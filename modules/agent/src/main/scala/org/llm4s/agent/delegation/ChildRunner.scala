@@ -74,9 +74,10 @@ private[agent] enum ChildEnd:
  * run from its claim, so not even a fast child's first event is missed: on the claim it sends the parent's live
  * `SubagentEvents.TaskStarted` for the admitted run, then each event of the run, a grandchild's included, goes to the
  * parent's nested subscribers as `StreamEvent.Nested`, queued behind it, and the run's await waits for the forwarder
- * to pass on its terminal event, so the call's result follows it. A child it cannot drive here - held by another
- * runtime, or already suspended or settled - sends its live events nowhere this runtime can see: the parent's nested
- * subscribers get `TaskStarted` and one `Nested(child, LiveGap(0))` instead, then the events of any run it drives later.
+ * to pass on its terminal event, so the call's result follows it. Only a child this call admits fresh is gap-free: for
+ * any other child run it did not forward - one an earlier attempt left `Running` or `Suspended`, one another runtime
+ * holds, one already settled - the parent's nested subscribers get a `TaskStarted` naming that run and one
+ * `Nested(child, LiveGap(0))`, then the events of any run this call drives.
  */
 private[agent] object ChildRunner:
   /** The first pause while a child's claim is held elsewhere; it doubles up to [[MaxBackoff]]. */
@@ -313,6 +314,8 @@ private[agent] object ChildRunner:
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
+              // an earlier attempt's run: its live events cannot be replayed, so a gap comes before this run's events
+              gap(RunId(checkpoint.runId))
               val run                = fresh()
               val (observer, events) = forwarder(run.runId)
               admitted(
@@ -328,8 +331,11 @@ private[agent] object ChildRunner:
               )
             case CheckpointStatus.Suspended =>
               answering(exec) match
-                case Some(pending) => resumed(pending)
-                case None          =>
+                case Some(pending) =>
+                  // the run that suspended it was an earlier attempt's: a gap, then the resumed run's events
+                  gap(RunId(checkpoint.runId))
+                  resumed(pending)
+                case None =>
                   // nothing runs here, so the child's live events are gone
                   gap(RunId(checkpoint.runId))
                   Step.Done(

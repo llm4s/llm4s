@@ -4,7 +4,7 @@ import org.llm4s.agent.{ Agent, CompletionFixture, ScriptedLLMClient, SpecTools 
 import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
-import org.llm4s.agent.graph.tool.{ ToolContent, ToolContext, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.agent.graph.toolloop.AgentInput
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
@@ -230,6 +230,10 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     taskEnds(runtime).loneElement.status shouldBe "completed"
   }
 
+  /** The run of the only child's latest checkpoint. */
+  private def runtimeChildRun(agent: Agent): RunId =
+    RunId(agent.runtime.history(agent.children(ThreadId("t1")).value.loneElement.threadId, None, 1).value.head.runId)
+
   private def taskEnds(runtime: GraphRuntime): Vector[org.llm4s.agent.events.TaskEnded] =
     runtime
       .storedEvents(ThreadId("t1"), 0L, 1000)
@@ -249,6 +253,79 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val ended = taskEnds(runtime).loneElement
     ended.status shouldBe "completed"
     ended.child.threadId shouldBe agent.children(ThreadId("t1")).value.loneElement.threadId
+  }
+
+  "a call reattaching to a Running child an earlier attempt left" should "give one gap for that attempt, then this run's events" in {
+    val childCalls = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        childCalls.incrementAndGet() match
+          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 2 => Left(ProcessingError("provider", "the provider is down"))
+          case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
+    }
+    val probe = AgentTool(SpecText.spec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("probed"))))
+    val agent = lead(client)
+      .withSubagents(researcher.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").isLeft shouldBe true
+    val earlier = runtimeChildRun(agent)
+
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    agent.streamRecover(ThreadId("t1"), nested = true)(seen.add(_): Unit).value.await().value
+    val events = seen.asScala.toVector
+    val nested = events.collect { case n: StreamEvent.Nested => n }
+    nested.head shouldBe StreamEvent.Nested(nested.head.child, StreamEvent.LiveGap(0))
+    nested.head.child.runId shouldBe earlier
+    // then the run this call drives, announced, from its claim
+    val later = nested.tail.map(_.child.runId).distinct.loneElement
+    later should not be earlier
+    nested.tail.head.event match
+      case StreamEvent.Durable(r) => r.event shouldBe a[RunEvent.RunRecovered]
+      case other                  => fail(s"expected the recovered run's claim, got $other")
+    events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId) shouldBe Vector(earlier, later)
+  }
+
+  "a call resuming a suspended child" should "give one gap for the run that suspended it, then the resumed run's events" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    val agent   = lead(approvingClient()).withSubagents(asking(probe(new AtomicInteger(0)))).build().value
+    val first   = agent.run(ThreadId("t1"), "go").value
+    val id      = suspendedOf(first).delegated.loneElement._1
+    val earlier = runtimeChildRun(agent)
+
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    agent.streamResume(ThreadId("t1"), Map(first.approve(id)), nested = true)(seen.add(_): Unit).value.await().value
+    val nested = seen.asScala.toVector.collect { case n: StreamEvent.Nested => n }
+    nested.head shouldBe StreamEvent.Nested(nested.head.child, StreamEvent.LiveGap(0))
+    nested.head.child.runId shouldBe earlier
+    nested.tail should not be empty
+    nested.tail.map(_.child.runId).distinct.loneElement should not be earlier
+  }
+
+  "a subagent of a handoff target" should "trace to the root's tracing, naming its parent" in {
+    val tracing     = new Recording
+    val targetCalls = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Lead(_) => Right(calling(call("h1", "handoff_to_target", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("TARGET")) =>
+        if targetCalls.incrementAndGet() == 1 then
+          Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "x"))))
+        else Right(CompletionFixture.simple("done"))
+      case Child("general", _) => Right(CompletionFixture.simple("report"))
+    }
+    val target = Agent.builder("target", client).withSystemPrompt("TARGET").withSubagents(general)
+    val agent = lead(client)
+      .withTracing(tracing)
+      .withHandoffs(org.llm4s.agent.Handoff.to("target", target, "the target does it"))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value
+    val child = tracing.events.collect { case e: TraceEvent.AgentRunEnded if e.agent == "general" => e }.loneElement
+    child.parentThreadId shouldBe Some("t1")
   }
 
   "subscribeChild" should "replay the child's own log after the run, and refuse another tenant" in {

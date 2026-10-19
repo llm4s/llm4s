@@ -3413,6 +3413,8 @@ final class GraphRuntime(
           ),
           () => !claimWasLost
         )
-      // a child's event, forwarded from the child's run (design 4.47): fenced like progress, so a lost run's child
-      // sends nothing past a later run's claim
-      override def nested(event: StreamEvent.Nested): Unit = hub.nested(threadId, event, token, () => !claimWasLost)
+      // a child's event, forwarded from the child's run (design 4.47): fenced like progress, and also once the run has
+      // released its claim, so a child that outlives its parent's run (it ignored a cancel past the drain) sends
+      // nothing into a later run's subscriptions
+      override def nested(event: StreamEvent.Nested): Unit =
+        hub.nested(threadId, event, token, () => !claimWasLost && !claimReleased.get)

@@ -227,7 +227,8 @@ final class AgentBuilder private (
       family <- AgentBuilder.family(this)
       _      <- AgentBuilder.idTargetsDefined(family)
       agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
-        acc.flatMap(done => builder.loopAgent(graphRuntime).map(done :+ _))
+        // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
+        acc.flatMap(done => builder.loopAgent(graphRuntime, tracing).map(done :+ _))
       }
       root      <- AgentId.of(id)
       loop      <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
@@ -249,7 +250,7 @@ final class AgentBuilder private (
    * without subagents. Refuses a bound that is not positive, two subagents with one id, and a subagent that does not
    * bind.
    */
-  private def delegating(graphRuntime: GraphRuntime): Result[Option[DelegationMiddleware]] =
+  private def delegating(graphRuntime: GraphRuntime, tracing: Option[Tracing]): Result[Option[DelegationMiddleware]] =
     // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
     if subagents.isEmpty then delegation.validated.map(_ => None)
     else
@@ -296,7 +297,7 @@ final class AgentBuilder private (
             )
           )
 
-  private def loopAgent(graphRuntime: GraphRuntime): Result[LoopAgent] =
+  private def loopAgent(graphRuntime: GraphRuntime, tracing: Option[Tracing]): Result[LoopAgent] =
     for
       agentId <- AgentId.of(id)
       _ <- Either.cond(
@@ -305,7 +306,7 @@ final class AgentBuilder private (
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
       installed  <- effective
-      delegating <- delegating(graphRuntime)
+      delegating <- delegating(graphRuntime, tracing)
       toolSet    <- ToolSet.of(validator, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
