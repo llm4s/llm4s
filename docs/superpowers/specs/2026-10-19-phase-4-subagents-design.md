@@ -305,7 +305,10 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
       its run ends, whatever its durability; a drain that fails leaves the pass to the next `start`.
     - A crash during the pass leaves the parent unsettled; `recover` reaches the same point and runs it again,
       which is idempotent.
-    - Not run at a Block or a failure, whose next admission handles it.
+    - Also run when the parent ends **Blocked**: the parent is settled and the blocked turn's calls never replay,
+      so every settled child is prunable, as at the next `start`. Not run at a **failure**: the run is incomplete
+      and `recover` may replay any of its calls (rule 14), so a failed parent keeps its children until its next
+      admission (`recover`'s terminal pass or `start`); `forget` removes them all with the thread.
   - **At `start` admission.** `start` is admitted only on a thread with no incomplete execution
     (`GraphError.IncompleteRun` otherwise), so no call of an earlier run can be replayed:
     - every settled child is prunable, whatever the parent's last status (a Block's retraction included);
@@ -746,7 +749,9 @@ Tests:
   - **Nor a subscriber that attaches mid-child.** A `subscribe(..., nested = true)` made while a child is running
     has missed that child's earlier live events, which are never replayed. At attach it gets, for each child
     running then, `TaskStarted` for that child's current run followed by one `Nested(child, LiveGap(0))`, then the
-    child's events from there. The every-event guarantee holds only for subscriptions in place before the child
+    child's events from there. The same goes for a child already settled whose call's result the parent has not
+    yet committed (its `TaskEnded` still to come): `TaskStarted`, the gap, then `TaskEnded`. So a late subscriber
+    never sees a `TaskEnded` without its `TaskStarted`. The every-event guarantee holds only for subscriptions in place before the child
     was admitted (`stream`'s).
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
