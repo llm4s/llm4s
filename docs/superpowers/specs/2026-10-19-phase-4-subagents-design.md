@@ -216,9 +216,11 @@ Delegation adds these:
 Today a thread has no parent. `deleteThread` removes one thread, and nothing can list the threads a run created.
 
 - **`RunOrigin`**, in `org.llm4s.agent.graph`, is a growth-prone `final case class RunOrigin private (parent:
-  ThreadId, call: IdempotencyKey, agent: AgentId, depth: Int)` with `apply` and `with*` setters, and a
-  `ReadWriter`.
+  ThreadId, call: IdempotencyKey, agent: AgentId, depth: Int, startedAt: Instant)` with `apply` and `with*`
+  setters, and a `ReadWriter`.
   - `depth` is 1 for a child of a top-level thread.
+  - `startedAt` is when the child was first admitted. Copied forward with the origin, it is the durable start of
+    the child's whole life across suspensions, restarts and event retention (D4's `TaskEnded.duration`).
 - **`Checkpoint.origin: Option[RunOrigin]`**, format **8**. `7 -> 8` writes nothing, because the field defaults to
   `None`. A build that predates it refuses format 8, rather than drive a child thread as a top-level one.
   - The origin is written on the child's first claim commit and copied forward on every checkpoint, as `tenantId`
@@ -597,7 +599,8 @@ Tests:
     with the call's **terminal** result only (a report, a tool `Error` or a refusal), so exactly once per child.
     A call that suspends because its child did (D3) commits no `TaskEnded`; the suspension is visible through the
     parent's existing interrupt events, and the resumed call commits the one `TaskEnded` when it settles. Its
-    `usage` and `duration` cover the child's whole life, every phase. Encoded with `DurationJson.millisRW`. No
+    `usage` and `duration` cover the child's whole life, every phase; `duration` is measured from
+    `RunOrigin.startedAt` (K1), never from a live event. Encoded with `DurationJson.millisRW`. No
     content (rule 9). This is the child-task metric.
 - **Following one child.** `Agent.subscribeChild(ref: ChildRef, afterSeq: Long = 0, config: RunConfig = RunConfig())(listener):
   Result[Subscription]` replays and follows the child's own log, tenant-checked. `AgentRun.subscribe(handlers)`
