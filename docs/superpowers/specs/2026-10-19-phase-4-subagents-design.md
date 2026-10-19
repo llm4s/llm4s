@@ -155,7 +155,7 @@ applies. This is how delegation meets the thirteen:
    (rule 16). `children` and child subscriptions check the tenant as the thread's other reads do.
 9. **Durable events carry no message content.** `TaskEnded` carries ids, the agent, a status label, usage and a
    duration, never the request or the report. Nested child text deltas are live-only.
-10. **A failed task commits nothing.** `TaskEnded` commits with the call's result. A parent task that fails after
+10. **A failed task commits nothing.** `TaskEnded` commits with the call's terminal result (D4). A parent task that fails after
     its child ended loses nothing: the child's thread keeps its usage and outcome, and the replay records them again
     (K2). A cancelled child's usage is on its own `RunCancelled` event.
 11. **Every model call is accounted.** A child's model calls are counted in the child's thread. When the `task` call
@@ -223,6 +223,18 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   `None`. A build that predates it refuses format 8, rather than drive a child thread as a top-level one.
   - The origin is written on the child's first claim commit and copied forward on every checkpoint, as `tenantId`
     is.
+- **`Checkpoint.outcome: Option[RunOutcome]`**, also format 8 (`None` from 7). The durable record of how a run
+  settled, written atomically with every terminal (`Completed` or `Failed`) checkpoint of every thread, child or
+  not, and cleared when a later run of the thread starts. `CheckpointStatus` and `RunCompleted` alone cannot rebuild
+  an `AgentStatus` (a final answer and `StepLimitReached` both complete; a Block's typed `GuardrailBlocked` is not
+  kept on a `Failed` checkpoint), so a settled run is read only through `outcome`.
+  - `RunOutcome` is a small enum with a `ReadWriter`: `Answered`, `StepLimitReached`, `TokenLimitReached` (K3),
+    `Blocked(guardrail: String, reason: String)`, `Failed(kind: String, message: String)`. The answer itself is
+    already in the thread's state, so `Answered` carries none.
+  - The agent layer supplies it to the runtime with the turn's terminal result. A graph run that is not an agent
+    turn writes `Answered` on completion and `Failed` on failure.
+  - `AgentRun.status` for a settled thread reads `outcome` too, so a status rebuilt after a restart equals the one
+    returned live.
 - **`ThreadId.child(parent: ThreadId, agent: AgentId, call: IdempotencyKey): ThreadId`** gives
   `<parent>/~task/<agent>/<digest>`. The digest is 24 hex characters of the SHA-256 of
   `("llm4s-child-v1", parent, call, agent)`.
@@ -239,7 +251,8 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
     `origin` on commit.
   - A tombstoned child is not listed.
 - **`GraphRuntime.children(threadId, config): Result[Vector[ChildThread]]`** checks the tenant, as `history` does.
-  `Agent.children(threadId)` forwards to it.
+  `Agent.children(threadId, config: RunConfig = RunConfig())` forwards to it, as `history` and `checkpoint` do,
+  so a tenant-scoped thread is listed by passing its tenant.
 - **Admission (rule 19).** `start`, `recover`, `resume`, `fork` and `updateState` on a thread whose latest
   checkpoint has an `origin` are refused with **`GraphError.ChildThread(threadId, parent)`**, before any claim.
   - The only way in is `private[agent] GraphRuntime.startChild` / `recoverChild` / `resumeChild`, used by K2.
@@ -256,6 +269,7 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   - A failed delete is logged at WARN, as retention prune is.
 - **`CheckpointerContract`** gains cases for:
   - origin round trip and copy-forward
+  - `outcome` written with each terminal checkpoint, cleared by the next run, absent on a format-7 fixture
   - `children` paging, tenant-free reads, tombstones not listed
   - a format-7 fixture read as `origin = None`
 
@@ -283,10 +297,18 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     - After that the call returns `ToolOutcome.Fatal(ThreadBusy)`. The parent run then fails, and `recover` later
       reattaches.
   - **`Suspended`:** returned as `Ended` with the `Suspended` status. D3 surfaces it.
-  - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint
-    (`AgentRun.status`, `decodeOutput`), with no run.
+  - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint's `outcome` (K1)
+    and, for `Answered`, `decodeOutput`, with no run. A settled child checkpoint without an `outcome` is corrupt
+    stored state: `ToolOutcome.Fatal`, never a guess from `status`.
   - A `Left` that is not a refusal (provider error, tool `Fatal`, `OutputInvalid`, `DeadlineExceeded`) is `Failed`.
-    The child thread stays for a later `recover`.
+    - Under `ChildFailure.Fail` the child thread stays `Running`, the parent run fails, and the parent's `recover`
+      replays the call, which recovers the child.
+    - Under `ChildFailure.Report` the call is about to commit, so it will never be replayed. Before returning the
+      tool `Error`, the runner **settles the child**: `private[agent] GraphRuntime.settleChild` commits a `Failed`
+      checkpoint with `outcome = Failed(...)` under the child's claim. A crash between that commit and the parent's
+      returns the same error on replay (the `Failed` row of rule 14). If the claim is busy, the call waits as
+      reattach does, then returns `Fatal`. So no child is left `Running` behind a committed call, and retention
+      (K1), which deletes only settled children, bounds every child a committed call made.
 - **Cancellation (rule 18).**
   - The runner awaits the child with `Agent.blocking`'s semantics. When the calling thread is interrupted (parent
     cancel, parent `ClaimLost`, a C2 timeout on the `task` call), it cancels the child and waits up to
@@ -298,14 +320,19 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   deadline passes the grant.
 - **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
   accumulator). That is the child thread's `usage` key plus the usage on its terminal event
-  (`AgentTracing.lostUsage`). It is added once per committing attempt. A failed attempt commits nothing, so a replay
-  adds it again without double counting.
+  (`AgentTracing.lostUsage`). It is added once, by the attempt that commits the call's **terminal** result, and covers
+  the child's whole life. A call that suspends because its child did (D3) adds nothing: the child's usage so far
+  stays in the child thread until the resumed call settles. A failed attempt commits nothing, so a replay adds it
+  again without double counting.
 - **Durability.** A child runs with its parent's durability and `ClaimPolicy`, on the parent's runtime (rule 16).
 
 Tests (each in-memory and on SQLite):
 - crash after the child completes and before the parent commits: `recover` runs no child model call (call counts on
   `ScriptedLLMClient`) and returns the same report
 - crash mid-child: `recover` recovers the child from its checkpoint and does not restart it
+- the same report after a restart for each `RunOutcome` (answer, step limit, token limit, Block, failure)
+- `ChildFailure.Report` settles the child: no `Running` child behind a committed call, across repeated turns
+  retention keeps the count at `childRetention`
 - a `ThreadExists` race between two runtimes starts one child
 - parent `cancel` during a child: child `RunCancelled`, parent `CancelledError`, both recoverable
 - a C2 timeout on the call cancels the child; parent `ClaimLost` cancels the child
@@ -543,9 +570,12 @@ Tests:
   - `TaskStarted(child: ChildRef)`: live (`progress`), sent when the child is admitted, and again on reattach. It
     is the nested stream handle.
   - `TaskEnded(child: ChildRef, status: String, usage: UsageSummary, duration: FiniteDuration)`: durable, committed
-    with the call's result. Encoded with `DurationJson.millisRW`. No content (rule 9). This is the child-task
-    metric.
-- **Following one child.** `Agent.subscribeChild(ref: ChildRef, afterSeq: Long = 0)(listener):
+    with the call's **terminal** result only (a report, a tool `Error` or a refusal), so exactly once per child.
+    A call that suspends because its child did (D3) commits no `TaskEnded`; the suspension is visible through the
+    parent's existing interrupt events, and the resumed call commits the one `TaskEnded` when it settles. Its
+    `usage` and `duration` cover the child's whole life, every phase. Encoded with `DurationJson.millisRW`. No
+    content (rule 9). This is the child-task metric.
+- **Following one child.** `Agent.subscribeChild(ref: ChildRef, afterSeq: Long = 0, config: RunConfig = RunConfig())(listener):
   Result[Subscription]` replays and follows the child's own log, tenant-checked. `AgentRun.subscribe(handlers)`
   is unchanged.
 - **One merged stream (opt-in).**
@@ -668,6 +698,7 @@ The suite also checks the runtime rules that apply:
 |---|---|
 | Checkpoint format 8 (`origin`): an older build refuses a file written by this one | K1 |
 | SQLite schema 6 | K1 |
+| `Checkpoint.outcome` (format 8): `AgentRun.status` of a settled thread is read from it | K1 |
 | `Checkpointer.children` is a new abstract method that third-party stores must implement | K1 |
 | `deleteThread` and `forget` cascade to child threads | K1 |
 | Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` | K1 |
