@@ -3,6 +3,7 @@ package org.llm4s.agent.delegation
 import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.events.TaskEnded
 import org.llm4s.agent.graph.{
+  Checkpoint,
   CheckpointStatus,
   GraphError,
   GraphRuntime,
@@ -314,7 +315,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
             TaskOutcome.Refused(
               ref.copy(runId = runId),
               TaskRefusal.OutputInvalid(all),
-              BoundAgent.storedUsage(agent, ref.threadId, config)
+              BoundAgent.storedUsage(agent, ref.threadId, runId, config)
             )
           )
         case Left(cancelled: CancelledError) => Left(cancelled)
@@ -426,12 +427,24 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
 object BoundAgent:
   private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BoundAgent[?, ?]])
 
-  /** The usage `threadId`'s latest checkpoint records, read under `config`'s tenant; none for a thread with none. */
-  private[delegation] def storedUsage(agent: Agent, threadId: ThreadId, config: RunConfig): UsageSummary =
-    agent.runtime
-      .history(threadId, None, 1, config)
-      .toOption
-      .flatMap(_.headOption)
-      .flatMap(latest => agent.loop.graph.restore(latest.snapshot).toOption)
+  /**
+   * The usage the newest checkpoint of run `runId` on `threadId` records, read under `config`'s tenant - not the
+   * thread's newest, which a concurrent continuation may have written since; none when the run left no checkpoint.
+   */
+  private[delegation] def storedUsage(agent: Agent, threadId: ThreadId, runId: RunId, config: RunConfig): UsageSummary =
+    @scala.annotation.tailrec
+    def newestOf(before: Option[String]): Option[Checkpoint] =
+      agent.runtime.history(threadId, before, UsagePage, config).toOption match
+        case Some(page) =>
+          page.find(_.runId == runId.value) match
+            case found @ Some(_)               => found
+            case None if page.size < UsagePage => None
+            case None                          => newestOf(page.lastOption.map(_.id))
+        case None => None
+    newestOf(None)
+      .flatMap(checkpoint => agent.loop.graph.restore(checkpoint.snapshot).toOption)
       .flatMap(_.state.get(LoopKeys.usage).toOption)
       .getOrElse(UsageSummary())
+
+  /** How many checkpoints [[storedUsage]] reads at a time. */
+  private val UsagePage: Int = 16

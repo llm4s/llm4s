@@ -526,8 +526,9 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
 
     val resumed = RunConfig().withRunId(org.llm4s.agent.graph.RunId("resume-1"))
     bound.resume(ref, Map(approve(status.approvals.loneElement._1)), resumed).value match
-      case TaskOutcome.Refused(child, TaskRefusal.OutputInvalid(errors), _) =>
+      case TaskOutcome.Refused(child, TaskRefusal.OutputInvalid(errors), usage) =>
         errors should not be empty
+        usage.requestCount shouldBe 3 // the probe call, the answer and its retry
         child.threadId shouldBe ref.threadId
         child.runId shouldBe org.llm4s.agent.graph.RunId("resume-1")
         child.runId should not be ref.runId
