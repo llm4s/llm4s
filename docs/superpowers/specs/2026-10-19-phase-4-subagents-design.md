@@ -497,8 +497,9 @@ section listing each subagent's id and description.
   - Run `ChildRunner`.
   - Map the outcome:
     - `Reported`: `Success(Json(writeJs(report)))`, or `Error("report over <n> bytes")` past `maxReportBytes`.
-    - `Refused` and `NotStarted`: under `Report`, `Error` naming the subagent, child thread and reason; under
-      `Fail`, `Fatal(GraphError...)`.
+    - `Refused`: under `Report`, `Error` naming the subagent, child thread and reason; under `Fail`,
+      `Fatal(GraphError...)`.
+    - `NotStarted`: the same, naming only the subagent and the reason, since no child thread exists.
     - **Every tool message is bounded.** Whatever the branch, the text that enters the parent's thread is at most
       `maxReportBytes`: a refusal's reason (a provider message, an `OutputInvalid` error vector) is truncated to
       fit, keeping its first errors and saying how many were dropped. The full reason stays in the child's thread
@@ -564,6 +565,11 @@ Tests:
     (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.NotStarted` with
     `TaskRefusal.StepLimitReached` or `TokenLimitReached`, which carries no `ChildRef`, creates no child thread, and never builds a
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
+  - **A child's grant is whole-life.** A recovered child's limits are its grant less what its earlier attempts
+    used: its `usage` key plus `priorUsage.total` (K2) for tokens, and its committed model steps for steps, so
+    repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
+    run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
+    (`settleChild`) and returns that refusal without running it.
   - **An expired deadline starts no child either.** When the parent's deadline has passed at call time, the call
     fails with the parent's own `DeadlineExceeded`, as any step past the deadline does, and never builds a
     non-positive timeout.
@@ -654,6 +660,9 @@ Tests:
     holds (K2's wait), that runtime's live events cannot reach this one, so the parent subscription gets one
     `LiveGap` for the child and then its events from the next run this runtime drives. Durable child events are
     never lost: `subscribeChild` replays them.
+  - **Nor a child already settled.** A call that reattaches to a `Completed` or `Failed` child (a replay after a
+    crash) starts no child run, so its live events are gone: the parent subscription gets `TaskStarted`, one
+    `LiveGap` for the child, then `TaskEnded`.
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
   - Core's **`TraceEvent.AgentRunEnded`** gains `parentThreadId: Option[String] = None` and
