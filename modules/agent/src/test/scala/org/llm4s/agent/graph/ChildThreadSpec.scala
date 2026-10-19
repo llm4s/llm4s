@@ -249,14 +249,34 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     store.latest(parent).value shouldBe defined
   }
 
+  it should "delete nothing when the thread is taken over between its claim's check and a descendant's delete (#2063)" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("cascade-taken-before-delete")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val children = Vector(1, 2).map(n => startChild(runtime, parent, n))
+    taking.armed = _ == "before-delete"
+
+    runtime.deleteThread(parent).left.value match
+      case busy: GraphError.ThreadBusy => busy.threadId shouldBe parent.value
+      case other                       => fail(s"expected ThreadBusy, got $other")
+
+    taking.takenOver shouldBe true
+    children.map(store.latest(_).value.isDefined) shouldBe Vector(true, true)
+    store.latest(parent).value shouldBe defined
+    // the refused child's own claim was given back, not taken for lost
+    store.claim(children(0), ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
+  }
+
   it should "finish a cascade a failure interrupted when run again" in {
     val store   = InMemoryCheckpointer()
     val failing = new AtomicBoolean(true)
     val parent  = ThreadId("cascade")
     val flaky = new ForwardingCheckpointer(store) {
-      override def deleteThread(threadId: ThreadId, token: FencingToken) =
+      override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
         if failing.get && threadId == childOf(parent, 3) then Left(ValidationError("store", "down"))
-        else store.deleteThread(threadId, token)
+        else store.deleteThread(threadId, token, fence)
     }
     val runtime = GraphRuntime(flaky, clock)
     runtime.start(parent, graph, "go").awaited.value
@@ -340,10 +360,29 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
       val listed = store.children(of, after, limit)
       if of == parent && armed("children") then takeOver()
       listed
-    override def deleteThread(threadId: ThreadId, token: FencingToken) =
-      val deleted = store.deleteThread(threadId, token)
+    override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+      // between the runtime's last check of the claim above and the store's delete (#2063)
+      if threadId != parent && armed("before-delete") then takeOver()
+      val deleted = store.deleteThread(threadId, token, fence)
       if threadId != parent && armed("delete") then takeOver()
       deleted
+  }
+
+  it should "delete nothing when the parent is taken over between the fence's check and a delete (#2063)" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("taken-before-delete")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val children = Vector(1, 2, 3).map(n => startChild(runtime, parent, n))
+    taking.armed = _ == "before-delete"
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(0)).isLeft shouldBe true
+
+    taking.takenOver shouldBe true
+    children.map(store.latest(_).value.isDefined) shouldBe Vector(true, true, true)
+    // the refused child's own claim was given back, not taken for lost
+    store.claim(children(0), ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
   }
 
   it should "stop the pass before any delete when the parent's claim is lost while the children are listed" in {
@@ -416,9 +455,9 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
         if failSettle.get && threadId == parent && commit.checkpoint.exists(_.status == CheckpointStatus.Completed)
         then Left(ValidationError("store", "down"))
         else store.commit(threadId, commit)
-      override def deleteThread(threadId: ThreadId, token: FencingToken) =
+      override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
         if failDelete.get && threadId == childOf(parent, 1) then Left(ValidationError("store", "down"))
-        else store.deleteThread(threadId, token)
+        else store.deleteThread(threadId, token, fence)
     }
     val runtime = GraphRuntime(flaky, clock)
     val config  = RunConfig().withChildRetention(1)

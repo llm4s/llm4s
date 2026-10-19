@@ -341,7 +341,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.eventsAfter(thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
     val token = reopened.claim(thread, ClaimRequest(RunId("next"), None, ttl)).value.token
     reopened.commit(thread, Commit(token, events = Vector(event("c")))).value.map(_.seq) shouldBe Vector(3L)
-    reopened.deleteThread(thread, token).value
+    reopened.deleteThread(thread, token, None).value
     // the tombstone keeps the numbering, and nothing else
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events WHERE thread_id = 'v1-thread'")(_.getInt(1)) shouldBe 0
     scalar(
@@ -483,7 +483,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     store.effect(thread, record.key).value shouldBe Some(record)
     // deleted with the thread, the row goes too
     val again = store.claim(thread, ClaimRequest(RunId("again"), None, ttl)).value.token
-    store.deleteThread(thread, again).value
+    store.deleteThread(thread, again, None).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_threads WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_effects WHERE thread_id = 'effects-only'")(_.getInt(1)) shouldBe 0
     store.close()
@@ -633,7 +633,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       store.latest(thread),
       store.eventsAfter(thread, 0L, 10),
       store.compactEvents(thread, 1L),
-      store.deleteThread(thread, token)
+      store.deleteThread(thread, token, None)
     )
     calls.foreach { result =>
       result.left.value shouldBe a[ProcessingError]
@@ -760,7 +760,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.history(thread, None, 10).value.map(_.id) shouldBe ids.reverse
     reopened.checkpoint(thread, "c1").value.map(_.id) shouldBe Some("c1")
     val deleting = reopened.claim(thread, ClaimRequest(RunId("deleter"), None, ttl)).value.token
-    reopened.deleteThread(thread, deleting).value
+    reopened.deleteThread(thread, deleting, None).value
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = 'kept'")(_.getInt(1)) shouldBe 0
     reopened.history(thread, None, 10).value shouldBe empty
     // a new thread of the same id starts a history of its own, and reuses the old ids freely

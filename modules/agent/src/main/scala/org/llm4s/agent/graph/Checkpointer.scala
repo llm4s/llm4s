@@ -266,8 +266,16 @@ trait Checkpointer:
    * that holds the thread now. A thread with no claim, an unknown one included, is therefore
    * refused too: claim it first. Use [[GraphRuntime.deleteThread]], which claims the thread, so it
    * refuses a thread with a live run in any runtime, and checks the tenant under its claim.
+   *
+   * '''The fence.''' With `fence = Some((other, otherToken))` the delete is also fenced by another thread's claim:
+   * it happens only if `otherToken` is `other`'s current claim too, checked in the same atomic step as the
+   * thread's own claim and the delete (one transaction, or under one lock), and otherwise is
+   * `Left(GraphError.StaleClaim(other, otherToken, otherCurrent))` with nothing deleted. The thread's own claim is
+   * checked first. [[GraphRuntime.deleteThread]] fences a cascade's delete of each descendant by the root's claim,
+   * and child retention each delete by the parent's (design 4.41), so a successor run that took the thread above
+   * over never finds a child it may reattach gone. `None` fences by the thread's own claim alone.
    */
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit]
+  def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit]
 
 object Checkpointer:
 
@@ -578,29 +586,41 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     Right(())
   }
 
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = withLock(lock) {
+  def deleteThread(
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] = withLock(lock) {
     val current = record(threadId)
-    if !current.claim.exists(_.token == token.value) then Left(stale(threadId, current, token))
-    else
-      // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
-      // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
-      // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
-      // event since its delete is kept as it is, so deleting it again moves nothing on
-      if current.nextSeq == 1L then remove(threadId)
-      else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
-        store(
-          threadId,
-          current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None, effects = Map.empty)
-        )
-      else
-        val first = current.nextSeq + 1
-        // the tombstone keeps the thread's place among its parent's children, so a page boundary survives
-        store(
-          threadId,
-          ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first, child = current.child)
-        )
-      appended.signalAll()
-      Right(())
+    // the thread's own claim first, then the fence's, both under the one lock the delete is made under
+    val refused = Option
+      .when(!current.claim.exists(_.token == token.value))(stale(threadId, current, token))
+      .orElse(fence.flatMap { (other, otherToken) =>
+        val above = record(other)
+        Option.when(!above.claim.exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
+    refused match
+      case Some(error) => Left(error)
+      case None        =>
+        // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
+        // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
+        // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
+        // event since its delete is kept as it is, so deleting it again moves nothing on
+        if current.nextSeq == 1L then remove(threadId)
+        else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
+          store(
+            threadId,
+            current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None, effects = Map.empty)
+          )
+        else
+          val first = current.nextSeq + 1
+          // the tombstone keeps the thread's place among its parent's children, so a page boundary survives
+          store(
+            threadId,
+            ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first, child = current.child)
+          )
+        appended.signalAll()
+        Right(())
   }
 
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] = withLock(lock) {

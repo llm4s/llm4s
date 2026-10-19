@@ -448,33 +448,44 @@ final class SqliteCheckpointer private (
    * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
    * so the check and the delete see one state of the file, whatever other stores on it are doing. The thread's row
    * stays, emptied, as a tombstone (see [[SqliteSchema]]) once it has numbered an event, so that a new thread of the
-   * id numbers on past it.
+   * id numbers on past it. A `fence` thread's claim is checked in the same transaction, after the thread's own.
    */
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("deleteThread") { c =>
+  def deleteThread(
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] = writing("deleteThread") { c =>
     val current = readRow(c, threadId)
-    if !current.flatMap(_.claim).exists(_.token == token.value) then Left(stale(threadId, current, token))
-    else
-      update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
-      update(
-        c,
-        // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
-        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
-        // and a tombstone that numbered no event since its delete keeps its numbering
-        """UPDATE llm4s_checkpoint_threads
-          |SET checkpoint_id = NULL, checkpoint_json = NULL,
-          |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
-          |    claim_tenant = NULL, claim_tenant_token = NULL
-          |WHERE thread_id = ?""".stripMargin,
-        threadId.value
-      )
-      dropIfEmpty(c, threadId)
-      Right(())
+    val refused = Option
+      .when(!current.flatMap(_.claim).exists(_.token == token.value))(stale(threadId, current, token))
+      .orElse(fence.flatMap { (other, otherToken) =>
+        val above = readRow(c, other)
+        Option.when(!above.flatMap(_.claim).exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
+    refused match
+      case Some(error) => Left(error)
+      case None =>
+        update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
+        update(
+          c,
+          // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
+          // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
+          // and a tombstone that numbered no event since its delete keeps its numbering
+          """UPDATE llm4s_checkpoint_threads
+            |SET checkpoint_id = NULL, checkpoint_json = NULL,
+            |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
+            |    claim_tenant = NULL, claim_tenant_token = NULL
+            |WHERE thread_id = ?""".stripMargin,
+          threadId.value
+        )
+        dropIfEmpty(c, threadId)
+        Right(())
   }
 
   /**

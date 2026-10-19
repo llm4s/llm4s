@@ -635,7 +635,9 @@ the contract. In short:
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
 - delete a thread only with the current claim's token, checked in the same lock or transaction as the delete
-  (`StaleClaim` otherwise, deleting nothing); a thread with no claim is refused too;
+  (`StaleClaim` otherwise, deleting nothing); a thread with no claim is refused too. With a `fence` of
+  `(other, otherToken)`, delete only if `otherToken` is also `other`'s current claim, in that same lock or
+  transaction, the thread's own claim checked first (`StaleClaim` for `other` otherwise, deleting nothing);
 - keep, after `deleteThread`, where the thread's event numbering ended - a tombstone with no data, for a thread that
   numbered any event - and number the next thread of the id from one past the deleted thread's next number;
   refuse `eventsAfter`/`awaitEventsAfter` after a number of the deleted thread with `ThreadDeleted`
@@ -686,7 +688,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ```
 
 It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread` (fenced by
-the current token, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
+the current token and by the fence thread's, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
 trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
 count), claims and fencing (also from many threads at once), each claim's tenant (a holder named only to a claim of
 its own tenant, also across a reopen), and two or more `GraphRuntime`s contending over one

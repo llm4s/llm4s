@@ -120,9 +120,10 @@ private[graph] class ForwardingCheckpointer(to: Checkpointer) extends Checkpoint
   def effect(threadId: ThreadId, key: EffectKey)                          = to.effect(threadId, key)
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)         = to.eventsAfter(threadId, afterSeq, limit)
   def compactEvents(threadId: ThreadId, beforeSeq: Long)                  = to.compactEvents(threadId, beforeSeq)
-  def deleteThread(threadId: ThreadId, token: FencingToken)               = to.deleteThread(threadId, token)
-  def children(parent: ThreadId, after: Option[ThreadId], limit: Int)     = to.children(parent, after, limit)
-  def history(threadId: ThreadId, before: Option[String], limit: Int)     = to.history(threadId, before, limit)
-  def checkpoint(threadId: ThreadId, checkpointId: String)                = to.checkpoint(threadId, checkpointId)
-  def prune(threadId: ThreadId, policy: RetentionPolicy)                  = to.prune(threadId, policy)
+  def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+    to.deleteThread(threadId, token, fence)
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = to.children(parent, after, limit)
+  def history(threadId: ThreadId, before: Option[String], limit: Int) = to.history(threadId, before, limit)
+  def checkpoint(threadId: ThreadId, checkpointId: String)            = to.checkpoint(threadId, checkpointId)
+  def prune(threadId: ThreadId, policy: RetentionPolicy)              = to.prune(threadId, policy)
 }

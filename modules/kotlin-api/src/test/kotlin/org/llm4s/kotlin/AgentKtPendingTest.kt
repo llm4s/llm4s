@@ -183,9 +183,13 @@ class AgentKtPendingTest {
             return store.commit(threadId, commit)
         }
 
-        override fun deleteThread(threadId: String, token: Long): Either<LLMError, BoxedUnit> {
+        override fun deleteThread(
+            threadId: String,
+            token: Long,
+            fence: scala.Option<scala.Tuple2<String, Any>>,
+        ): Either<LLMError, BoxedUnit> {
             deleted.add(threadId)
-            return store.deleteThread(threadId, token)
+            return store.deleteThread(threadId, token, fence)
         }
     }
 

@@ -113,8 +113,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       afterRead(read)
       Right(found)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
-    def children(parent: ThreadId, after: Option[ThreadId], limit: Int)     = underlying.children(parent, after, limit)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -333,8 +334,9 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       if watchGo.tryAcquire(5, TimeUnit.SECONDS) then Right(records.filter(_.seq > afterSeq).take(limit))
       else Right(Vector.empty)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
-    def children(parent: ThreadId, after: Option[ThreadId], limit: Int)     = underlying.children(parent, after, limit)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)

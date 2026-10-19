@@ -139,9 +139,10 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = next.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       next.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]    = next.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = next.deleteThread(threadId, token)
-    def children(parent: ThreadId, after: Option[ThreadId], limit: Int)     = next.children(parent, after, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = next.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+      next.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = next.children(parent, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
       next.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =

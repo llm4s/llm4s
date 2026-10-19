@@ -91,9 +91,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       read
     }
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken) = {
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) = {
       onDelete()
-      underlying.deleteThread(threadId, token)
+      underlying.deleteThread(threadId, token, fence)
     }
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
@@ -162,9 +162,9 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       } else underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken) =
-      if all then serialised { changes.incrementAndGet(); underlying.deleteThread(threadId, token) }
-      else underlying.deleteThread(threadId, token)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+      if all then serialised { changes.incrementAndGet(); underlying.deleteThread(threadId, token, fence) }
+      else underlying.deleteThread(threadId, token, fence)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)

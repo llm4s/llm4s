@@ -408,7 +408,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case TaskOutcome.Reported(report, child, usage) =>
         report shouldBe Findings("alone", 3)
         child.depth shouldBe 0
-        child.toolCallId shouldBe ToolCallId("")
+        child.toolCallId shouldBe None
         usage.requestCount shouldBe 1
         runtime.history(child.threadId).value.head.origin shouldBe None
       case other => fail(s"expected a report, got $other")
@@ -616,7 +616,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     val report: TaskOutcome[String] =
       TaskOutcome.Reported(
         "a" * 64,
-        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), general.id, ToolCallId("k"), 1),
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), general.id, Some(ToolCallId("k")), 1),
         UsageSummary()
       )
     DelegationMiddleware.toolOutcome("general", ChildFailure.Report, 64, report, None) shouldBe
@@ -673,7 +673,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     // the typed outcome keeps them all
     val refused: TaskOutcome[Findings] =
       TaskOutcome.Refused(
-        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), researcher.id, ToolCallId("k"), 1),
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), researcher.id, Some(ToolCallId("k")), 1),
         TaskRefusal.OutputInvalid(errors),
         UsageSummary()
       )

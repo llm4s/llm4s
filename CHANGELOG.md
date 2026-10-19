@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Breaking changes
 
 - Checkpoint format 8 and SQLite schema 6: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
-- `Checkpointer.children` is a new abstract method every store implements; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.children` is a new abstract method every store implements, and `Checkpointer.deleteThread` takes a
+  `fence` on the claim above, checked atomically with the delete; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;

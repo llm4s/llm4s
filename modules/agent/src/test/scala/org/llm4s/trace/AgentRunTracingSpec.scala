@@ -203,8 +203,12 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
-      underlying.deleteThread(threadId, token)
+    def deleteThread(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      fence: Option[(ThreadId, org.llm4s.agent.graph.FencingToken)]
+    ): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)

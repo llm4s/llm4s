@@ -58,8 +58,8 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
     alive(underlying.eventsAfter(threadId, afterSeq, limit))
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
     alive(underlying.compactEvents(threadId, beforeSeq))
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] =
-    alive(underlying.deleteThread(threadId, token))
+  def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+    alive(underlying.deleteThread(threadId, token, fence))
 }
 
 object StoppingCheckpointer {

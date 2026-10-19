@@ -170,8 +170,10 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = alive(underlying.prune(threadId, policy))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       alive(underlying.eventsAfter(threadId, afterSeq, limit))
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)    = alive(underlying.compactEvents(threadId, beforeSeq))
-    def deleteThread(threadId: ThreadId, token: FencingToken) = alive(underlying.deleteThread(threadId, token))
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = alive(underlying.compactEvents(threadId, beforeSeq))
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) = alive(
+      underlying.deleteThread(threadId, token, fence)
+    )
 
   /**
    * The store as a run that is about to lose its claim sees it: the run pauses at `at` - its first effect
@@ -209,8 +211,9 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)    = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken) = underlying.deleteThread(threadId, token)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+      underlying.deleteThread(threadId, token, fence)
 
   /**
    * A run that loses its claim while it pauses at `at`, and a successor that takes the thread over and

@@ -35,10 +35,10 @@ enum ChildFailure:
 /**
  * The child run a delegated task ran as (design 4.44): its thread, the run that produced the outcome, the subagent's
  * id, the parent's tool call that started it, and its depth - 1 for a child of a top-level thread. A child run with no
- * parent ([[BoundAgent.run]]) has depth 0 and an empty `toolCallId`.
+ * parent ([[BoundAgent.run]]) has depth 0 and no `toolCallId`.
  */
 @Experimental
-final case class ChildRef(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: ToolCallId, depth: Int)
+final case class ChildRef(threadId: ThreadId, runId: RunId, agent: AgentId, toolCallId: Option[ToolCallId], depth: Int)
 
 object ChildRef:
   private given ReadWriter[RunId]      = upickle.default.readwriter[String].bimap(_.value, RunId(_))

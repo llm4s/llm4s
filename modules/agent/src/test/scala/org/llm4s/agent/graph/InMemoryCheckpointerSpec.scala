@@ -118,7 +118,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     val otherToken = store.claim(other, ClaimRequest(RunId("o"), None, ttl)).value.token
     store.commit(other, Commit(otherToken, Some(checkpoint("o1", None)), Vector.empty, Vector(event("x"))))
 
-    store.deleteThread(thread, c.token).value shouldBe (())
+    store.deleteThread(thread, c.token, None).value shouldBe (())
 
     store.latest(thread).value shouldBe None
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
@@ -135,7 +135,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
       .value
       .map(_.seq) shouldBe Vector(4L)
     // a delete is fenced like a commit: an unknown thread has no claim to delete under
-    store.deleteThread(ThreadId("unknown"), again.token).left.value shouldBe
+    store.deleteThread(ThreadId("unknown"), again.token, None).left.value shouldBe
       GraphError.StaleClaim("unknown", again.token, None)
   }
 

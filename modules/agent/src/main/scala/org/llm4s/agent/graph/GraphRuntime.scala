@@ -915,16 +915,21 @@ final class GraphRuntime(
    * deleted by retention: a top-level delete refuses a child thread ([[GraphError.ChildThread]]), and retention only
    * deletes children.
    *
-   * The cascade is fenced by the claims above what it deletes: before each delete, `fence` - retention's check of the
-   * parent's claim ([[keepChildren]]) - and, for a descendant, `threadId`'s own claim ([[Held.holds]]). A cascade whose
-   * claim was lost while it stalled stops there, [[GraphError.ThreadBusy]], so it never deletes a child that a
-   * successor run on the thread above may reattach and would then run again (#2056 review).
+   * The cascade is fenced by the claims above what it deletes, so it never deletes a child that a successor run on
+   * the thread above may reattach and would then run again (#2056 review, #2063). Before each delete it checks
+   * `fence` - retention's check of the parent's claim ([[keepChildren]]) - and, for a descendant, `threadId`'s own
+   * claim ([[Held.holds]]), stopping at the first that fails; and the store checks the claim above atomically with
+   * each delete ([[Checkpointer.deleteThread]]'s `fence`), so a takeover between the check and the delete deletes
+   * nothing: `above` - retention's parent and the parent's claim token - fences every delete of the tree, and
+   * without it, as for a top-level delete, `threadId`'s claim fences each descendant's. A fence that fails is
+   * [[GraphError.ThreadBusy]] on the thread above, with nothing more deleted.
    */
   private def deleteTree(
     threadId: ThreadId,
     config: RunConfig,
     child: Boolean,
-    fence: () => Boolean = () => true
+    fence: () => Boolean = () => true,
+    above: Option[(ThreadId, FencingToken)] = None
   ): Result[Unit] =
     def checked: Result[Unit] =
       checkpointer
@@ -967,24 +972,48 @@ final class GraphRuntime(
             )
             unchanged.flatMap(_ =>
               heldBelow.foldLeft[Result[Unit]](Right(()))((done, child) =>
-                done.flatMap(_ => fenced).flatMap(_ => rootHolds).flatMap(_ => deleteHeld(child, config))
+                done
+                  .flatMap(_ => fenced)
+                  .flatMap(_ => rootHolds)
+                  .flatMap(_ =>
+                    // retention's parent fences the whole tree; otherwise this thread's claim, whose loss the store
+                    // finds then is acted on as `rootHolds` would act on it
+                    above.fold(deleteHeld(child, config, Some(threadId -> held.claim.token), held.foundLost))(fence =>
+                      deleteHeld(child, config, Some(fence))
+                    )
+                  )
               )
             )
           }
         )
         .flatMap(_ => fenced)
-        .flatMap(_ => deleteHeld(held, config))
+        .flatMap(_ => deleteHeld(held, config, above))
     }
 
   /**
    * Deletes the thread `held` holds, fenced by its claim; see [[deleteThread]]. A claim that lapsed while this runtime
    * stalled, and that another run took over, deletes nothing of that run, and is refused as any live claim is; a
-   * delete not begun when the claim was found lost never reaches the store, and is refused so.
+   * delete not begun when the claim was found lost never reaches the store, and is refused so. `fence` is the claim
+   * above the thread that the store checks with the delete ([[deleteTree]]): one it refuses deleted nothing and is
+   * [[GraphError.ThreadBusy]] on that thread, a loss of the claim above, not of `held`'s, reported to `aboveLost`.
    */
-  private def deleteHeld(held: Held, config: RunConfig): Result[Unit] =
+  private def deleteHeld(
+    held: Held,
+    config: RunConfig,
+    fence: Option[(ThreadId, FencingToken)],
+    aboveLost: Option[FencingToken] => Unit = _ => ()
+  ): Result[Unit] =
     val threadId = held.threadId
     val claim    = held.claim
-    val outcome = held.committing(Commit(claim.token))(checkpointer.deleteThread(threadId, claim.token)) match
+    // a refusal for the fence's claim is taken out before `committing`, which would act on it as a loss of `held`'s
+    def fenceLost(error: LLMError): LLMError = (error, fence) match
+      case (stale: GraphError.StaleClaim, Some((above, _))) if above != threadId && stale.threadId == above.value =>
+        aboveLost(stale.current)
+        GraphError.ThreadBusy(above.value, None, afterLoss(stale.current))
+      case _ => error
+    val outcome = held.committing(Commit(claim.token))(
+      checkpointer.deleteThread(threadId, claim.token, fence).left.map(fenceLost)
+    ) match
       case Left(stale: GraphError.StaleClaim) =>
         busyAt(threadId, config, holder = afterLoss(stale.current))
       case other => other
@@ -1058,6 +1087,7 @@ final class GraphRuntime(
     threadId: ThreadId,
     config: RunConfig,
     base: Option[String],
+    token: FencingToken,
     fenced: () => Boolean,
     abandon: Boolean
   ): Unit =
@@ -1092,11 +1122,12 @@ final class GraphRuntime(
             .map(_.threadId)
             .toVector
           prunable.dropRight(config.childRetention).iterator.takeWhile(_ => holds()).foreach { old =>
-            Try(deleteTree(old, config, child = true, () => holds())).toResult.flatten.left.foreach(error =>
-              GraphRuntime.logger.warn(
-                s"Deleting the child ${old.value} of ${threadId.value} for retention failed: ${error.message}"
+            Try(deleteTree(old, config, child = true, () => holds(), Some(threadId -> token))).toResult.flatten.left
+              .foreach(error =>
+                GraphRuntime.logger.warn(
+                  s"Deleting the child ${old.value} of ${threadId.value} for retention failed: ${error.message}"
+                )
               )
-            )
           }
 
   /**
@@ -1601,6 +1632,12 @@ final class GraphRuntime(
             lost(stale.current)
             Left(stale)
           case other => other.map(_ => ())
+
+    /**
+     * A loss of this claim that the store found when it refused a write fenced by it on another thread - a cascade's
+     * delete of a descendant ([[deleteHeld]]) - acted on as a refused renewal is.
+     */
+    def foundLost(current: Option[FencingToken]): Unit = lost(current)
 
     /**
      * Makes `write`, the change's write to the store, unless the claim has been found lost: then it is
@@ -2684,6 +2721,7 @@ final class GraphRuntime(
                       threadId,
                       config,
                       parent,
+                      granted.token,
                       parentFence(threadId, granted.token, () => lostAt.get.isDefined),
                       abandon = true
                     )
@@ -3140,6 +3178,7 @@ final class GraphRuntime(
         threadId,
         config,
         Some(lastCommitted),
+        token,
         parentFence(threadId, token, () => lostAt.get.isDefined),
         abandon = false
       )
