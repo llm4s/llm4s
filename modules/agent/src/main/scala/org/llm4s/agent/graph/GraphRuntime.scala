@@ -1032,9 +1032,11 @@ final class GraphRuntime(
               Either.cond(now.toSet == below.toSet, (), GraphError.ThreadBusy(threadId.value, None))
             )
             // marked before the first descendant goes, so a cascade stopped part-way leaves a thread no admission
-            // replays (#2074); a thread with no descendants is deleted in one store call and needs no marker
+            // replays (#2074); a thread with no descendants is deleted in one store call and needs no marker. Nor does
+            // a child retention deletes (`above`): it is prunable, so never admitted again whatever is left of it, and a
+            // checkpoint commit cannot be fenced by the parent's claim, so a stale pass could otherwise mark it
             def marked: Result[Unit] =
-              if heldBelow.isEmpty then Right(())
+              if heldBelow.isEmpty || above.isDefined then Right(())
               else fenced.flatMap(_ => rootHolds).flatMap(_ => markDeleting(held, config))
             unchanged
               .flatMap(_ => marked)

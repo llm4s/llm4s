@@ -313,6 +313,30 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     Vector(1, 2).map(n => store.latest(childOf(parent, n)).value) shouldBe Vector(None, None)
   }
 
+  it should "never mark a pruned child deleting, even when its cascade stops part-way (#2074)" in {
+    val store  = InMemoryCheckpointer()
+    val parent = ThreadId("retained-unmarked")
+    val down   = new AtomicBoolean(true)
+    val flaky = new ForwardingCheckpointer(store) {
+      override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+        if down.get && threadId == childOf(childOf(parent, 1), 2) then Left(ValidationError("store", "down"))
+        else store.deleteThread(threadId, token, fence)
+    }
+    val runtime = GraphRuntime(flaky, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val pruned = startChild(runtime, parent, 1)
+    runtime.startChild(childOf(pruned, 2), graph, "go", origin(pruned, 2, depth = 2), RunConfig()).awaited.value
+    startChild(runtime, parent, 3)
+
+    runtime.start(parent, graph, "next", RunConfig().withChildRetention(1)).awaited.value.completed
+
+    // the pass could not delete the grandchild, so the child stays - unmarked, as retention marks nothing
+    store.latest(pruned).value.value.checkpoint.deleting shouldBe false
+    down.set(false)
+    runtime.start(parent, graph, "again", RunConfig().withChildRetention(1)).awaited.value.completed
+    store.latest(pruned).value shouldBe None
+  }
+
   it should "keep the newest settled children at a settled parent's start, an abandoned one counting" in {
     val (store, runtime, parent) = fresh()
     val children = Vector(1, 2, 3, 4).map(n => startChild(runtime, parent, n, if n == 1 then "ask" else "go"))
