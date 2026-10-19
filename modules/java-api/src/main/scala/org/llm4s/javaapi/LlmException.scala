@@ -8,7 +8,7 @@ import java.util.{ Optional, OptionalInt }
 import scala.jdk.DurationConverters.*
 
 /**
- * A checked-free runtime exception wrapping an [[LLMError]], thrown only when
+ * A checked-free runtime exception wrapping an [[org.llm4s.error.LLMError LLMError]], thrown only when
  * Java callers dereference a failed [[LlmResult]] via [[LlmResult#get]].
  *
  * If the wrapped error carries an underlying `Throwable` (for example a
@@ -65,7 +65,7 @@ object LlmException {
 }
 
 /**
- * How [[LlmException]] reads an [[LLMError]]: its kind, its retry delay and its HTTP status.
+ * How [[LlmException]] reads an [[org.llm4s.error.LLMError LLMError]]: its kind, its retry delay and its HTTP status.
  *
  * Every concrete error class in `org.llm4s.error` has an entry in [[byClass]], and `LlmErrorKindSpec` scans that
  * package and fails when one has not, so a new error class is given a kind on purpose rather than falling to

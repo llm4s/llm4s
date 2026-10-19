@@ -14,7 +14,7 @@ import org.llm4s.llmconnect.model.{ ModelUsage, UsageSummary }
  * methods for retrieving aggregated statistics without external infrastructure.
  *
  * Cost is stored as [[BigDecimal]] to prevent floating-point accumulation drift,
- * matching the pattern used by [[UsageSummary]] and [[ModelUsage]].
+ * matching the pattern used by [[org.llm4s.llmconnect.model.UsageSummary UsageSummary]] and [[org.llm4s.llmconnect.model.ModelUsage ModelUsage]].
  *
  * Example usage:
  * {{{
@@ -109,7 +109,7 @@ final class CostTracker private () extends MetricsCollector {
       )
     }
 
-  /** Returns a [[UsageSummary]] for interop with agent-level tracking. */
+  /** Returns a [[org.llm4s.llmconnect.model.UsageSummary UsageSummary]] for interop with agent-level tracking. */
   def snapshot: UsageSummary = {
     val current = state.get()
     val models = current.map { case (model, acc) =>

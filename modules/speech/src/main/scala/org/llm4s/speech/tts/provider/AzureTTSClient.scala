@@ -12,8 +12,8 @@ import scala.concurrent.duration._
 /**
  * Azure AI Speech text-to-speech (REST `POST /cognitiveservices/v1`, SSML body).
  *
- * Requests the `raw-24khz-16bit-mono-pcm` output format, so [[GeneratedAudio.data]] is headerless
- * 24 kHz, 16-bit, mono PCM described by an honest [[AudioMeta]]. Write it out with
+ * Requests the `raw-24khz-16bit-mono-pcm` output format, so [[org.llm4s.speech.GeneratedAudio.data GeneratedAudio.data]] is headerless
+ * 24 kHz, 16-bit, mono PCM described by an honest [[org.llm4s.speech.AudioMeta AudioMeta]]. Write it out with
  * [[org.llm4s.speech.io.WavFileGenerator.saveAsWav]].
  *
  * With `options.outputFormat = AudioFormat.Mp3` it requests `audio-24khz-48kbitrate-mono-mp3` and returns the

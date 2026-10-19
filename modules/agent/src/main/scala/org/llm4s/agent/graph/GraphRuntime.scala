@@ -62,7 +62,7 @@ object GraphRuntime:
 
   /**
    * A runtime over a new [[InMemoryCheckpointer]], holding its runs' claims by `claims`. Both use `clock`: the
-   * runtime stamps checkpoints and events with it, and the store judges claim expiry and [[prune]]'s ages by
+   * runtime stamps checkpoints and events with it, and the store judges claim expiry and [[GraphRuntime!.prune prune]]'s ages by
    * it, so a test that moves `clock` moves both.
    *
    * A [[GraphRuntime]] over a store of its own has two clocks: its `clock` stamps what it writes - each

@@ -8,7 +8,7 @@ import scala.util.Try
 /**
  * Minimal runnable example of a locked-down workspace sandbox.
  *
- * Uses [[WorkspaceSandboxConfig.LockedDown]]:
+ * Uses [[org.llm4s.shared.WorkspaceSandboxConfig.LockedDown WorkspaceSandboxConfig.LockedDown]]:
  * - Read-only file ops (explore, read, search) are allowed
  * - Shell execution is disabled (executeCommand throws)
  * - Strict resource limits

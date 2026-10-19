@@ -25,13 +25,13 @@ import scala.jdk.CollectionConverters.*
  *   protected def newSubject(): ReplayContract.Subject = StoreFileSubject(InMemoryLongTermStore())
  * }}}
  *
- * Each case runs a one-task graph on a real [[GraphRuntime]] whose task performs the subject's two
+ * Each case runs a one-task graph on a real [[org.llm4s.agent.graph.GraphRuntime GraphRuntime]] whose task performs the subject's two
  * effects (slots 0 and 1), then crashes the run at a point - the store goes down at a chosen effect
  * record write, before or after writing it, or after the task's commit, and every later write fails as
  * in a dead process - moves the store's clock past the claim's lease, and recovers on a new runtime.
  * The task records each slot's outcome, or the guard's refusal, as a tool turns a refusal into a tool
  * error; any other failure fails the task, as a tool's `Fatal` does. For every crash point and the
- * subject's [[ReplaySupport]] it checks the target's state, the outcomes against a run that never
+ * subject's [[org.llm4s.agent.graph.ReplaySupport ReplaySupport]] it checks the target's state, the outcomes against a run that never
  * crashed, that the two effects never collide, and that once the run completes the store holds no
  * effect record and the target no applied key:
  *
@@ -44,7 +44,7 @@ import scala.jdk.CollectionConverters.*
  * | after the task's commit | not re-run | same | same |
  *
  * and, when another thread changes the target after the effect and before its outcome is written: the
- * recorded outcome with the change left in place (Transactional), [[GraphError.EffectReplayRefused]]
+ * recorded outcome with the change left in place (Transactional), [[org.llm4s.agent.graph.GraphError.EffectReplayRefused GraphError.EffectReplayRefused]]
  * (Verifiable), refused (Unverifiable). It also checks that a run left recoverable for a year, its
  * thread pruned by age meanwhile, still replays from its records.
  *

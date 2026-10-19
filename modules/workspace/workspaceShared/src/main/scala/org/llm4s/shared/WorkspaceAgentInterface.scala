@@ -55,7 +55,7 @@ trait WorkspaceAgentInterface {
    * @param content Content to write
    * @param mode Write mode (default: "overwrite")
    * @param createDirectories Create parent directories if they don't exist
-   * @param expectedHash A compare-and-set: write only if the path's current [[FileSnapshotResponse.hash]] is this,
+   * @param expectedHash A compare-and-set: write only if the path's current [[org.llm4s.shared.FileSnapshotResponse.hash FileSnapshotResponse.hash]] is this,
    *                     atomically against every other file operation, and replace the file atomically (a reader or
    *                     a crash sees the old content or the new, never part of it); otherwise `HASH_MISMATCH`, and
    *                     nothing is written. Only with mode "overwrite".

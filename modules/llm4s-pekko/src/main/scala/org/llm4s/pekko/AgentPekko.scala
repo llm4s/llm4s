@@ -13,7 +13,7 @@ import scala.concurrent.{ blocking, ExecutionContext, Future }
 import scala.util.control.Exception.ultimately
 
 /**
- * Apache Pekko Streams wrapper for [[Agent]], the Pekko counterpart of `AgentIO` (cats-effect, fs2) and
+ * Apache Pekko Streams wrapper for [[org.llm4s.agent.Agent Agent]], the Pekko counterpart of `AgentIO` (cats-effect, fs2) and
  * `AgentZ` (ZIO).
  *
  * `stream`, `streamResume` and `streamRecover` run a turn as a `Source` of its events
@@ -35,29 +35,29 @@ import scala.util.control.Exception.ultimately
  * `ExecutionContext` you pass (a blocking one: the wait blocks a thread). A `Future` cannot be cancelled;
  * stream the turn when it has to be cancellable.
  *
- * Intentionally a thin wrapper: build the [[Agent]] with its tools, middleware (guardrails), handoffs and
+ * Intentionally a thin wrapper: build the [[org.llm4s.agent.Agent Agent]] with its tools, middleware (guardrails), handoffs and
  * options through `Agent.builder`, or [[LLMClientPekko.agent]].
  */
 trait AgentPekko {
 
-  /** One turn on a new thread; see [[Agent.run]]. */
+  /** One turn on a new thread; see [[org.llm4s.agent.Agent.run Agent.run]]. */
   def run(query: String, config: RunConfig = RunConfig())(using ec: ExecutionContext): Future[AgentResult]
 
-  /** The next turn on `previous`'s thread; see [[Agent.continueConversation]]. */
+  /** The next turn on `previous`'s thread; see [[org.llm4s.agent.Agent.continueConversation Agent.continueConversation]]. */
   def continueConversation(previous: AgentResult, query: String, config: RunConfig = RunConfig())(using
     ec: ExecutionContext
   ): Future[AgentResult]
 
-  /** Continues `threadId`'s failed or interrupted run; see [[Agent.recover]]. */
+  /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig())(using ec: ExecutionContext): Future[AgentResult]
 
-  /** Answers pending approvals and questions and continues; see [[Agent.resume]]. */
+  /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(using
     ec: ExecutionContext
   ): Future[AgentResult]
 
   /**
-   * One turn on `threadId`, as a stream: every event of the turn ([[Agent.stream]]), then `Done(result)`.
+   * One turn on `threadId`, as a stream: every event of the turn ([[org.llm4s.agent.Agent.stream Agent.stream]]), then `Done(result)`.
    * `bufferSize` is how many live events wait for a slow consumer before the rest are counted into a
    * `LiveGap`; a value below 1 fails the stream at once.
    *
@@ -99,7 +99,7 @@ trait AgentPekko {
 
   /**
    * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
-   * order. It observes the run, through [[AgentRun.subscribe]], once per materialization: it replays
+   * order. It observes the run, through [[org.llm4s.agent.AgentRun.subscribe AgentRun.subscribe]], once per materialization: it replays
    * the run's durable events from its start and then follows it live, but misses the live events sent
    * before the stream started - use [[stream]] to see every one. It ends after the run's terminal
    * event, or once a run that ends without one has delivered its last event; the run's own outcome is
@@ -128,7 +128,7 @@ object AgentPekko {
   /** Items handed over between the pump thread and the stream, on top of the live-event buffer. */
   private val HandOver = 16
 
-  /** Wraps an already-constructed [[Agent]]. */
+  /** Wraps an already-constructed [[org.llm4s.agent.Agent Agent]]. */
   def apply(agent: Agent): AgentPekko = new Impl(agent)
 
   final private class Impl(agent: Agent) extends AgentPekko {

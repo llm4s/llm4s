@@ -29,7 +29,7 @@ final class TracingBackends private (
   val discovered: Boolean
 ):
 
-  /** The backend registered for `mode`, matched on [[TracingMode.name]] case-insensitively. */
+  /** The backend registered for `mode`, matched on [[org.llm4s.trace.TracingMode.name TracingMode.name]] case-insensitively. */
   def find(mode: TracingMode): Option[TracingBackend] =
     val key = TracingBackends.keyOf(mode)
     backends.findLast(backend => TracingBackends.keyOf(backend.mode) == key)
@@ -104,13 +104,11 @@ object TracingBackends:
    * Wider than `Try`, which lets every `LinkageError` through; that is exactly
    * what a stale or half-present backend jar produces.
    */
-  // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
   private def guarded[A](what: => String)(body: => A): Either[String, A] =
     try Right(body)
     catch
       case error: LinkageError => Left(describe(what, error))
       case NonFatal(error)     => Left(describe(what, error))
-  // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 
   private def describe(what: String, error: Throwable): String =
     s"$what failed: ${error.getClass.getName}: ${Option(error.getMessage).getOrElse("")}"

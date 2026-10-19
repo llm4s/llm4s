@@ -108,7 +108,7 @@ final class Agent private[agent] (
   /**
    * `first` on a new thread, then each of `followUps` on it, stopping at the first turn whose
    * status is not `Completed`; returns the last turn's result. Each turn is its own run: the first
-   * runs with `config`, each follow-up with `config` and a fresh [[RunId]]. A `Left` carries no
+   * runs with `config`, each follow-up with `config` and a fresh [[org.llm4s.agent.graph.RunId RunId]]. A `Left` carries no
    * thread id, so a conversation whose turn fails - cancelled by an interrupt included - is
    * forgotten once that turn has ended, as for the one-shot [[run]].
    */

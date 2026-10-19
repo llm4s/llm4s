@@ -355,7 +355,7 @@ class OpenAICompatibleClient(
   /**
    * The credentials a request with `requestHeaders` carried, which an error body must not repeat: the
    * bearer token sent, and for an exchange its literal identity token and its client id (when long enough to
-   * scrub without garbling the body, [[Redaction.identifiers]]).
+   * scrub without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
    */
   private def credentialSecrets(requestHeaders: Map[String, String]): Seq[String] = {
     val bearer = requestHeaders.collect {
@@ -576,7 +576,7 @@ class OpenAICompatibleClient(
    * One streamed event as chunks: one per tool call, the first also carrying the text, finish
    * reason and thinking. Scoped to the provider package so specs can inspect it.
    *
-   * `toolCalls` is the state of the stream this event belongs to - see [[StreamToolCalls]]. The
+   * `toolCalls` is the state of the stream this event belongs to - see [[org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls StreamToolCalls]]. The
    * default, a fresh one, is right only for an event read on its own.
    *
    * A tool call's arguments are its fragment verbatim, as a string (an empty fragment is the

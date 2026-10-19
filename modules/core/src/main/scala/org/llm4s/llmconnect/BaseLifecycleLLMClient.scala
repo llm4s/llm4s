@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *  - `validateNotClosed` — a pre-check returning `Left(ConfigurationError)` once closed.
  *  - `close()` — an idempotent close that delegates to `releaseResources()` exactly once.
  *  - `completeWithMetrics` — combines lifecycle validation with metrics recording for
- *    [[Completion]] results, eliminating boilerplate in `complete` / `streamComplete`.
+ *    [[org.llm4s.llmconnect.model.Completion Completion]] results, eliminating boilerplate in `complete` / `streamComplete`.
  *
  * Concrete clients mix in this trait, supply `providerName` and `modelName`,
  * and optionally override `releaseResources()` to free provider-specific

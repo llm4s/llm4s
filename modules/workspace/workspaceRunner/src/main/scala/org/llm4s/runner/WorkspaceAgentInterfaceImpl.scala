@@ -25,7 +25,7 @@ import scala.util.chaining._
  * @param isWindows     True if the host OS is Windows.  Used to route built-in commands
  *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
  *                      no standalone `.exe` on Windows.
- * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
+ * @param sandboxConfig Optional sandbox config; if None, uses [[org.llm4s.shared.WorkspaceSandboxConfig.Permissive WorkspaceSandboxConfig.Permissive]]
  * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
  * @param gateWait      how long a command or a file operation waits at the command gate before it is refused
  *                      (`WORKSPACE_BUSY`)
@@ -304,9 +304,9 @@ class WorkspaceAgentInterfaceImpl(
     finally { fileLock.unlock(); commitBy.remove() }
   }
 
-  /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
+  /** The current [[org.llm4s.shared.FileSnapshotResponse.hash FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
   /**
-   * The [[FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
+   * The [[org.llm4s.shared.FileSnapshotResponse.hash FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
    * over `maxFileSize` is `oversized`, never read, so no snapshot or comparison reads more than the limit.
    */
   /**
@@ -1592,7 +1592,7 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Check a command and build the process that runs it, using direct argument-vector
    * execution (no shell interpolation).  The first token of the command must appear in
-   * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
+   * `config.allowedCommands` (see [[org.llm4s.shared.WorkspaceSandboxConfig.allowedCommands WorkspaceSandboxConfig.allowedCommands]]);
    * absolute/relative paths to executables are rejected, and the runner looks
    * the program up itself in trusted directories only (see layer 10).
    *

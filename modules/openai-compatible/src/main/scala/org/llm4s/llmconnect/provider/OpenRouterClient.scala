@@ -152,7 +152,7 @@ object OpenRouterClient {
  */
 private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
 
-  /** The provider id on the [[ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
+  /** The provider id on the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
   val ProviderId: String = "openrouter"
 
   override val headers: Seq[(String, String)] =
@@ -216,7 +216,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
     OpenAICompatibleDialect.firstString(obj, "thinking", "reasoning")
 
   /**
-   * The turn's thinking text as `reasoning`, and its `reasoning_details` - the [[ThinkingBlock.Opaque]]
+   * The turn's thinking text as `reasoning`, and its `reasoning_details` - the [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]]
    * blocks this dialect read, in order and exactly as received - when it still has them. A turn
    * unsealed since (its history or content changed) has only its text, and sends only `reasoning`.
    * Opaque blocks from any other provider are ignored.
@@ -231,7 +231,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
     obj.objOpt.flatMap(_.get("reasoning_details")).flatMap(_.arrOpt).toSeq.flatten.filter(_.objOpt.isDefined)
 
   /**
-   * One [[ThinkingBlock.Opaque]] per `reasoning_details` item, holding the item's JSON with every
+   * One [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] per `reasoning_details` item, holding the item's JSON with every
    * field (`type`, `text`, `summary`, `data`, `signature`, `id`, `format`, `index` and any other).
    *
    * A stream sends an item in fragments that share its `index` and `type`: the `text` and `summary`

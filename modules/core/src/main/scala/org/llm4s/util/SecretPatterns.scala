@@ -5,7 +5,7 @@ import org.llm4s.annotation.Stable
 import scala.util.matching.Regex
 
 /**
- * Library of credential-detection patterns used by [[org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail]]
+ * Library of credential-detection patterns used by `org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail` (`llm4s-agent`)
  * and `Redaction`.
  *
  * All regex matching is performed via [[SecretType]] instances.  Each type

@@ -10,9 +10,9 @@ import org.llm4s.types.Result
 import scala.concurrent.duration.FiniteDuration
 
 /**
- * Runs commands in a containerised workspace, for a [[SandboxBackend]] (design §4.33). It only runs: the
+ * Runs commands in a containerised workspace, for a [[org.llm4s.agent.harness.SandboxBackend SandboxBackend]] (design §4.33). It only runs: the
  * backend wraps every run in C4's `Unverifiable` guard, so a completed command replays its stored
- * [[ExecResult]] and one that may have run is refused, never run again. A command locks
+ * [[org.llm4s.agent.harness.ExecResult ExecResult]] and one that may have run is refused, never run again. A command locks
  * `files/workspace/<id>` ([[WorkspaceLocks]]), so it conflicts with every file mutation in its workspace.
  *
  * The runner runs a command as a program and its arguments, never through a shell, and refuses what the
@@ -80,7 +80,7 @@ object WorkspaceSandboxRunner:
   def apply(id: String, workspace: WorkspaceAgentInterface): Result[WorkspaceSandboxRunner] =
     WorkspaceLocks.checkedId(id).map(new WorkspaceSandboxRunner(_, workspace))
 
-/** The [[SandboxBackend]] of a containerised workspace: `SandboxBackend` over a [[WorkspaceSandboxRunner]]. */
+/** The [[org.llm4s.agent.harness.SandboxBackend SandboxBackend]] of a containerised workspace: `SandboxBackend` over a [[WorkspaceSandboxRunner]]. */
 @Experimental
 object WorkspaceSandboxBackend:
 

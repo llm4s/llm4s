@@ -20,19 +20,19 @@ import scala.util.Try
  *
  * Cohere's v3 and v4 models embed a query and a document differently, so a mismatch between how
  * texts were indexed and how a query is embedded quietly degrades retrieval. A request says which
- * it is with its [[org.llm4s.llmconnect.model.InputPurpose]], and the provider maps it onto [[SearchQuery]] or
- * [[SearchDocument]] by itself, not guessed from the number of inputs or encoded in the model
- * name. An input type the purpose cannot express ([[Classification]], [[Clustering]]) is a typed
+ * it is with its [[org.llm4s.llmconnect.model.InputPurpose]], and the provider maps it onto [[CohereInputType.SearchQuery SearchQuery]] or
+ * [[CohereInputType.SearchDocument SearchDocument]] by itself, not guessed from the number of inputs or encoded in the model
+ * name. An input type the purpose cannot express ([[CohereInputType.Classification Classification]], [[CohereInputType.Clustering Clustering]]) is a typed
  * setting of the provider: pass it to [[CohereEmbeddingProvider.fromConfig]], where it takes
  * precedence over the purpose of every request.
  *
  * @param wireName the value sent as `input_type` in the request body
  */
 enum CohereInputType(val wireName: String):
-  /** A document to index; pair with [[SearchQuery]] for the queries run against it. */
+  /** A document to index; pair with [[CohereInputType.SearchQuery SearchQuery]] for the queries run against it. */
   case SearchDocument extends CohereInputType("search_document")
 
-  /** A search query against documents embedded as [[SearchDocument]]. */
+  /** A search query against documents embedded as [[CohereInputType.SearchDocument SearchDocument]]. */
   case SearchQuery extends CohereInputType("search_query")
 
   /** Input for a text classifier. */
@@ -45,7 +45,7 @@ object CohereInputType:
   /** The input type for a document, [[org.llm4s.llmconnect.model.InputPurpose.Document]]: what a provider built without an explicit one sends. */
   val default: CohereInputType = SearchDocument
 
-  /** The input type a request's [[org.llm4s.llmconnect.model.InputPurpose]] stands for: [[SearchDocument]] for a document, [[SearchQuery]] for a query. */
+  /** The input type a request's [[org.llm4s.llmconnect.model.InputPurpose]] stands for: [[CohereInputType.SearchDocument SearchDocument]] for a document, [[CohereInputType.SearchQuery SearchQuery]] for a query. */
   def forPurpose(purpose: InputPurpose): CohereInputType = purpose match
     case InputPurpose.Document => SearchDocument
     case InputPurpose.Query    => SearchQuery

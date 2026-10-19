@@ -20,8 +20,8 @@ import scala.annotation.unused
 import scala.util.Try
 
 /**
- * Stable identifier of an [[AgentMiddleware]] in a [[MiddlewareStack]]; must match
- * `[a-zA-Z0-9_-]{1,64}`, which [[MiddlewareStack.of]] checks. Persisted in approval requests.
+ * Stable identifier of an [[org.llm4s.agent.graph.middleware.AgentMiddleware AgentMiddleware]] in a [[org.llm4s.agent.graph.middleware.MiddlewareStack MiddlewareStack]]; must match
+ * `[a-zA-Z0-9_-]{1,64}`, which [[org.llm4s.agent.graph.middleware.MiddlewareStack.of MiddlewareStack.of]] checks. Persisted in approval requests.
  */
 opaque type MiddlewareId = String
 
@@ -159,7 +159,7 @@ object ToolCallRequest:
  * run, its model calls and its tool calls. Every hook passes through by default; override only
  * those the concern needs.
  *
- * Middleware run as a [[MiddlewareStack]], ordered by registration and by [[runsBefore]] and
+ * Middleware run as a [[org.llm4s.agent.graph.middleware.MiddlewareStack MiddlewareStack]], ordered by registration and by [[runsBefore]] and
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
  * unwinding, and `afterAgent`, run in reverse. A hook that throws fails the run with
  * `GraphError.MiddlewareFailed`; a thrown cancellation cancels it.
@@ -173,7 +173,7 @@ object ToolCallRequest:
  * again only asks again.
  *
  * A middleware that asks typed questions - for review, an edit, or missing information - extends
- * [[AgentMiddleware.Asking]].
+ * [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]].
  */
 trait AgentMiddleware:
 
@@ -188,8 +188,8 @@ trait AgentMiddleware:
 
   /**
    * Where this middleware must run relative to `other`, when both are present; `None`, the default, when it does not
-   * matter. A requirement is checked, never arranged: [[MiddlewareStack.of]] - so `AgentBuilder.build()` - refuses a
-   * stack in which this middleware does not run outside `other`, and a [[Placement.OutsideAtBoundary]] is checked
+   * matter. A requirement is checked, never arranged: [[org.llm4s.agent.graph.middleware.MiddlewareStack.of MiddlewareStack.of]] - so `AgentBuilder.build()` - refuses a
+   * stack in which this middleware does not run outside `other`, and a [[org.llm4s.agent.graph.middleware.Placement.OutsideAtBoundary Placement.OutsideAtBoundary]] is checked
    * across an agent family too. Register the two in the right order, or name `other` in [[runsBefore]]. Name `other`
    * by its type: ids are configurable.
    */
@@ -204,7 +204,7 @@ trait AgentMiddleware:
   /** Tools this middleware contributes; they join the loop's tool set and are validated like any other. */
   def tools: Vector[AgentTool[?]] = Vector.empty
 
-  /** The codecs of the question this middleware asks and the answer it takes; only [[AgentMiddleware.Asking]] declares one. */
+  /** The codecs of the question this middleware asks and the answer it takes; only [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]] declares one. */
   private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
 
   /**
@@ -226,8 +226,8 @@ trait AgentMiddleware:
   /**
    * Wraps one model call. A wrapper may rewrite the request (inject a note, filter tools), call
    * `next` more than once (retry, fallback), transform its response, add an update to its `writes`
-   * ([[ModelResponse.addUpdate]]), or return `Left`, which fails the run. Only an
-   * [[AgentMiddleware.Asking]] wrapper suspends, by asking its question. Every call `next` makes is
+   * ([[org.llm4s.agent.graph.middleware.ModelResponse!.addUpdate ModelResponse.addUpdate]]), or return `Left`, which fails the run. Only an
+   * [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking AgentMiddleware.Asking]] wrapper suspends, by asking its question. Every call `next` makes is
    * counted in the thread's usage, whichever response the wrapper returns.
    *
    * Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission
@@ -248,7 +248,7 @@ trait AgentMiddleware:
   ): ToolOutcome = next()
 
 /**
- * Where a middleware must run relative to another ([[AgentMiddleware.placement]]): a position its correctness depends
+ * Where a middleware must run relative to another ([[org.llm4s.agent.graph.middleware.AgentMiddleware.placement AgentMiddleware.placement]]): a position its correctness depends
  * on, which the stack checks rather than leaving to the documentation.
  */
 @Experimental
@@ -323,7 +323,7 @@ object AgentMiddleware:
     final protected def answered(context: ModelContext): Option[Resumed[Q, Ans]] = answered(context.run)
 
 /**
- * A middleware's question on its way out of a hook, from [[AgentMiddleware.Asking.ask]]: the agent loop
+ * A middleware's question on its way out of a hook, from [[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking.ask AgentMiddleware.Asking.ask]]: the agent loop
  * suspends the run with it. A wrapper that sees it as `next`'s result passes it on. Outside the loop it
  * is an error: a question nobody can answer.
  */

@@ -47,7 +47,7 @@ object ChatTuiTool:
    * follow symlinks. A workspace-relative path that traverses a symlink
    * pointing at `/etc` would still pass a `startsWith(root)` check after
    * normalisation. We therefore resolve to **real** paths via
-   * [[Path.toRealPath]] before the containment check.
+   * `Path.toRealPath` before the containment check.
    *
    * For a path that doesn't exist yet (which `read_file` will reject
    * later anyway, but `safeResolve` is also called by the dialog's
@@ -94,7 +94,7 @@ object ChatTuiTool:
 
   /**
    * Build a registered tool function. Returns `Left(ValidationError)`
-   * only if the underlying [[ToolBuilder]] fails — practically
+   * only if the underlying [[org.llm4s.toolapi.ToolBuilder ToolBuilder]] fails — practically
    * impossible here because the handler is always supplied.
    */
   def tool(workspaceRoot: Path): Result[ToolFunction[Map[String, Any], ReadFileResult]] =

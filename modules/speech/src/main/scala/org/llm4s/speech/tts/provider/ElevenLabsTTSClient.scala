@@ -14,7 +14,7 @@ import scala.concurrent.duration._
  * ElevenLabs text-to-speech (`POST /v1/text-to-speech/{voice_id}`).
  *
  * Requests `output_format=pcm_24000` (raw 24 kHz, 16-bit, mono little-endian samples), so
- * [[GeneratedAudio.data]] is headerless PCM described by an honest [[AudioMeta]]. Write it out with
+ * [[org.llm4s.speech.GeneratedAudio.data GeneratedAudio.data]] is headerless PCM described by an honest [[org.llm4s.speech.AudioMeta AudioMeta]]. Write it out with
  * [[org.llm4s.speech.io.WavFileGenerator.saveAsWav]]. With `options.outputFormat = AudioFormat.Mp3` it requests
  * `mp3_44100_128` and returns the MP3 bytes untouched. `options.voice` overrides the configured voice id.
  *

@@ -28,7 +28,7 @@ import scala.concurrent.duration.FiniteDuration
  *    because a long generation legitimately outlives a request that returns at once.
  *
  * A value must be positive and finite: `java.net.http.HttpRequest.timeout` rejects anything else, and
- * `Duration.Inf` is not a `FiniteDuration`. Loading a section checks it ([[validated]]); a value set with
+ * `Duration.Inf` is not a `FiniteDuration`. Loading a section checks it ([[ProviderTimeouts$.validated validated]]); a value set with
  * `withRequest` or `withStream` on a hand-built config is not checked until a client uses it.
  *
  * The constructor is private: build one with the companion `apply` or [[ProviderTimeouts.default]] and

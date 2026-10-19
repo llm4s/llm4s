@@ -16,13 +16,13 @@ import org.llm4s.types.TryOps
  * Provides centralized WAV file creation, format conversion, metadata validation,
  * and temporary file management.
  *
- * All generation entry points validate [[AudioMeta]] up front via [[validateMetadata]]
+ * All generation entry points validate [[org.llm4s.speech.AudioMeta AudioMeta]] up front via [[validateMetadata]]
  * so that invalid sample rates, channel counts, or bit depths fail fast with a
  * descriptive [[WavError]] rather than producing a corrupt WAV file.
  */
 object WavFileGenerator {
 
-  /** A WAV file could not be generated or saved; a [[NonRecoverableError]], as a core `ProcessingError` is. */
+  /** A WAV file could not be generated or saved; a [[org.llm4s.error.NonRecoverableError NonRecoverableError]], as a core `ProcessingError` is. */
   sealed trait WavError extends LLMError with NonRecoverableError
   final case class WavGenerationFailed(message: String, override val context: Map[String, String] = Map.empty)
       extends WavError
@@ -36,7 +36,7 @@ object WavFileGenerator {
   val MaxChannels: Int = 8
 
   /**
-   * Validate [[AudioMeta]] before it is used to generate or read a WAV file.
+   * Validate [[org.llm4s.speech.AudioMeta AudioMeta]] before it is used to generate or read a WAV file.
    *
    * Enforces that the sample rate is positive, the channel count is within
    * `[1, `[[MaxChannels]]`]`, and the bit depth is one of [[SupportedBitDepths]].
@@ -73,7 +73,7 @@ object WavFileGenerator {
     ManagedResource.tempFile(prefix, ".wav")
 
   /**
-   * Create a Java AudioFormat from [[AudioMeta]].
+   * Create a Java AudioFormat from [[org.llm4s.speech.AudioMeta AudioMeta]].
    */
   def createJavaAudioFormat(meta: AudioMeta): JAudioFormat =
     new JAudioFormat(
@@ -85,7 +85,7 @@ object WavFileGenerator {
     )
 
   /**
-   * Save [[GeneratedAudio]] as a WAV file using ManagedResource (eliminates duplication from AudioIO.saveWav).
+   * Save [[org.llm4s.speech.GeneratedAudio GeneratedAudio]] as a WAV file using ManagedResource (eliminates duplication from AudioIO.saveWav).
    *
    * The audio metadata is validated before writing.
    */
@@ -114,7 +114,7 @@ object WavFileGenerator {
   }
 
   /**
-   * Create [[GeneratedAudio]] from raw bytes with metadata, validating the metadata first.
+   * Create [[org.llm4s.speech.GeneratedAudio GeneratedAudio]] from raw bytes with metadata, validating the metadata first.
    */
   def createWavFromBytes(data: Array[Byte], meta: AudioMeta): Result[GeneratedAudio] =
     validateMetadata(meta).map(GeneratedAudio(data, _, AudioFormat.WavPcm16))
@@ -131,7 +131,7 @@ object WavFileGenerator {
     } yield savedPath
 
   /**
-   * Read a WAV file and return [[GeneratedAudio]], parsing actual RIFF/WAV header fields.
+   * Read a WAV file and return [[org.llm4s.speech.GeneratedAudio GeneratedAudio]], parsing actual RIFF/WAV header fields.
    *
    * The parsed metadata is validated via [[validateMetadata]] so that a malformed or
    * non-PCM file is rejected with a descriptive error rather than yielding garbage metadata.
@@ -161,7 +161,7 @@ object WavFileGenerator {
    * Utility for creating WAV headers manually (advanced usage).
    *
    * Validates the metadata, then uses BinaryWriter typeclass instances for correct
-   * little-endian encoding. Returns a [[Result]] rather than throwing, per project convention.
+   * little-endian encoding. Returns a [[org.llm4s.types.Result Result]] rather than throwing, per project convention.
    */
   def createWavHeader(dataSize: Int, meta: AudioMeta): Result[Array[Byte]] =
     for {

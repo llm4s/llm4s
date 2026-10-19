@@ -203,7 +203,7 @@ object Llm4sConfig {
     org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.defaultProviderName)
 
   /**
-   * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   * Loads the configured default named provider as a runtime [[org.llm4s.llmconnect.config.ProviderConfig ProviderConfig]].
    *
    * Only the default section is validated: another section's problem does not fail this.
    */

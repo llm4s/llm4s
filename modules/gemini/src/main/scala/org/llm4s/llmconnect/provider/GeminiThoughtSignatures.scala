@@ -26,7 +26,7 @@ import scala.util.Try
  *    can deliver it on a part with empty text.
  *  - '''Never merge''' a part that has a signature with one that has none, and never combine two signed parts.
  *
- * A signature is therefore kept as a sealed [[ThinkingBlock.Opaque]] block of the client's own provider id
+ * A signature is therefore kept as a sealed [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque ThinkingBlock.Opaque]] block of the client's own provider id
  * (`gemini` or `vertexai`: the two are separate signing authorities here, because nothing in Google's
  * documentation says a signature from one validates on the other), beside the message content and tool
  * calls it was produced with, and is bound and replayed through [[ThinkingReplay]] like every other sealed

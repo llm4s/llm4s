@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation,
 import org.llm4s.types.Result
 
 /**
- * Java-friendly wrapper around [[LLMClient]].
+ * Java-friendly wrapper around [[org.llm4s.llmconnect.LLMClient LLMClient]].
  *
  * The underlying Scala client returns `Result[Completion]`; this wrapper surfaces it as [[LlmResult]] so Java
  * callers never import any Scala types. `complete` returns the reply's text alone; `completion` returns the whole
@@ -77,7 +77,7 @@ final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] va
     else completing(conversation, options.underlying)
 
   /**
-   * Full access: send a conversation with core's Scala [[CompletionOptions]], returning the raw text
+   * Full access: send a conversation with core's Scala [[org.llm4s.llmconnect.model.CompletionOptions CompletionOptions]], returning the raw text
    * content; from Java, [[JCompletionOptions]] builds the same options without Scala types. Blocks and
    * reports an interrupt as `complete(String)` does: a `CancelledError` result, the interrupt flag left
    * set, never an `InterruptedException`.

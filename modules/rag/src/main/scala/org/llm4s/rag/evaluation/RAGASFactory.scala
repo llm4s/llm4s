@@ -35,7 +35,7 @@ object RAGASFactory {
    *
    * The embedding model's dimensions come from its provider's descriptor, through
    * the given [[org.llm4s.llmconnect.spi.ProviderRegistry]]. A model the provider does
-   * not declare is an error rather than a guess; build the [[EmbeddingModelConfig]]
+   * not declare is an error rather than a guess; build the [[org.llm4s.llmconnect.config.EmbeddingModelConfig EmbeddingModelConfig]]
    * yourself and use [[create]] for one.
    */
   def fromConfigs(

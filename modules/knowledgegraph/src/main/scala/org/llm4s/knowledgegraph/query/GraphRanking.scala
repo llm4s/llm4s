@@ -8,7 +8,7 @@ import scala.annotation.tailrec
  * Graph ranking algorithms for entity importance scoring.
  *
  * Provides PageRank, betweenness centrality, closeness centrality, and degree centrality
- * implementations that operate on the immutable [[Graph]] data structure.
+ * implementations that operate on the immutable [[org.llm4s.knowledgegraph.Graph Graph]] data structure.
  *
  * These scores are used by [[GraphQAPipeline]] to prioritize which entities
  * to include in LLM context when the result set exceeds context limits.

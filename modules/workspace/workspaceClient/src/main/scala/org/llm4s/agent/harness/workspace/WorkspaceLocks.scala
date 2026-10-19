@@ -55,7 +55,7 @@ private[workspace] object WorkspaceCalls:
   def relative(path: VPath): String = if path == VPath.root then "." else path.value.drop(1)
 
   /**
-   * `body`'s result; a runner refusal of `path` as a [[BackendRefused]], a lost compare-and-set as
+   * `body`'s result; a runner refusal of `path` as a [[org.llm4s.agent.harness.BackendRefused BackendRefused]], a lost compare-and-set as
    * `GraphError.EffectReplayRefused` (it wrote nothing), and anything else - a transport failure, an I/O
    * error - as a failure whose outcome is unknown, so the task fails and `recover` probes the workspace.
    */
@@ -79,7 +79,7 @@ private[workspace] object WorkspaceCalls:
       case Failure(e: WorkspaceAgentException) => Left(WorkspaceFailure(e))
       case Failure(e) => Left(ProcessingError(s"workspace.$operation", s"the workspace call failed: $e", Some(e)))
 
-  /** A runner snapshot's `hash` as C4's [[StateCheck]], or a failure for a value the runner cannot have sent. */
+  /** A runner snapshot's `hash` as C4's [[org.llm4s.agent.graph.StateCheck StateCheck]], or a failure for a value the runner cannot have sent. */
   def stateCheck(hash: String): Result[StateCheck] =
     if hash == FileSnapshotResponse.Kind.Absent then Right(StateCheck.absent)
     else if Named(hash) || Sha256.matches(hash) || LinkHash.matches(hash) || DanglingHash.matches(hash) then

@@ -34,7 +34,7 @@ object SpeechProviderSelector {
   def stt(source: ConfigSource): Result[SpeechToText] = SpeechConfigLoader.stt(source).flatMap(getSTTClient)
 
   /**
-   * Returns a [[TextToSpeech]] implementation for the given configuration.
+   * Returns a [[org.llm4s.speech.tts.TextToSpeech TextToSpeech]] implementation for the given configuration.
    * Dispatches based on `cfg.provider`:
    *   - "openai"      -> [[org.llm4s.speech.tts.provider.OpenAITTSClient]]
    *   - "elevenlabs"  -> [[org.llm4s.speech.tts.provider.ElevenLabsTTSClient]]
@@ -57,7 +57,7 @@ object SpeechProviderSelector {
     }
 
   /**
-   * Returns a [[SpeechToText]] implementation for the given configuration.
+   * Returns a [[org.llm4s.speech.stt.SpeechToText SpeechToText]] implementation for the given configuration.
    * Dispatches based on `cfg.provider`:
    *   - "openai" -> [[org.llm4s.speech.stt.provider.OpenAISTTClient]]
    *   - "azure"  -> [[org.llm4s.speech.stt.provider.AzureSTTClient]]

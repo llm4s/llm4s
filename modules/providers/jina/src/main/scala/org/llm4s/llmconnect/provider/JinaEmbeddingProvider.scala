@@ -20,15 +20,15 @@ import scala.util.Try
  *
  * Jina embeds queries and documents differently, so the right task depends on what the caller
  * is embedding. A request says so with its [[org.llm4s.llmconnect.model.InputPurpose]], and the provider maps it onto
- * [[RetrievalQuery]] or [[RetrievalPassage]] by itself. A task the purpose cannot express
- * ([[TextMatching]], [[Classification]], [[Separation]]) is a typed setting of the provider, not
+ * [[JinaTask.RetrievalQuery RetrievalQuery]] or [[JinaTask.RetrievalPassage RetrievalPassage]] by itself. A task the purpose cannot express
+ * ([[JinaTask.TextMatching TextMatching]], [[JinaTask.Classification Classification]], [[JinaTask.Separation Separation]]) is a typed setting of the provider, not
  * part of the model name: pass it to [[JinaEmbeddingProvider.fromConfig]], where it takes
  * precedence over the purpose of every request.
  *
  * @param wireName the value sent as `task` in the request body
  */
 enum JinaTask(val wireName: String):
-  /** Embeds a search query; pair with [[RetrievalPassage]] for the indexed documents. */
+  /** Embeds a search query; pair with [[JinaTask.RetrievalPassage RetrievalPassage]] for the indexed documents. */
   case RetrievalQuery extends JinaTask("retrieval.query")
 
   /** Embeds a document passage for indexing. */
@@ -47,7 +47,7 @@ object JinaTask:
   /** The task for a document, [[org.llm4s.llmconnect.model.InputPurpose.Document]]: what a provider built without an explicit task sends. */
   val default: JinaTask = RetrievalPassage
 
-  /** The task a request's [[org.llm4s.llmconnect.model.InputPurpose]] stands for: [[RetrievalPassage]] for a document, [[RetrievalQuery]] for a query. */
+  /** The task a request's [[org.llm4s.llmconnect.model.InputPurpose]] stands for: [[JinaTask.RetrievalPassage RetrievalPassage]] for a document, [[JinaTask.RetrievalQuery RetrievalQuery]] for a query. */
   def forPurpose(purpose: InputPurpose): JinaTask = purpose match
     case InputPurpose.Document => RetrievalPassage
     case InputPurpose.Query    => RetrievalQuery

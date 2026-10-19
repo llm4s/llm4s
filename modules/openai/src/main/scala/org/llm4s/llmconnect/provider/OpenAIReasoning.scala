@@ -6,7 +6,7 @@ import org.llm4s.model.ModelRegistryService
 
 /**
  * Decides whether [[OpenAIClient]] treats a model as an OpenAI reasoning model, and how it
- * maps [[ReasoningEffort]] onto the chat-completions `reasoning_effort` parameter.
+ * maps [[org.llm4s.llmconnect.model.ReasoningEffort ReasoningEffort]] onto the chat-completions `reasoning_effort` parameter.
  *
  * The model registry is the source of truth, as it is for the rest of llm4s's model-specific
  * request shaping (`RequestTransformer`): a model the registry knows as an OpenAI or Azure

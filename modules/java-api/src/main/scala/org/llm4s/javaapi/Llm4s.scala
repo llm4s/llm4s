@@ -75,7 +75,7 @@ object Llm4s {
   def azureOpenAi(): AzureOpenAiClientBuilder = new AzureOpenAiClientBuilder(ClientSettings.EMPTY)
 
   /**
-   * Creates a [[JLlmClient]] from an explicit [[ProviderConfig]].  Useful
+   * Creates a [[JLlmClient]] from an explicit [[org.llm4s.llmconnect.config.ProviderConfig ProviderConfig]].  Useful
    * when the caller constructs the config programmatically rather than relying
    * on environment variables.
    */
@@ -92,7 +92,7 @@ object Llm4s {
     FacadeInternals.createClient(config, metrics)
 
   /**
-   * Wraps a Scala [[LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
+   * Wraps a Scala [[org.llm4s.llmconnect.LLMClient LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
    * implementation, or a test double - in a [[JLlmClient]]. Closing the wrapper closes `client`.
    *
    * @throws NullPointerException when `client` is `null`
@@ -131,7 +131,7 @@ object Llm4s {
     else FacadeInternals.result(FacadeInternals.embeddingClient(Llm4sConfig.embeddingsFor(model)))
 
   /**
-   * Wraps a Scala [[EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
+   * Wraps a Scala [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
    * [[JEmbeddingClient]] that asks for `model` and reports its dimensions.
    *
    * @throws NullPointerException when either argument is `null`

@@ -42,7 +42,7 @@ object ShellResult {
  * == Execution model ==
  *
  * Commands are tokenized with shell-style quoting (see [[CommandTokenizer]]) and
- * executed directly via [[ProcessBuilder]] '''without invoking a shell'''. As a
+ * executed directly via `ProcessBuilder` '''without invoking a shell'''. As a
  * consequence:
  *
  *   - No glob expansion (`*`, `?`, `[abc]` are passed literally to the program).

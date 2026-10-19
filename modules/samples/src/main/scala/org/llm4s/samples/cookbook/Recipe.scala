@@ -105,7 +105,7 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
  *
  * Each text becomes its word counts, hashed into [[Dimensions]] buckets and scaled to length 1, so texts that share
  * words are close and the same text always gives the same vector. It never touches the network. It is a real
- * [[EmbeddingProviderDescriptor]], so a recipe registers it exactly as it would a provider module's descriptor.
+ * [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor EmbeddingProviderDescriptor]], so a recipe registers it exactly as it would a provider module's descriptor.
  */
 object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
   val id: ProviderId                             = ProviderId("bagofwords")

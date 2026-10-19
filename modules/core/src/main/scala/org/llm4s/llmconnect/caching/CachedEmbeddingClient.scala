@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingR
 import org.llm4s.types.Result
 
 /**
- * A caching decorator for [[EmbeddingClient]] that avoids redundant provider calls.
+ * A caching decorator for [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]] that avoids redundant provider calls.
  *
  * On each [[embed]] call, input texts are checked against the cache first. Only
  * texts that are not cached are forwarded to the base client — in a single batched
@@ -16,8 +16,8 @@ import org.llm4s.types.Result
  * Errors returned by the base client are never cached, so transient failures are
  * retried on the next call.
  *
- * '''Note''': [[EmbeddingClient]] is a concrete class rather than a trait, so this
- * wrapper cannot be used as a drop-in substitute for [[EmbeddingClient]] in APIs
+ * '''Note''': [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]] is a concrete class rather than a trait, so this
+ * wrapper cannot be used as a drop-in substitute for [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]] in APIs
  * that require that type. A follow-up issue should extract an embedding service
  * interface to allow proper decorator substitution.
  *
@@ -39,8 +39,8 @@ class CachedEmbeddingClient(
    * available and forwarding all cache misses to the base client in a single call.
    *
    * @param request The embedding request containing one or more input strings.
-   * @return A [[Result]] containing an [[EmbeddingResponse]] with one vector per input,
-   *         in the same order as [[EmbeddingRequest.input]].
+   * @return A [[org.llm4s.types.Result Result]] containing an [[org.llm4s.llmconnect.model.EmbeddingResponse EmbeddingResponse]] with one vector per input,
+   *         in the same order as [[org.llm4s.llmconnect.model.EmbeddingRequest.input EmbeddingRequest.input]].
    */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     // A query and a document with the same text are different vectors for the models that embed

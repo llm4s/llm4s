@@ -271,7 +271,7 @@ final case class ToolResult(
   isError: Boolean
 ) derives ReadWriter
 
-/** One invocation of an agent's model: the task's [[RunContext]], the agent, and this attempt's number (from 1). */
+/** One invocation of an agent's model: the task's [[org.llm4s.agent.graph.RunContext RunContext]], the agent, and this attempt's number (from 1). */
 final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
   def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
   def thinkingDelta(text: String): Unit =
@@ -469,7 +469,7 @@ final class ToolLoop private (
     }
 
   /**
-   * Answers for [[GraphRuntime.resume]] or [[CompiledGraph.resume]]. Every agent's approval node
+   * Answers for [[org.llm4s.agent.graph.GraphRuntime.resume GraphRuntime.resume]] or [[org.llm4s.agent.graph.CompiledGraph.resume CompiledGraph.resume]]. Every agent's approval node
    * takes the same answer codec, so a decision encodes the same whichever agent asked.
    */
   def answers(decisions: (InterruptId, ApprovalDecision)*): Map[InterruptId, ujson.Value] =

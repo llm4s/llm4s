@@ -11,7 +11,7 @@ import org.llm4s.types.Result
 import scala.concurrent.{ blocking, ExecutionContext, Future }
 
 /**
- * Apache Pekko Streams wrapper for [[LLMClient]].
+ * Apache Pekko Streams wrapper for [[org.llm4s.llmconnect.LLMClient LLMClient]].
  *
  * `streamComplete` is a `Source` of the provider's chunks; `complete` is a `Future`. The provider call
  * blocks, so it never runs on a stream or actor dispatcher thread: a stream runs it on a thread of its own,
@@ -22,7 +22,7 @@ import scala.concurrent.{ blocking, ExecutionContext, Future }
  * they keep the interrupt and return `Left(CancelledError)`. A `Future` cannot be cancelled; use
  * `streamComplete` when the call has to be.
  *
- * An [[LLMError]] is carried by an [[LLMException]], the failure of the stream or the `Future`.
+ * An [[org.llm4s.error.LLMError LLMError]] is carried by an [[LLMException]], the failure of the stream or the `Future`.
  */
 trait LLMClientPekko {
 
@@ -62,7 +62,7 @@ object LLMClientPekko {
   /** Chunks held between the provider's thread and the consumer unless `bufferSize` says otherwise. */
   val DefaultBufferSize: Int = 64
 
-  /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
+  /** Wraps an already-constructed [[org.llm4s.llmconnect.LLMClient LLMClient]]. Does not manage its lifecycle. */
   def apply(underlying: LLMClient): LLMClientPekko = new Impl(underlying)
 
   final private class Impl(underlying: LLMClient) extends LLMClientPekko {

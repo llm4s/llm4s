@@ -19,7 +19,7 @@ import termflow.tui.TuiPrelude.*
 import scala.concurrent.{ ExecutionContext, Future }
 
 /**
- * The big match — translates one [[Msg]] into a `Tui[Model, Msg]`. Kept
+ * The big match — translates one [[org.llm4s.samples.chat.tui.ChatTuiModel.Msg Msg]] into a `Tui[Model, Msg]`. Kept
  * as a private object so the public surface stays just `ChatTuiApp`.
  */
 private[tui] object ChatTuiUpdate:

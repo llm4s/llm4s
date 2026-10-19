@@ -257,9 +257,9 @@ class GeminiClient(
   /**
    * Builds the Gemini API request body from a conversation and options.
    *
-   * [[SystemMessage]] is extracted into `systemInstruction`; all other
+   * [[org.llm4s.llmconnect.model.SystemMessage SystemMessage]] is extracted into `systemInstruction`; all other
    * messages are placed in `contents`. Tool-call IDs are tracked in a local
-   * map so that subsequent [[ToolMessage]] entries can be keyed by function
+   * map so that subsequent [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] entries can be keyed by function
    * name rather than ID (Gemini's requirement).
    */
   private def buildRequestBody(
@@ -485,7 +485,7 @@ class GeminiClient(
     }
 
   /**
-   * Parse a streaming chunk from Gemini into the parts it held and the [[StreamedChunk]]s they make: one per
+   * Parse a streaming chunk from Gemini into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per
    * function call (a chunk holds a single call), or one when there is none. `textOffset` is the number of
    * answer-text characters streamed before this chunk, so a text signature records where it sits.
    */

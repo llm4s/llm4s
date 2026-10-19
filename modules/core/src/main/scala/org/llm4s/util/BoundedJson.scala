@@ -36,8 +36,8 @@ private[llm4s] object BoundedJson {
   val MaxDepth: Int = 512
 
   /**
-   * Parses `text`, or returns a `Left`: a [[ValidationError]] on field `json` naming the limit when
-   * `text` is nested more than `maxDepth` levels deep, otherwise a [[ValidationError]] on field `json`
+   * Parses `text`, or returns a `Left`: a [[org.llm4s.error.ValidationError ValidationError]] on field `json` naming the limit when
+   * `text` is nested more than `maxDepth` levels deep, otherwise a [[org.llm4s.error.ValidationError ValidationError]] on field `json`
    * carrying the parser's own message (why it stopped, and the JSON path where). The parser's exception
    * is mapped here, never through `DefaultErrorMapper`: a malformed reply is a validation failure, and
    * that mapper used to classify any exception whose message contained `401` or `429` (#1668) - the
@@ -70,7 +70,7 @@ private[llm4s] object BoundedJson {
    * this, never `e == tooDeep()`: that equality holds only for the error of the default limit with its
    * exact wording, and a read with another limit, or a reworded message, would then fall through to the
    * site's generic arm - in a stream, the arm that skips the chunk (#1651). The recognition is structural:
-   * a [[ValidationError]] on the same field, with a violation that starts with the prefix [[tooDeep]]
+   * a [[org.llm4s.error.ValidationError ValidationError]] on the same field, with a violation that starts with the prefix [[tooDeep]]
    * writes - the reason as given, not the message, so `ValidationError`'s own `Invalid <field>: ` framing
    * is not relied on either.
    */

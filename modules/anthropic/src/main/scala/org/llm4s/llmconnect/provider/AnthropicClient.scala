@@ -993,7 +993,7 @@ object AnthropicClient {
   /**
    * The configured values an error must not repeat: the API key, or with workload identity the ids
    * `AnthropicWorkloadIdentity.toString` redacts, when long enough to scrub without garbling the body
-   * ([[Redaction.identifiers]]).
+   * ([[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
    */
   private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
     config.workloadIdentity match {
@@ -1097,7 +1097,7 @@ object AnthropicClient {
       .flatMap(valid => Try(new AnthropicClient(valid, metrics, exchangeLogging)).toResult)
 
   /**
-   * The identity token file checks of [[AnthropicWorkloadIdentity.checkTokenFile]], for a config with workload
+   * The identity token file checks of [[org.llm4s.llmconnect.config.AnthropicWorkloadIdentity.checkTokenFile AnthropicWorkloadIdentity.checkTokenFile]], for a config with workload
    * identity; a config without one passes.
    */
   private[llm4s] def checkTokenFile(config: AnthropicConfig): Result[AnthropicConfig] =

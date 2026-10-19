@@ -11,7 +11,7 @@ import java.util.OptionalInt
 import scala.jdk.CollectionConverters.*
 
 /**
- * Java-friendly wrapper around core's [[EmbeddingClient]]: turns texts into vectors, for semantic search and
+ * Java-friendly wrapper around core's [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]]: turns texts into vectors, for semantic search and
  * similarity, with no Scala type in sight.
  *
  * {{{

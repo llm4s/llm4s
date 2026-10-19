@@ -39,7 +39,7 @@ import scala.concurrent.duration._
  * @param hostPort             the host port the container's 8080 is published on
  * @param extraAllowedCommands programs the runner may run besides its profile's allowlist (for example `sbt`),
  *                             passed to the container as `WORKSPACE_EXTRA_COMMANDS`; each is a bare program name,
- *                             never a shell or a launcher (see [[WorkspaceSandboxConfig.withExtraCommands]]), and
+ *                             never a shell or a launcher (see [[org.llm4s.shared.WorkspaceSandboxConfig.withExtraCommands WorkspaceSandboxConfig.withExtraCommands]]), and
  *                             a container is not started with a name the runner would refuse
  * @param sandboxConfig        the runner's whole sandbox config, passed as `WORKSPACE_SANDBOX_CONFIG`; `None` leaves
  *                             the runner on its profile

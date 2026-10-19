@@ -7,8 +7,8 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, Message, SystemMessage, To
  * blocks, for providers that require a tool result to answer a call of the turn just before it
  * (Anthropic, Bedrock Converse).
  *
- * A call is paired when a [[ToolMessage]] with its id appears in the run of tool messages
- * immediately after the [[AssistantMessage]] that made it; that tool message is then paired too.
+ * A call is paired when a [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] with its id appears in the run of tool messages
+ * immediately after the [[org.llm4s.llmconnect.model.AssistantMessage AssistantMessage]] that made it; that tool message is then paired too.
  * System messages do not break a run, since those providers lift them out of the message list.
  * Anything else - a user message between the call and its result, a result for a call of an
  * earlier turn, a second result for the same call - leaves the call unpaired: the client omits it
@@ -28,8 +28,8 @@ final private[llm4s] case class ToolResultPairing(calls: Map[Int, Set[String]], 
 
   /**
    * The assistant message at `index` as it may be sent: with only its paired calls, set through
-   * [[AssistantMessage.withToolCalls]], so that dropping a call unseals the thinking (see
-   * "Sealed thinking" on [[AssistantMessage]]) - a signed turn may go back only with the exact calls
+   * [[org.llm4s.llmconnect.model.AssistantMessage.withToolCalls AssistantMessage.withToolCalls]], so that dropping a call unseals the thinking (see
+   * "Sealed thinking" on [[org.llm4s.llmconnect.model.AssistantMessage AssistantMessage]]) - a signed turn may go back only with the exact calls
    * it was returned with. With every call paired it is `message` itself, signatures intact.
    */
   def replayable(index: Int, message: AssistantMessage): AssistantMessage =

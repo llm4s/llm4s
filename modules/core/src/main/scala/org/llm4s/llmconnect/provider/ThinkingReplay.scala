@@ -17,7 +17,7 @@ import java.security.MessageDigest
  * before it is sent - pruned, compressed, summarised, edited, a handoff's view of it - so rather than
  * have each of them remember to unseal later turns, the client checks at the point of sending:
  *
- *  - [[bind]], when a completion arrives, records in [[AssistantMessage.thinkingBinding]] a
+ *  - [[bind]], when a completion arrives, records in [[org.llm4s.llmconnect.model.AssistantMessage.thinkingBinding AssistantMessage.thinkingBinding]] a
  *    [[fingerprint]] of the request that produced it and of the [[ReplayOrigin]] that produced it;
  *  - [[replayable]], when a conversation is sent, unseals every assistant message whose binding does
  *    not match the fingerprint of the conversation before it now, sent to the origin about to be
@@ -68,7 +68,7 @@ private[llm4s] object ThinkingReplay {
    * `messages` as they may be sent to `origin`, the provider and model about to be called: every
    * assistant message whose sealed thinking is bound to that origin and to the conversation before
    * it as it is now kept as it is, every other sealed one unsealed (see
-   * [[AssistantMessage.unsealed]]). Indices are unchanged.
+   * [[org.llm4s.llmconnect.model.AssistantMessage.unsealed AssistantMessage.unsealed]]). Indices are unchanged.
    */
   def replayable(origin: ReplayOrigin, messages: Seq[Message], options: CompletionOptions): Seq[Message] =
     if (!messages.exists { case am: AssistantMessage => am.hasSealedThinking; case _ => false }) messages
@@ -94,8 +94,8 @@ private[llm4s] object ThinkingReplay {
    * history must PRESERVE the signatures, and Gemini 3 answers HTTP 400 when the current turn's
    * required function-call signature is missing - so pruning or compressing earlier turns must not
    * unseal them. What still unseals: a change of provider or model ([[replayableOrigin]]), and any
-   * edit to the carrying message itself ([[AssistantMessage.withContent]] and
-   * [[AssistantMessage.withToolCalls]] unseal, and the client attaches a signature only to a part
+   * edit to the carrying message itself ([[org.llm4s.llmconnect.model.AssistantMessage.withContent AssistantMessage.withContent]] and
+   * [[org.llm4s.llmconnect.model.AssistantMessage.withToolCalls AssistantMessage.withToolCalls]] unseal, and the client attaches a signature only to a part
    * that still spells what it did).
    */
   def bindOrigin(origin: ReplayOrigin, message: AssistantMessage): AssistantMessage =

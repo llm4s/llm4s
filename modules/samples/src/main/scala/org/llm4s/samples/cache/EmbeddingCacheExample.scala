@@ -30,7 +30,7 @@ import scala.concurrent.duration._
  */
 object EmbeddingCacheExample {
 
-  /** An [[EmbeddingProvider]] that counts the calls and the texts that reach the wrapped provider. */
+  /** An [[org.llm4s.llmconnect.provider.EmbeddingProvider EmbeddingProvider]] that counts the calls and the texts that reach the wrapped provider. */
   final class CountingProvider(delegate: EmbeddingProvider) extends EmbeddingProvider {
     private val callCounter = new AtomicInteger(0)
     private val textCounter = new AtomicInteger(0)

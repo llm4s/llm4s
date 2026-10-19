@@ -30,8 +30,8 @@ trait MetricsRecording {
    *
    * Latency and outcome (success or classified error) are recorded for every
    * call regardless of result. Token counts and cost are recorded **only on
-   * success** — a `Left` result emits an [[org.llm4s.metrics.Outcome.Error]]
-   * event whose kind is derived from the [[org.llm4s.error.LLMError]] subtype
+   * success** — a `Left` result emits an `Outcome.Error`
+   * ([[org.llm4s.metrics.Outcome]]) event whose kind is derived from the [[org.llm4s.error.LLMError]] subtype
    * via `ErrorKind.fromLLMError`.
    *
    * @param provider     Provider label forwarded to the collector (e.g. `"openai"`).

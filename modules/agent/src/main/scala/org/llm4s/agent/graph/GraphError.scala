@@ -6,7 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * Errors raised while building, running or restoring a typed graph. Every case is a
- * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
+ * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
 sealed trait GraphError extends LLMError

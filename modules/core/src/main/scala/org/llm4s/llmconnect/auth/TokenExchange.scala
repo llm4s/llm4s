@@ -214,7 +214,7 @@ object TokenExchange:
   /**
    * The values a token-endpoint reply must never repeat into an error: the subject token posted, the
    * configured identity token when it is a literal, and the `clientId` (redacted in `toString` too) when it
-   * is long enough to scrub without garbling the body ([[Redaction.identifiers]]).
+   * is long enough to scrub without garbling the body ([[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
    */
   private def sensitiveValues(config: TokenExchangeConfig, jwt: String): Seq[String] =
     Seq(jwt) ++ Redaction.identifiers(config.clientId) ++ (config.identityToken match

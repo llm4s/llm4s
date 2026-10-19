@@ -9,7 +9,7 @@ import org.llm4s.types.Result
 import scala.jdk.CollectionConverters.*
 
 /**
- * Java-friendly wrapper around [[Agent]].
+ * Java-friendly wrapper around [[org.llm4s.agent.Agent Agent]].
  *
  * Exposes `run(query)` and `continueConversation(previous, query)`, returning
  * [[LlmResult]]`[`[[JAgentResult]]`]` so Java callers do not need to deal with
