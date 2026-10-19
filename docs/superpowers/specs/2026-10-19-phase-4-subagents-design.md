@@ -349,8 +349,8 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
 - **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
   accumulator). A failed, cancelled or timed-out attempt that a later `recover` finished records its tokens only on
   its terminal event (`AgentTracing.lostUsage`), so they are carried forward instead of re-read from the log:
-  - A runtime-owned child-thread key, `DelegationKeys.priorUsage`, holds `PriorUsage(total: TokenUsage,
-    foldedThrough: Long)`: the lost usage folded so far and the sequence number of the last terminal event folded.
+  - A runtime-owned child-thread key, `DelegationKeys.priorUsage`, holds `PriorUsage(total: UsageSummary,
+    foldedThrough: Long)`, the same type as `AgentTracing.lostUsage` (requests, tokens per model, cost): the lost usage folded so far and the sequence number of the last terminal event folded.
   - `recoverChild` reads the child's newest terminal event. If its sequence is above `foldedThrough`, it adds that
     event's lost usage to `total` and sets `foldedThrough` to its sequence; otherwise (already folded) it changes
     nothing. The update commits with the new attempt's first checkpoint.
@@ -551,6 +551,11 @@ Tests:
   - time: the parent's `deadline`
   - tokens: the parent's `maxTokens` less the run's usage at the snapshot
   - concurrency: the parent's `maxConcurrency`
+
+  - **An exhausted budget starts no child.** When the remaining steps or tokens are zero or less at call time
+    (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.Refused` with
+    `TaskRefusal.StepLimitReached` or `TokenLimitReached`, creates no child thread, and never builds a
+    non-positive `RunBudgets`. A replay decides the same from the same snapshot.
 
   Parallel children each get the same remainder, so together they can overshoot the parent's tokens. The parent's
   next model call then stops at `TokenLimitReached` (rule 1, documented).
