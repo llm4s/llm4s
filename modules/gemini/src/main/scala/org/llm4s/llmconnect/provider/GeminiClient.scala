@@ -184,6 +184,7 @@ class GeminiClient(
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+            val citations   = scala.collection.mutable.ArrayBuffer.empty[Citation]      // grounding sources, in order
             var textLength = 0 // characters of answer text streamed so far: where a text signature sits
             var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
 
@@ -209,6 +210,9 @@ class GeminiClient(
                               onChunk(chunk)
                             }
                           }
+                          // grounding metadata usually arrives with the last chunk; collect it from any chunk
+                          Try(json("candidates").arr.headOption).toOption.flatten
+                            .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
                           // Extract token usage from usageMetadata if present
                           for {
                             usage      <- Try(json("usageMetadata")).toOption
@@ -238,6 +242,7 @@ class GeminiClient(
                         c.message.toolCalls.toList
                       ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
+                      .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
                   }
                 )
@@ -365,13 +370,13 @@ class GeminiClient(
       )
     }
 
-    // Add tools if specified
-    if (options.tools.nonEmpty) {
-      val functionDeclarations = options.tools.map(convertToolToGeminiFormat)
-      request("tools") = ujson.Arr(
-        ujson.Obj("functionDeclarations" -> ujson.Arr(functionDeclarations: _*))
-      )
-    }
+    // Function declarations, and the Google Search grounding tool when the section enables it
+    val functions = Option.when(options.tools.nonEmpty)(
+      ujson.Obj("functionDeclarations" -> ujson.Arr(options.tools.map(convertToolToGeminiFormat): _*))
+    )
+    val search = Option.when(config.googleSearch)(ujson.Obj("google_search" -> ujson.Obj()))
+    val tools  = functions.toSeq ++ search
+    if (tools.nonEmpty) request("tools") = ujson.Arr(tools: _*)
 
     request
   }
@@ -477,7 +482,8 @@ class GeminiClient(
               created = System.currentTimeMillis() / 1000,
               message = message,
               usage = usageOpt,
-              estimatedCost = cost
+              estimatedCost = cost,
+              citations = GeminiGrounding.citations(candidate)
             )
           )
         }

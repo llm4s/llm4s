@@ -18,6 +18,9 @@ import org.llm4s.util.Redaction
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param googleSearch whether to ground answers in Google Search: the section's `googleSearch` key. When set,
+ *                 every request carries Gemini's `google_search` tool, the model may search before answering,
+ *                 and the sources it used arrive on `Completion.citations`. Off by default; billed by Google.
  */
 @Stable
 case class GeminiConfig(
@@ -26,15 +29,17 @@ case class GeminiConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  googleSearch: Boolean = false
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("gemini")
   override def endpointUrl: Option[String]                            = Some(baseUrl)
   override def withModel(model: String): GeminiConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig = copy(timeouts = timeouts)
+  def withGoogleSearch(enabled: Boolean): GeminiConfig                = copy(googleSearch = enabled)
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion, googleSearch=$googleSearch)"
 
 object GeminiConfig {
 

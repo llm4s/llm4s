@@ -349,6 +349,25 @@ Great for cost-conscious projects and high-volume applications.
 
 ---
 
+### Google Search grounding
+
+Set `googleSearch = true` in a `gemini` or `vertexai` section and every request carries Gemini's Google
+Search tool (`google_search`; `googleSearch` on Vertex AI). The model then decides per request whether to
+search, and the sources behind a grounded answer arrive on `Completion.citations` (see
+[Citations and grounding sources](#citations-and-grounding-sources)):
+
+```hocon
+llm4s.providers.gemini-search {
+  provider     = "gemini"
+  model        = "gemini-2.5-flash"
+  googleSearch = true
+}
+```
+
+It is off by default. Google bills grounded requests separately, and the citation URLs it returns are
+`vertexaisearch.cloud.google.com` redirects, not the pages themselves. The tool is sent beside any function
+declarations; a model that does not support search together with function calling rejects that request.
+
 ## Google Vertex AI
 
 Vertex AI serves the same Gemini models from a GCP project, authenticated with OAuth2 rather
@@ -1697,12 +1716,14 @@ provider's call). `hasSpan` says whether both are present.
 | OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them with no request option; Azure and Requesty return them only if the deployment does. |
 | OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
-| Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
+| Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
+| Anthropic, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, which llm4s cannot yet request. |
 
 Things to know:
 
-- **Streaming.** A completion assembled from streamed chunks has no citations: neither OpenAI nor
-  OpenRouter documents where a stream carries them, so streamed chunks are not read. (A model that does not
+- **Streaming.** For OpenAI and OpenRouter, a completion assembled from streamed chunks has no citations:
+  neither documents where a stream carries them, so streamed chunks are not read. Gemini and Vertex AI send
+  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. (A model that does not
   stream natively is answered with one ordinary call, and that completion keeps its citations.)
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK

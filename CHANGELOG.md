@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
+  `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Changed** an `ollama` section's `baseUrl` to default to `http://localhost:11434`, so a local section needs only
   `provider` and `model`; `OLLAMA_BASE_URL` is the one documented variable (`baseUrl = ${?OLLAMA_BASE_URL}`) [#1991](https://github.com/llm4s/llm4s/issues/1991).
 - **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider

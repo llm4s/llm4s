@@ -87,6 +87,62 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     completion.toolCalls.head.name shouldBe "get_weather"
   }
 
+  it should "report the sources of a grounded answer as citations (#1216)" in {
+    val body =
+      """{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}}]}"""
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
+
+    val completion = mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value
+    completion.citations shouldBe List(
+      Citation(url = "https://src/a", title = Some("A")),
+      Citation(url = "https://src/b", title = Some("B"))
+    )
+  }
+
+  it should "report no citations for an answer that was not grounded" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+
+    mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.citations shouldBe empty
+  }
+
+  private def requestBody(config: GeminiConfig, options: CompletionOptions): ujson.Value = {
+    var body     = ""
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall {
+      (_: String, _: Map[String, String], sent: String, _: scala.concurrent.duration.FiniteDuration) =>
+        body = sent
+        Right(httpOk(successBody))
+    }
+    new GeminiClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+      .complete(conversation("Hi"), options)
+      .isRight shouldBe true
+    ujson.read(body)
+  }
+
+  private lazy val searchTool = {
+    import org.llm4s.toolapi.{ Schema, ToolBuilder }
+    val schema = Schema.`object`[Map[String, Any]]("In").withProperty(Schema.property("q", Schema.string("q")))
+    ToolBuilder[Map[String, Any], String]("lookup", "Lookup tool", schema)
+      .withHandler(_ => Right("ok"))
+      .buildSafe()
+      .fold(e => fail(e.message), identity)
+  }
+
+  it should "send no tools unless the section enables Google Search or the request has functions" in {
+    requestBody(testConfig, CompletionOptions()).obj.contains("tools") shouldBe false
+  }
+
+  it should "send the google_search tool when googleSearch is on, beside any function declarations" in {
+    val grounded = testConfig.withGoogleSearch(true)
+    requestBody(grounded, CompletionOptions())("tools") shouldBe ujson.Arr(ujson.Obj("google_search" -> ujson.Obj()))
+
+    val both = requestBody(grounded, CompletionOptions().withTools(Seq(searchTool)))("tools").arr
+    both.map(_.obj.keySet) shouldBe Seq(Set("functionDeclarations"), Set("google_search"))
+    both.head("functionDeclarations")(0)("name").str shouldBe "lookup"
+  }
+
   it should "return AuthenticationError on HTTP 401" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(401)))
@@ -278,6 +334,27 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.toOption.get.content should include("Hello")
     result.toOption.get.content should include("world")
     chunks should have size 2
+  }
+
+  it should "report grounding sources from the stream as citations, however the chunks carry them" in {
+    val sseData =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}," +
+        "\"groundingMetadata\":" + ujson.write(
+          ujson.read(
+            """{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}"""
+          )
+        ) + "}]}\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+    val mockHttp    = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
+    completion.content shouldBe "Hello world"
+    completion.citations shouldBe List(
+      Citation(url = "https://src/a", title = Some("A")),
+      Citation(url = "https://src/b", title = Some("B"))
+    )
   }
 
   it should "parse token usage from the final SSE chunk" in {

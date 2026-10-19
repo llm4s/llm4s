@@ -36,13 +36,17 @@ case class VertexAIConfig(
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
-  wellKnownCredentialPath: Option[String] = None
+  wellKnownCredentialPath: Option[String] = None,
+  googleSearch: Boolean = false
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("vertexai")
   override def withModel(model: String): VertexAIConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig = copy(timeouts = timeouts)
 
   def withWellKnownCredentialPath(path: String): VertexAIConfig = copy(wellKnownCredentialPath = Some(path))
+
+  /** Whether every request carries Vertex AI's `googleSearch` grounding tool; see `GeminiConfig.googleSearch`. */
+  def withGoogleSearch(enabled: Boolean): VertexAIConfig = copy(googleSearch = enabled)
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"
@@ -52,7 +56,7 @@ case class VertexAIConfig(
   override def toString: String =
     s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, " +
       s"credentialFilePath=${credentialFilePath.map(_ => "<redacted>").getOrElse("none")}, " +
-      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, googleSearch=$googleSearch)"
 
 object VertexAIConfig:
 
