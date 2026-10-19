@@ -711,6 +711,34 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     tokens(lastRollUp(setup)) shouldBe ((3L, 30L, 60L))
   }
 
+  it should "fail the recover, folding nothing, when the child's events cannot be read" in {
+    val open    = storage()
+    val failing = new AtomicBoolean(true)
+    val broken  = new AtomicBoolean(false)
+    val store = new ForwardingCheckpointer(open()) {
+      override def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        if (broken.get && threadId.value.contains("/~task/")) Left(ProcessingError("store", "unreadable"))
+        else super.eventsAfter(threadId, afterSeq, limit)
+    }
+    val setup = new Setup(
+      delegating(),
+      answers("report", "report"),
+      settle = false,
+      child = _.withMiddleware(failingOnce(failing)),
+      childConfig = ageing
+    )
+    val thread = ThreadId("usage-unreadable")
+    family(new GraphRuntime(store), setup)._1.run(thread, "go").isLeft shouldBe true
+
+    broken.set(true)
+    family(new GraphRuntime(store), setup)._1.recover(thread).isLeft shouldBe true
+    setup.childClient.callCount shouldBe 1
+
+    broken.set(false)
+    family(new GraphRuntime(store), setup)._1.recover(thread).ok.answer shouldBe Some("composed")
+    tokens(lastRollUp(setup)) shouldBe ((2L, 20L, 40L))
+  }
+
   it should "keep a failed attempt's lost usage when the recover's claim commit fails after the fold" in {
     val open    = storage()
     val failing = new AtomicBoolean(true)
