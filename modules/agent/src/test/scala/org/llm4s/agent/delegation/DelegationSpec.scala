@@ -368,6 +368,19 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     client.calls shouldBe empty
   }
 
+  it should "return an interrupt while rendering as a cancellation, the flag kept" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val blocking = researcher.withInputText { _ =>
+      Thread.currentThread().interrupt()
+      Thread.sleep(1000)
+      "unreached"
+    }
+    val result = blocking.bind(client, GraphRuntime.inMemory()).value.run(Question("x"))
+    val kept   = Thread.interrupted() // clears the flag for the rest of the suite
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    kept shouldBe true
+  }
+
   it should "report a typed answer that fails its schema as a refusal" in {
     val client  = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}""")) }
     val outcome = researcher.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).value

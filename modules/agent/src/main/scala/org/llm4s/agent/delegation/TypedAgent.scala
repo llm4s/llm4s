@@ -7,7 +7,7 @@ import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
 import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, UsageSummary }
 import org.llm4s.toolapi.SchemaDefinition
@@ -203,11 +203,15 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
     val ref      = ChildRef(threadId, config.runId, agent.id, ToolCallId(""), 0)
     // a renderer or input codec is caller code: what it throws is a refused input, not an escaped exception
-    scala.util
-      .Try(definition.rendered(input))
-      .toEither
-      .left
-      .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
+    // an interrupt while it renders is a cancellation, the flag kept, as for the run itself
+    CancelledError
+      .attempt(s"subagent ${agent.id.value} input")(
+        scala.util
+          .Try(definition.rendered(input))
+          .toEither
+          .left
+          .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
+      )
       .flatMap(query => agent.run(threadId, query, config)) match
       case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
       case Left(GraphError.OutputInvalid(all)) =>
