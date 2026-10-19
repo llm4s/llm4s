@@ -184,7 +184,8 @@ private[agent] object ChildRunner:
     private def step(): Step =
       runtime.childAtRest(childId, graph, base) match
         case Left(error) => Step.Done(Left(error))
-        case Right(None) => admitted(runtime.startChild(childId, graph, input, origin, fresh()))
+        case Right(None) =>
+          admitted(runtime.startChild(childId, graph, input, origin, fresh(), notAfter = ctx.run.deadline))
         // a thread at the child's id that is not this call's child - a top-level thread named like one, or a child of
         // another origin - is never adopted: its answer is not this call's
         case Right(Some((checkpoint, _))) if !ours(checkpoint) =>
@@ -199,7 +200,9 @@ private[agent] object ChildRunner:
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
-              admitted(runtime.recoverChild(childId, graph, fresh(), amend = foldLostUsage))
+              admitted(
+                runtime.recoverChild(childId, graph, fresh(), amend = foldLostUsage, notAfter = ctx.run.deadline)
+              )
             case CheckpointStatus.Suspended =>
               Step.Done(
                 AgentRun
@@ -215,7 +218,8 @@ private[agent] object ChildRunner:
 
     /** What an admission of the child calls for: its run awaited, or a refusal that reads the child again. */
     private def admitted(handle: Result[RunHandle[TurnOutput]]): Step = handle match
-      case Right(h) => ended(agent.blocking(Right(agent.agentRun(h, None, drain = false))))
+      // awaited even if the interrupt came after the admission: an admitted child is always cancelled with its parent
+      case Right(h) => ended(Agent.awaitBlocking(agent.agentRun(h, None, drain = false)))
       // another runtime started it, settled it, or moved it on between the read and the admission
       case Left(
             _: GraphError.ThreadExists | _: GraphError.NothingToRecover | _: GraphError.IncompleteRun |

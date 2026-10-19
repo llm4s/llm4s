@@ -464,7 +464,8 @@ final class GraphRuntime(
     input: I,
     origin: RunOrigin,
     config: RunConfig,
-    observer: Option[Observer] = None
+    observer: Option[Observer] = None,
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] =
     startOn(
       threadId,
@@ -474,7 +475,8 @@ final class GraphRuntime(
       Durability.Sync,
       Some(() => GraphError.ThreadExists(threadId.value)),
       observer,
-      Some(origin)
+      Some(origin),
+      notAfter
     )
 
   private def startOn[I, O](
@@ -485,12 +487,22 @@ final class GraphRuntime(
     durability: Durability,
     newOnly: Option[() => LLMError],
     observer: Option[Observer],
-    origin: Option[RunOrigin]
+    origin: Option[RunOrigin],
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
         // a child's origin records when it was first admitted, by this runtime's clock
-        newRun(graph, threadId, config, durability, 0, admitting, origin.map(_.withStartedAt(clock.instant())))
+        newRun(
+          graph,
+          threadId,
+          config,
+          durability,
+          0,
+          admitting,
+          origin.map(_.withStartedAt(clock.instant())),
+          notAfter
+        )
           .admit(graph.start(input), None, _ => started(config))
       case Some(stored) =>
         // the child runner's start of a thread that exists is ThreadExists, whatever the thread is
@@ -543,9 +555,19 @@ final class GraphRuntime(
     graph: CompiledGraph[I, O],
     config: RunConfig,
     observer: Option[Observer] = None,
-    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] =
-    recoverOn(threadId, graph, GraphRuntime.childConfig(config), Durability.Sync, observer, child = true, amend)
+    recoverOn(
+      threadId,
+      graph,
+      GraphRuntime.childConfig(config),
+      Durability.Sync,
+      observer,
+      child = true,
+      amend,
+      notAfter
+    )
 
   private def recoverOn[I, O](
     threadId: ThreadId,
@@ -554,7 +576,8 @@ final class GraphRuntime(
     durability: Durability,
     observer: Option[Observer],
     child: Boolean,
-    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
@@ -572,7 +595,8 @@ final class GraphRuntime(
                   durability,
                   execution.superstep,
                   admitting,
-                  stored.checkpoint.origin
+                  stored.checkpoint.origin,
+                  notAfter
                 ).admit(
                   execution,
                   Some(stored.checkpoint.id),
@@ -627,9 +651,19 @@ final class GraphRuntime(
     graph: CompiledGraph[I, O],
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig,
-    observer: Option[Observer] = None
+    observer: Option[Observer] = None,
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] =
-    resumeOn(threadId, graph, answers, GraphRuntime.childConfig(config), Durability.Sync, observer, child = true)
+    resumeOn(
+      threadId,
+      graph,
+      answers,
+      GraphRuntime.childConfig(config),
+      Durability.Sync,
+      observer,
+      child = true,
+      notAfter
+    )
 
   private def resumeOn[I, O](
     threadId: ThreadId,
@@ -638,7 +672,8 @@ final class GraphRuntime(
     config: RunConfig,
     durability: Durability,
     observer: Option[Observer],
-    child: Boolean
+    child: Boolean,
+    notAfter: Option[Instant] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
@@ -656,7 +691,8 @@ final class GraphRuntime(
                 durability,
                 resumed.superstep,
                 admitting,
-                stored.checkpoint.origin
+                stored.checkpoint.origin,
+                notAfter
               ).admit(
                 resumed,
                 Some(stored.checkpoint.id),
@@ -1993,9 +2029,10 @@ final class GraphRuntime(
     durability: Durability,
     firstSuperstep: Int,
     admitting: Admitting,
-    origin: Option[RunOrigin]
+    origin: Option[RunOrigin],
+    notAfter: Option[Instant] = None
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting, origin)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting, origin, notAfter)
 
   /**
    * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
@@ -2527,7 +2564,13 @@ final class GraphRuntime(
     firstSuperstep: Int,
     admitting: Admitting,
     /** The child thread's origin, written on every checkpoint of the run; `None` on a top-level thread. */
-    origin: Option[RunOrigin]
+    origin: Option[RunOrigin],
+    /**
+     * An absolute cap on the run's deadline, by the runtime's clock: a child's parent's deadline (design 4.42). The
+     * deadline fixed at the claim is the sooner of it and `budgets.timeout` from then, so admission's own latency never
+     * moves a child's deadline past its parent's.
+     */
+    notAfter: Option[Instant] = None
   ):
     private val signal      = admitting.signal
     val runId               = config.runId
@@ -2693,8 +2736,14 @@ final class GraphRuntime(
         position = execution -> claimed.id
         claimedReused = reused
         claimSeq = seq
-        deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
-        deadlineAt = config.budgets.timeout.map(timeout => clock.instant().plusNanos(timeout.toNanos))
+        val nowNanos = System.nanoTime()
+        // read only for a run with a deadline, as before the cap existed
+        lazy val nowAt = clock.instant()
+        // the time left until the cap, from now, by the runtime's clock; never negative
+        val capped = notAfter.map(at => java.time.Duration.between(nowAt, at).toNanos.max(0L))
+        val left   = (config.budgets.timeout.map(_.toNanos) ++ capped).minOption
+        deadline = left.map(nowNanos + _)
+        deadlineAt = left.map(nowAt.plusNanos)
         admittedState = Some(execution.state)
         this
 

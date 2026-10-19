@@ -302,19 +302,9 @@ final class Agent private[agent] (
    * ([[AgentRun.awaitEnded]]), which detaches its tracing; a cancel the turn's commit beat leaves it
    * `Right` - its real outcome - and that is returned. Either way the interrupt flag stays set.
    */
-  private[agent] def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
+  private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
-    else
-      begin.flatMap { run =>
-        run.await() match
-          case cancelled @ Left(_: CancelledError) =>
-            if run.cancelAndAwaitEnd() then
-              run.awaitEnded() match
-                case outcome @ Right(_) => outcome
-                case Left(_)            => cancelled
-            else cancelled
-          case other => other
-      }
+    else begin.flatMap(Agent.awaitBlocking)
 
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
@@ -365,6 +355,22 @@ final class Agent private[agent] (
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])
+
+  /**
+   * Awaits `run`, which has begun, as [[Agent.blocking]] does: an interrupted wait - also one interrupted before it
+   * began - cancels the run and waits up to [[AgentRun.Drain]] for it to end, returning its real outcome if its commit
+   * beat the cancel, else the `CancelledError`, with the interrupt flag kept. The child runner awaits a child with it
+   * (design 4.42), so a child admitted just before its parent's cancel is still cancelled.
+   */
+  private[agent] def awaitBlocking(run: AgentRun): Result[AgentResult] =
+    run.await() match
+      case cancelled @ Left(_: CancelledError) =>
+        if run.cancelAndAwaitEnd() then
+          run.awaitEnded() match
+            case outcome @ Right(_) => outcome
+            case Left(_)            => cancelled
+        else cancelled
+      case other => other
 
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50
