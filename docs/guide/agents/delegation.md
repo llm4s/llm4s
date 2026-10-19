@@ -28,7 +28,7 @@ delegated task runs on a **child thread** of the parent's thread, with a fresh c
 tools and middleware. Only typed data crosses: the parent sends `I`, which becomes the child's first user message, and
 gets back `O`. The child's messages never enter the parent's thread, and the parent's never enter the child's.
 
-The API is `@Experimental` (design [§4.44](../../design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md)).
+The API is `@Experimental` (design [§4.44](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md)).
 
 ## Defining subagents
 
@@ -116,6 +116,6 @@ thread and returns its `TaskOutcome`. It is for graph nodes and tests.
 
 ## Delegation or handoffs
 
-A [handoff](handoffs.md) moves the conversation to another agent of the same family, which then owns it. Delegation
+A [handoff](handoffs) moves the conversation to another agent of the same family, which then owns it. Delegation
 starts another thread, and the parent keeps control and sees only the report. Use handoffs for conversational routing,
 delegation for bounded, independent work, especially work that can run in parallel.
