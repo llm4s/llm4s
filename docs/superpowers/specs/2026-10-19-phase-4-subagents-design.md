@@ -556,6 +556,9 @@ Tests:
     (K3 lets the model call that emitted the task overshoot), the call returns `TaskOutcome.Refused` with
     `TaskRefusal.StepLimitReached` or `TokenLimitReached`, creates no child thread, and never builds a
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
+  - **An expired deadline starts no child either.** When the parent's deadline has passed at call time, the call
+    fails with the parent's own `DeadlineExceeded`, as any step past the deadline does, and never builds a
+    non-positive timeout.
 
   Parallel children each get the same remainder, so together they can overshoot the parent's tokens. The parent's
   next model call then stops at `TokenLimitReached` (rule 1, documented).
@@ -635,6 +638,10 @@ Tests:
   - `EventHandlers.onChild[A](eventType)((ChildRef, A) => R)` matches nested events.
   - `AgentIO`, `AgentZ` and `AgentPekko` gain `nestedEvents(run, handlers)`.
   - Overflow is `LiveGap` on the parent subscription (rule 12).
+  - **No event is lost to a race.** Live events are not replayed, so forwarding cannot start when the parent sees
+    `TaskStarted`. The runner installs the nested forwarder on the child's run during child admission, before the
+    child's first task runs. Events it forwards are queued behind `TaskStarted` in the parent's subscription, so
+    order holds: `TaskStarted`, then every child event, then the child's terminal event.
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
   - Core's **`TraceEvent.AgentRunEnded`** gains `parentThreadId: Option[String] = None` and
