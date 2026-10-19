@@ -483,6 +483,30 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     messages(2) should include("(truncated)")
   }
 
+  it should "fit maxReportBytes when a task call shares a message with a handoff" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")),
+            call("h1", "handoff_to_other", ujson.Obj())
+          )
+        )
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+    }
+    val other = Agent.builder("other", client).withSystemPrompt("OTHER")
+    val agent = lead(client)
+      .withSubagents(general)
+      .withHandoffs(org.llm4s.agent.Handoff.to("other", other, "other"))
+      .withDelegation(DelegationConfig().withMaxReportBytes(64))
+      .build()
+      .value
+    val results = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+    results should have size 2
+    results.head.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 64
+    results.head should include("(truncated)")
+  }
+
   it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
     val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
     val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)

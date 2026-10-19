@@ -1341,10 +1341,14 @@ object ToolLoop:
             .goto(target.model)
         case _ =>
           // a handoff with other calls, or several: nothing runs, every call gets the rule as its error
-          val error = ujson.Obj("error" -> HandoffTools.MixedBatch).render()
-          calls.filterNot(c => handoffs.contains(c.name)).foreach(pipeline.refusedInBatch(_, error, context))
+          // cut, for a tool that bounds its errors (the task tools, design 4.44), as every recorded error is
+          def error(call: ToolCall) =
+            ujson
+              .Obj("error" -> ToolErrors.recorded(nodes.tools.get(call.name), HandoffTools.MixedBatch, isError = true))
+              .render()
+          calls.filterNot(c => handoffs.contains(c.name)).foreach(c => pipeline.refusedInBatch(c, error(c), context))
           calls
-            .foldLeft(appended(Set.empty))((command, c) => command.update(messages, toolMessage(c, error)))
+            .foldLeft(appended(Set.empty))((command, c) => command.update(messages, toolMessage(c, error(c))))
             .goto(nodes.model)
 
     /**
