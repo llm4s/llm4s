@@ -1347,10 +1347,13 @@ object ToolLoop:
       val outcome = state.get(LoopKeys.turn).flatMap { turn =>
         if turn.steps >= agent.maxSteps then ended(turn, TurnOutcome.StepLimitReached)
         else
-          runTokens(state, context).flatMap { used =>
-            if context.config.budgets.maxTokens.exists(used >= _) then ended(turn, TurnOutcome.TokenLimitReached)
-            else modelCall(turn, state, context, answers)
-          }
+          context.config.budgets.maxTokens match
+            case None => modelCall(turn, state, context, answers)
+            case Some(budget) =>
+              runTokens(state, context).flatMap { used =>
+                if used >= budget then ended(turn, TurnOutcome.TokenLimitReached)
+                else modelCall(turn, state, context, answers)
+              }
       }
       outcome.fold(NodeResult.Fail(_), identity)
 
