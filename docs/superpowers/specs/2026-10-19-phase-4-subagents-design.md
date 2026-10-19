@@ -265,17 +265,21 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   - A child with a live claim refuses the whole delete with `ThreadBusy`, before anything is removed.
   - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
   - `deleteThread` on a child thread directly is refused (rule 19).
-- **Child retention (rule 12).** The runtime keeps the newest `childRetention` settled children of a parent (default
-  64, set per agent by `DelegationConfig`, D1) and cascade-deletes older settled children. It runs at two points:
-  - right after the parent's own terminal (`Completed` or `Failed`) checkpoint commits, when every child result of
-    the run is committed, so the bound holds for a parent that gets no later turn, such as a one-shot delegated
-    child;
-  - at `start` admission on a settled parent, which finishes a prune that a crash interrupted.
-  - It never deletes a `Running` or `Suspended` child. None is left behind a committed call: a reported child
-    failure settles its child before the call commits (K2, `settleChild`), so every child of a settled parent is
-    itself settled or belongs to a call that will be replayed.
-  - It never runs at `recover` or `resume` admission: before the run settles, a child whose parent call has not
-    committed must stay for rule 14.
+- **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
+  (default 64, set per agent by `DelegationConfig`, D1) and cascade-deletes older prunable ones.
+  - **Prunable** means settled (`outcome` written) *and* either its call's result is in the parent's latest
+    committed checkpoint (the origin's `IdempotencyKey` matches a committed tool result), or the parent's latest
+    checkpoint is `Completed`, whose calls are never replayed (a new turn makes new keys). Such a child is never
+    read again by rule 14, so deleting it is safe at any moment, whatever happens to the parent afterwards. The
+    second arm covers a Block, which retracts the turn's tool results (rule 5).
+  - A `Running` or `Suspended` child, or a settled one whose call has not committed, is never pruned. None is left
+    behind a committed call: a reported child failure settles its child before the call commits (K2,
+    `settleChild`).
+  - The pass runs **before** the parent's terminal (`Completed` or `Failed`) checkpoint is committed, after the
+    last superstep's commit, so it needs no later turn. A crash during it leaves the parent unsettled; the parent's
+    `recover` reaches the same point and runs the pass again, which is idempotent. A parent that is never recovered
+    keeps at most one run's children beyond the bound, until `deleteThread`.
+  - It runs again at `start` admission on a `Completed` parent, which removes children a Block's retraction left.
   - A failed delete is logged at WARN, as retention prune is.
 - **`CheckpointerContract`** gains cases for:
   - origin round trip and copy-forward
@@ -288,8 +292,8 @@ Tests:
 - a child id stable for one key, different for another key, thread or agent
 - every refused operation on a child thread, with the allowed reads
 - cascade delete through two levels; a child with a live claim refuses the delete
-- retention keeps N after the parent's terminal checkpoint (`childRetention = 1`, two calls: one child left) and
-  at `start`, never touches a suspended child, never runs at `recover`
+- retention: `childRetention = 1`, two calls, one child left when the parent completes; a crash during the pass is
+  finished by `recover`; never touches a suspended child or a settled child whose call has not committed
 
 ### K2: child-run supervision (#2046, 4.42)
 
@@ -330,11 +334,15 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
 - **Deadline.** The child's `RunBudgets.timeout` is `min(granted, ctx.run.deadline - now)` (K3). A parent with no
   deadline passes the grant.
 - **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
-  accumulator). That is the child thread's `usage` key plus the lost usage (`AgentTracing.lostUsage`) on **every**
-  terminal event in the child's log, one per attempt: a failed, cancelled or timed-out attempt that a later
-  `recover` finished is recorded only there. So that those events survive until they are counted, event retention
-  is not applied to a child thread before its `outcome` is written; after that, K1's child retention removes the
-  thread whole. It is added once, by the attempt that commits the call's **terminal** result, and covers
+  accumulator). A failed, cancelled or timed-out attempt that a later `recover` finished records its tokens only on
+  its terminal event (`AgentTracing.lostUsage`), so they are carried forward instead of re-read from the log:
+  - `recoverChild` reads the child's newest terminal event (the previous attempt's) and adds its lost usage to a
+    runtime-owned child-thread key, `DelegationKeys.priorUsage`, committed with the new attempt's first
+    checkpoint. A crash before that commit writes nothing, so the next `recoverChild` folds the same event once.
+  - The roll-up is the child's `usage` key, plus `priorUsage`, plus the lost usage on its final terminal event.
+  - Each term is in the child's latest checkpoint or newest event, so ordinary event retention
+    (`RetentionPolicy.maxEvents >= 1`) applies to child threads unchanged.
+  - The roll-up is added once, by the attempt that commits the call's **terminal** result, and covers
   the child's whole life. A call that suspends because its child did (D3) adds nothing: the child's usage so far
   stays in the child thread until the resumed call settles. A failed attempt commits nothing, so a replay adds it
   again without double counting.
