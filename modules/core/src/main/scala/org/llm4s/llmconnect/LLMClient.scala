@@ -63,7 +63,8 @@ trait LLMClient extends AutoCloseable {
    * Clients that do not read `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
    * JSON in markdown code fences or surround it with prose, the response is normalised
    * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
-   * uPickle into the expected type `A`.
+   * uPickle into the expected type `A`. `A` is read from that text, so a `Long` field receives an integer above 2^53 exactly; a reader that goes through `ujson.Value` (such as a
+   * bridge to another JSON library) sees it rounded to the nearest double.
    *
    * The reply is '''not''' validated against the schema: it is only deserialised. A constraint the
    * reader does not check - an enum, a numeric or string bound, `additionalProperties = false` (extra
@@ -96,10 +97,11 @@ trait LLMClient extends AutoCloseable {
     val opts       = options.withResponseFormat(jsonSchema)
     for {
       completion <- complete(conversation, opts)
+      json = LLMClient.extractJson(completion.content)
       // The reply is model output: `BoundedJson` refuses a document nested more than 512 levels
       // deep before it is parsed, since reading it into `A` below would overflow the stack (#1562)
       parsed <- BoundedJson
-        .read(LLMClient.extractJson(completion.content))
+        .read(json)
         .left
         .map(e => ValidationError("structured_output", s"Response is not valid JSON: ${e.message}"))
       // uPickle reads a JSON null into a null reference for case classes; the schema is an object
@@ -109,7 +111,9 @@ trait LLMClient extends AutoCloseable {
         (),
         ValidationError("structured_output", "Response does not match expected schema: got JSON null")
       )
-      result <- Try(upickle.default.read[A](parsed)).toEither.left.map(e =>
+      // `A` is read from the text, not from `parsed`: a `ujson` number is a double, so an integer above
+      // 2^53 in the AST is already rounded, while uPickle reads a `Long` exactly from text (#1597)
+      result <- Try(upickle.default.read[A](json)).toEither.left.map(e =>
         ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
       )
     } yield result

@@ -212,7 +212,7 @@ def orderViaZio(client: LLMClient, conversation: Conversation): Result[Order] =
 
 ## Numbers
 
-LLM4S parses a model's reply into the `ujson` AST first, and a `ujson` number is a double. Doubles and ordinary integers (up to 2^53) round trip unchanged. **A whole number above 2^53 is rounded to the nearest double before any JSON library sees it.** That is `ujson`'s own parse, so it is not a property of circe, play-json or zio-json:
+A `ujson` number is a double. Doubles and ordinary integers (up to 2^53) round trip unchanged, but **a whole number above 2^53 is rounded to the nearest double as soon as it is parsed into the `ujson` AST**. That is `ujson`'s own parse, so it is not a property of circe, play-json or zio-json:
 
 ```scala
 val big = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
@@ -220,7 +220,15 @@ val big = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
 val parsed: Long = ujson.read(s"""{"id":$big}""")("id").num.toLong
 ```
 
-The first integer a double cannot hold, 2^53 + 1 (9007199254740993), comes back as 9007199254740992, and a circe `Decoder[Long]` then reads the rounded value. If a model has to return or receive large identifiers (snowflake ids, database keys above 9 quadrillion), make them strings in the schema and the case class, and convert in your own code. This rounding is a known limitation, tracked in [#1597](https://github.com/llm4s/llm4s/issues/1597).
+The first integer a double cannot hold, 2^53 + 1 (9007199254740993), comes back as 9007199254740992.
+
+What this means for structured output depends on the reader:
+
+- **uPickle readers are exact.** `completeStructured` reads `A` from the reply's text, so a uPickle `Long` field receives 9007199254740993 unchanged.
+- **The bridges on this page round.** `circeReader`, `playReader` and `zioReader` start from `reader[ujson.Value]`, so a circe `Decoder[Long]` (and its play-json and zio-json counterparts) reads the already-rounded value.
+- **Tool arguments round too.** A tool call's arguments reach a handler as a `ujson.Value`. `SafeParameterExtractor.getInt` refuses any number outside the `Int` range, so a typed integer parameter is never silently wrong; a large number read from the raw JSON, though, has already been rounded.
+
+So if a model has to return or receive large identifiers (snowflake ids, database keys above 9 quadrillion) through a bridge or a tool, make them strings in the schema and the case class, and convert in your own code. See [#1597](https://github.com/llm4s/llm4s/issues/1597).
 
 ## What this page does not cover
 

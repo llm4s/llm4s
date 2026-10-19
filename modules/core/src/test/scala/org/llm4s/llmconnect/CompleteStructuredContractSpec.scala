@@ -133,6 +133,38 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // #1597: a `ujson` number is a double, so reading `A` from the parsed AST rounded integers above 2^53
+  case class Ids(id: Long, ids: List[Long])
+  object Ids { implicit val rw: ReadWriter[Ids] = macroRW }
+
+  private lazy val idsSchema: ObjectSchema[Ids] = Schema
+    .`object`[Ids]("Identifiers")
+    .withRequiredField("id", Schema.integer("Id"))
+    .withRequiredField("ids", Schema.array("More ids", Schema.integer("Id")))
+
+  it should "read integers above 2^53 exactly into Long fields" in {
+    val above = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
+    val reply =
+      s"""```json
+         |{"id":$above,"ids":[${Long.MaxValue},${Long.MinValue},-$above]}
+         |```""".stripMargin
+    new RecordingClient((_, _) => Right(completion(reply))).completeStructured[Ids](conv, idsSchema) shouldBe Right(
+      Ids(above, List(Long.MaxValue, Long.MinValue, -above))
+    )
+  }
+
+  it should "still refuse an integer that does not fit the field's type" in {
+    val tooBig = s"""{"id":${BigInt(Long.MaxValue) + 1},"ids":[]}"""
+    val result = new RecordingClient((_, _) => Right(completion(tooBig))).completeStructured[Ids](conv, idsSchema)
+    result.left.toOption.collect { case e: ValidationError => e.field } shouldBe Some("structured_output")
+  }
+
+  it should "still refuse a reply nested too deeply before reading it" in {
+    val deep   = "[" * 600 + "]" * 600
+    val result = new RecordingClient((_, _) => Right(completion(deep))).completeStructured[Ids](conv, idsSchema)
+    result.left.toOption.map(_.message).getOrElse("") should include("not valid JSON")
+  }
+
   it should "return provider errors untouched and not attempt to parse" in {
     val err = AuthenticationError("p", "nope")
     val c   = new RecordingClient((_, _) => Left(err))
