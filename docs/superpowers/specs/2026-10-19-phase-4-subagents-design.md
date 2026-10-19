@@ -286,7 +286,11 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
     fence thread's current claim is the fence token; otherwise `StaleClaim` and nothing is removed. The cascade
     passes the root's token as the fence, and child retention (below) passes the parent's.
     `CheckpointerContract` tests a fence token superseded by a takeover.
-  - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
+  - **Before the first deletion the root is marked deleting**, durably and under its claim (a terminal
+    "deleting" checkpoint or store flag). A crash part-way leaves fewer children and the marked parent; `start`,
+    `recover`, `resume` and `fork` refuse a marked thread (`GraphError.ThreadDeleting`), so it can never replay a
+    task whose child is already gone. Only `deleteThread` proceeds on it, and running the delete again finishes
+    it.
   - `deleteThread` on a child thread directly is refused (rule 19).
 - **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
   (default 64, set per agent by `RunConfig.withChildRetention`, and by `DelegationConfig`, D1) and cascade-deletes
@@ -736,6 +740,11 @@ Tests:
     their claims lapsed), cannot replay that earlier attempt's live events: the parent subscription gets one
     `LiveGap` for the child before the events of the run it now drives. Only a child this call admits fresh is
     gap-free.
+  - **Nor a subscriber that attaches mid-child.** A `subscribe(..., nested = true)` made while a child is running
+    has missed that child's earlier live events, which are never replayed. At attach it gets, for each child
+    running then, `TaskStarted` for that child's current run followed by one `Nested(child, LiveGap(0))`, then the
+    child's events from there. The every-event guarantee holds only for subscriptions in place before the child
+    was admitted (`stream`'s).
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
   - Core's **`TraceEvent.AgentRunEnded`** gains `parentThreadId: Option[String] = None` and
