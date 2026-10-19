@@ -363,8 +363,54 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     val client  = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}""")) }
     val outcome = researcher.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).value
     outcome match
-      case TaskOutcome.Refused(_, TaskRefusal.OutputInvalid(errors), _) => errors should not be empty
-      case other                                                        => fail(s"expected a refusal, got $other")
+      case TaskOutcome.Refused(_, TaskRefusal.OutputInvalid(errors), usage) =>
+        errors should not be empty
+        usage.requestCount shouldBe 2 // the answer and its retry, both counted
+      case other => fail(s"expected a refusal, got $other")
+  }
+
+  "ChildFailure.Fail" should "fail the parent with a typed child's OutputInvalid, every error kept" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
+    }
+    val agent = lead(client).withSubagents(researcher.withFailure(ChildFailure.Fail)).build().value
+    val error = agent.run(ThreadId("t1"), "go").left.value
+    error.message should include("task_researcher")
+    org.llm4s.agent.AgentFixture.cause(error) match
+      case failed: GraphError.ToolFailed =>
+        failed.cause match
+          case GraphError.OutputInvalid(errors) => errors.mkString should include("sources")
+          case other                            => fail(s"expected the child's OutputInvalid, got $other")
+      case other => fail(s"expected ToolFailed, got $other")
+  }
+
+  "DelegationConfig.childRetention" should "apply when only a handoff target delegates, the tightest bound in the family" in {
+    val client = RoutingClient {
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        val sinceUser = messages.drop(messages.lastIndexWhere { case _: UserMessage => true; case _ => false })
+        if toolResults(sinceUser).exists(_.contains("r")) && sinceUser.exists {
+            case a: AssistantMessage => a.toolCalls.exists(_.name == "task"); case _ => false
+          }
+        then Right(CompletionFixture.simple("done"))
+        else
+          Right(
+            calling(call(s"t${messages.size}", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")))
+          )
+      case Child("general", _) => Right(CompletionFixture.simple("r"))
+    }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withChildRetention(1))
+    val agent =
+      lead(client).withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist")).build().value
+    agent.run(ThreadId("t1"), "one").value.answer.value shouldBe "done"
+    agent.run(ThreadId("t1"), "two").value.answer.value shouldBe "done"
+    agent.children(ThreadId("t1")).value should have size 1
   }
 
   "build()" should "refuse two subagents with one id, a clash with another tool, bad bounds and a bad subagent" in {

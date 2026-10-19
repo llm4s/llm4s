@@ -4,7 +4,7 @@ import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentStatus }
 import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunOrigin, ThreadId, ToolCallId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
-import org.llm4s.agent.graph.toolloop.AgentInput
+import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
 import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ LLMError, ValidationError }
@@ -202,9 +202,10 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
     val ref      = ChildRef(threadId, config.runId, agent.id, ToolCallId(""), 0)
     agent.run(threadId, definition.rendered(input), config) match
-      case Right(result) => Right(outcome(result, ref.copy(runId = result.runId)))
+      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
       case Left(GraphError.OutputInvalid(all)) =>
-        Right(TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), UsageSummary()))
+        // the turn is removed, its model calls are kept: the thread's usage counts them
+        Right(TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), BoundAgent.storedUsage(agent, threadId, config)))
       case Left(error) => Left(error)
 
   /**
@@ -221,8 +222,8 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     val ref      = ChildRef(threadId, config.runId, agent.id, ctx.toolCallId, origin.depth)
     ChildRunner.run(agent, origin, AgentInput(definition.rendered(input)), config, ctx).map {
       case ChildEnd.Ended(result, _) => outcome(result, ref.copy(runId = result.runId)) -> None
-      case ChildEnd.Failed(GraphError.OutputInvalid(all), usage) =>
-        TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> None
+      case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
+        TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
       case ChildEnd.Failed(error, usage) =>
         TaskOutcome.Refused(ref, TaskRefusal.Failed(error.message), usage) -> Some(error)
     }
@@ -242,3 +243,15 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   /** The report in `answer`: the text itself for a text subagent, else the answer decoded as `O`. */
   private def report(result: AgentResult, answer: String): Result[O] =
     definition.output.fold(text => Right(text(answer)), _ => result.decodeOutput[O](using definition.outputCodec))
+
+object BoundAgent:
+
+  /** The usage `threadId`'s latest checkpoint records, read under `config`'s tenant; none for a thread with none. */
+  private[delegation] def storedUsage(agent: Agent, threadId: ThreadId, config: RunConfig): UsageSummary =
+    agent.runtime
+      .history(threadId, None, 1, config)
+      .toOption
+      .flatMap(_.headOption)
+      .flatMap(latest => agent.loop.graph.restore(latest.snapshot).toOption)
+      .flatMap(_.state.get(LoopKeys.usage).toOption)
+      .getOrElse(UsageSummary())

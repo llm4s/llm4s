@@ -45,8 +45,8 @@ final class AgentBuilder private (
   maxPromptSectionTokens: Int,
   output: Option[OutputFormat],
   harness: Option[HarnessProfile],
-  subagents: Vector[TypedAgent[?, ?]],
-  delegation: DelegationConfig
+  private val subagents: Vector[TypedAgent[?, ?]],
+  private val delegation: DelegationConfig
 ):
 
   private def copy(
@@ -240,7 +240,8 @@ final class AgentBuilder private (
       family.flatMap(b => b.held(loop, b.interruptBefore, BreakpointPhase.Before)).toSet,
       family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
       installed.retention,
-      Option.when(subagents.nonEmpty)(delegation.childRetention)
+      // children are made on the family's thread by whichever agent is active: keep the tightest bound any sets
+      family.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption
     )
 
   /**
