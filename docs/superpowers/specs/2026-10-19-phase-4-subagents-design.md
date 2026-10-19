@@ -469,6 +469,10 @@ object TypedAgent:
 - **`BoundAgent[I, O]`** is the definition compiled onto a runtime.
   - `run(input: I, config: RunConfig): Result[TaskOutcome[O]]` runs it on a new top-level thread. This is for graph
     nodes and tests, with no parent.
+  - `resume(ref: ChildRef, answers: Map[InterruptId, ujson.Value], config)` (the same answers as `Agent.resume`) and `recover(ref: ChildRef, config)`, both
+    `Result[TaskOutcome[O]]`, continue a standalone run that suspended or failed, so a `Suspended` outcome is never
+    a dead end. They accept only a standalone ref (`toolCallId = None`); a delegated child is continued only
+    through its parent (rule 19).
   - The `task` tools use it through K2.
 
 **The outcome**, a public data type:
@@ -574,6 +578,8 @@ Tests:
     so (rule 1).
 - **Permissions (rule 15).** At `bind`, the child's stack gets an `AncestorPermissions` middleware, outermost, built
   from every ancestor's `PermissionMiddleware` rules.
+  - Permission middleware reaches a child **only** this way: naming a `PermissionMiddleware` id in
+    `Inheritance.middleware` is refused at `build()`, so one policy is never evaluated twice.
   - A call runs only if each ancestor's rules allow it, and then the child's own.
   - `Deny` anywhere denies. `Ask` anywhere asks once (D3), and the approval covers every level, as an edited call is
     evaluated again by every level.
@@ -583,7 +589,8 @@ Tests:
 - **Model.** The child uses the parent's client and `CompletionOptions` unless `withModel` is set. A model is not a
   capability, so inheriting it is the default. It is shown in the plan.
 - **Budgets (rule 18).** At call time each limit is `min(grant, parent's remaining)`:
-  - steps: the grant, else the parent agent's `maxSteps`, capped by the parent turn's remaining steps (its `maxSteps`
+  - steps: the grant, else the parent agent's `maxSteps`, **always capped by the typed agent's own `maxSteps`**
+    (`withMaxSteps`) when set, so a child's whole-life step grant never exceeds its own limit, and capped by the parent turn's remaining steps (its `maxSteps`
     less the model calls the turn has made at the snapshot), which D2 exposes as `RunContext.remainingSteps`
   - time: the parent's `deadline`
   - tokens: the parent's `maxTokens` less the run's usage at the snapshot
