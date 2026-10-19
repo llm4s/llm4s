@@ -479,6 +479,17 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     DelegationMiddleware.cut("ab", 1) shouldBe ""
   }
 
+  "a call its child runner refuses" should "be a tool error for a ValidationError and Fatal otherwise" in {
+    val edited = ValidationError("input", "the child thread 'c' was started with other input")
+    DelegationMiddleware.notRun("researcher", edited, 1024) match
+      case ToolOutcome.Error(text) =>
+        text should startWith("subagent 'researcher' was not run:")
+        text should include("started with other input")
+      case other => fail(s"expected a tool error, got $other")
+    val cancelled = org.llm4s.error.CancelledError("task")
+    DelegationMiddleware.notRun("researcher", cancelled, 1024) shouldBe ToolOutcome.Fatal(cancelled)
+  }
+
   "build()" should "refuse two subagents with one id, a clash with another tool, bad bounds and a bad subagent" in {
     val client = RoutingClient(PartialFunction.empty)
     lead(client).withSubagents(general, general).build().left.value.message should include("defined twice")

@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.tool.{
   ToolResource
 }
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
-import org.llm4s.error.{ CancelledError, LLMError, ProcessingError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
 import org.llm4s.types.Result
@@ -95,7 +95,7 @@ final private[agent] class DelegationMiddleware(
     val name   = bound.id.value
     val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, Instant.now(), depth + 1)
     bound.delegated(input, origin, childConfig(ctx.run.config), ctx) match
-      case Left(error) => ToolOutcome.Fatal(error)
+      case Left(error) => DelegationMiddleware.notRun(name, error, config.maxReportBytes)
       case Right((outcome, cause)) =>
         DelegationMiddleware.toolOutcome(name, bound.definition.failure, config.maxReportBytes, outcome, cause)(using
           bound.definition.outputCodec
@@ -158,6 +158,18 @@ private[agent] object DelegationMiddleware:
             maxReportBytes
           )
         )
+
+  /**
+   * What the parent model sees when the child runner refused or failed the call itself, `error`: a `ValidationError`
+   * - the call's child thread was started with other arguments (an edited call run again), or a thread at its id is not
+   * its child - is a tool error, bounded by `maxReportBytes`, since running the call again cannot change it; anything
+   * else (a cancellation, a claim held past the wait, corrupt stored state) is `Fatal`, so the run fails and `recover`
+   * runs the call again.
+   */
+  def notRun(name: String, error: LLMError, maxReportBytes: Int): ToolOutcome = error match
+    case refused: ValidationError =>
+      ToolOutcome.Error(cut(s"subagent '$name' was not run: ${refused.message}", maxReportBytes))
+    case other => ToolOutcome.Fatal(other)
 
   private def utf8(text: String): Int = text.getBytes(StandardCharsets.UTF_8).length
 
