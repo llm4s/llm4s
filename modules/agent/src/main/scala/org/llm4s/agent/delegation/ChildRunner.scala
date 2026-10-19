@@ -301,8 +301,8 @@ private[agent] object ChildRunner:
             case _: AgentStatus.Completed => true
             case _                        => settleOnFailure
         case ChildEnd.Failed(_, _) => settleOnFailure
-      // also when the calling task was interrupted as the child committed: a task that then fails commits nothing, and
-      // a timed-out call commits its error with the accumulator
+      // also when the calling task was interrupted as the child committed: a task that then fails drops a roll-up (it is
+      // never the run's lost usage, TaskUsage.merge), and a timed-out call commits its error with it
       if commits then ctx.run.usage.merge(childEnd.usage)
       childEnd
 

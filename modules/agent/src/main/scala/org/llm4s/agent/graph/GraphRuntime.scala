@@ -2778,7 +2778,7 @@ final class GraphRuntime(
 
     /** Keeps the usage `context`'s task recorded, when the task commits nothing: no pending write will carry it. */
     private def uncommitted(context: RunContext): Unit =
-      if !context.usage.isEmpty then failedUsage.updateAndGet(_.merge(context.usage.summary)): Unit
+      if !context.usage.lostIsEmpty then failedUsage.updateAndGet(_.merge(context.usage.lost)): Unit
 
     private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage)
 
