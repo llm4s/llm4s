@@ -63,6 +63,13 @@ class EventHubRunningChildrenSpec extends AnyFlatSpec with Matchers with EitherV
     attached(hub) shouldBe empty
   }
 
+  "forgetChildren" should "forget the thread's running children, as a release with an orphan in flight does" in {
+    val hub = new EventHub(InMemoryCheckpointer())
+    hub.childStarted(parent, ref("r1"), started("r1", 1L), () => true)
+    hub.forgetChildren(parent)
+    attached(hub) shouldBe empty
+  }
+
   "a run's release" should "forget the thread's running children" in {
     val hub = new EventHub(InMemoryCheckpointer())
     hub.childStarted(parent, ref("r1"), started("r1", 1L), () => true)

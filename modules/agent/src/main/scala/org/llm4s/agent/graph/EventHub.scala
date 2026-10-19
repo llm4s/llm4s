@@ -480,6 +480,16 @@ final private[graph] class EventHub(
     }
 
   /**
+   * Forgets the thread's running children ([[running]]). The runtime calls it whenever a run releases the thread, even
+   * while a commit the run gave up on keeps the hand-over mark ([[release]] waits for it): the run's children are over
+   * for any subscription made from then on, and a store call that hangs must not leave them announced.
+   */
+  def forgetChildren(threadId: ThreadId): Unit =
+    withLock(hubLock) {
+      running = running - threadId.value
+    }
+
+  /**
    * Runs `f` with the highest `seq` handed over on the thread (0 if none), holding `hubLock`, so no
    * hand-over is made while it runs. A hand-over is queued to every subscriber in one step under that
    * lock ([[durable]]), so one made before is at or below the value and queued everywhere, and one not

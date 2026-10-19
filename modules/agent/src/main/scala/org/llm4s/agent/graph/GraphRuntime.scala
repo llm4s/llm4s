@@ -2131,6 +2131,8 @@ final class GraphRuntime(
    */
   private def release(threadId: ThreadId): Unit =
     withLock(activeLock) {
+      // a run's children are over once it releases the thread, even while an orphan keeps the mark (#2074)
+      hub.forgetChildren(threadId)
       if !orphans.contains(threadId.value) then hub.release(threadId)
       releasingLocally(threadId)
       active.remove(threadId.value)
