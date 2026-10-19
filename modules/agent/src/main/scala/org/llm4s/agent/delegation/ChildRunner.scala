@@ -125,43 +125,52 @@ private[agent] object ChildRunner:
     private val childId = ThreadId.child(origin.parent, origin.agent, origin.call)
     private val parent  = ctx.run.config
 
-    private val (timeout, parentsDeadline) =
-      cappedTimeout(config.budgets.timeout, ctx.run.deadline, runtime.now())
-
-    /** The child's config: identity from the parent (rule 16), the capped timeout, and the agent's breakpoints. */
+    /**
+     * The child's config, without its timeout: identity from the parent (rule 16) and the agent's breakpoints. Reads
+     * use it; each admission adds the timeout ([[fresh]]).
+     */
     private val base: RunConfig =
-      agent.configured(
-        config
-          .withTenantId(parent.tenantId)
-          .withPrincipal(parent.principal)
-          .withBudgets(config.budgets.withTimeout(timeout))
-      )
+      agent.configured(config.withTenantId(parent.tenantId).withPrincipal(parent.principal))
 
-    /** A new run's config: each admission is a run of its own. */
-    private def fresh(): RunConfig = base.withRunId(RunId.random())
+    /** Whether the latest admission's timeout was the parent's deadline rather than the grant. */
+    @volatile private var parentsDeadline = false
 
-    /** How long a busy child is waited on, from the first `ThreadBusy`: twice the claim's life, within the deadline. */
-    private def busyWindow: FiniteDuration =
+    /**
+     * A new run's config: each admission is a run of its own, with the timeout capped by what is left of the parent's
+     * deadline now, so time spent waiting for a busy child never lets the child outlive its parent.
+     */
+    private def fresh(): RunConfig =
+      val (timeout, capped) = cappedTimeout(config.budgets.timeout, ctx.run.deadline, runtime.now())
+      parentsDeadline = capped
+      base.withBudgets(config.budgets.withTimeout(timeout)).withRunId(RunId.random())
+
+    /**
+     * When waiting on a busy child gives up, as a `System.nanoTime` value: twice the claim's life from now, or the
+     * parent's deadline if that is sooner. Fixed at the first `ThreadBusy`.
+     */
+    private def busyCutoff(): Long =
       val claims = runtime.claimTtl * 2
-      ctx.run.deadline.fold(claims)(d => claims.min(JDuration.between(runtime.now(), d).toNanos.max(0L).nanos))
+      val window =
+        ctx.run.deadline.fold(claims)(d => claims.min(JDuration.between(runtime.now(), d).toNanos.max(0L).nanos))
+      System.nanoTime() + window.toNanos
 
     def drive(): Result[ChildEnd] =
-      @tailrec def loop(busySince: Option[Long], waits: Int): Result[ChildEnd] =
+      @tailrec def loop(cutoff: Option[Long], waits: Int): Result[ChildEnd] =
         if Thread.currentThread().isInterrupted then Left(CancelledError("child run"))
         else
           step() match
             case Step.Done(result) => result
-            case Step.Again        => loop(busySince, waits)
+            case Step.Again        => loop(cutoff, waits)
             case Step.Busy(error) =>
-              val since = busySince.getOrElse(System.nanoTime())
-              pause(since, waits, error) match
+              val until = cutoff.getOrElse(busyCutoff())
+              pause(until, waits, error) match
                 case Left(stop) => Left(stop)
-                case Right(_)   => loop(Some(since), waits + 1)
+                case Right(_)   => loop(Some(until), waits + 1)
       loop(None, 0)
 
-    /** Waits before the next read of a busy child; `Left` once the window has passed, or when interrupted. */
-    private def pause(since: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =
-      val left = since + busyWindow.toNanos - System.nanoTime()
+    /** Waits before the next read of a busy child; `Left` once `until` has passed, or when interrupted. */
+    private def pause(until: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =
+      val left = until - System.nanoTime()
       if left <= 0 then Left(busy)
       else
         val backoff = (InitialBackoff.toNanos << waits.min(16)).min(MaxBackoff.toNanos)
@@ -217,7 +226,14 @@ private[agent] object ChildRunner:
 
     /** Settles the failed child, then reads it again: the failure returned is the one its checkpoint records. */
     private def settle(error: LLMError): Step =
-      runtime.settleChild(childId, graph, RunOutcome.failed(error), error.message, fresh(), foldLostUsage) match
+      runtime.settleChild(
+        childId,
+        graph,
+        RunOutcome.failed(error),
+        error.message,
+        base.withRunId(RunId.random()),
+        foldLostUsage
+      ) match
         case Right(_)                          => Step.Again
         case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)
         case Left(other)                       => Step.Done(Left(other))
