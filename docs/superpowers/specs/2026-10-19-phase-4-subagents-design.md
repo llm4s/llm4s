@@ -349,9 +349,14 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
 - **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
   accumulator). A failed, cancelled or timed-out attempt that a later `recover` finished records its tokens only on
   its terminal event (`AgentTracing.lostUsage`), so they are carried forward instead of re-read from the log:
-  - `recoverChild` reads the child's newest terminal event (the previous attempt's) and adds its lost usage to a
-    runtime-owned child-thread key, `DelegationKeys.priorUsage`, committed with the new attempt's first
-    checkpoint. A crash before that commit writes nothing, so the next `recoverChild` folds the same event once.
+  - A runtime-owned child-thread key, `DelegationKeys.priorUsage`, holds `PriorUsage(total: TokenUsage,
+    foldedThrough: Long)`: the lost usage folded so far and the sequence number of the last terminal event folded.
+  - `recoverChild` reads the child's newest terminal event. If its sequence is above `foldedThrough`, it adds that
+    event's lost usage to `total` and sets `foldedThrough` to its sequence; otherwise (already folded) it changes
+    nothing. The update commits with the new attempt's first checkpoint.
+    - A crash before that commit writes nothing, so the next `recoverChild` folds the event then.
+    - A crash after it, before the attempt's own terminal event, leaves the same newest terminal event, whose
+      sequence is not above `foldedThrough`, so it is not folded twice.
   - The roll-up is the child's `usage` key, plus `priorUsage`, plus the lost usage on its final terminal event.
   - Each term is in the child's latest checkpoint or newest event. A child thread keeps at least its newest event:
     its effective `RetentionPolicy.maxEvents` is `max(inherited, 1)` (`Some(0)` is accepted for top-level threads),
@@ -375,7 +380,7 @@ Tests (each in-memory and on SQLite):
 - a C2 timeout on the call cancels the child; parent `ClaimLost` cancels the child
 - the child's deadline is capped by the parent's
 - usage counted exactly once across a crash and replay, including tokens of a failed child attempt that a later
-  `recover` finished
+  `recover` finished; a crash after `priorUsage` commits and before the attempt ends folds nothing twice
 
 ### K3: token budgets and the run's deadline (#2047, 4.43)
 
