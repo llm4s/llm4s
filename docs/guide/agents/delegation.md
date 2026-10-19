@@ -91,8 +91,34 @@ parent run fails instead, and the parent's `recover` continues the child from it
 A task call runs again on `recover`. It never starts its child twice: a completed child's report is read back from
 the child thread, and a child that was still running continues from its checkpoint.
 
-A child that stops for approval or a question is, for now, reported to the parent model as an error and left
-suspended; answering it through the parent is the next slice.
+## Approvals and questions through the parent
+
+A child that stops for an approval, a tool's or a middleware's question, or a breakpoint suspends its parent too. The
+parent's other calls in the batch finish first. The parent's `AgentStatus.Suspended` lists each child interrupt in
+`delegated`, under a composite id `<parent interrupt>~<child interrupt>` (a grandchild's is `p~c~g`), with the
+`ChildRef` of the child that waits and its request as the child gives it (`ChildInterrupt`). A delegated interrupt is
+never also in `questions`.
+
+Answer them with the usual helpers, by the composite id, and resume the parent:
+
+```scala
+agent.run(threadId, "research tides").flatMap { result =>
+  result.status match
+    case AgentStatus.Suspended(_, _, _, _, delegated) =>
+      val answers = delegated.map {
+        case (id, DelegatedRequest(_, _: ChildInterrupt.Approval)) => result.approve(id)
+        case (id, _)                                              => result.proceed(id)
+      }
+      agent.resume(threadId, answers.toMap)
+    case _ => Right(result)
+}
+```
+
+`approve`, `reject`, `edit`, `reply` and `proceed` encode the answer the child expects; `Agent.resume` routes it to
+the child through its `task` call, which resumes the child and reports to the parent model once the child ends. A
+rejection reaches the child's model as at top level. Answer some and the rest stay pending: the call asks again, under
+a new parent interrupt id. A composite id that is not pending is refused with `GraphError.InvalidResume`. A parent
+that stops after its child resumed never resumes the child twice: its `recover` reads the child first.
 
 ## Permissions
 

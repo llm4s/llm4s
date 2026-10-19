@@ -38,6 +38,9 @@ import scala.util.control.Exception.ultimately
  * the call, so exact and stable under replay) or `maxDepth`; it waits for one of the parent run's
  * `maxConcurrentChildren` slots; then it runs the child through the child runner and maps its outcome.
  *
+ * A child that suspends makes its call ask a [[DelegatedQuestion]] (design 4.46): the parent suspends too, listing the
+ * child's interrupts under composite ids, and the call's resume, with the [[DelegatedAnswers]], resumes the child.
+ *
  * @param depth how deep the agent this is installed in runs: 0 for a top-level agent
  */
 final private[agent] class DelegationMiddleware(
@@ -59,11 +62,10 @@ final private[agent] class DelegationMiddleware(
   override val tools: Vector[AgentTool[?]] =
     val shared =
       Option.when(taskShaped.nonEmpty)(
-        TaskTool(TaskTools.taskSpec(taskShaped.map(_.definition)), config.maxReportBytes) { (args, ctx) =>
-          taskShaped.find(_.id.value == args.subagent_type) match
-            case None        => error(s"no subagent '${args.subagent_type}' takes a task description")
-            case Some(bound) => viaRequest(bound, args.description, ctx)
-        }
+        TaskTool(TaskTools.taskSpec(taskShaped.map(_.definition)), config.maxReportBytes)(
+          (args, ctx) => sharedTask(args, None, ctx),
+          (args, answers, ctx) => sharedTask(args, Some(answers), ctx)
+        )
       )
     shared.toVector ++ subagents.filterNot(_.definition.takesTaskRequest).map(typedTool(_))
 
@@ -74,15 +76,38 @@ final private[agent] class DelegationMiddleware(
   private def error(message: String): ToolOutcome =
     ToolOutcome.Error(ToolErrors.bounded(message, config.maxReportBytes))
 
-  private def viaRequest[I, O](bound: BoundAgent[I, O], description: String, ctx: ToolContext): ToolOutcome =
+  /** A call of the shared `task` tool, or with `answers` its resume. */
+  private def sharedTask(args: TaskTools.TaskCall, answers: Option[DelegatedAnswers], ctx: ToolContext): ToolOutcome =
+    taskShaped.find(_.id.value == args.subagent_type) match
+      case None        => error(s"no subagent '${args.subagent_type}' takes a task description")
+      case Some(bound) => viaRequest(bound, args.description, answers, ctx)
+
+  private def viaRequest[I, O](
+    bound: BoundAgent[I, O],
+    description: String,
+    answers: Option[DelegatedAnswers],
+    ctx: ToolContext
+  ): ToolOutcome =
     TaskTools.fromRequest(TaskRequest(description))(using bound.definition.inputCodec) match
       case Left(problem) => error(problem)
-      case Right(input)  => delegate(bound, input, ctx)
+      case Right(input)  => delegate(bound, input, answers, ctx)
 
   private def typedTool[I, O](bound: BoundAgent[I, O]): AgentTool[I] =
-    TaskTool(TaskTools.typedSpec(bound.definition), config.maxReportBytes)((input, ctx) => delegate(bound, input, ctx))
+    TaskTool(TaskTools.typedSpec(bound.definition), config.maxReportBytes)(
+      (input, ctx) => delegate(bound, input, None, ctx),
+      (input, answers, ctx) => delegate(bound, input, Some(answers), ctx)
+    )
 
-  private def delegate[I, O](bound: BoundAgent[I, O], input: I, ctx: ToolContext): ToolOutcome =
+  /**
+   * One run of a task call - its first, or with `answers` the resume of its suspended child: the same checks, which a
+   * resume passes as its first run did (they read the same committed messages), the same slot, then the child.
+   */
+  private def delegate[I, O](
+    bound: BoundAgent[I, O],
+    input: I,
+    answers: Option[DelegatedAnswers],
+    ctx: ToolContext
+  ): ToolOutcome =
     val name     = bound.id.value
     val position = TaskTools.positionInTurn(ctx, toolNames)
     if position > config.maxTasksPerTurn then
@@ -95,12 +120,17 @@ final private[agent] class DelegationMiddleware(
       val slot = slots.computeIfAbsent(ctx.run.incarnation, _ => new Semaphore(config.maxConcurrentChildren, true))
       CancelledError.attempt(s"task $name")(Right(slot.acquire())) match
         case Left(cancelled) => ToolOutcome.Fatal(cancelled)
-        case Right(_)        => ultimately(slot.release())(run(bound, input, ctx))
+        case Right(_)        => ultimately(slot.release())(run(bound, input, answers, ctx))
 
-  private def run[I, O](bound: BoundAgent[I, O], input: I, ctx: ToolContext): ToolOutcome =
+  private def run[I, O](
+    bound: BoundAgent[I, O],
+    input: I,
+    answers: Option[DelegatedAnswers],
+    ctx: ToolContext
+  ): ToolOutcome =
     val name   = bound.id.value
     val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, Instant.now(), depth + 1)
-    bound.delegated(input, origin, childConfig(ctx.run.config), ctx) match
+    bound.delegated(input, origin, childConfig(ctx.run.config), ctx, answers) match
       case Left(error) => DelegationMiddleware.notRun(name, error, config.maxReportBytes)
       case Right((outcome, cause)) =>
         DelegationMiddleware.toolOutcome(name, bound.definition.failure, config.maxReportBytes, outcome, cause)(using
@@ -119,12 +149,19 @@ final private[agent] class DelegationMiddleware(
       childRetention = config.childRetention
     )
 
-/** A `task` tool: its errors, whoever raises them, are cut by the loop to `maxErrorBytes` (`maxReportBytes`). */
-final private class TaskTool[A](val spec: AgentToolSpec[A], val maxErrorBytes: Int)(
-  run: (A, ToolContext) => ToolOutcome
-) extends AgentTool[A]
+/**
+ * A `task` tool: its errors, whoever raises them, are cut by the loop to `maxErrorBytes` (`maxReportBytes`). It asks a
+ * [[DelegatedQuestion]] when its child suspends, and `answer` resumes the child with the [[DelegatedAnswers]].
+ */
+final private class TaskTool[A](base: AgentToolSpec[A], val maxErrorBytes: Int)(
+  run: (A, ToolContext) => ToolOutcome,
+  answer: (A, DelegatedAnswers, ToolContext) => ToolOutcome
+) extends AgentTool.Asking[A, DelegatedQuestion, DelegatedAnswers](base)
     with BoundedErrors:
   def execute(args: A, context: ToolContext): ToolOutcome = run(args, context)
+
+  def resume(args: A, question: DelegatedQuestion, answers: DelegatedAnswers, context: ToolContext): ToolOutcome =
+    answer(args, answers, context)
 
 private[agent] object DelegationMiddleware:
   val Id: MiddlewareId = MiddlewareId("delegation")
@@ -132,10 +169,10 @@ private[agent] object DelegationMiddleware:
   /**
    * What the parent model sees for subagent `name`'s `outcome`: its report as JSON, or past `maxReportBytes` a tool
    * error; a refusal (made with or without a child) as a tool error under `ChildFailure.Report`, or `Fatal` with the
-   * child's error `cause` - else a `ProcessingError` with the same text - under `Fail`; a suspension as a tool error.
+   * child's error `cause` - else a `ProcessingError` with the same text - under `Fail`.
    * Every tool message is at most `maxReportBytes` in UTF-8: a refusal's reason is cut to fit, an `OutputInvalid`
    * keeping its first errors and saying how many it dropped. The full reason stays in the child's `RunOutcome` and in
-   * the typed `TaskOutcome`.
+   * the typed `TaskOutcome`. A suspended child is the call's [[DelegatedQuestion]] (design 4.46): its interrupts.
    */
   def toolOutcome[O: ReadWriter](
     name: String,
@@ -163,14 +200,8 @@ private[agent] object DelegationMiddleware:
         refused(s"subagent '$name' (child thread ${child.threadId.value}) ", reason)
       case TaskOutcome.NotStarted(_, reason) =>
         refused(s"subagent '$name' was not started: ", reason)
-      case TaskOutcome.Suspended(child, _) =>
-        ToolOutcome.Error(
-          cut(
-            s"subagent '$name' suspended (child thread ${child.threadId.value}): it waits for approvals or answers, " +
-              "which cannot be given through the parent yet",
-            maxReportBytes
-          )
-        )
+      case TaskOutcome.Suspended(child, status) =>
+        ToolOutcome.Ask(DelegatedQuestion(child, ChildInterrupt.of(status)))
 
   /**
    * What the parent model sees when the child runner refused or failed the call itself, `error`: a `ValidationError`

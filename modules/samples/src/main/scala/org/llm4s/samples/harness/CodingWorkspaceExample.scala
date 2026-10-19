@@ -91,7 +91,7 @@ object CodingWorkspaceExample {
         coder  <- CodingWorkspace.agent(client, GraphRuntime(store), workspace, memories.store)
         result <- coder.agent.stream(thread, CodingWorkspace.Query, config)(printing).flatMap(_.await())
       } yield result.status match {
-        case AgentStatus.Suspended(approvals, _, _, _) =>
+        case AgentStatus.Suspended(approvals, _, _, _, _) =>
           approvals.foreach((_, request) => println(s"\n[approval] ${request.reason}"))
           println("--- process 1 ends with the turn suspended ---\n")
           Some(result)
@@ -129,7 +129,7 @@ object CodingWorkspaceExample {
   /** Your answer to each command `pending` waits on: approved only on `y`; anything else, or no answer, rejects it. */
   private def review(pending: AgentResult): Map[InterruptId, ujson.Value] =
     pending.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) =>
+      case AgentStatus.Suspended(approvals, _, _, _, _) =>
         approvals.map { (id, request) =>
           // the person decides: Ask is a review, never an allow
           print(s"\nThe agent asks to run: ${request.call.arguments.render()}\nApprove? [y/N] ")

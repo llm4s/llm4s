@@ -283,8 +283,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
         )
         val parked = agent.run("ship it").value
         val approvals = parked.status match {
-          case AgentStatus.Suspended(approvals, _, _, _) => approvals.map((id, r) => r.call.id -> (id, r)).toMap
-          case other                                     => fail(s"expected Suspended, got $other")
+          case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, r) => r.call.id -> (id, r)).toMap
+          case other                                        => fail(s"expected Suspended, got $other")
         }
         approvals.keySet shouldBe Set("a1", "r1", "e1")
         approvals.values.map(_._2.idempotencyKey).toSet should have size 3
@@ -331,8 +331,8 @@ class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
           val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(asker, ok)))
           val parked = agent.run("ask").value
           val (id, question) = parked.status match {
-            case AgentStatus.Suspended(_, questions, _, _) => questions.head
-            case other                                     => fail(s"expected Suspended, got $other")
+            case AgentStatus.Suspended(_, questions, _, _, _) => questions.head
+            case other                                        => fail(s"expected Suspended, got $other")
           }
           requests() shouldBe 1
           val done = agent.resume(parked.threadId, Map(parked.reply(id, Answer(true)))).value

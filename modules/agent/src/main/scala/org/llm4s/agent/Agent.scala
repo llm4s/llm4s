@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.{ DelegatedAnswers, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -194,6 +195,10 @@ final class Agent private[agent] (
    * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]], [[AgentResult.reply]] and
    * [[AgentResult.proceed]] - and continues. Unanswered ones stay pending. Interrupting the calling
    * thread cancels the turn, as for [[run]].
+   *
+   * A subagent's interrupt (`AgentStatus.Suspended.delegated`) is answered by its composite id: the answers are
+   * grouped by the parent interrupt they go through and reach the child when its `task` call resumes (design 4.46).
+   * A composite id that is not pending is refused (`GraphError.InvalidResume`), as any other interrupt is.
    */
   def resume(
     threadId: ThreadId,
@@ -208,7 +213,43 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false))
+    routed(threadId, answers, config).flatMap(grouped =>
+      runtime.resume(threadId, loop.graph, grouped, configured(config)).map(agentRun(_, None, drain = false))
+    )
+
+  /**
+   * `answers` as the runtime takes them (design 4.46): composite answers to delegated interrupts, checked against the
+   * suspended thread's `delegated` interrupts, grouped into the `DelegatedAnswers` of the `task` call each goes
+   * through. Answers with no composite id are passed as they are, for the runtime to check.
+   */
+  private def routed(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig
+  ): Result[Map[InterruptId, ujson.Value]] =
+    if !answers.keys.exists(_.value.contains(DelegatedAnswers.Separator)) then Right(answers)
+    else
+      for
+        pending <- delegatedPending(threadId, config)
+        _ <- pending.map(DelegatedAnswers.problems(answers, _)).filter(_.nonEmpty) match
+          case Some(problems) => Left(GraphError.InvalidResume(loop.graph.id, problems.toList))
+          case None           => Right(())
+        grouped <- DelegatedAnswers.group(answers)
+      yield grouped
+
+  /** The suspended thread's delegated interrupts; `None` when it is not suspended, which the runtime then refuses. */
+  private def delegatedPending(
+    threadId: ThreadId,
+    config: RunConfig
+  ): Result[Option[Vector[(InterruptId, DelegatedRequest)]]] =
+    runtime.childAtRest(threadId, loop.graph, configured(config)).flatMap {
+      case Some((checkpoint, exec)) if checkpoint.status == CheckpointStatus.Suspended =>
+        AgentRun.status(runtime.suspendedResult(loop.graph, exec), isBlock = false, loop).map {
+          case suspended: AgentStatus.Suspended => Some(suspended.delegated)
+          case _                                => None
+        }
+      case _ => Right(None)
+    }
 
   /**
    * Starts a turn on `threadId` as [[run]] does, returning at once with the running turn - to
@@ -291,10 +332,12 @@ final class Agent private[agent] (
     config: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
-    val (observer, scope) = observed(config, listening)
-    runtime
-      .resume(threadId, loop.graph, answers, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain))
+    routed(threadId, answers, config).flatMap { grouped =>
+      val (observer, scope) = observed(config, listening)
+      runtime
+        .resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
+        .map(agentRun(_, Some(scope), listening.drain))
+    }
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An

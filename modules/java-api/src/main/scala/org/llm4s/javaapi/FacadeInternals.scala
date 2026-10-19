@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentResult, AgentStatus }
+import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
@@ -112,18 +113,33 @@ private[llm4s] object FacadeInternals {
 
   /**
    * The interrupts `status` waits for: a `Suspended` turn's approvals, then its tool questions, its middleware
-   * questions and its breakpoints, each in the order the turn lists them; none for any other status. An
+   * questions, its breakpoints and its subagents' interrupts (each as its kind in the child, under its composite id),
+   * each in the order the turn lists them; none for any other status. An
    * unmodifiable `java.util.List`.
    */
   def pending(status: AgentStatus): java.util.List[PendingInterrupt] = status match {
-    case AgentStatus.Suspended(approvals, questions, asked, breakpoints) =>
+    case AgentStatus.Suspended(approvals, questions, asked, breakpoints, delegated) =>
       val all = approvals.map((id, request) => approval(id, request)) ++
         questions.map((id, request) => question(id, request)) ++
         asked.map((id, request) => middlewareQuestion(id, request)) ++
-        breakpoints.map((id, request) => breakpoint(id, request))
+        breakpoints.map((id, request) => breakpoint(id, request)) ++
+        delegated.map((id, request) => delegatedInterrupt(id, request))
       java.util.List.copyOf(all.asJava)
     case _ => none
   }
+
+  /**
+   * A subagent's interrupt (design 4.46), as the kind of interrupt it is in the child, under its composite id: answered
+   * by that id with the same `Answer` helpers.
+   */
+  private def delegatedInterrupt(id: InterruptId, request: DelegatedRequest): PendingInterrupt =
+    request.request match {
+      case ChildInterrupt.Approval(_, r)           => approval(id, r)
+      case ChildInterrupt.Question(_, r)           => question(id, r)
+      case ChildInterrupt.MiddlewareQuestion(_, r) => middlewareQuestion(id, r)
+      case ChildInterrupt.Breakpoint(_, r)         => breakpoint(id, r)
+      case ChildInterrupt.Delegated(_, nested)     => delegatedInterrupt(id, nested)
+    }
 
   private def approval(id: InterruptId, request: ApprovalRequest): PendingInterrupt =
     interrupt(id, InterruptKind.APPROVAL, Some(request.call), Option(request.reason), None, None)

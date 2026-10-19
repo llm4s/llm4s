@@ -1,6 +1,6 @@
 package org.llm4s.agent.testkit
 
-import org.llm4s.agent.{ Agent, AgentBuilder }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
 import org.llm4s.agent.delegation.{ ChildFailure, TaskRequest, TypedAgent }
 import org.llm4s.agent.graph.{ Checkpointer, CheckpointStatus, GraphRuntime, ThreadId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, PermissionMiddleware, PermissionRule }
@@ -39,7 +39,7 @@ import scala.jdk.CollectionConverters.*
  * |---------------------------|--------------------------------------------|
  * | none                      | starts the child                           |
  * | `Running`                 | continues the child from its checkpoint    |
- * | `Suspended`               | reports the child suspended again          |
+ * | `Suspended`               | surfaces the child's interrupts again      |
  * | `Completed` or `Failed`   | returns the outcome there, with no run     |
  *
  * Mix it into a spec and give it a fresh store per case:
@@ -140,11 +140,12 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     client.callsTo(WorkerPrompt) shouldBe 1
   }
 
-  "DelegationContract: a call whose child is Suspended" should "report it suspended again, leaving it suspended, with no child run" in {
+  "DelegationContract: a call whose child is Suspended" should "surface its interrupts again, with no child run, and resume it through the parent" in {
     val store = newCheckpointer()
     val client = Routing(leadRoute.orElse {
-      case m if isWorker(m) =>
+      case m if isWorker(m) && results(m).isEmpty =>
         Right(calling(ToolCall("p1", "probe", ujson.Obj("text" -> "x"))))
+      case m if isWorker(m) => Right(text("probed"))
     })
     val probe = AgentTool(textSpec("probe"))((_, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str("probed"))))
     val asking = worker
@@ -155,9 +156,16 @@ trait DelegationContract extends AnyFlatSpecLike with Matchers with EitherValues
     agent.run(parent, "go").isLeft shouldBe true
     agent.children(parent).value.loneElement.status shouldBe CheckpointStatus.Suspended
 
-    agent.recover(parent).value.answer.value should include("suspended")
+    val surfaced = agent.recover(parent).value
     client.callsTo(WorkerPrompt) shouldBe 1
     agent.children(parent).value.loneElement.status shouldBe CheckpointStatus.Suspended
+    val pending = surfaced.status match
+      case suspended: AgentStatus.Suspended => suspended.delegated.loneElement._1
+      case other                            => fail(s"expected the parent suspended, got $other")
+
+    agent.resume(parent, Map(surfaced.approve(pending))).value.answer.value shouldBe "lead read: probed"
+    client.callsTo(WorkerPrompt) shouldBe 2
+    agent.children(parent).value.loneElement.status shouldBe CheckpointStatus.Completed
   }
 
 object DelegationContract:

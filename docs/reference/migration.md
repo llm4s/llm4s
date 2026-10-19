@@ -75,6 +75,14 @@ The runner that delegated calls use to run a child is internal ([design 4.42](ht
 - **A tool call's own model usage is counted.** The usage a tool call's task records (a tool that calls a model through its context, or a delegated child's roll-up) now commits to the thread's `usage` with the call's result, so `AgentResult.usage` can be higher than before for agents with such tools.
 - **The state key ids `delegation-prior-usage`, `delegation-input` and `delegation-counted` are reserved.** Every agent graph registers them; a tool or middleware declaring a key with one of these ids is refused at `build()`.
 
+### Child suspension through the parent (#2050)
+
+A child that stops for an approval or a question now suspends its parent ([design 4.46](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md)):
+
+- **`AgentStatus.Suspended` has a fifth field, `delegated`** (default empty): a subagent's interrupts, under composite ids `<parent>~<child>`. A positional pattern `case AgentStatus.Suspended(a, q, m, b)` needs a fifth binder, `case AgentStatus.Suspended(a, q, m, b, _)`; one matching by type (`case s: AgentStatus.Suspended`) is unchanged. Answer a delegated interrupt with the usual helpers by its composite id. In Java and Kotlin, `pending` lists each one as its kind in the child, under the composite id.
+- **A suspended child is no longer a tool error.** Code that waited for the parent model to see `subagent '<id>' suspended` now gets the parent `Suspended` instead, and must answer or abandon it.
+- **`ToolLoop.questions` no longer lists a `task` call waiting on its child**; `ToolLoop.delegatedQuestions` does.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

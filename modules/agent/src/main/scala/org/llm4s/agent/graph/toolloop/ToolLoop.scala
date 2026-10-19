@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.{ AgentId, AgentNode }
-import org.llm4s.agent.delegation.{ CountedUpdate, DelegationKeys }
+import org.llm4s.agent.delegation.{ CountedUpdate, DelegatedQuestion, DelegationKeys }
 import org.llm4s.agent.events
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
@@ -425,6 +425,7 @@ final class ToolLoop private (
   approval: ResumeRef[ApprovalRequest, ApprovalDecision],
   approvalNodes: Set[NodeId],
   askNodes: Set[NodeId],
+  delegationNodes: Set[NodeId],
   askedNodes: Set[NodeId],
   callToolNodes: Set[NodeId],
   continuations: Map[(AgentId, AgentNode), Set[NodeId]]
@@ -451,9 +452,19 @@ final class ToolLoop private (
   def requests(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ApprovalRequest)]] =
     pending[ApprovalRequest](suspended, approvalNodes.contains)
 
-  /** The tool questions a suspended run is waiting on; read each one's question with [[ToolLoop.question]]. */
+  /**
+   * The tool questions a suspended run is waiting on; read each one's question with [[ToolLoop.question]]. A `task`
+   * call waiting on its suspended child is not one of them: see [[delegatedQuestions]].
+   */
   def questions(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ToolQuestionRequest)]] =
-    pending[ToolQuestionRequest](suspended, askNodes.contains)
+    pending[ToolQuestionRequest](suspended, node => askNodes.contains(node) && !delegationNodes.contains(node))
+
+  /**
+   * The `task` calls a suspended run is waiting on because their children suspended (design 4.46): each one's question
+   * is an `org.llm4s.agent.delegation.DelegatedQuestion`.
+   */
+  def delegatedQuestions(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ToolQuestionRequest)]] =
+    pending[ToolQuestionRequest](suspended, delegationNodes.contains)
 
   /**
    * The middleware questions a suspended run is waiting on; read each one's question with
@@ -1197,6 +1208,12 @@ object ToolLoop:
           agents(root).approval,
           all.map(_.approval.node.id).toSet,
           all.flatMap(_.askRefs.values.map(_.node.id)).toSet,
+          all
+            .flatMap { owner =>
+              owner.asking.filter(t => DelegatedQuestion.asks(t.spec)).flatMap(t => owner.askRefs.get(t.spec.name))
+            }
+            .map(_.node.id)
+            .toSet,
           all.flatMap(_.askedRefs.values.map(_.ref.node.id)).toSet,
           all.map(_.callTool.id).toSet,
           continuations

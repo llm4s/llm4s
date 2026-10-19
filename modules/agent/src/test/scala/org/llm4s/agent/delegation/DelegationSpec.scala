@@ -343,7 +343,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     agent.children(ThreadId("t1")).value should have size 1
   }
 
-  "a suspended child" should "be reported to the parent model as an error, the child left suspended" in {
+  "a suspended child" should "suspend the parent with the child's interrupt delegated, the child left suspended" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
@@ -357,7 +357,11 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     val agent  = lead(client).withSubagents(asking).build().value
     val result = agent.run(ThreadId("t1"), "go").value
 
-    result.answer.value should include("suspended")
+    result.status match
+      case suspended: org.llm4s.agent.AgentStatus.Suspended =>
+        suspended.delegated.loneElement._2.request.id shouldBe a[org.llm4s.agent.graph.InterruptId]
+        suspended.questions shouldBe empty
+      case other => fail(s"expected Suspended, got $other")
     agent.children(ThreadId("t1")).value.loneElement.status.toString shouldBe "Suspended"
   }
 
@@ -642,7 +646,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       defined
   }
 
-  "a suspended child" should "have its usage counted in the parent, the call committing its error" in {
+  "a suspended child" should "leave its usage in the child thread while the parent waits (rules 10, 11)" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
@@ -654,8 +658,8 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       .withTools(ToolSet.of(echo("child_tool")).value)
       .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.ask(Operation.Invoke, "child_tool"))))
     val result = lead(client).withSubagents(asking).build().value.run(ThreadId("t1"), "go").value
-    result.answer.value should include("suspended")
-    result.usage.requestCount shouldBe 3 // the lead's two calls and the child's one
+    result.answer shouldBe None
+    result.usage.requestCount shouldBe 1 // the lead's call: the child's is added once its call settles
   }
 
   it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {

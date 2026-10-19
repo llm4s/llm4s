@@ -175,8 +175,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       )
     val parked = family(Agent.builder("root", client)).run(thread, "q1").value
     val approval = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
-      case other                                     => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+      case other                                        => fail(s"expected Suspended, got $other")
     }
     val answers = Map(parked.approve(approval))
 
@@ -220,8 +220,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
       val parked =
         agent(SpecTools.spec("echo"), SpecTools.calling(SpecTools.call("c1", "echo"))).run(thread, "go").value
       parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _) => parked.approve(approvals.head._1)
-        case other                                     => fail(s"expected Suspended, got $other")
+        case AgentStatus.Suspended(approvals, _, _, _, _) => parked.approve(approvals.head._1)
+        case other                                        => fail(s"expected Suspended, got $other")
       }
     }
 
@@ -306,8 +306,8 @@ class AgentFingerprintSpec extends AnyFlatSpec with Matchers {
   }
 
   private def approveAll(parked: AgentResult) = parked.status match {
-    case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
-    case other                                   => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
+    case other                                      => fail(s"expected Suspended, got $other")
   }
 
   private def stepResults(result: AgentResult) = result.messages.collect { case t: ToolMessage => t.content }.toVector

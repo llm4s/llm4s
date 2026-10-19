@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
   matches and `RunBudgets` patterns break; [migration](docs/reference/migration.md#token-budgets-and-the-runs-deadline-2047).
+- `AgentStatus.Suspended` gains a fifth field, `delegated`: positional patterns need another binder; [migration](docs/reference/migration.md#child-suspension-through-the-parent-2050).
 
 ### Agent subagents (Phase 4)
 
@@ -31,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held to its deadline (`RunContext.deadline`), usage rolled up once; a tool's own model calls now count in the thread's usage [#2046](https://github.com/llm4s/llm4s/issues/2046); [design §4.42](docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md).
 - **Added** `TypedAgent[I, O]` subagents, offered with `AgentBuilder.withSubagents` through the `task` / `task_<id>` tools,
   run in parallel on child threads within `DelegationConfig`'s bounds [#2048](https://github.com/llm4s/llm4s/issues/2048); [design §4.44](docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md).
+- **Added** child suspension through the parent: a child's approvals and questions suspend the parent, listed in
+  `AgentStatus.Suspended.delegated` under composite ids that the answer helpers and `Agent.resume` take [#2050](https://github.com/llm4s/llm4s/issues/2050); [design §4.46](docs/design/typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md).
 
 ### Agent harness (Phase 3)
 

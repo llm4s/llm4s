@@ -147,8 +147,8 @@ class CodingWorkspaceIntegrationSpec extends AnyFlatSpec with Matchers with Eith
     } yield agent
 
   private def approvals(result: AgentResult): Map[InterruptId, ujson.Value] = result.status match {
-    case AgentStatus.Suspended(approvals, _, _, _) => approvals.map((id, _) => result.approve(id)).toMap
-    case other                                     => fail(s"not suspended: $other")
+    case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, _) => result.approve(id)).toMap
+    case other                                        => fail(s"not suspended: $other")
   }
 
   "The coding example" should "suspend at execute, resume approved in a fresh runtime, and run the command once" in {

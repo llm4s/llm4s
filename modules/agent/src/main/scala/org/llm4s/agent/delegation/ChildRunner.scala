@@ -44,7 +44,9 @@ private[agent] enum ChildEnd:
  *    committed nothing into [[DelegationKeys.priorUsage]]. A child whose claim another run holds is waited on, with
  *    backoff, for up to twice the claim's lifetime (no later than the parent's deadline), then the call returns that
  *    `ThreadBusy` as a `Left`, for the parent to fail and recover later.
- *  - `Suspended`: `Ended` with the `Suspended` status, nothing run.
+ *  - `Suspended`: `Ended` with the `Suspended` status, nothing run - unless the call is a resume with answers to
+ *    interrupts the child still waits on, which resume it ([[GraphRuntime.resumeChild]], design 4.46). Answers the
+ *    child no longer waits on were applied by an earlier attempt of the resume: the child is reattached instead.
  *  - `Completed` or `Failed`: the outcome the child's terminal checkpoint records, nothing run. A settled checkpoint
  *    without one is corrupt stored state, a `Left`.
  *
@@ -74,6 +76,8 @@ private[agent] object ChildRunner:
   /** The longest pause between attempts on a busy child. */
   val MaxBackoff: FiniteDuration = 500.millis
 
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
   /** How many events a usage scan reads at a time. */
   private val EventPage: Int = 256
 
@@ -90,7 +94,24 @@ private[agent] object ChildRunner:
     ctx: ToolContext,
     settleOnFailure: Boolean = true
   ): Result[ChildEnd] =
-    new Attempt(agent, origin, input, config, ctx, settleOnFailure).drive()
+    new Attempt(agent, origin, input, config, ctx, settleOnFailure, None).drive()
+
+  /**
+   * [[run]] for a call resumed with `answers` to its suspended child's interrupts (design 4.46): the child, read first
+   * as [[run]] reads it, is resumed with the answers it still waits on - composite ones grouped for its own `task`
+   * calls - and awaited. A child that no longer waits on any of them (an earlier attempt of this resume applied them)
+   * is reattached as [[run]] does, with no second resume. A child thread that no longer exists is a `ValidationError`.
+   */
+  def resume(
+    agent: Agent,
+    origin: RunOrigin,
+    input: AgentInput,
+    answers: DelegatedAnswers,
+    config: RunConfig,
+    ctx: ToolContext,
+    settleOnFailure: Boolean
+  ): Result[ChildEnd] =
+    new Attempt(agent, origin, input, config, ctx, settleOnFailure, Some(answers.answers)).drive()
 
   /**
    * The child's timeout: its grant, capped by what is left of the parent's deadline (`deadline`, by the runtime's
@@ -120,7 +141,8 @@ private[agent] object ChildRunner:
     input: AgentInput,
     config: RunConfig,
     ctx: ToolContext,
-    settleOnFailure: Boolean
+    settleOnFailure: Boolean,
+    answers: Option[Map[InterruptId, ujson.Value]]
   ):
     private val runtime = agent.runtime
     private val graph   = agent.loop.graph
@@ -133,6 +155,9 @@ private[agent] object ChildRunner:
      */
     private val base: RunConfig =
       agent.configured(config.withTenantId(parent.tenantId).withPrincipal(parent.principal))
+
+    /** Whether this attempt resumed the child: it resumes it at most once. */
+    private var applied = false
 
     /** Whether the latest admission's timeout was the parent's deadline rather than the grant. */
     @volatile private var parentsDeadline = false
@@ -186,6 +211,15 @@ private[agent] object ChildRunner:
     private def step(): Step =
       runtime.childAtRest(childId, graph, base) match
         case Left(error) => Step.Done(Left(error))
+        case Right(None) if answers.isDefined =>
+          Step.Done(
+            Left(
+              ValidationError(
+                "threadId",
+                s"the child thread '${childId.value}' no longer exists, so its interrupts cannot be answered"
+              )
+            )
+          )
         case Right(None) =>
           admitted(
             runtime.startChild(
@@ -226,13 +260,49 @@ private[agent] object ChildRunner:
                 runtime.recoverChild(childId, graph, fresh(), amend = foldLostUsage, notAfter = ctx.run.deadline)
               )
             case CheckpointStatus.Suspended =>
-              Step.Done(
-                AgentRun
-                  .status(runtime.suspendedResult(graph, exec), isBlock = false, agent.loop)
-                  .flatMap(status => rebuilt(checkpoint, exec, status))
-                  .flatMap(result => usage().map(ChildEnd.Ended(result, _)))
-              )
+              answering(exec) match
+                case Some(pending) => resumed(pending)
+                case None =>
+                  Step.Done(
+                    AgentRun
+                      .status(runtime.suspendedResult(graph, exec), isBlock = false, agent.loop)
+                      .flatMap(status => rebuilt(checkpoint, exec, status))
+                      .flatMap(result => usage().map(ChildEnd.Ended(result, _)))
+                  )
             case CheckpointStatus.Completed | CheckpointStatus.Failed => Step.Done(settled(checkpoint, exec))
+
+    /**
+     * The answers this resume gives the suspended child `exec` (design 4.46): composite ones grouped for its own `task`
+     * calls, kept only for interrupts it still waits on. `None` once this attempt resumed it, for a call that is not a
+     * resume, when none is still pending - an earlier attempt applied them - or when they do not group.
+     */
+    private def answering(exec: Execution): Option[Map[InterruptId, ujson.Value]] =
+      if applied then None
+      else
+        answers.flatMap { all =>
+          val parked = runtime.suspendedResult(graph, exec) match
+            case suspended: RunResult.Suspended => suspended.interrupts.map(_.id).toSet
+            case _                              => Set.empty[InterruptId]
+          DelegatedAnswers.group(all).toOption.map(_.filter((id, _) => parked.contains(id))).filter(_.nonEmpty)
+        }
+
+    /**
+     * What resuming the child with `pending` calls for: its run awaited; for answers the child refuses, the child read
+     * again and its interrupts surfaced again, with a warning; any other refusal as [[admitted]] takes it.
+     */
+    private def resumed(pending: Map[InterruptId, ujson.Value]): Step =
+      runtime.resumeChild(childId, graph, pending, fresh(), notAfter = ctx.run.deadline) match
+        case handle @ Right(_) =>
+          applied = true
+          admitted(handle)
+        case Left(invalid: GraphError.InvalidResume) =>
+          applied = true
+          logger.warn(
+            s"The child thread ${childId.value} refused the answers given through its parent: " +
+              s"${invalid.problems.mkString("; ")}; its interrupts are asked again"
+          )
+          Step.Again
+        case refused => admitted(refused)
 
     /**
      * Adds the child's roll-up to the calling task's accumulator, unless the thread's committed state shows it counted
@@ -265,7 +335,7 @@ private[agent] object ChildRunner:
       // another runtime started it, settled it, or moved it on between the read and the admission
       case Left(
             _: GraphError.ThreadExists | _: GraphError.NothingToRecover | _: GraphError.IncompleteRun |
-            _: GraphError.PendingInterrupts
+            _: GraphError.PendingInterrupts | _: GraphError.NotSuspended
           ) =>
         Step.Again
       case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)

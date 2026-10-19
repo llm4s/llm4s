@@ -60,8 +60,9 @@ enum TaskOutcome[+O]:
   case Refused(child: ChildRef, reason: TaskRefusal, usage: UsageSummary)
 
   /**
-   * The child is waiting for approvals or answers, `status`. Until child suspension is surfaced through the parent
-   * (#2050), the `task` tools report it to the parent model as an error and leave the child suspended.
+   * The child is waiting for approvals or answers, `status`. Through a `task` call, the parent suspends too, listing
+   * the child's interrupts in its own `AgentStatus.Suspended.delegated`, and resuming the parent resumes the child
+   * (design 4.46).
    */
   case Suspended(child: ChildRef, status: AgentStatus.Suspended)
 

@@ -634,8 +634,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val thread  = ThreadId(s"approved-after-child-$rerun")
       val parked  = parent.run(thread, "go").ok
       val id = parked.status match {
-        case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
-        case other                                     => fail(s"unexpected $other")
+        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+        case other                                        => fail(s"unexpected $other")
       }
       val done = parent.resume(thread, Map(parked.approve(id))).ok
       done.answer shouldBe Some("composed")
@@ -653,8 +653,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val thread  = ThreadId("edited-after-child")
     val parked  = parent.run(thread, "go").ok
     val id = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
-      case other                                     => fail(s"unexpected $other")
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+      case other                                        => fail(s"unexpected $other")
     }
     parent.resume(thread, Map(parked.edit(id, ujson.Obj("text" -> "another task")))).isLeft shouldBe true
     setup.allEnds.last.left.toOption.get.message should include("started with other input")

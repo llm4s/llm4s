@@ -252,8 +252,8 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
         .withMiddleware(new PermissionMiddleware(rules))
     )
     def approvals(result: AgentResult) = result.status match {
-      case AgentStatus.Suspended(pending, _, _, _) => pending.map(_._1)
-      case other                                   => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(_._1)
+      case other                                      => fail(s"expected Suspended, got $other")
     }
 
     // c1 asks; c2 and c3 wait behind it in the queue
@@ -312,8 +312,8 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
   }
 
   private def approvalOf(result: AgentResult) = result.status match {
-    case AgentStatus.Suspended(pending, _, _, _) => pending.map(_._1).head
-    case other                                   => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(_._1).head
+    case other                                      => fail(s"expected Suspended, got $other")
   }
 
   private def editRules = Seq(
@@ -466,8 +466,8 @@ class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
         .withMiddleware(new PermissionMiddleware(rules), blocking)
     )
     def approvals(result: AgentResult) = result.status match {
-      case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => result.approve(p._1)).toMap
-      case other                                   => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(p => result.approve(p._1)).toMap
+      case other                                      => fail(s"expected Suspended, got $other")
     }
     val thread = ThreadId("blocked-batch")
 

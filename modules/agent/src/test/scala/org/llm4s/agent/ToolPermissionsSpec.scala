@@ -40,8 +40,8 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
     result.messages.collect { case t: ToolMessage => t.content }.toVector
 
   private def approvalsOf(result: AgentResult): Vector[InterruptId] = result.status match {
-    case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
-    case other                                     => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map(_._1)
+    case other                                        => fail(s"expected Suspended, got $other")
   }
 
   "A call" should "run when its resource is allowed and be denied, unrun, when a rule denies it" in {
@@ -190,8 +190,8 @@ class ToolPermissionsSpec extends AnyFlatSpec with Matchers {
   }
 
   private def questionOf(result: AgentResult) = result.status match {
-    case AgentStatus.Suspended(_, questions, _, _) => questions.head._1
-    case other                                     => fail(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(_, questions, _, _, _) => questions.head._1
+    case other                                        => fail(s"expected Suspended, got $other")
   }
 
   "An asking tool" should "be checked on its declared envelope before it asks, and again when it resumes" in {

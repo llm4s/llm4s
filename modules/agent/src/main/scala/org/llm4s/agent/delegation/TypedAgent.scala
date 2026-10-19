@@ -226,31 +226,34 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
         Left(error)
 
   /**
-   * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner: the outcome, and
-   * for a failed child its error, which `ChildFailure.Fail` fails the parent with.
+   * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner - or, with
+   * `answers`, resumes its suspended child with them (design 4.46): the outcome, and for a failed child its error,
+   * which `ChildFailure.Fail` fails the parent with. A suspended child's roll-up is left for the call's run that
+   * settles it (rules 10, 11).
    */
   private[delegation] def delegated(
     input: I,
     origin: RunOrigin,
     config: RunConfig,
-    ctx: ToolContext
+    ctx: ToolContext,
+    answers: Option[DelegatedAnswers] = None
   ): Result[(TaskOutcome[O], Option[LLMError])] =
     val threadId = ThreadId.child(origin.parent, origin.agent, origin.call)
     val ref      = ChildRef(threadId, config.runId, agent.id, ctx.toolCallId, origin.depth)
     val settle   = definition.failure == ChildFailure.Report
-    ChildRunner.run(agent, origin, AgentInput(definition.rendered(input)), config, ctx, settleOnFailure = settle).map {
-      case ChildEnd.Ended(result, usage) =>
-        // a suspended child is reported as the call's tool error until D3, so the call commits now and never runs
-        // again: its roll-up, which the runner leaves for the resumed call, is counted here, once (rules 10, 11)
-        if result.status.isInstanceOf[AgentStatus.Suspended] &&
-          !ctx.state.get(DelegationKeys.counted).toOption.exists(_.contains(threadId.value))
-        then ctx.run.usage.merge(usage, threadId)
-        outcome(result, ref.copy(runId = result.runId)) -> None
-      case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
-        TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
-      case ChildEnd.Failed(error, usage) =>
-        TaskOutcome.Refused(ref, TaskRefusal.Failed(error.message), usage) -> Some(error)
-    }
+    val query    = AgentInput(definition.rendered(input))
+    answers
+      .fold(ChildRunner.run(agent, origin, query, config, ctx, settleOnFailure = settle))(answered =>
+        ChildRunner.resume(agent, origin, query, answered, config, ctx, settleOnFailure = settle)
+      )
+      .map {
+        case ChildEnd.Ended(result, _) =>
+          outcome(result, ref.copy(runId = result.runId)) -> None
+        case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
+          TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
+        case ChildEnd.Failed(error, usage) =>
+          TaskOutcome.Refused(ref, TaskRefusal.Failed(error.message), usage) -> Some(error)
+      }
 
   private def outcome(result: AgentResult, ref: ChildRef): TaskOutcome[O] =
     result.status match

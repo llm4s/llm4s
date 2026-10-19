@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalDecision,
@@ -46,12 +47,18 @@ enum AgentStatus:
    * [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
    * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay
    * pending.
+   *
+   * `delegated` lists the interrupts of suspended subagents (design 4.46), flattened: each child interrupt under the
+   * composite id `<parent interrupt>~<child interrupt>` (a grandchild's `p~c~g`), with the child run that waits. The
+   * same helpers answer them by that id, encoding the answer the child expects, and [[Agent.resume]] routes each to
+   * its child through the parent. A `task` call waiting on its child is listed only here, never in `questions`.
    */
   case Suspended(
     approvals: Vector[(InterruptId, ApprovalRequest)],
     questions: Vector[(InterruptId, ToolQuestionRequest)],
     middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)] = Vector.empty,
-    breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty
+    breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty,
+    delegated: Vector[(InterruptId, DelegatedRequest)] = Vector.empty
   )
 
 /**

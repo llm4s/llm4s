@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.{ DelegatedQuestion, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
@@ -246,10 +247,26 @@ private[agent] object AgentRun:
           questions   <- loop.questions(suspended)
           middleware  <- loop.middlewareQuestions(suspended)
           breakpoints <- loop.breakpoints(suspended)
-        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints)
+          delegated   <- delegatedOf(loop, suspended)
+        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints, delegated)
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
         Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
       case RunResult.Failed(_, error) => Left(error)
+
+  /**
+   * The interrupts of the children `suspended`'s `task` calls wait on, flattened under composite ids (design 4.46).
+   */
+  private def delegatedOf(
+    loop: ToolLoop,
+    suspended: RunResult.Suspended
+  ): Result[Vector[(InterruptId, DelegatedRequest)]] =
+    loop.delegatedQuestions(suspended).flatMap { asks =>
+      asks.foldLeft[Result[Vector[(InterruptId, DelegatedRequest)]]](Right(Vector.empty)) { case (acc, (id, request)) =>
+        acc.flatMap(found =>
+          ToolLoop.question[DelegatedQuestion](request).map(q => found ++ DelegatedQuestion.flatten(id, q))
+        )
+      }
+    }
 
   /**
    * The status of a settled turn, rebuilt from the thread alone (design 4.41): `outcome`, recorded on the turn's

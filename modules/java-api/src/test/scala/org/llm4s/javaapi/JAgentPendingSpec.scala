@@ -133,6 +133,27 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     question.questionJson() shouldBe java.util.Optional.empty()
   }
 
+  it should "list a subagent's interrupts as their kind in the child, under their composite ids (#2050)" in {
+    import org.llm4s.agent.delegation.{ ChildInterrupt, ChildRef, DelegatedRequest }
+    import org.llm4s.agent.graph.{ RunId, ThreadId, ToolCallId }
+    val c = call("k1", "probe", "x")
+    val child =
+      ChildRef(ThreadId("t1/child"), RunId("r1"), org.llm4s.agent.AgentId.unsafe("worker"), ToolCallId("c1"), 1)
+    val request =
+      ApprovalRequest("m1", c, "check", ApprovalSource.Tool, IdempotencyKey("k1"))
+    val status = AgentStatus.Suspended(
+      Vector.empty,
+      Vector.empty,
+      delegated = Vector(
+        InterruptId("1.0~2.0") -> DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("2.0"), request))
+      )
+    )
+    val List(p) = FacadeInternals.pending(status).asScala.toList: @unchecked
+    p.id shouldBe "1.0~2.0"
+    p.kind shouldBe InterruptKind.APPROVAL
+    p.reason() shouldBe java.util.Optional.of("check")
+  }
+
   "InterruptKind" should "be a Java enum" in {
     classOf[InterruptKind].isEnum shouldBe true
     InterruptKind.valueOf("QUESTION") shouldBe InterruptKind.QUESTION
