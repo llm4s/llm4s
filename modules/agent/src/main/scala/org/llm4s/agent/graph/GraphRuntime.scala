@@ -3583,7 +3583,7 @@ final class GraphRuntime(
       // a child's start, fenced as progress is, and remembered for a nested subscriber attaching mid-child (#2074)
       override def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
         hub.childStarted(threadId, child, liveEvent(name, version, payload), () => !claimWasLost)
-      override def childEnded(child: ThreadId): Unit = hub.childEnded(threadId, child)
+      override def childEnded(child: ThreadId): Unit = hub.childEnded(threadId, child, token)
       private def liveEvent(name: String, version: Int, payload: ujson.Value): StreamEvent.Live =
         StreamEvent.Live(
           threadId.value,

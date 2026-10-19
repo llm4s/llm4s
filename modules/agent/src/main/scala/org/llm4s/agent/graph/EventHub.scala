@@ -542,10 +542,18 @@ final private[graph] class EventHub(
         running = running.updated(threadId.value, children)
     }
 
-  /** The call that ran `child` on the thread has ended: a nested subscription made from now on is not told of it. */
-  def childEnded(threadId: ThreadId, child: ThreadId): Unit =
+  /**
+   * The call that ran `child` on the thread, in the run of the claim `token`, has ended: a nested subscription made from
+   * now on is not told of it. Only that run's entry goes: a stale task of a lost run that returns late never removes a
+   * successor run's announcement of the same child.
+   */
+  def childEnded(threadId: ThreadId, child: ThreadId, token: FencingToken): Unit =
     withLock(hubLock) {
-      running = running.updatedWith(threadId.value)(_.map(_ - child.value).filter(_.nonEmpty))
+      running = running.updatedWith(threadId.value)(
+        _.map(children =>
+          if children.get(child.value).exists(_._1.token == token) then children - child.value else children
+        ).filter(_.nonEmpty)
+      )
     }
 
   /** Joins the live set; the caller holds `hubLock`. */
