@@ -357,8 +357,8 @@ final private[agent] class TaskUsage:
    * call's replay, which reattaches the child, adds it then.
    */
   def merge(other: UsageSummary, child: ThreadId): Unit =
-    delegated.updateAndGet(_.merge(other)): Unit
-    children.updateAndGet(_ + child.value): Unit
+    // once per child per task: a wrapper may run the call - and so reattach the child - more than once
+    if !children.getAndUpdate(_ + child.value).contains(child.value) then delegated.updateAndGet(_.merge(other)): Unit
 
   /** The child threads whose roll-ups [[merge]] added. */
   private val children = new AtomicReference(Set.empty[String])

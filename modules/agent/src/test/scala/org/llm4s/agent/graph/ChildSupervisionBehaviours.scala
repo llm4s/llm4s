@@ -661,6 +661,24 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     setup.childClient.callCount shouldBe 1
   }
 
+  it should "be counted once when a wrapper runs the call twice" in {
+    val open = storage()
+    val twice = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("twice")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome = {
+        next(): Unit
+        next()
+      }
+    }
+    val setup = new Setup(delegating(), answers("report"), parentMiddleware = Seq(twice))
+    val done  = family(new GraphRuntime(open()), setup)._1.run(ThreadId("run-twice"), "go").ok
+    done.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 1
+    tokens(done.usage) shouldBe ((3L, 30L, 60L))
+  }
+
   behavior.of("A child thread")
 
   it should "keep at least its newest event, whatever retention it inherits" in {
