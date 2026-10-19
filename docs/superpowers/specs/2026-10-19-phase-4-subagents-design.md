@@ -166,7 +166,9 @@ applies. This is how delegation meets the thirteen:
     - task calls per turn (`maxTasksPerTurn`)
     - depth (`maxDepth`)
     - report size (`maxReportBytes`)
-    - child threads kept per parent (`childRetention`)
+    - child threads kept per parent (`childRetention`). A pruned child leaves the store's ordinary tombstone (its
+      next event number, a few bytes), kept for good as every deleted thread's is (`Checkpointer.deleteThread`);
+      bounding tombstones is a store-wide retention question for Stage 5 (#2059), not a delegation rule
     - each child's steps, time and tokens (D2)
     - nested live events per subscription (the subscription's own queue, `LiveGap` on overflow)
 13. **Every named type exists or is defined where it is introduced.** As before.
@@ -566,7 +568,8 @@ Tests:
     `TaskRefusal.StepLimitReached` or `TokenLimitReached`, which carries no `ChildRef`, creates no child thread, and never builds a
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
   - **A child's grant is whole-life.** A recovered child's limits are its grant less what its earlier attempts
-    used: its `usage` key plus `priorUsage.total` (K2) for tokens, and its committed model steps for steps, so
+    used: its `usage` key plus `priorUsage.total` (K2) for tokens, its committed model steps for steps, and for
+    time a deadline of `RunOrigin.startedAt + granted timeout` (capped by the parent's), never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
     run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
     (`settleChild`) and returns that refusal without running it.
