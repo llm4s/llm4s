@@ -591,6 +591,62 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(parent.token, events = Vector(s.event("y")), on = above).value.map(_.seq) shouldBe Vector(2L)
   }
 
+  it should "refuse a fenced commit once the fence thread's claim is taken over, writing nothing (#2071)" in {
+    val s      = Store()
+    val parent = newThread()
+    val child  = ThreadId(s"${parent.value}/~task/worker/1")
+    // the parent's run admits a child: the parent claimed, then the child under a claim of its own
+    val first = s.claim("parent", parent).value
+    // the parent's claim lapses and a successor takes it over: the stale task's fence is stale
+    s.advance(ttl)
+    val successor = s.claim("successor", parent).value
+    val token     = s.claim("child", child).value.token
+    val firstCommit =
+      Commit(token, Some(s.checkpoint("k1", None, on = child).withOrigin(Some(originOf(parent, 1)))))
+        .withPendingWrites(Vector(s.write("k1", "0.0")))
+        .withEvents(Vector(s.event("a")))
+    s.store.commit(child, firstCommit.withFence(parent -> first.token)).refused shouldBe
+      GraphError.StaleClaim(parent.value, first.token, Some(successor.token))
+    // a fence on a thread with no claim at all, an unknown one included, is refused too
+    s.store.commit(child, firstCommit.withFence(newThread() -> first.token)).refused shouldBe a[GraphError.StaleClaim]
+    // nothing was written: no checkpoint, no event, and the parent lists no child
+    s.store.latest(child).value shouldBe None
+    s.seqs(child) shouldBe empty
+    s.store.children(parent, None, 10).value shouldBe empty
+    // the thread's own claim is checked first: a stale own token names the thread, whatever the fence
+    s.store
+      .commit(child, firstCommit.withToken(FencingToken(token.value - 1)).withFence(parent -> successor.token))
+      .refused shouldBe GraphError.StaleClaim(child.value, FencingToken(token.value - 1), Some(token))
+    // the child's own claim is untouched: the same commit unfenced still lands, numbered from 1
+    s.store.commit(child, firstCommit).value.map(_.seq) shouldBe Vector(1L)
+  }
+
+  it should "commit under a fence that is the fence thread's current claim, leaving the fence thread alone (#2071)" in {
+    val s      = Store()
+    val parent = newThread()
+    val child  = ThreadId(s"${parent.value}/~task/worker/1")
+    val held   = s.claim("parent", parent).value
+    s.commit(held.token, Some(s.checkpoint("p1", None, on = parent)), events = Vector(s.event("x")), on = parent).value
+    val token = s.claim("child", child).value.token
+
+    s.store
+      .commit(
+        child,
+        Commit(token, Some(s.checkpoint("k1", None, on = child).withOrigin(Some(originOf(parent, 1)))))
+          .withEvents(Vector(s.event("a")))
+          .withFence(parent -> held.token)
+      )
+      .value
+      .map(_.seq) shouldBe Vector(1L)
+
+    s.latestId(child) shouldBe Some("k1")
+    s.store.children(parent, None, 10).value.map(_.threadId) shouldBe Vector(child)
+    // the fence thread keeps its data and its claim
+    s.latestId(parent) shouldBe Some("p1")
+    s.store.renew(parent, held.token, ttl).value.token shouldBe held.token
+    s.commit(held.token, events = Vector(s.event("y")), on = parent).value.map(_.seq) shouldBe Vector(2L)
+  }
+
   it should "number a new thread of a deleted thread's id past the deleted thread's events, across a reopen" in {
     val s     = Store()
     val token = s.claim("run").value.token

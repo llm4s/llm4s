@@ -360,12 +360,45 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
       val listed = store.children(of, after, limit)
       if of == parent && armed("children") then takeOver()
       listed
+    override def commit(threadId: ThreadId, commit: Commit) =
+      // between the parent run's last check of its claim and its child's first commit, which writes the origin (#2071)
+      if threadId != parent && commit.checkpoint.exists(_.origin.isDefined) && armed("first-commit") then takeOver()
+      store.commit(threadId, commit)
     override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
       // between the runtime's last check of the claim above and the store's delete (#2063)
       if threadId != parent && armed("before-delete") then takeOver()
       val deleted = store.deleteThread(threadId, token, fence)
       if threadId != parent && armed("delete") then takeOver()
       deleted
+  }
+
+  it should "register no child when the parent is taken over before the child's first commit (#2071)" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("taken-before-admission")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    // the parent's run, as the child runner admits its children: holding the parent's claim
+    val held = taking.claim(parent, ClaimRequest(RunId("parent-run"), None, 1.minute)).value
+    // under the parent's current claim, the fenced first commit lands
+    val kept = childOf(parent, 1)
+    runtime
+      .startChild(kept, graph, "go", origin(parent, 1), RunConfig(), parentClaim = Some(held.token))
+      .awaited
+      .value
+      .completed
+    taking.armed = _ == "first-commit"
+    val late = childOf(parent, 2)
+
+    runtime.startChild(late, graph, "go", origin(parent, 2), RunConfig(), parentClaim = Some(held.token)) match
+      case Left(lost: GraphError.ClaimLost) => lost.threadId shouldBe parent.value
+      case other                            => fail(s"expected ClaimLost on the parent, got $other")
+
+    taking.takenOver shouldBe true
+    store.latest(late).value shouldBe None
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(kept)
+    // the refused child's own claim was given back, not taken for lost
+    store.claim(late, ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
   }
 
   it should "delete nothing when the parent is taken over between the fence's check and a delete (#2063)" in {

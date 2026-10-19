@@ -633,7 +633,10 @@ the contract. In short:
   `takenOverFrom` empty. A claim whose tenant the store cannot tell - stored before it recorded tenants - is of no
   tenant;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
-- apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
+- apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first).
+  With a `Commit.fence` of `(other, otherToken)`, apply it only if `otherToken` is also `other`'s current claim, in
+  that same lock or transaction, the thread's own claim checked first (`StaleClaim` for `other` otherwise, writing
+  nothing);
 - delete a thread only with the current claim's token, checked in the same lock or transaction as the delete
   (`StaleClaim` otherwise, deleting nothing); a thread with no claim is refused too. With a `fence` of
   `(other, otherToken)`, delete only if `otherToken` is also `other`'s current claim, in that same lock or
@@ -687,7 +690,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
     MyCheckpointer.open(freshDatabase(), clock)
 ```
 
-It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread` (fenced by
+It runs every case against your store: commits (also fenced by another thread's claim), conflicts, event numbering, compaction, `deleteThread` (fenced by
 the current token and by the fence thread's, and a recreated thread numbered on past the deleted one, whose log a reader cannot continue), round
 trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
 count), claims and fencing (also from many threads at once), each claim's tenant (a holder named only to a claim of

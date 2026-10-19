@@ -22,7 +22,8 @@ import scala.util.{ Try, Using }
  *
  *  - '''Atomic, fenced commits.''' Every call that writes is one `BEGIN IMMEDIATE` transaction: a `Commit`'s
  *    checkpoint, pending writes and events land together or not at all, and the claim's token and the thread's
- *    version are checked inside the same transaction, so two stores over one file cannot both pass the checks.
+ *    version are checked inside the same transaction, so two stores over one file cannot both pass the checks; so is
+ *    a `Commit.fence`'s claim on another thread.
  *  - '''Claims expire by `clock`''', the clock this store was opened with: the clock of the process that grants or
  *    renews a claim decides when it lapses. Stores in processes on different hosts sharing one file therefore
  *    judge expiry by different clocks, and skew between them changes a claim's effective `ttl` (see
@@ -133,9 +134,13 @@ final class SqliteCheckpointer private (
   def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
     val current  = readRow(c, threadId)
     val latestId = current.flatMap(_.checkpointId)
-    val fenced = Option.when(!current.flatMap(_.claim).exists(_.token == commit.token.value))(
-      stale(threadId, current, commit.token)
-    )
+    // the thread's own claim first, then the fence's, both in the transaction the commit is made in
+    val fenced = Option
+      .when(!current.flatMap(_.claim).exists(_.token == commit.token.value))(stale(threadId, current, commit.token))
+      .orElse(commit.fence.flatMap { (other, otherToken) =>
+        val above = readRow(c, other)
+        Option.when(!above.flatMap(_.claim).exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
     val conflict = commit.checkpoint.filter(_.parent != latestId).map { checkpoint =>
       GraphError.CheckpointConflict(threadId.value, checkpoint.parent, latestId)
     }

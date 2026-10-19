@@ -286,7 +286,9 @@ private[agent] object ChildRunner:
               run,
               observer = Some(observer),
               notAfter = ctx.run.deadline,
-              amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest)))
+              amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest))),
+              // the child is registered only while the parent run still holds its claim (#2071)
+              parentClaim = ctx.run.position.fencingToken
             ),
             events
           )

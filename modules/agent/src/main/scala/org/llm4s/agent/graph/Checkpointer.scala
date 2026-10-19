@@ -27,7 +27,8 @@ import scala.util.Try
  *  - apply a [[Commit]] entirely or not at all, and only if its token is the thread's current claim
  *    ([[GraphError.StaleClaim]] otherwise, checked first) - so a writer that lost its claim, even
  *    one whose token is the highest it has seen, records nothing after another run took over - and
- *    fence [[deleteThread]] by its token in the same way, atomically with the delete;
+ *    fence [[deleteThread]] by its token in the same way, atomically with the delete; a commit's
+ *    [[Commit.fence]] and a delete's `fence` are another thread's claim, checked in that same atomic step;
  *  - accept a new checkpoint only when its `parent` is the thread's latest checkpoint id - the
  *    thread version the writer expects ([[GraphError.CheckpointConflict]] otherwise) - and its id is
  *    not already in the thread's history, and only pending writes naming the resulting latest
@@ -141,7 +142,9 @@ trait Checkpointer:
 
   /**
    * Applies `commit` atomically, fenced by its token, and returns its events with their sequence numbers,
-   * each recording that token.
+   * each recording that token. A [[Commit.fence]] of `(other, otherToken)` fences it by `other`'s claim too, checked
+   * in the same transaction or under the same lock as the write, after the thread's own claim: otherwise
+   * `Left(GraphError.StaleClaim(other, otherToken, otherCurrent))` with nothing written.
    */
   def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]]
 
@@ -434,8 +437,13 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val current                 = record(threadId)
     val latestId                = current.latestId
     def invalid(reason: String) = GraphError.InvalidCommit(threadId.value, reason)
-    val fenced =
-      Option.when(!current.claim.exists(_.token == commit.token.value))(stale(threadId, current, commit.token))
+    // the thread's own claim first, then the fence's, both under the one lock the commit is made under
+    val fenced = Option
+      .when(!current.claim.exists(_.token == commit.token.value))(stale(threadId, current, commit.token))
+      .orElse(commit.fence.flatMap { (other, otherToken) =>
+        val above = record(other)
+        Option.when(!above.claim.exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
     val conflict = commit.checkpoint.filter(_.parent != latestId).map { checkpoint =>
       GraphError.CheckpointConflict(threadId.value, checkpoint.parent, latestId)
     }

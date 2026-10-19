@@ -282,6 +282,12 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *    record for which [[releasesEffect]] holds, so replay evidence lives exactly as long as its task can
  *    run again (design §4.24). The runtime writes each record of a [[ReplayGuard]] as a commit of its
  *    own, with no checkpoint, pending write or event.
+ *  - `fence`, if present as `(other, otherToken)`, fences the commit by another thread's claim too: it applies only if
+ *    `otherToken` is `other`'s current claim, checked in the same atomic step as `token` and the write (one
+ *    transaction, or under one lock), and otherwise is `GraphError.StaleClaim(other, otherToken, otherCurrent)` with
+ *    nothing written - `token` checked first. The runtime fences a child thread's first commit, the one that writes
+ *    its [[Checkpoint.origin]], by the parent's claim (design 4.41), so a stale task of a parent taken over never
+ *    registers a child after a successor's cascade delete looked for children.
  */
 final case class Commit private (
   token: FencingToken,
@@ -289,15 +295,18 @@ final case class Commit private (
   pendingWrites: Vector[PendingWrite],
   events: Vector[EventDraft],
   retractTurn: Boolean,
-  effects: Vector[EffectRecord]
+  effects: Vector[EffectRecord],
+  fence: Option[(ThreadId, FencingToken)]
 ):
-  def withToken(t: FencingToken): Commit                 = copy(token = t)
-  def withCheckpoint(c: Checkpoint): Commit              = copy(checkpoint = Some(c))
-  def withCheckpoint(c: Option[Checkpoint]): Commit      = copy(checkpoint = c)
-  def withPendingWrites(w: Vector[PendingWrite]): Commit = copy(pendingWrites = w)
-  def withEvents(e: Vector[EventDraft]): Commit          = copy(events = e)
-  def withRetractTurn(r: Boolean): Commit                = copy(retractTurn = r)
-  def withEffects(e: Vector[EffectRecord]): Commit       = copy(effects = e)
+  def withToken(t: FencingToken): Commit                     = copy(token = t)
+  def withCheckpoint(c: Checkpoint): Commit                  = copy(checkpoint = Some(c))
+  def withCheckpoint(c: Option[Checkpoint]): Commit          = copy(checkpoint = c)
+  def withPendingWrites(w: Vector[PendingWrite]): Commit     = copy(pendingWrites = w)
+  def withEvents(e: Vector[EventDraft]): Commit              = copy(events = e)
+  def withRetractTurn(r: Boolean): Commit                    = copy(retractTurn = r)
+  def withEffects(e: Vector[EffectRecord]): Commit           = copy(effects = e)
+  def withFence(f: (ThreadId, FencingToken)): Commit         = copy(fence = Some(f))
+  def withFence(f: Option[(ThreadId, FencingToken)]): Commit = copy(fence = f)
 
   /**
    * The tasks the new checkpoint can still run. A settled checkpoint (`Completed`, or `Failed`, which a Block
@@ -340,8 +349,18 @@ object Commit:
     pendingWrites: Vector[PendingWrite] = Vector.empty,
     events: Vector[EventDraft] = Vector.empty,
     retractTurn: Boolean = false,
-    effects: Vector[EffectRecord] = Vector.empty
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects)
+    effects: Vector[EffectRecord] = Vector.empty,
+    fence: Option[(ThreadId, FencingToken)] = None
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence)
+
+  def apply(
+    token: FencingToken,
+    checkpoint: Option[Checkpoint],
+    pendingWrites: Vector[PendingWrite],
+    events: Vector[EventDraft],
+    retractTurn: Boolean,
+    effects: Vector[EffectRecord]
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, None)
 
   /** The superstep that scheduled a task: its id is `"<superstep>.<ordinal>"`; another id reads as long past. */
   private def scheduledAt(taskId: TaskId): Int =

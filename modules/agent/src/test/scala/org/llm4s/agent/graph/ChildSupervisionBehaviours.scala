@@ -311,6 +311,38 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
   }
 
+  behavior.of("A parent taken over before its child's first commit")
+
+  it should "register no child, so a successor's cascade delete cannot leave one behind (#2071)" in {
+    val open        = storage()
+    val setup       = new Setup(delegating(), answers("report"))
+    val thread      = ThreadId("taken-before-child")
+    val parentToken = new AtomicReference[FencingToken]()
+    val takenOver   = new AtomicBoolean(false)
+    val store = new ForwardingCheckpointer(open()) {
+      override def claim(threadId: ThreadId, request: ClaimRequest) = {
+        val granted = super.claim(threadId, request)
+        if (threadId == thread) granted.foreach(c => parentToken.set(c.token))
+        granted
+      }
+      // the parent's claim is taken over after its run started the child, before the child's first commit
+      override def commit(threadId: ThreadId, commit: Commit) = {
+        if (threadId != thread && commit.checkpoint.exists(_.origin.isDefined) && !takenOver.getAndSet(true)) {
+          val under = open()
+          under.release(thread, parentToken.get).ok
+          under.claim(thread, ClaimRequest(RunId("successor"), None, 1.minute)).ok: Unit
+        }
+        super.commit(threadId, commit)
+      }
+    }
+
+    family(new GraphRuntime(store), setup)._1.run(thread, "go").isLeft shouldBe true
+
+    takenOver.get shouldBe true
+    open().children(thread, None, 10).ok shouldBe empty
+    setup.childClient.callCount shouldBe 0
+  }
+
   behavior.of("Two runtimes")
 
   it should "start one child when a start loses the race" in {

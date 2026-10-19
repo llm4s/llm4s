@@ -467,6 +467,11 @@ final class GraphRuntime(
    * runtime's clock - on its first checkpoint and every later one (design 4.41): the only way a child thread is created. The thread must be new - an existing one is
    * [[GraphError.ThreadExists]], checked as [[startNew]] checks - and the run is admitted as any other, with the
    * parent's tenant in `config`. For the child runner (K2), which derives `threadId` with [[ThreadId.child]].
+   *
+   * `parentClaim` is the token of the parent run's claim on `origin.parent`: the child's first commit, which writes the
+   * origin and so registers the child, is fenced by it in the store ([[Commit.fence]], #2071). A parent claim taken
+   * over or released meanwhile refuses that commit, writing nothing, and the start is [[GraphError.ClaimLost]] on the
+   * parent, the child's own claim given back.
    */
   private[agent] def startChild[I, O](
     threadId: ThreadId,
@@ -476,7 +481,8 @@ final class GraphRuntime(
     config: RunConfig,
     observer: Option[Observer] = None,
     notAfter: Option[Instant] = None,
-    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    parentClaim: Option[FencingToken] = None
   ): Result[RunHandle[O]] =
     startOn(
       threadId,
@@ -488,7 +494,8 @@ final class GraphRuntime(
       observer,
       Some(origin),
       notAfter,
-      amend
+      amend,
+      parentClaim.map(origin.parent -> _)
     )
 
   private def startOn[I, O](
@@ -501,7 +508,8 @@ final class GraphRuntime(
     observer: Option[Observer],
     origin: Option[RunOrigin],
     notAfter: Option[Instant] = None,
-    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    parentFence: Option[(ThreadId, FencingToken)] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
@@ -516,7 +524,8 @@ final class GraphRuntime(
           origin.map(_.withStartedAt(clock.instant())),
           notAfter
         )
-          .admit(graph.start(input), None, _ => started(config), amend = amended(_, amend))
+          // the child's first commit is fenced by its parent's claim (#2071)
+          .admit(graph.start(input), None, _ => started(config), amend = amended(_, amend), fence = parentFence)
       case Some(stored) =>
         // the child runner's start of a thread that exists is ThreadExists, whatever the thread is
         val admissible = if origin.isDefined then Right(()) else notChild(threadId, stored)
@@ -2681,7 +2690,9 @@ final class GraphRuntime(
      * claim's commit is fenced against it, and given up once the loss is old enough ([[boundedByLoss]]). A
      * claim's commit the store refuses as stale is a loss found then: admission fails
      * [[GraphError.ClaimLost]], naming the current claim the store named unless the heartbeat recorded the
-     * loss first, so the two agree on one claim.
+     * loss first, so the two agree on one claim. `fence` is another thread's claim the store checks with the claim's
+     * commit ([[Commit.fence]]): a refusal for it wrote nothing and is [[GraphError.ClaimLost]] on that thread, not a
+     * loss of this run's claim, which is given back as usual.
      */
     def admit(
       execution: Execution,
@@ -2689,7 +2700,8 @@ final class GraphRuntime(
       event: RunClaim => RunEvent,
       carry: () => Result[(Vector[PendingWrite], Map[TaskId, ReusedWrite])] = () => Right(Vector.empty -> Map.empty),
       retainChildren: Boolean = false,
-      amend: Execution => Result[Execution] = Right(_)
+      amend: Execution => Result[Execution] = Right(_),
+      fence: Option[(ThreadId, FencingToken)] = None
     ): Result[Run[I, O]] =
       val sentAt = ticker()
       claimThread(threadId, config).flatMap { granted =>
@@ -2725,7 +2737,7 @@ final class GraphRuntime(
                       parentFence(threadId, granted.token, () => lostAt.get.isDefined),
                       abandon = true
                     )
-                  committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused)
+                  committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused, fence)
               }
             )
           admitted = outcome.isRight
@@ -2754,7 +2766,8 @@ final class GraphRuntime(
       parent: Option[String],
       event: RunEvent,
       carried: Vector[PendingWrite],
-      reused: Map[TaskId, ReusedWrite]
+      reused: Map[TaskId, ReusedWrite],
+      fence: Option[(ThreadId, FencingToken)]
     ): Result[Run[I, O]] =
       for
         claimed <- newCheckpoint(execution, parent, CheckpointStatus.Running)
@@ -2763,10 +2776,14 @@ final class GraphRuntime(
           Some(claimed),
           carried.map(_.copy(checkpointId = claimed.id)),
           Vector(draft(Some(claimed.id), None, event))
-        )
+        ).withFence(fence)
         // through the committer's fence, so that a claim found lost before it begins never lands
         records <- committer.begun(claim)(reason => Left(reason))(commitAndDeliver(threadId, claim)) match
           case Left(lost: GraphError.ClaimLost) => Left(lost)
+          // the claim above was lost, not this run's: nothing was written, and this run's claim is given back as usual
+          case Left(GraphError.StaleClaim(above, aboveToken, current))
+              if fence.exists((other, _) => other != threadId && other.value == above) =>
+            Left(GraphError.ClaimLost(above, aboveToken, current))
           // the claim lapsed, or another run took it over, before its commit landed: the loss is recorded
           // as the heartbeat records one, so a loss it declared meanwhile and this refusal name one claim
           case Left(stale: GraphError.StaleClaim) =>
