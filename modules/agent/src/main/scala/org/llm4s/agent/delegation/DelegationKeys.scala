@@ -35,6 +35,14 @@ private[agent] object DelegationKeys:
    * thread: a call that suspended after its child ran committed the roll-up with the suspension, and when it runs again
    * the reattached child is not counted twice. Written only with a tool call's result, and cleared as each turn starts.
    */
+  /**
+   * The digest of the input a child thread was started with (design 4.42), written with its first checkpoint: a call
+   * that runs again with other arguments (an approval that edited them) derives the same child id, and is refused
+   * rather than given the report of the input it no longer asks about.
+   */
+  val input: StateKey[Option[String], Option[String]] =
+    StateKey.replace[Option[String]]("delegation-input", None)
+
   val counted: StateKey[Set[String], CountedUpdate] =
     StateKey[Set[String], CountedUpdate]("delegation-counted", Set.empty)((ids, update) =>
       Right(update match

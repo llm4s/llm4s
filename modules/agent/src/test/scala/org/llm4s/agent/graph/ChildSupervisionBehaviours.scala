@@ -645,6 +645,22 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
   }
 
+  it should "refuse a call whose arguments an approval edited after its child started" in {
+    val open    = storage()
+    val setup   = new Setup(delegating(), answers("report"), parentMiddleware = Seq(reviewing(rerun = true)))
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId("edited-after-child")
+    val parked  = parent.run(thread, "go").ok
+    val id = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+      case other                                     => fail(s"unexpected $other")
+    }
+    parent.resume(thread, Map(parked.edit(id, ujson.Obj("text" -> "another task")))).isLeft shouldBe true
+    setup.allEnds.last.left.toOption.get.message should include("started with other input")
+    setup.childClient.callCount shouldBe 1
+  }
+
   behavior.of("A child thread")
 
   it should "keep at least its newest event, whatever retention it inherits" in {

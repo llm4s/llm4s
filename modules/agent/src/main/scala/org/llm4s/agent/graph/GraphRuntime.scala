@@ -465,7 +465,8 @@ final class GraphRuntime(
     origin: RunOrigin,
     config: RunConfig,
     observer: Option[Observer] = None,
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] =
     startOn(
       threadId,
@@ -476,7 +477,8 @@ final class GraphRuntime(
       Some(() => GraphError.ThreadExists(threadId.value)),
       observer,
       Some(origin),
-      notAfter
+      notAfter,
+      amend
     )
 
   private def startOn[I, O](
@@ -488,7 +490,8 @@ final class GraphRuntime(
     newOnly: Option[() => LLMError],
     observer: Option[Observer],
     origin: Option[RunOrigin],
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None =>
@@ -503,7 +506,7 @@ final class GraphRuntime(
           origin.map(_.withStartedAt(clock.instant())),
           notAfter
         )
-          .admit(graph.start(input), None, _ => started(config))
+          .admit(graph.start(input), None, _ => started(config), amend = amended(_, amend))
       case Some(stored) =>
         // the child runner's start of a thread that exists is ThreadExists, whatever the thread is
         val admissible = if origin.isDefined then Right(()) else notChild(threadId, stored)

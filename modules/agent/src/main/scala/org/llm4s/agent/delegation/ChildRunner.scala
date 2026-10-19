@@ -187,7 +187,17 @@ private[agent] object ChildRunner:
       runtime.childAtRest(childId, graph, base) match
         case Left(error) => Step.Done(Left(error))
         case Right(None) =>
-          admitted(runtime.startChild(childId, graph, input, origin, fresh(), notAfter = ctx.run.deadline))
+          admitted(
+            runtime.startChild(
+              childId,
+              graph,
+              input,
+              origin,
+              fresh(),
+              notAfter = ctx.run.deadline,
+              amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest)))
+            )
+          )
         // a thread at the child's id that is not this call's child - a top-level thread named like one, or a child of
         // another origin - is never adopted: its answer is not this call's
         case Right(Some((checkpoint, _))) if !ours(checkpoint) =>
@@ -196,6 +206,16 @@ private[agent] object ChildRunner:
               ValidationError(
                 "threadId",
                 s"'${childId.value}' exists and is not the child thread of call ${origin.call.value} on '${origin.parent.value}'"
+              )
+            )
+          )
+        case Right(Some((_, exec))) if !sameInput(exec.state) =>
+          Step.Done(
+            Left(
+              ValidationError(
+                "input",
+                s"the child thread '${childId.value}' was started with other input; a delegated call's arguments " +
+                  "cannot change once its child has started"
               )
             )
           )
@@ -224,6 +244,15 @@ private[agent] object ChildRunner:
 
     /** Whether the parent's deadline has passed, by the runtime's clock: a child timing out then timed out with it. */
     private def parentDeadlinePassed: Boolean = ctx.run.deadline.exists(d => !runtime.now().isBefore(d))
+
+    /** The digest of the input this call delegates: its query and history, canonically encoded. */
+    private lazy val inputDigest: String =
+      val bytes = upickle.default.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8)
+      java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
+
+    /** Whether the child was started with this call's input; a child recorded with none is taken as started with it. */
+    private def sameInput(state: ThreadState): Boolean =
+      state.get(DelegationKeys.input).toOption.flatten.forall(_ == inputDigest)
 
     /** Whether `checkpoint` is this call's child's: its origin names this call's parent, call and agent. */
     private def ours(checkpoint: Checkpoint): Boolean =

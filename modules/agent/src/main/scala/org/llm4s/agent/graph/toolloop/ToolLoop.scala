@@ -702,6 +702,7 @@ object ToolLoop:
         LoopKeys.turn.id,
         LoopKeys.transfer.id,
         DelegationKeys.priorUsage.id,
+        DelegationKeys.input.id,
         DelegationKeys.counted.id
       )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
@@ -1064,6 +1065,7 @@ object ToolLoop:
     val b        = GraphBuilder(id, version)
     // the runtime's key on a child thread (design 4.42): written only by the child runner, never by a node
     b.stateKey(DelegationKeys.priorUsage)
+    b.stateKey(DelegationKeys.input)
     val locking = prepared.exists(_.tools.tools.exists(_.spec.locksOf.isDefined))
     val agents  = prepared.map(p => p.agent.id -> declare(b, p, locking)).toMap
     // whether a transfer keeps the context, by (source, target)
