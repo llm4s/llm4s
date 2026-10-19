@@ -164,6 +164,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     def effect(threadId: ThreadId, key: EffectKey)       = alive(underlying.effect(threadId, key))
     def history(threadId: ThreadId, before: Option[String], limit: Int) =
       alive(underlying.history(threadId, before, limit))
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) =
+      alive(underlying.children(parent, after, limit))
     def checkpoint(threadId: ThreadId, checkpointId: String) = alive(underlying.checkpoint(threadId, checkpointId))
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = alive(underlying.prune(threadId, policy))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
@@ -201,6 +203,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
     def latest(threadId: ThreadId)                                          = underlying.latest(threadId)
     def history(threadId: ThreadId, before: Option[String], limit: Int) =
       underlying.history(threadId, before, limit)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) =
+      underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =

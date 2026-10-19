@@ -91,6 +91,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
       underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
@@ -116,6 +117,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
       underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
@@ -146,6 +148,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
       underlying.deleteThread(threadId, token)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }

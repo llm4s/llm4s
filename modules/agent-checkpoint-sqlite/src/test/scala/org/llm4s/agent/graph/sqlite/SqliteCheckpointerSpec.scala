@@ -44,8 +44,19 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-5 build left it: threads without a parent (#2045). */
+  private def asVersionFive(path: Path): Unit =
+    exec(
+      path,
+      "DROP INDEX llm4s_checkpoint_threads_parent",
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN parent_thread_id",
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN child_order",
+      "UPDATE llm4s_checkpoint_schema SET version = 5"
+    )
+
   /** The file as a version-4 build left it: claims without their tenant (#1926). */
   private def asVersionFour(path: Path): Unit =
+    asVersionFive(path)
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN claim_tenant",

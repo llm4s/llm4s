@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
 import java.time.{ Clock, Instant }
@@ -68,6 +68,8 @@ import scala.util.Try
  *    point: cancelling a subscription interrupts its watch mid-read, so an interrupt must end that
  *    one call - with `Left(CancelledError)` or a failed result - and leave the store usable by every
  *    other thread and later call (see [[awaitEventsAfter]]);
+ *  - list a thread's direct children ([[children]]) - the threads whose latest checkpoint's [[RunOrigin]] names it
+ *    as `parent` - in the order they were first committed, paged, and never one [[deleteThread]] removed;
  *  - return from every call within a bound it documents (#1919) - see below.
  *
  * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
@@ -226,6 +228,18 @@ trait Checkpointer:
           case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
     }
 
+  /**
+   * Up to `limit` of `parent`'s direct children (design 4.41), oldest first: every thread whose latest checkpoint's
+   * [[Checkpoint.origin]] names `parent`, in the order each first committed a checkpoint with that origin, starting
+   * after child `after` when it is given, so a caller pages through them by passing the last id of each page. A
+   * thread [[deleteThread]] removed is not listed, nor is a thread whose latest checkpoint names another parent or
+   * none. An `after` the store does not know as a child of `parent` is `Left(ValidationError)`; a child deleted
+   * since it was listed keeps its place as long as its tombstone does ([[deleteThread]]), so a page boundary survives
+   * retention deleting it. A thread with no children has none; `limit` below 1 reads none. Needs no claim, and reads no tenant: the runtime
+   * checks the parent's tenant ([[GraphRuntime.children]]).
+   */
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]]
+
   /** Drops events with `seq < beforeSeq`; replay can then start no earlier than `beforeSeq`. */
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]
 
@@ -304,7 +318,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     /** The first event number of the thread now under the id: past every event of a deleted one. */
     firstSeq: Long,
     /** Effect records by key, with their task and the token of the commit that wrote them. */
-    effects: Map[String, StoredEffect] = Map.empty
+    effects: Map[String, StoredEffect] = Map.empty,
+    /** The parent the latest checkpoint's origin names, and the thread's place among its children; kept by a delete. */
+    child: Option[(String, Long)] = None
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
     def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty
@@ -313,7 +329,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   private val threads   = mutable.Map.empty[String, ThreadRecord]
   private var lastToken = 0L
-  private val lock      = new java.util.concurrent.locks.ReentrantLock()
+
+  /** Each parent's children, by their place among them: the index [[children]] pages. */
+  private val childIndex = mutable.Map.empty[String, mutable.TreeMap[Long, String]]
+  private var lastChild  = 0L
+  private val lock       = new java.util.concurrent.locks.ReentrantLock()
 
   /** Signalled, under `lock`, whenever a commit appends events or a thread is deleted. */
   private val appended = lock.newCondition()
@@ -322,7 +342,31 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     threads.getOrElse(threadId.value, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, 1L, 1L, None, 1L))
 
   private def store(threadId: ThreadId, record: ThreadRecord): Unit =
-    if record.isEmpty then threads.remove(threadId.value): Unit else threads.update(threadId.value, record)
+    if record.isEmpty then remove(threadId) else threads.update(threadId.value, record)
+
+  private def remove(threadId: ThreadId): Unit =
+    threads.remove(threadId.value).flatMap(_.child).foreach(unindex)
+
+  private def unindex(child: (String, Long)): Unit =
+    childIndex.get(child._1).foreach { siblings =>
+      siblings.remove(child._2)
+      if siblings.isEmpty then childIndex.remove(child._1)
+    }
+
+  /**
+   * `current`'s place among the children of the parent `checkpoint`'s origin names: kept while that is the parent
+   * it is indexed under, a new last place under a new parent, and none for a top-level checkpoint.
+   */
+  private def placed(threadId: ThreadId, current: ThreadRecord, checkpoint: Checkpoint): Option[(String, Long)] =
+    val parent = checkpoint.origin.map(_.parent.value)
+    if current.child.map(_._1) == parent then current.child
+    else
+      current.child.foreach(unindex)
+      parent.map { p =>
+        lastChild += 1
+        childIndex.getOrElseUpdate(p, mutable.TreeMap.empty).update(lastChild, threadId.value)
+        p -> lastChild
+      }
 
   // the replaced claim's holder is named only to a claim of its own tenant
   private def granted(threadId: ThreadId, claim: Claim, replaced: Option[Claim] = None): RunClaim =
@@ -421,7 +465,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           history = kept ++ added,
           pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
           events = current.events ++ stored,
-          nextSeq = current.nextSeq + stored.size
+          nextSeq = current.nextSeq + stored.size,
+          child = commit.checkpoint.fold(current.child)(placed(threadId, current, _))
         )
       )
       if stored.nonEmpty then appended.signalAll()
@@ -540,7 +585,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
       // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
       // event since its delete is kept as it is, so deleting it again moves nothing on
-      if current.nextSeq == 1L then threads.remove(threadId.value): Unit
+      if current.nextSeq == 1L then remove(threadId)
       else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
         store(
           threadId,
@@ -548,9 +593,33 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         )
       else
         val first = current.nextSeq + 1
-        store(threadId, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first))
+        // the tombstone keeps the thread's place among its parent's children, so a page boundary survives
+        store(
+          threadId,
+          ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first, child = current.child)
+        )
       appended.signalAll()
       Right(())
+  }
+
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] = withLock(lock) {
+    val siblings = childIndex.getOrElse(parent.value, mutable.TreeMap.empty[Long, String])
+    val from: Result[Long] = after match
+      case None => Right(0L)
+      case Some(cursor) =>
+        threads
+          .get(cursor.value)
+          .flatMap(_.child)
+          .filter(_._1 == parent.value)
+          .map(_._2)
+          .toRight(ValidationError("after", s"'${cursor.value}' is not a known child of '${parent.value}'"))
+    from.flatMap { cursor =>
+      // a tombstone keeps its place but is not listed
+      val listed = siblings.iteratorFrom(cursor + 1).flatMap((_, id) => threads.get(id).flatMap(_.history.lastOption))
+      sequence(
+        listed.take(math.max(limit, 0)).toVector.map(latest => Checkpoint.fromJson(latest.json))
+      ).map(_.flatMap(ChildThread.of))
+    }
   }
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =

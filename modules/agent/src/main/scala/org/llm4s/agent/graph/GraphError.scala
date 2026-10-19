@@ -151,6 +151,16 @@ object GraphError:
   final case class ThreadExists(threadId: String) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' already exists; fork to a new thread id"
 
+  /**
+   * The thread is a child thread - its latest checkpoint records a [[RunOrigin]] - of `parent`, and is driven only
+   * through its parent's run (design 4.41): `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` on
+   * it are refused before any claim, and nothing was changed. Reads (`history`, `checkpoint`, `subscribe`,
+   * `children`) are allowed; delete the parent to delete the child.
+   */
+  final case class ChildThread(threadId: String, parent: String) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Thread '$threadId' is a child thread of '$parent'; it is driven only through its parent's run"
+
   /** Events before `earliestSeq` were compacted away and cannot be replayed. */
   final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"

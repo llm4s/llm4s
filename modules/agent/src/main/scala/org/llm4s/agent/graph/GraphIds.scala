@@ -38,6 +38,27 @@ object ThreadId:
   def apply(value: String): ThreadId         = value
   extension (id: ThreadId) def value: String = id
 
+  /**
+   * The id of the child thread that the tool call `call` of a run on `parent` starts for agent `agent` (design 4.41):
+   * `<parent>/~task/<agent>/<digest>`, where the digest is the first 24 hex characters of the SHA-256 of
+   * `("llm4s-child-v1", parent, call, agent)`. The same call starting the same agent on the same thread always names
+   * the same child, so a replayed call finds the child its first run started; any other call, thread or agent names
+   * another. The id is hierarchical, so the nesting shows in it, and grows with depth.
+   *
+   * The id's shape decides nothing: a thread is a child thread only when its checkpoint records a [[RunOrigin]], so a
+   * caller naming a top-level thread like this gets a top-level thread.
+   */
+  def child(parent: ThreadId, agent: org.llm4s.agent.AgentId, call: IdempotencyKey): ThreadId =
+    val digest = KeyDigest.of(Seq("llm4s-child-v1", parent, call.value, agent.value)).take(24)
+    s"$parent/~task/${agent.value}/$digest"
+
+  /**
+   * Encodes as a plain JSON string. Built from upickle's string codecs: inside this scope a `ThreadId` is a
+   * `String`, so summoning `ReadWriter[String]` would find this given.
+   */
+  given upickle.default.ReadWriter[ThreadId] =
+    upickle.default.ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
+
 object RunId:
   def apply(value: String): RunId         = value
   def random(): RunId                     = java.util.UUID.randomUUID().toString

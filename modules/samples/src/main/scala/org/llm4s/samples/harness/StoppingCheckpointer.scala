@@ -49,6 +49,8 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] = alive(underlying.effect(threadId, key))
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
     alive(underlying.history(threadId, before, limit))
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
+    alive(underlying.children(parent, after, limit))
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     alive(underlying.checkpoint(threadId, checkpointId))
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = alive(underlying.prune(threadId, policy))

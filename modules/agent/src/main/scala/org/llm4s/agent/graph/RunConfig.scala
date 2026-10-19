@@ -66,7 +66,8 @@ final case class RunConfig private (
   metadata: Map[String, String],
   interruptBefore: Set[NodeId],
   interruptAfter: Set[NodeId],
-  retention: Option[RetentionPolicy]
+  retention: Option[RetentionPolicy],
+  childRetention: Int
 ):
   def withRunId(id: RunId): RunConfig                 = copy(runId = id)
   def withTenantId(t: TenantId): RunConfig            = copy(tenantId = Some(t))
@@ -97,6 +98,16 @@ final case class RunConfig private (
   /** [[withRetention]], or no pruning for `None`. */
   def withRetention(policy: Option[RetentionPolicy]): RunConfig = copy(retention = policy)
 
+  /**
+   * How many settled (`Completed` or `Failed`) child threads of the run's thread to keep (design 4.41, default
+   * [[RunConfig.DefaultChildRetention]]): once the run's terminal checkpoint commits, and at a later `start` on the
+   * settled thread, older settled children are deleted, each with everything below it. A `Running` or `Suspended`
+   * child is never deleted, and nothing is at `recover` or `resume`. Throws `IllegalArgumentException` below 0.
+   */
+  def withChildRetention(n: Int): RunConfig =
+    require(n >= 0, s"childRetention must not be negative, was $n")
+    copy(childRetention = n)
+
 object RunConfig:
   def apply(
     runId: RunId = RunId.random(),
@@ -106,9 +117,47 @@ object RunConfig:
     metadata: Map[String, String] = Map.empty,
     interruptBefore: Set[NodeId] = Set.empty,
     interruptAfter: Set[NodeId] = Set.empty,
-    retention: Option[RetentionPolicy] = None
+    retention: Option[RetentionPolicy] = None,
+    childRetention: Int = DefaultChildRetention
   ): RunConfig =
-    new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, retention)
+    require(childRetention >= 0, s"childRetention must not be negative, was $childRetention")
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      retention,
+      childRetention
+    )
+
+  /** Settled child threads a thread keeps unless its run says otherwise ([[RunConfig.withChildRetention]]). */
+  val DefaultChildRetention: Int = 64
+
+  /** A config keeping [[DefaultChildRetention]] children, as before `childRetention` existed. */
+  def apply(
+    runId: RunId,
+    tenantId: Option[TenantId],
+    principal: Option[Principal],
+    budgets: RunBudgets,
+    metadata: Map[String, String],
+    interruptBefore: Set[NodeId],
+    interruptAfter: Set[NodeId],
+    retention: Option[RetentionPolicy]
+  ): RunConfig =
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      retention,
+      DefaultChildRetention
+    )
 
   /** A config without retention, as before `retention` existed. */
   def apply(
@@ -119,7 +168,18 @@ object RunConfig:
     metadata: Map[String, String],
     interruptBefore: Set[NodeId],
     interruptAfter: Set[NodeId]
-  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, None)
+  ): RunConfig =
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      None,
+      DefaultChildRetention
+    )
 
 /**
  * Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a

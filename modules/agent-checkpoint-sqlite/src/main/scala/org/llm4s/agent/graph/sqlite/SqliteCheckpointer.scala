@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.*
-import org.llm4s.error.{ CancelledError, LLMError, ProcessingError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
@@ -195,6 +195,7 @@ final class SqliteCheckpointer private (
           threadId.value
         )
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+        placeChild(c, threadId, checkpoint)
       }
       appendWrites(c, threadId, commit.pendingWrites)
       // released before this commit's own records are applied
@@ -407,6 +408,35 @@ final class SqliteCheckpointer private (
     }
     Right(())
   }
+
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
+    reading("children") { c =>
+      val from: Result[Long] = after match
+        case None => Right(0L)
+        case Some(cursor) =>
+          query(
+            c,
+            """SELECT child_order FROM llm4s_checkpoint_threads
+              |WHERE thread_id = ? AND parent_thread_id = ? AND child_order IS NOT NULL""".stripMargin,
+            cursor.value,
+            parent.value
+          )(_.getLong(1)).headOption
+            .toRight(ValidationError("after", s"'${cursor.value}' is not a known child of '${parent.value}'"))
+      from.map { order =>
+        if limit <= 0 then Vector.empty
+        else
+          // a tombstone keeps its place but is not listed
+          query(
+            c,
+            """SELECT checkpoint_json FROM llm4s_checkpoint_threads
+              |WHERE parent_thread_id = ? AND child_order > ? AND checkpoint_json IS NOT NULL
+              |ORDER BY child_order LIMIT ?""".stripMargin,
+            parent.value,
+            order,
+            limit
+          )(_.getString(1))
+      }
+    }.flatMap(rows => sequence(rows.map(decodeCheckpoint("children", _))).map(_.flatMap(ChildThread.of)))
 
   /**
    * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
@@ -816,6 +846,30 @@ object SqliteCheckpointer:
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
+
+  /**
+   * Records the parent `checkpoint`'s origin names, inside the caller's write transaction: the thread keeps its place
+   * among that parent's children while the parent stays the same, takes a place past every other under a new one,
+   * and has none as a top-level thread.
+   */
+  private def placeChild(c: Connection, threadId: ThreadId, checkpoint: Checkpoint): Unit =
+    val parent = checkpoint.origin.map(_.parent.value)
+    val current =
+      query(c, "SELECT parent_thread_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
+        Option(rows.getString(1))
+      ).headOption.flatten
+    if current != parent then
+      // one past the file's highest place: a tombstone keeps its place, so places only grow while children are kept
+      val order = parent.map { _ =>
+        query(c, "SELECT COALESCE(MAX(child_order), 0) + 1 FROM llm4s_checkpoint_threads")(_.getLong(1)).head
+      }
+      update(
+        c,
+        "UPDATE llm4s_checkpoint_threads SET parent_thread_id = ?, child_order = ? WHERE thread_id = ?",
+        parent,
+        order,
+        threadId.value
+      )
 
   /** The next fencing token for the whole file; inside the caller's write transaction. */
   private def nextToken(c: Connection): Long =

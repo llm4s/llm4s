@@ -494,6 +494,11 @@ final class ToolLoop private (
 
 object ToolLoop:
 
+  /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */
+  private[agent] def settled(output: TurnOutput): RunOutcome = output.outcome match
+    case TurnOutcome.Completed        => RunOutcome.Answered
+    case TurnOutcome.StepLimitReached => RunOutcome.StepLimitReached
+
   /**
    * The error result of an approval whose edited arguments take a lock the proposed arguments' locks do
    * not cover (`AgentToolSpec.withLocks`): the call was scheduled with those locks, so it does not run.
@@ -1116,32 +1121,33 @@ object ToolLoop:
         active  <- state.get(LoopKeys.activeAgent)
         outcome <- turn.outcome.toRight(ValidationError("tool loop", "the run ended without an outcome"))
       yield TurnOutput(outcome, active.getOrElse(root))
-    }.map { graph =>
-      val all = agents.values.toVector
-      def asked(owner: AgentNodes, hook: MiddlewareHook): Set[NodeId] =
-        owner.askedRefs.collect { case ((_, h), ref) if h == hook => ref.ref.node.id }.toSet
-      // the nodes that continue each agent's model, tool and finish steps after a review
-      val continuations = all.flatMap { owner =>
-        val agent = owner.agent.id
-        val rootsAfterAgent =
-          if agent == root then Set.empty[NodeId] else asked(agents(root), MiddlewareHook.AfterAgent)
-        Vector(
-          (agent, AgentNode.Model) -> asked(owner, MiddlewareHook.WrapModelCall),
-          (agent, AgentNode.Tool) -> (asked(owner, MiddlewareHook.WrapToolCall) ++
-            owner.askRefs.values.map(_.node.id) + owner.approval.node.id),
-          (agent, AgentNode.Finish) -> (asked(owner, MiddlewareHook.AfterAgent) ++ rootsAfterAgent)
+    }.map(_.withOutcome(ToolLoop.settled))
+      .map { graph =>
+        val all = agents.values.toVector
+        def asked(owner: AgentNodes, hook: MiddlewareHook): Set[NodeId] =
+          owner.askedRefs.collect { case ((_, h), ref) if h == hook => ref.ref.node.id }.toSet
+        // the nodes that continue each agent's model, tool and finish steps after a review
+        val continuations = all.flatMap { owner =>
+          val agent = owner.agent.id
+          val rootsAfterAgent =
+            if agent == root then Set.empty[NodeId] else asked(agents(root), MiddlewareHook.AfterAgent)
+          Vector(
+            (agent, AgentNode.Model) -> asked(owner, MiddlewareHook.WrapModelCall),
+            (agent, AgentNode.Tool) -> (asked(owner, MiddlewareHook.WrapToolCall) ++
+              owner.askRefs.values.map(_.node.id) + owner.approval.node.id),
+            (agent, AgentNode.Finish) -> (asked(owner, MiddlewareHook.AfterAgent) ++ rootsAfterAgent)
+          )
+        }.toMap
+        new ToolLoop(
+          graph,
+          agents(root).approval,
+          all.map(_.approval.node.id).toSet,
+          all.flatMap(_.askRefs.values.map(_.node.id)).toSet,
+          all.flatMap(_.askedRefs.values.map(_.ref.node.id)).toSet,
+          all.map(_.callTool.id).toSet,
+          continuations
         )
-      }.toMap
-      new ToolLoop(
-        graph,
-        agents(root).approval,
-        all.map(_.approval.node.id).toSet,
-        all.flatMap(_.askRefs.values.map(_.node.id)).toSet,
-        all.flatMap(_.askedRefs.values.map(_.ref.node.id)).toSet,
-        all.map(_.callTool.id).toSet,
-        continuations
-      )
-    }
+      }
 
   /**
    * The appends that seed a new thread with `history`, each message's id derived from the input

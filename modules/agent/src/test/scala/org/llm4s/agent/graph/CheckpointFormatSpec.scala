@@ -223,7 +223,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     migrated.fencingToken shouldBe Some(FencingToken(7L))
     migrated.snapshot.frontier.head.passedBefore shouldBe false
     migrated.snapshot.frontier.head.replay shouldBe None
-    Checkpoint.CurrentFormat shouldBe 7
+    Checkpoint.CurrentFormat shouldBe 8
   }
 
   it should "read a format-6 checkpoint, written before task lineages, with every task of an empty lineage" in {
@@ -237,7 +237,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     json("formatVersion") = 6
     json("snapshot")("frontier").arr.foreach(t => t.obj.remove("lineage"): Unit)
     val read = Checkpoint.fromJson(json).value
-    read.formatVersion shouldBe 7
+    read.formatVersion shouldBe Checkpoint.CurrentFormat
     read.snapshot.frontier.map(_.lineage) shouldBe Vector("")
     val restored = g.restore(read.snapshot).value
     restored.frontier.map(_.lineage) shouldBe Vector(Task.Unstamped)
@@ -293,8 +293,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 8, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(8, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 9, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(9, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

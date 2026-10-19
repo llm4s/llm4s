@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
@@ -222,12 +222,7 @@ private[agent] object AgentRun:
     result match
       case RunResult.Completed(state, output, _) =>
         output.outcome match
-          case TurnOutcome.Completed =>
-            state.get(Messages.key).flatMap { stored =>
-              stored.reverseIterator
-                .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
-                .toRight(ValidationError("agent", "the turn completed without an assistant message"))
-            }
+          case TurnOutcome.Completed        => completedStatus(state)
           case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
       case suspended: RunResult.Suspended =>
         for
@@ -239,6 +234,31 @@ private[agent] object AgentRun:
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
         Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
       case RunResult.Failed(_, error) => Left(error)
+
+  /**
+   * The status of a settled turn, rebuilt from the thread alone (design 4.41): `outcome`, recorded on the turn's
+   * terminal checkpoint ([[org.llm4s.agent.graph.Checkpoint.outcome]]), and `state`, that checkpoint's state, where
+   * an answer is. Equal to the status [[AgentRun.await]] returned live: `Completed` with the last assistant message's
+   * content, `StepLimitReached`, or `Blocked`. A turn whose live result was `Left` - its answer failed its output
+   * schema, or a hook's failure blocked it - is `Left` again: `GraphError.OutputInvalid` with every error, or a
+   * `ProcessingError` naming the failure's kind and message.
+   */
+  def settledStatus(outcome: RunOutcome, state: ThreadState): Result[AgentStatus] = outcome match
+    case RunOutcome.Answered          => completedStatus(state)
+    case RunOutcome.StepLimitReached  => Right(AgentStatus.StepLimitReached)
+    case RunOutcome.Blocked(g, r)     => Right(AgentStatus.Blocked(g, r))
+    case RunOutcome.OutputInvalid(es) => Left(GraphError.OutputInvalid(es))
+    case RunOutcome.Failed(kind, msg) => Left(ProcessingError("agent turn", s"$kind: $msg"))
+    // AgentStatus.TokenLimitReached arrives with token budgets (#2047), which maps this case to it
+    case RunOutcome.TokenLimitReached =>
+      Left(ProcessingError("agent turn", "the turn reached its token budget"))
+
+  private def completedStatus(state: ThreadState): Result[AgentStatus] =
+    state.get(Messages.key).flatMap { stored =>
+      stored.reverseIterator
+        .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
+        .toRight(ValidationError("agent", "the turn completed without an assistant message"))
+    }
 
   /** The current turn's messages: from the last user message on. */
   def turnMessages(state: ThreadState): Result[Vector[Message]] =

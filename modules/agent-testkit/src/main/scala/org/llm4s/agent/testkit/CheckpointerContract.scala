@@ -45,7 +45,10 @@ import scala.jdk.CollectionConverters.*
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
  *    by age, by count and by event count, never the latest checkpoint; effect records (design §4.24) -
  *    upserted by key and fenced like any commit, released at a commit with a checkpoint exactly as
- *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; and claims and fencing - one
+ *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; child threads (design
+ *    4.41) - a checkpoint's `origin` and `outcome` read back, a format-7 checkpoint read with neither, and `children`
+ *    listing a parent's children oldest first, paged, without a tenant, never one deleted or one whose latest
+ *    checkpoint names another parent; and claims and fencing - one
  *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
  *    holder as `takenOverFrom`), the tenant recorded on each claim - a holder named, in a refusal or as
@@ -1356,6 +1359,145 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.historyIds() shouldBe Vector("c1")
   }
 
+  // ---- child threads (design 4.41) ----
+
+  private def originOf(parent: ThreadId, n: Int, depth: Int = 1): RunOrigin =
+    RunOrigin(parent, IdempotencyKey(s"call-$n"), org.llm4s.agent.AgentId.unsafe("worker"), start.plusSeconds(n), depth)
+
+  /** Commits a first checkpoint with `origin` on `child`, under a claim of its own, with one event, and releases it. */
+  private def childCommitted(
+    s: Store,
+    child: ThreadId,
+    origin: Option[RunOrigin],
+    status: CheckpointStatus = CheckpointStatus.Completed,
+    tenant: Option[String] = None,
+    id: String = "c1"
+  ): Unit =
+    val claim  = s.claim("child", on = child, tenant = tenant).value
+    val parent = s.latestId(child)
+    s.commit(
+      claim.token,
+      Some(s.checkpoint(id, parent, on = child, status = status).withOrigin(origin).withTenantId(tenant)),
+      events = Vector(s.event(id, Some(id))),
+      on = child
+    ).value
+    s.store.release(child, claim.token).value
+
+  /**
+   * A format-7 checkpoint as the last format-7 build wrote it (`Checkpoint.toJson`, 7623bd442): no `origin` and no
+   * `outcome` field.
+   */
+  private val formatSeven: String =
+    """{"formatVersion":7,"id":"c7","parent":null,"threadId":"format-7","runId":"run","status":"Completed","createdAt":"2026-10-09T12:00:00Z","snapshot":{"graphId":"g","graphVersion":"v1","fingerprint":"f","superstep":0,"state":{},"frontier":[],"staticJoins":[],"dynamicJoins":[],"parked":[],"paused":false},"tenantId":"tenant-a","fencingToken":3}"""
+
+  it should "read back a checkpoint's origin and outcome, on the latest, in the history and by id, across a reopen" in {
+    val s      = Store()
+    val origin = originOf(s.thread, 1)
+    val child  = ThreadId(s"${s.thread.value}/~task/worker/1")
+    val token  = s.claim("run", on = child).value.token
+    s.commit(token, Some(s.checkpoint("c1", None, on = child).withOrigin(origin)), on = child).value
+    s.commit(
+      token,
+      Some(
+        s.checkpoint("c2", Some("c1"), on = child, status = CheckpointStatus.Completed)
+          .withOrigin(origin)
+          .withOutcome(RunOutcome.Blocked("LengthCheck", "too long"))
+      ),
+      on = child
+    ).value
+    s.reopened()
+    val latest = s.store.latest(child).value.value.checkpoint
+    latest.origin shouldBe Some(origin)
+    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    s.store.history(child, None, 10).value.map(c => (c.id, c.origin, c.outcome)) shouldBe Vector(
+      ("c2", Some(origin), Some(RunOutcome.Blocked("LengthCheck", "too long"))),
+      ("c1", Some(origin), None)
+    )
+    s.store.checkpoint(child, "c1").value.value.origin shouldBe Some(origin)
+    // a later checkpoint without an outcome clears it, and keeps the origin it carries
+    s.commit(token, Some(s.checkpoint("c3", Some("c2"), on = child).withOrigin(origin)), on = child).value
+    s.store.latest(child).value.value.checkpoint.outcome shouldBe None
+    s.store.checkpoint(child, "c2").value.value.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    val invalid = RunOutcome.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))
+    s.commit(
+      token,
+      Some(s.checkpoint("c4", Some("c3"), on = child, status = CheckpointStatus.Failed).withOutcome(invalid)),
+      on = child
+    ).value
+    s.store.latest(child).value.value.checkpoint.outcome shouldBe Some(invalid)
+  }
+
+  it should "list a thread's children oldest first, paged, without a tenant, and never one deleted" in {
+    val s        = Store()
+    val children = (1 to 4).map(n => ThreadId(s"${s.thread.value}/~task/worker/$n")).toVector
+    children.zipWithIndex.foreach { (child, i) =>
+      childCommitted(
+        s,
+        child,
+        Some(originOf(s.thread, i + 1)),
+        status = if i == 1 then CheckpointStatus.Suspended else CheckpointStatus.Completed,
+        tenant = Some("tenant-a")
+      )
+    }
+    // another parent's child and a top-level thread are not listed
+    childCommitted(s, ThreadId(s"${s.thread.value}-other/~task/worker/1"), Some(originOf(ThreadId("other"), 1)))
+    childCommitted(s, ThreadId(s"${s.thread.value}-top"), None)
+
+    val listed = s.store.children(s.thread, None, 10).value
+    listed.map(_.threadId) shouldBe children
+    listed.map(_.status)(1) shouldBe CheckpointStatus.Suspended
+    listed.head.origin shouldBe originOf(s.thread, 1)
+    listed.head.latest shouldBe "c1"
+    listed.head.updatedAt shouldBe start
+    s.store.children(s.thread, None, 0).value shouldBe empty
+
+    val first = s.store.children(s.thread, None, 3).value
+    first.map(_.threadId) shouldBe children.take(3)
+    s.store.children(s.thread, first.lastOption.map(_.threadId), 3).value.map(_.threadId) shouldBe children.drop(3)
+    s.store.children(s.thread, Some(ThreadId("stranger")), 3).refused shouldBe a[ValidationError]
+    s.store.children(s.thread, Some(children(0)), 10).value.map(_.threadId) shouldBe children.drop(1)
+
+    // a child keeps its place as it moves on
+    childCommitted(s, children(0), Some(originOf(s.thread, 1)), tenant = Some("tenant-a"), id = "c2")
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children
+
+    // a deleted child is not listed, and keeps its place as a page boundary
+    val claim = s.claim("deleter", on = children(1), tenant = Some("tenant-a")).value
+    s.store.deleteThread(children(1), claim.token).value
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1)
+    s.store.children(s.thread, Some(children(1)), 10).value.map(_.threadId) shouldBe children.drop(2)
+
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1)
+  }
+
+  it should "stop listing a child whose latest checkpoint names no parent, or another" in {
+    val s     = Store()
+    val child = ThreadId(s"${s.thread.value}/~task/worker/1")
+    childCommitted(s, child, Some(originOf(s.thread, 1)))
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(child)
+    childCommitted(s, child, None, id = "c2")
+    s.store.children(s.thread, None, 10).value shouldBe empty
+    childCommitted(s, child, Some(originOf(ThreadId("elsewhere"), 1)), id = "c3")
+    s.store.children(s.thread, None, 10).value shouldBe empty
+    s.store.children(ThreadId("elsewhere"), None, 10).value.map(_.threadId) shouldBe Vector(child)
+  }
+
+  it should "read a format-7 checkpoint as a top-level thread with no outcome, listed as nobody's child" in {
+    val s       = Store()
+    val written = Checkpoint.fromJson(ujson.read(formatSeven)).value
+    written.formatVersion shouldBe Checkpoint.CurrentFormat
+    written.origin shouldBe None
+    written.outcome shouldBe None
+    val token = s.claim("seed", tenant = Some("tenant-a")).value.token
+    s.commit(token, Some(written.withThreadId(s.thread.value))).value
+    s.reopened()
+    val read = s.store.latest(s.thread).value.value.checkpoint
+    read.origin shouldBe None
+    read.outcome shouldBe None
+    s.store.children(s.thread, None, 10).value shouldBe empty
+  }
+
   // ---- effect records (design §4.24) ----
 
   /**
@@ -1711,6 +1853,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId, token: FencingToken)       = s.store.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = s.store.history(threadId, before, limit)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = s.store.children(parent, after, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = s.store.prune(threadId, policy)
     val first   = GraphRuntime(counted, claims = ClaimPolicy(ttl = ttl, renewEvery = 20.millis))
@@ -1880,6 +2023,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId, token: FencingToken)       = s.store.deleteThread(threadId, token)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = s.store.history(threadId, before, limit)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = s.store.children(parent, after, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = s.store.prune(threadId, policy)
     completed(GraphRuntime(s.store, claims = neverRenewed).start(s.thread, w.graph, Vector("a"), config("a")).value)

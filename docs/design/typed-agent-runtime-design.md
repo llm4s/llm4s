@@ -390,7 +390,7 @@ The run completes when no nodes are scheduled and no interrupt is pending; there
 
 The runtime supports per-node retry/cache policy, a recursion/superstep limit, input/output codecs, and graph visualization export (Mermaid). Thread checkpoint writes use optimistic version checks; one writer advances a thread version at a time. Concurrent same-thread runs must choose an explicit policy (reject by default; optional enqueue later), and stale workers cannot overwrite a newer checkpoint.
 
-Static `interruptBefore`/`interruptAfter` breakpoints complement dynamic typed interrupts. `updateState` creates a versioned state update before resume; `history` inspects checkpoints; `fork` starts a new thread from a selected checkpoint. Subgraphs use hierarchical checkpoint namespaces and emit events with parent and child run IDs.
+Static `interruptBefore`/`interruptAfter` breakpoints complement dynamic typed interrupts. `updateState` creates a versioned state update before resume; `history` inspects checkpoints; `fork` starts a new thread from a selected checkpoint. Subgraphs use hierarchical checkpoint namespaces and emit events with parent and child run IDs. (Amended by §4.41: the namespaces are child threads - a thread whose checkpoints record a `RunOrigin` naming its parent, with a hierarchical id - not a column of one thread.)
 
 ### Slice records
 
@@ -435,6 +435,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.38 | [Stage 3 slice P2: the exit examples](typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md) ([#1916](https://github.com/llm4s/llm4s/issues/1916)) |
 | 4.39 | [Workspace command confinement](typed-agent-runtime/4.39-workspace-command-confinement.md) ([#1983](https://github.com/llm4s/llm4s/issues/1983)) |
 | 4.40 | [`HostFileBackend`: a file backend over a host directory](typed-agent-runtime/4.40-host-file-backend.md) ([#1964](https://github.com/llm4s/llm4s/issues/1964)) |
+| 4.41 | [Stage 4 slice K1: child threads](typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md) ([#2045](https://github.com/llm4s/llm4s/issues/2045)) |
 
 ### 4.9 Stage 0 carry-forward
 

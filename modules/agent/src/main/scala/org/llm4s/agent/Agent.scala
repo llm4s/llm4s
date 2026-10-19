@@ -146,7 +146,9 @@ final class Agent private[agent] (
 
   /**
    * Removes `threadId` - its history, usage and event log - from the agent's runtime, so that its id
-   * names a new thread again. Threads are kept until forgotten, one-shot [[run]]s included.
+   * names a new thread again, and every child thread below it first ([[children]], design 4.41). Threads are kept
+   * until forgotten, one-shot [[run]]s included. A child thread is refused (`GraphError.ChildThread`): forget its
+   * parent, and a child with a live run refuses the whole call (`ThreadBusy`) with nothing removed.
    * Refused, with nothing removed, for a thread that a run holds - one active in this runtime, or one
    * holding a live claim on it in any runtime or process sharing the store (`GraphError.ThreadBusy`) - or
    * that belongs to another tenant than `config`'s (`GraphError.TenantMismatch`). Forgetting an unknown
@@ -154,6 +156,22 @@ final class Agent private[agent] (
    */
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)
+
+  /**
+   * Every direct child thread of `threadId` (design 4.41) - the threads its delegated tasks ran on - oldest first,
+   * with each one's origin, status and latest checkpoint; a thread with no children, or none at all, has none. A
+   * thread of another tenant than `config`'s is `GraphError.TenantMismatch`, as for the runtime's `history`. Read a
+   * child's own history, checkpoints and events through the runtime by its id; a child thread cannot be run, resumed,
+   * forked, updated or forgotten directly (`GraphError.ChildThread`): forgetting its parent forgets it.
+   */
+  def children(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Vector[ChildThread]] =
+    @scala.annotation.tailrec
+    def pages(after: Option[ThreadId], found: Vector[ChildThread]): Result[Vector[ChildThread]] =
+      runtime.children(threadId, after, Agent.ChildPage, config) match
+        case Left(error)                                => Left(error)
+        case Right(page) if page.size < Agent.ChildPage => Right(found ++ page)
+        case Right(page)                                => pages(page.lastOption.map(_.threadId), found ++ page)
+    pages(None, Vector.empty)
 
   /**
    * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
@@ -350,6 +368,9 @@ object Agent:
 
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50
+
+  /** How many children [[Agent.children]] reads from the runtime at a time. */
+  private val ChildPage: Int = 256
 
   /** Queue size of a `stream*` or `subscribe` subscription. */
   val StreamCapacity: Int = 1024

@@ -12,8 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- Checkpoint format 8 and SQLite schema 6: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.children` is a new abstract method every store implements; [migration](docs/reference/migration.md#child-threads-2045).
+- `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
+- Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
+
+### Agent subagents (Phase 4)
+
+- **Added** child threads: `RunOrigin` on checkpoints (format 8), `ThreadId.child`, `Checkpointer.children` /
+  `Agent.children`, cascade delete, child retention and a durable `Checkpoint.outcome` [#2045](https://github.com/llm4s/llm4s/issues/2045); [design §4.41](docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md).
 
 ### Agent harness (Phase 3)
 

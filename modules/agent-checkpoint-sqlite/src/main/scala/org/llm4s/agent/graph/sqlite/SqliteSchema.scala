@@ -19,7 +19,9 @@ import scala.util.{ Try, Using }
  *    the first event number of the thread now under the id (`first_seq`, version 2), and the claim (holder, token,
  *    expiry as epoch seconds and nanoseconds, and from version 5 its tenant: `claim_tenant`, with
  *    `claim_tenant_token` the token of the claim it was recorded for, so the tenant is the claim's only when the two
- *    tokens agree). `deleteThread` keeps the row of a thread that numbered any event,
+ *    tokens agree), and from version 6 the parent the latest checkpoint's origin names (`parent_thread_id`) with the
+ *    thread's place among that parent's children (`child_order`, one past the file's highest, which a tombstone keeps), indexed
+ *    by `(parent_thread_id, child_order)`. `deleteThread` keeps the row of a thread that numbered any event,
  *    emptied, as a tombstone: `next_seq`, `first_seq` and the replay floor move one past the deleted thread's next
  *    number, so a new thread of the same id numbers its events past the deleted one's, and a read from inside the
  *    deleted log is told so (`GraphError.ThreadDeleted`). The tombstone holds no data of the deleted thread.
@@ -41,7 +43,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 5
+  val Current: Int = 6
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -52,8 +54,23 @@ private[sqlite] object SqliteSchema:
     1 -> addFirstSeq,
     2 -> addEffects,
     3 -> addEffectLineages,
-    4 -> addClaimTenants
+    4 -> addClaimTenants,
+    5 -> addChildThreads
   )
+
+  /**
+   * Version 6: child threads (#2045). `parent_thread_id` is the parent the thread's latest checkpoint's origin names,
+   * NULL for a top-level thread, and `child_order` its place among that parent's children, one past the file's
+   * highest; `children` pages the index on both. Every thread of a version-5 file is top-level - format 7 had no
+   * origin - so both are NULL, and nothing is backfilled.
+   */
+  private def addChildThreads(connection: Connection): Unit =
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN parent_thread_id TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN child_order INTEGER",
+      "CREATE INDEX llm4s_checkpoint_threads_parent ON llm4s_checkpoint_threads (parent_thread_id, child_order)"
+    )
 
   /**
    * Version 5: the tenant of each claim (#1926), so that a refusal or a takeover names the claim's holder only to a

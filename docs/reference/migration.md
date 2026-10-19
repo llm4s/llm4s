@@ -42,6 +42,21 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
 - **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
 - **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Subagents and isolation (Phase 4)
+
+Not in a release yet. Stage 4 lets an agent delegate to child agents on threads of their own ([#2044](https://github.com/llm4s/llm4s/issues/2044)). Each slice adds its breaks here.
+
+### Child threads (#2045)
+
+A thread can now be a child thread: its checkpoints record a `RunOrigin` naming its parent ([design 4.41](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md)).
+
+- **Checkpoint format 8 and SQLite schema 6, with no way back.** Format 8 adds `Checkpoint.origin` and `Checkpoint.outcome` (how a settled run ended, written with every terminal checkpoint); schema 6 adds `parent_thread_id` and `child_order` to `llm4s_checkpoint_threads`. Existing threads read and continue unchanged: format 7 reads as a top-level thread with no outcome, and the schema step backfills nothing. An older build refuses a format-8 checkpoint (`UnsupportedCheckpointFormat`) and a schema-6 file, so upgrade every process sharing a store together.
+- **A `Checkpointer` implements `children`.** `children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]]` is a new abstract method: list the threads whose latest checkpoint's `origin.parent` is `parent`, in the order each first named it, paged after `after`, never a deleted one, and refuse an unknown `after` with a `ValidationError`. Index the parent as you commit a checkpoint (`checkpoint.origin.map(_.parent)`). A store that only forwards to another forwards this too. `CheckpointerContract` checks it.
+- **`deleteThread` and `Agent.forget` cascade.** Deleting a thread first deletes every child thread below it; a child with a live run anywhere refuses the whole delete with `ThreadBusy`, deleting nothing.
+- **Child threads refuse direct calls.** `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (and the `Agent` methods over them) on a child thread are refused with the new `GraphError.ChildThread`; delete its parent to delete it. An exhaustive match on `GraphError` needs the new case.
+- **Settled children are pruned.** A thread keeps its newest 64 settled children (`RunConfig.withChildRetention`); older ones are deleted as the parent's run completes.
+- **`Checkpoint.apply` and `RunConfig.apply`** gain parameters with defaults (`origin`, `outcome`; `childRetention`); calls that pass every previous argument resolve to the kept overloads unchanged.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

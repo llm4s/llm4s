@@ -125,6 +125,7 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
   }
 
   "ReplayContract" should "fail a target that performs its effect without a guard" in {
