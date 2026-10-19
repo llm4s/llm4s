@@ -353,8 +353,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     runtime-owned child-thread key, `DelegationKeys.priorUsage`, committed with the new attempt's first
     checkpoint. A crash before that commit writes nothing, so the next `recoverChild` folds the same event once.
   - The roll-up is the child's `usage` key, plus `priorUsage`, plus the lost usage on its final terminal event.
-  - Each term is in the child's latest checkpoint or newest event, so ordinary event retention
-    (`RetentionPolicy.maxEvents >= 1`) applies to child threads unchanged.
+  - Each term is in the child's latest checkpoint or newest event. A child thread keeps at least its newest event:
+    its effective `RetentionPolicy.maxEvents` is `max(inherited, 1)` (`Some(0)` is accepted for top-level threads),
+    so the previous attempt's terminal event survives until the next `recoverChild` folds it. Otherwise event
+    retention applies to child threads unchanged.
   - The roll-up is added once, by the attempt that commits the call's **terminal** result, and covers
   the child's whole life. A call that suspends because its child did (D3) adds nothing: the child's usage so far
   stays in the child thread until the resumed call settles. A failed attempt commits nothing, so a replay adds it
