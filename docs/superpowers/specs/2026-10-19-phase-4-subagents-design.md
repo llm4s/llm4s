@@ -227,6 +227,10 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   `None`. A build that predates it refuses format 8, rather than drive a child thread as a top-level one.
   - The origin is written on the child's first claim commit and copied forward on every checkpoint, as `tenantId`
     is.
+  - **That first commit is fenced by the parent's claim, atomically in the store**, as descendant deletes are
+    (#2063): it commits only if the origin's parent's current claim is the admitting run's token. A stale task of
+    a parent taken over or released therefore never registers a child after a successor's cascade-delete
+    preflight, which would leave an orphan.
 - **`Checkpoint.outcome: Option[RunOutcome]`**, also format 8 (`None` from 7). The durable record of how a run
   settled, written atomically with every terminal (`Completed` or `Failed`) checkpoint of every thread, child or
   not, and cleared when a later run of the thread starts. `CheckpointStatus` and `RunCompleted` alone cannot rebuild
@@ -335,6 +339,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
       after a cancel.
     - After that the call returns `ToolOutcome.Fatal(ThreadBusy)`. The parent run then fails, and `recover` later
       reattaches.
+  - **Every reattach branch first validates the stored origin.** An existing thread at the derived id is adopted
+    only if its latest checkpoint's origin names this call's parent, call and agent; otherwise (a top-level thread
+    pre-created at that id, or another delegation's) the call is refused with a `ValidationError` and nothing of
+    that thread is run or reported.
   - **`Suspended`:** returned as `Ended` with the `Suspended` status. D3 surfaces it.
   - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint's `outcome` (K1)
     and, for `Answered`, `decodeOutput`, with no run. A settled child checkpoint without an `outcome` is corrupt
