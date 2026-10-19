@@ -508,6 +508,30 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       .message should include("harness")
   }
 
+  it should "refuse one agent id defined by two builders whose subagents or bounds differ behind the same task tools" in {
+    val client = RoutingClient(PartialFunction.empty)
+    def family(a: AgentBuilder, b: AgentBuilder) =
+      lead(client)
+        .withHandoffs(
+          org.llm4s.agent.Handoff
+            .to("left", Agent.builder("left", client).withHandoffs(org.llm4s.agent.Handoff.to("shared", a, "a")), "l")
+        )
+        .withHandoffs(
+          org.llm4s.agent.Handoff
+            .to("right", Agent.builder("right", client).withHandoffs(org.llm4s.agent.Handoff.to("shared", b, "b")), "r")
+        )
+        .build()
+    val base = Agent.builder("shared", client).withSubagents(general)
+    family(base, base).isRight shouldBe true
+    family(
+      base,
+      Agent.builder("shared", client).withSubagents(general.withSystemPrompt("CHILD:other"))
+    ).left.value.message should
+      include("defined by two different builders")
+    family(base, base.withDelegation(DelegationConfig().withMaxReportBytes(10))).left.value.message should
+      include("defined by two different builders")
+  }
+
   it should "version the parent's graph by its task tools, and leave an agent without subagents as it was" in {
     val client = RoutingClient(PartialFunction.empty)
     val plain  = lead(client).build().value

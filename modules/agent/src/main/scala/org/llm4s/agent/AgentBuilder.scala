@@ -217,7 +217,7 @@ final class AgentBuilder private (
    * Compiles this agent and every agent reachable through handoffs into one graph. Refuses an
    * invalid id, a `maxSteps` below 1, a handoff whose id is invalid or differs from its target's,
    * an id-only handoff ([[Handoff.toId]]) to an id no builder of the family defines, one id
-   * defined by two builders with different settings - their handoff targets compared too - and whatever
+   * defined by two builders with different settings - their handoff targets and subagents compared too - and whatever
    * [[org.llm4s.agent.graph.toolloop.ToolLoop.build]] refuses: tool name clashes, invalid tool
    * schemas, keys the loop owns, handoffs to self or twice to one target.
    */
@@ -336,6 +336,16 @@ final class AgentBuilder private (
    * tools, middleware and prompt are covered as the agent's own; a harness that does not assemble is covered by its
    * presence only, and refused by `build()`.
    */
+  /**
+   * Whether `other` delegates as this builder does: the same subagent definitions, as instances, in order, and the same
+   * bounds. The graph version covers only the task tools' specs, so two builders whose subagents differ behind the same
+   * specs (prompts, tools, output, failure policy) would otherwise pass as one agent.
+   */
+  private def delegatesAs(other: AgentBuilder): Boolean =
+    subagents.size == other.subagents.size &&
+      subagents.lazyZip(other.subagents).forall(_ eq _) &&
+      delegation == other.delegation
+
   private def canonical: ujson.Obj =
     val installed = effective.getOrElse(AgentBuilder.Effective(tools, middleware, systemPrompt, None))
     val settings = ujson.Obj(
@@ -425,8 +435,9 @@ object AgentBuilder:
         case next +: rest =>
           val targets = next.handoffs.flatMap(_.target)
           found.find(_.id == next.id) match
-            case None                                           => walk(rest ++ targets, found :+ next, walked :+ next)
-            case Some(seen) if seen.canonical == next.canonical => walk(rest ++ targets, found, walked :+ next)
+            case None => walk(rest ++ targets, found :+ next, walked :+ next)
+            case Some(seen) if seen.canonical == next.canonical && seen.delegatesAs(next) =>
+              walk(rest ++ targets, found, walked :+ next)
             case Some(_) =>
               Left(ValidationError("handoffs", s"agent id '${next.id}' is defined by two different builders"))
         case _ => Right(found)
