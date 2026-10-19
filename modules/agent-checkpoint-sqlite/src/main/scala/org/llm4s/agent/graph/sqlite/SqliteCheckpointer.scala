@@ -157,6 +157,12 @@ final class SqliteCheckpointer private (
       val nextSeq = current.fold(1L)(_.nextSeq)
       commit.checkpoint.foreach { checkpoint =>
         val json = ujson.write(Checkpoint.toJson(checkpoint))
+        // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
+        // a retraction below empties the history but leaves the thread the same one
+        val fresh =
+          query(c, "SELECT checkpoint_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
+            Option(rows.getString(1))
+          ).headOption.flatten.isEmpty
         // positions only grow, also across a retraction, so the history's order is its primary key's
         val position = query(
           c,
@@ -195,7 +201,7 @@ final class SqliteCheckpointer private (
           threadId.value
         )
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-        placeChild(c, threadId, checkpoint)
+        placeChild(c, threadId, checkpoint, fresh)
       }
       appendWrites(c, threadId, commit.pendingWrites)
       // released before this commit's own records are applied
@@ -852,18 +858,14 @@ object SqliteCheckpointer:
    * among that parent's children while the parent stays the same, takes a place past every other under a new one,
    * and has none as a top-level thread.
    */
-  private def placeChild(c: Connection, threadId: ThreadId, checkpoint: Checkpoint): Unit =
+  private def placeChild(c: Connection, threadId: ThreadId, checkpoint: Checkpoint, fresh: Boolean): Unit =
     val parent = checkpoint.origin.map(_.parent.value)
     val current =
       query(c, "SELECT parent_thread_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
         Option(rows.getString(1))
       ).headOption.flatten
-    // the checkpoint just written is the only one: a new thread under the id, whose tombstone's place was a cursor
-    val recreated =
-      query(c, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)(
-        _.getLong(1)
-      ).head == 1L
-    if current != parent || recreated then
+    // a new thread under the id takes a new place: its tombstone's was only a paging cursor
+    if current != parent || fresh then
       // one past the file's highest place: a tombstone keeps its place, so places only grow while children are kept
       val order = parent.map { _ =>
         query(c, "SELECT COALESCE(MAX(child_order), 0) + 1 FROM llm4s_checkpoint_threads")(_.getLong(1)).head

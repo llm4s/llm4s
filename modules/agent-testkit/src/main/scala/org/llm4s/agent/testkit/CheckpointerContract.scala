@@ -1477,6 +1477,25 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1) :+ children(1)
   }
 
+  it should "keep a child's place when a blocked first turn retracts every checkpoint it had" in {
+    val s       = Store()
+    val blocked = ThreadId(s"${s.thread.value}/~task/worker/1")
+    val sibling = ThreadId(s"${s.thread.value}/~task/worker/2")
+    childCommitted(s, blocked, Some(originOf(s.thread, 1)), status = CheckpointStatus.Running)
+    childCommitted(s, sibling, Some(originOf(s.thread, 2)))
+    // the blocked turn retracts back to the newest settled checkpoint, of which there is none: the history is
+    // emptied before the terminal checkpoint is written, but the thread is the same one and keeps its place
+    val claim = s.claim("child", on = blocked).value
+    val terminal = s
+      .checkpoint("c2", s.latestId(blocked), on = blocked, status = CheckpointStatus.Failed)
+      .withOrigin(Some(originOf(s.thread, 1)))
+    s.store.commit(blocked, Commit(claim.token, Some(terminal), retractTurn = true)).value
+    s.store.release(blocked, claim.token).value
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(blocked, sibling)
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(blocked, sibling)
+  }
+
   it should "stop listing a child whose latest checkpoint names no parent, or another" in {
     val s     = Store()
     val child = ThreadId(s"${s.thread.value}/~task/worker/1")
