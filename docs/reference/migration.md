@@ -83,6 +83,16 @@ A child that stops for an approval or a question now suspends its parent ([desig
 - **A suspended child is no longer a tool error.** Code that waited for the parent model to see `subagent '<id>' suspended` now gets the parent `Suspended` instead, and must answer or abandon it.
 - **`ToolLoop.questions` no longer lists a `task` call waiting on its child**; `ToolLoop.delegatedQuestions` does.
 
+### Nested streams and tracing (#2051)
+
+A parent's subscribers can follow its children, and a child's trace names its parent ([design 4.47](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md)):
+
+- **`StreamEvent.Nested(child, event)`** is a new case, so an exhaustive `match` on `StreamEvent` needs it. Only a subscription made with `nested = true` receives one; add `case _: StreamEvent.Nested => ()` where you match exhaustively.
+- **`TraceEvent.AgentRunEnded` gains `parentThreadId` and `parentRunId`** (`Option[String]`, default `None`), after `timestamp`. Construction is unchanged; a positional pattern `case AgentRunEnded(t, r, a, s, m, u, ts)` needs two more binders, or match on the type and read the fields.
+- **OpenTelemetry span names.** The ended-run span `Agent Run` is now `invoke_agent <agent>`, and the tool span `Tool Execution: <tool>` is now `execute_tool <tool>`, each with `gen_ai.operation.name`; a dashboard or alert keyed on the old names needs the new ones. A child run's span carries `llm4s.parent.thread_id` and `llm4s.parent.run_id`.
+- **`RunHandle.subscribe` takes `nested`** (`subscribe(capacity, nested = false)`), so a `RunHandle` of your own implements the two-argument form. A call site is unchanged.
+- **A subagent traces to its parent's `Tracing`.** An agent built `withTracing` now also traces its subagents' runs, each ending with its own `AgentRunEnded`.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

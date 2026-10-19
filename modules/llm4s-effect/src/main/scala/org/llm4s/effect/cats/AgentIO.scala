@@ -92,6 +92,14 @@ trait AgentIO[F[_]] {
    * raises [[LLMException]].
    */
   def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R]
+
+  /**
+   * [[events]], with the events of every child `run` delegates to (design 4.47): the subscription is made with
+   * `nested = true`, so `handlers` also see each `StreamEvent.Nested` - matched with `EventHandlers.onChild`, or
+   * `otherwise` - after the parent's `SubagentEvents.TaskStarted` for its child. Nested events are live: a consumer too
+   * slow for the buffer loses them as a `LiveGap`.
+   */
+  def nestedEvents[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R]
 }
 
 object AgentIO {
@@ -181,11 +189,16 @@ object AgentIO {
      * Subscribes a buffer's listener to `run`, ending the buffer when the subscription ends; the
      * release cancels the subscription - never the run - and closes the buffer.
      */
-    def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R] = {
+    def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R] = observed(run, handlers, nested = false)
+
+    def nestedEvents[R](run: AgentRun, handlers: EventHandlers[R]): Stream[F, R] =
+      observed(run, handlers, nested = true)
+
+    private def observed[R](run: AgentRun, handlers: EventHandlers[R], nested: Boolean): Stream[F, R] = {
       val acquire = F
         .blocking {
           val buffer = AgentEventBuffer(StreamBufferSize)
-          run.subscribeEnding(Agent.StreamCapacity, () => buffer.end())(buffer.listener).map(s => (buffer, s))
+          run.subscribeEnding(Agent.StreamCapacity, () => buffer.end(), nested)(buffer.listener).map(s => (buffer, s))
         }
         .flatMap(raised)
       Stream

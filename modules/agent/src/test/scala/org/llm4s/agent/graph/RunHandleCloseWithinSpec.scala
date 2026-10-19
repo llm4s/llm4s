@@ -28,7 +28,7 @@ class RunHandleCloseWithinSpec extends AnyFlatSpec with Matchers {
       RunId("r"),
       1L,
       StopSignal(),
-      (_, _, _) => Left(ValidationError("subscribe", "not used")),
+      (_, _, _, _) => Left(ValidationError("subscribe", "not used")),
       None
     )
     handle.launch(

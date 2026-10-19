@@ -105,6 +105,12 @@ private[graph] trait NodeEventSink:
   def custom(name: String, version: Int, payload: ujson.Value): Unit
   def progress(name: String, version: Int, payload: ujson.Value): Unit
 
+  /**
+   * Forwards a delegated child's event to the task's thread's nested subscribers (design 4.47), live, as `progress`
+   * does; a no-op outside a runtime.
+   */
+  def nested(event: StreamEvent.Nested): Unit = ()
+
   /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
   def discardCustom(): Unit
 

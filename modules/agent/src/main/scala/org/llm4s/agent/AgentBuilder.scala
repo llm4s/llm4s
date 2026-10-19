@@ -263,7 +263,7 @@ final class AgentBuilder private (
           ValidationError("subagents", s"agent '$id': subagent ids defined twice: ${duplicated.mkString(", ")}")
         )
         bound <- subagents.foldLeft[Result[Vector[BoundAgent[?, ?]]]](Right(Vector.empty)) { (acc, definition) =>
-          acc.flatMap(done => definition.bind(client, graphRuntime).map(done :+ _))
+          acc.flatMap(done => definition.bind(client, graphRuntime, tracing).map(done :+ _))
         }
       yield Some(new DelegationMiddleware(bound, config, depth = 0))
 

@@ -363,7 +363,13 @@ final class GraphRuntime(
    * subscription before it with `Disconnected(lastSeq, DisconnectReason.TenantMismatch)`. A thread
    * with no checkpoint any more ends it with `ThreadDeleted`, and a failed read with `ReplayFailed`.
    */
-  def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024, config: RunConfig = RunConfig())(
+  def subscribe(
+    threadId: ThreadId,
+    afterSeq: Long = 0L,
+    capacity: Int = 1024,
+    config: RunConfig = RunConfig(),
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[Subscription] = admission(threadId) {
     val requested = config.tenantId.map(_.value)
@@ -393,7 +399,8 @@ final class GraphRuntime(
             capacity,
             listener,
             AbandonedWrites.none,
-            TenantScope.Of(requested, confirmed = false)
+            TenantScope.Of(requested, confirmed = false),
+            nested
           )
         )
     }
@@ -409,9 +416,12 @@ final class GraphRuntime(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean
   ): Result[Dispatched] =
-    validCapacity(capacity).flatMap(_ => hub.subscribe(threadId, afterSeq, capacity, listener, abandoned, scope))
+    validCapacity(capacity).flatMap(_ =>
+      hub.subscribe(threadId, afterSeq, capacity, listener, abandoned, scope, nested)
+    )
 
   private def validCapacity(capacity: Int): Result[Unit] =
     Either.cond(
@@ -1900,7 +1910,8 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope))
+              observation =
+                observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope, o.nested))
               // the observer takes its place in the log at the first commit fenced by the run's claim
               admit(Admitting(signal, token => observation.foreach(_.claimed(token)))).map { run =>
                 admitted = Some(run)
@@ -1910,8 +1921,8 @@ final class GraphRuntime(
                   run.runId,
                   run.claimSeq,
                   signal,
-                  (afterSeq, capacity, listener) =>
-                    dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope),
+                  (afterSeq, capacity, nested, listener) =>
+                    dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope, nested),
                   subscription
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
@@ -3402,3 +3413,6 @@ final class GraphRuntime(
           ),
           () => !claimWasLost
         )
+      // a child's event, forwarded from the child's run (design 4.47): fenced like progress, so a lost run's child
+      // sends nothing past a later run's claim
+      override def nested(event: StreamEvent.Nested): Unit = hub.nested(threadId, event, token, () => !claimWasLost)

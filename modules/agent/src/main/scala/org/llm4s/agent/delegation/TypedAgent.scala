@@ -1,7 +1,8 @@
 package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunOrigin, ThreadId, ToolCallId }
+import org.llm4s.agent.events.TaskEnded
+import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunId, RunOrigin, ThreadId, ToolCallId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
@@ -11,8 +12,11 @@ import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, UsageSummary }
 import org.llm4s.toolapi.SchemaDefinition
+import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
+
+import scala.concurrent.duration.*
 
 /**
  * A subagent's definition (design 4.44): an agent that takes a typed input `I` and gives back a typed report `O`, run
@@ -42,7 +46,8 @@ final class TypedAgent[I, O] private (
   model: Option[(LLMClient, CompletionOptions)],
   maxSteps: Option[Int],
   render: Option[I => String],
-  val failure: ChildFailure
+  val failure: ChildFailure,
+  streaming: Boolean
 )(using private[delegation] val inputCodec: ReadWriter[I], private[delegation] val outputCodec: ReadWriter[O]):
 
   private def copy(
@@ -53,7 +58,8 @@ final class TypedAgent[I, O] private (
     model: Option[(LLMClient, CompletionOptions)] = model,
     maxSteps: Option[Int] = maxSteps,
     render: Option[I => String] = render,
-    failure: ChildFailure = failure
+    failure: ChildFailure = failure,
+    streaming: Boolean = streaming
   ): TypedAgent[I, O] =
     new TypedAgent(
       rawId,
@@ -68,7 +74,8 @@ final class TypedAgent[I, O] private (
       model,
       maxSteps,
       render,
-      failure
+      failure,
+      streaming
     )
 
   /** The subagent's id: its agent id, and the `subagent_type` or the `task_<id>` tool name the parent model uses. */
@@ -95,14 +102,21 @@ final class TypedAgent[I, O] private (
   /** Renders the input as the child's first user message, replacing the default (see the class description). */
   def withInputText(render: I => String): TypedAgent[I, O] = copy(render = Some(render))
 
+  /**
+   * Streams the child's model answers (`AgentBuilder.withStreaming`), so a parent subscription made with
+   * `nested = true` sees the child's `AgentEvents.TextDelta`s as they arrive (design 4.47). Off by default.
+   */
+  def withStreaming(): TypedAgent[I, O] = copy(streaming = true)
+
   /** What the parent does when the child fails; [[ChildFailure.Report]] by default. */
   def withFailure(policy: ChildFailure): TypedAgent[I, O] = copy(failure = policy)
 
   /**
-   * Compiles the definition onto `runtime`, calling `parentClient` unless [[withModel]] set a client. Refuses an
-   * invalid id, a blank description, and whatever `AgentBuilder.build()` refuses for the child.
+   * Compiles the definition onto `runtime`, calling `parentClient` unless [[withModel]] set a client, and tracing to
+   * the parent's `tracing` (rule 16: a child never has tracing of its own; design 4.47). Refuses an invalid id, a
+   * blank description, and whatever `AgentBuilder.build()` refuses for the child.
    */
-  def bind(parentClient: LLMClient, runtime: GraphRuntime): Result[BoundAgent[I, O]] =
+  def bind(parentClient: LLMClient, runtime: GraphRuntime, tracing: Option[Tracing] = None): Result[BoundAgent[I, O]] =
     if description.trim.isEmpty then Left(ValidationError("subagents", s"subagent '$rawId': the description is blank"))
     else
       val (client, options) = model.getOrElse(parentClient -> CompletionOptions())
@@ -115,7 +129,9 @@ final class TypedAgent[I, O] private (
       val tooled    = tools.fold(prompted)(prompted.withTools)
       val harnessed = harness.fold(tooled)(tooled.withHarness)
       val limited   = maxSteps.fold(harnessed)(harnessed.withMaxSteps)
-      val typed     = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
+      val outputted = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
+      val traced    = tracing.fold(outputted)(outputted.withTracing)
+      val typed     = if streaming then traced.withStreaming() else traced
       AgentId
         .of(rawId)
         .left
@@ -159,7 +175,8 @@ object TypedAgent:
       None,
       None,
       None,
-      ChildFailure.Report
+      ChildFailure.Report,
+      false
     )
 
   /**
@@ -180,7 +197,8 @@ object TypedAgent:
       None,
       None,
       None,
-      ChildFailure.Report
+      ChildFailure.Report,
+      false
     )
 
 /**
@@ -227,9 +245,10 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
 
   /**
    * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner - or, with
-   * `answers`, resumes its suspended child with them (design 4.46): the outcome, and for a failed child its error,
-   * which `ChildFailure.Fail` fails the parent with. A suspended child's roll-up is left for the call's run that
-   * settles it (rules 10, 11).
+   * `answers`, resumes its suspended child with them (design 4.46): the outcome, for a failed child its error, which
+   * `ChildFailure.Fail` fails the parent with, and - unless the child suspended - the `TaskEnded` the call commits with
+   * a terminal result (design 4.47): the child's status, roll-up, and time since its first admission. A suspended
+   * child's roll-up is left for the call's run that settles it (rules 10, 11), and its call commits no `TaskEnded`.
    */
   private[delegation] def delegated(
     input: I,
@@ -237,7 +256,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     config: RunConfig,
     ctx: ToolContext,
     answers: Option[DelegatedAnswers] = None
-  ): Result[(TaskOutcome[O], Option[LLMError])] =
+  ): Result[(TaskOutcome[O], Option[LLMError], Option[TaskEnded])] =
     val threadId = ThreadId.child(origin.parent, origin.agent, origin.call)
     val ref      = ChildRef(threadId, config.runId, agent.id, ctx.toolCallId, origin.depth)
     val settle   = definition.failure == ChildFailure.Report
@@ -246,14 +265,61 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       .fold(ChildRunner.run(agent, origin, query, config, ctx, settleOnFailure = settle))(answered =>
         ChildRunner.resume(agent, origin, query, answered, config, ctx, settleOnFailure = settle)
       )
-      .map {
-        case ChildEnd.Ended(result, _) =>
-          outcome(result, ref.copy(runId = result.runId)) -> None
-        case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
-          TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
-        case ChildEnd.Failed(error, usage) =>
-          TaskOutcome.Refused(ref, TaskRefusal.Failed(error.message), usage) -> Some(error)
+      .map { childEnd =>
+        val (taskOutcome, cause, child, status) = childEnd match
+          case ChildEnd.Ended(result, _) =>
+            val ended = ref.copy(runId = result.runId)
+            val made  = outcome(result, ended)
+            val label = made match
+              case TaskOutcome.Refused(_, reason, _) => Some(TaskRefusal.label(reason))
+              case _: TaskOutcome.Suspended[?]       => None
+              case _                                 => Some("completed")
+            (made, None, ended, label)
+          case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
+            val reason = TaskRefusal.OutputInvalid(all)
+            val failed = failedRef(ref, config)
+            (TaskOutcome.Refused(failed, reason, usage), Some(invalid), failed, Some(TaskRefusal.label(reason)))
+          case ChildEnd.Failed(error, usage) =>
+            val reason = TaskRefusal.Failed(error.message)
+            val failed = failedRef(ref, config)
+            (TaskOutcome.Refused(failed, reason, usage), Some(error), failed, Some(TaskRefusal.label(reason)))
+        // a suspension is not the call's end: the call that settles the child commits the one TaskEnded
+        (taskOutcome, cause, status.map(taskEnded(child, _, childEnd.usage, origin, config)))
       }
+
+  /**
+   * `ref` naming the run of the failed child's latest checkpoint - the run that recorded its failure, as replay names
+   * it - rather than the run id the call was configured with, which no admission uses; `ref` as it is if the child
+   * cannot be read.
+   */
+  private def failedRef(ref: ChildRef, config: RunConfig): ChildRef =
+    agent.runtime
+      .childAtRest(ref.threadId, agent.loop.graph, config)
+      .toOption
+      .flatten
+      .fold(ref)((checkpoint, _) => ref.copy(runId = RunId(checkpoint.runId)))
+
+  /**
+   * The `TaskEnded` of `child`: its status label, its roll-up `usage`, and the time from its first admission -
+   * `RunOrigin.startedAt` as its thread records it, stamped by the runtime, else `origin`'s - to now, by the runtime's
+   * clock.
+   */
+  private def taskEnded(
+    child: ChildRef,
+    status: String,
+    usage: UsageSummary,
+    origin: RunOrigin,
+    config: RunConfig
+  ): TaskEnded =
+    val startedAt = agent.runtime
+      .childAtRest(child.threadId, agent.loop.graph, config)
+      .toOption
+      .flatten
+      .flatMap(_._1.origin)
+      .map(_.startedAt)
+      .getOrElse(origin.startedAt)
+    val elapsed = java.time.Duration.between(startedAt, agent.runtime.now()).toNanos.max(0L)
+    TaskEnded(child, status, usage, elapsed.nanos)
 
   private def outcome(result: AgentResult, ref: ChildRef): TaskOutcome[O] =
     result.status match

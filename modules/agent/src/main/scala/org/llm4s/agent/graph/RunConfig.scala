@@ -332,6 +332,9 @@ final class RunContext private[graph] (
   /** Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. */
   def progress(name: String, version: Int, payload: ujson.Value): Unit = sink.progress(name, version, payload)
 
+  /** Forwards a delegated child's event to this task's thread's nested subscribers (design 4.47). */
+  private[agent] def nested(event: StreamEvent.Nested): Unit = sink.nested(event)
+
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
 

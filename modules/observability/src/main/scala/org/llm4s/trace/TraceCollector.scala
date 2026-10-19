@@ -185,7 +185,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts) =>
+      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts, parentThread, parentRun) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -203,7 +203,8 @@ class TraceCollectorTracing[F[_]](
             "message_count" -> SpanValue.LongValue(messages.size.toLong),
             "input_tokens"  -> SpanValue.LongValue(usage.inputTokens),
             "output_tokens" -> SpanValue.LongValue(usage.outputTokens)
-          )
+          ) ++ parentThread.map(id => "parent_thread_id" -> SpanValue.StringValue(id)) ++
+            parentRun.map(id => "parent_run_id" -> SpanValue.StringValue(id))
         )
 
       case TraceEvent.CustomEvent(name, data, ts) =>

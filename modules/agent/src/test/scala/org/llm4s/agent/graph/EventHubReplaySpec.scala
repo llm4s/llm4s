@@ -52,6 +52,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     case StreamEvent.Disconnected(_, reason)      => s"Disconnected($reason)"
     case StreamEvent.LiveGap(n)                   => s"gap:$n"
     case StreamEvent.Live(_, _, _, _, _, _, _, p) => s"live:${p.num.toInt}"
+    case _: StreamEvent.Nested                    => "nested"
 
   private def live(i: Int): StreamEvent.Live =
     StreamEvent.Live(thread.value, run.value, FencingToken(1L), "task", "node", "test.progress", 1, ujson.Num(i))

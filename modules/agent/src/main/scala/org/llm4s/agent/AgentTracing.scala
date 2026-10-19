@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.events.AgentEvents
+import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, ToolLoop, TurnOutput }
 import org.llm4s.types.Result
@@ -26,12 +26,16 @@ import scala.util.{ Failure, Try }
  * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered the run's
  * last event, at the run's end-of-run barrier, its error is traced as `ErrorOccurred` and logged at
  * WARN. Tracing failures are logged at WARN and never fail the run.
+ *
+ * `parent` is, for a delegated child's run, the parent thread and run whose `task` call drives it: its
+ * `AgentRunEnded` names them (design 4.47).
  */
 final private[agent] class AgentTracing(
   handle: RunHandle[TurnOutput],
   root: AgentId,
   loop: ToolLoop,
-  tracing: Tracing
+  tracing: Tracing,
+  parent: Option[(ThreadId, RunId)] = None
 ):
   private val delivered    = new CompletableFuture[Unit]()
   private val detached     = new AtomicBoolean(false)
@@ -95,7 +99,16 @@ final private[agent] class AgentTracing(
       case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
     status.left.foreach(error => if label == "failed" then traceError(error.message))
     trace(
-      TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, label, messages, usage.get)
+      TraceEvent.AgentRunEnded(
+        handle.threadId.value,
+        handle.runId.value,
+        active.value,
+        label,
+        messages,
+        usage.get,
+        parentThreadId = parent.map(_._1.value),
+        parentRunId = parent.map(_._2.value)
+      )
     )
 
   /**
@@ -157,8 +170,9 @@ private[agent] object AgentTracing:
   def toTrace(record: EventRecord): TraceEvent.CustomEvent =
     val traced = TracingSubscriber.toTrace(record)
     record.event match
-      case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) => traced.copy(name = name)
-      case _                                                        => traced
+      case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) || SubagentEvents.durable(name) =>
+        traced.copy(name = name)
+      case _ => traced
 
   private def stateOf(result: RunResult[TurnOutput]): ThreadState = result match
     case RunResult.Completed(s, _, _) => s

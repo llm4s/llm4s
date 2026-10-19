@@ -12,6 +12,7 @@ package org.llm4s.agent.graph
  * recognised by its fencing token ([[EventRecord.token]], [[StreamEvent.Live.token]]), which, unlike a run id,
  * is never reused. The subscription is thread-scoped like any
  * other: it keeps delivering later runs until cancelled, through [[RunHandle.observation]]. A
- * refused admission abandons it, and its listener is never called.
+ * refused admission abandons it, and its listener is never called. With `nested`, it also receives the events of the
+ * children the run delegates to, as [[StreamEvent.Nested]] (design 4.47).
  */
-final case class Observer(capacity: Int, listener: StreamEvent => Unit)
+final case class Observer(capacity: Int, listener: StreamEvent => Unit, nested: Boolean = false)

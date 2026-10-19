@@ -24,7 +24,7 @@ class RunHandleAwaitEndSpec extends AnyFlatSpec with Matchers {
     def await(): Result[RunResult[Unit]]  = Left(ValidationError("await", "not used"))
     def cancel(): Unit                    = current.set(RunStatus.Failed)
     def observation: Option[Subscription] = None
-    def subscribe(capacity: Int)(listener: StreamEvent => Unit): Result[Subscription] =
+    def subscribe(capacity: Int, nested: Boolean)(listener: StreamEvent => Unit): Result[Subscription] =
       Left(ValidationError("subscribe", "not used"))
   }
 

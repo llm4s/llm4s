@@ -118,6 +118,18 @@ trait AgentPekko {
     handlers: EventHandlers[R],
     bufferSize: Int = AgentPekko.DefaultBufferSize
   ): Source[R, Future[Done]]
+
+  /**
+   * [[events]], with the events of every child `run` delegates to (design 4.47): the subscription is made with
+   * `nested = true`, so `handlers` also see each `StreamEvent.Nested` - matched with `EventHandlers.onChild`, or
+   * `otherwise` - after the parent's `SubagentEvents.TaskStarted` for its child. Nested events are live: past
+   * `bufferSize` a slow consumer loses them as a `LiveGap`.
+   */
+  def nestedEvents[R](
+    run: AgentRun,
+    handlers: EventHandlers[R],
+    bufferSize: Int = AgentPekko.DefaultBufferSize
+  ): Source[R, Future[Done]]
 }
 
 object AgentPekko {
@@ -175,7 +187,18 @@ object AgentPekko {
       events(run, EventHandlers.on(eventType)(identity), bufferSize)
 
     def events[R](run: AgentRun, handlers: EventHandlers[R], bufferSize: Int): Source[R, Future[Done]] =
-      BlockingSource("llm4s-pekko-events", HandOver)(() => new RunEventsProducer(bufferSize, run))
+      observed(run, handlers, bufferSize, nested = false)
+
+    def nestedEvents[R](run: AgentRun, handlers: EventHandlers[R], bufferSize: Int): Source[R, Future[Done]] =
+      observed(run, handlers, bufferSize, nested = true)
+
+    private def observed[R](
+      run: AgentRun,
+      handlers: EventHandlers[R],
+      bufferSize: Int,
+      nested: Boolean
+    ): Source[R, Future[Done]] =
+      BlockingSource("llm4s-pekko-events", HandOver)(() => new RunEventsProducer(bufferSize, run, nested))
         .map(handlers.dispatch)
         .collect { case Some(r) => r }
 
@@ -201,18 +224,20 @@ object AgentPekko {
    * blocks the subscription. The subscription is cancelled and the buffer closed on this thread before `run`
    * returns, however it returns; the run itself is left alone.
    */
-  final private class RunEventsProducer(bufferSize: Int, agentRun: AgentRun) extends Producer[StreamEvent] {
+  final private class RunEventsProducer(bufferSize: Int, agentRun: AgentRun, nested: Boolean)
+      extends Producer[StreamEvent] {
 
     def run(emitter: Emitter[StreamEvent]): Either[LLMError, Unit] =
       if (bufferSize < 1)
         Left(org.llm4s.error.ValidationError("bufferSize", s"must be at least 1, got $bufferSize"))
       else {
         val events = AgentEventBuffer(bufferSize)
-        agentRun.subscribeEnding(Agent.StreamCapacity, () => events.end())(events.listener).flatMap { subscription =>
-          ultimately {
-            subscription.cancel()
-            events.close()
-          }(pump(events, emitter))
+        agentRun.subscribeEnding(Agent.StreamCapacity, () => events.end(), nested)(events.listener).flatMap {
+          subscription =>
+            ultimately {
+              subscription.cancel()
+              events.close()
+            }(pump(events, emitter))
         }
       }
 

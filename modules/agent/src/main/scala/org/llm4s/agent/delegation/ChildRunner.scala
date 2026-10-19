@@ -1,6 +1,7 @@
 package org.llm4s.agent.delegation
 
-import org.llm4s.agent.{ Agent, AgentResult, AgentRun, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentResult, AgentRun, AgentStatus, RunScope }
+import org.llm4s.agent.events.{ SubagentEvents, TaskStarted }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.ToolContext
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys, TurnOutput }
@@ -68,6 +69,14 @@ private[agent] enum ChildEnd:
  * child's whole life once. The exception is a child cancelled with the calling task: its usage so far is added once it
  * has drained, because a timeout on the call commits the call's error with the accumulator (a cancelled parent task
  * commits nothing, and its replay counts the child once).
+ *
+ * Its events reach the parent's subscribers (design 4.47). It admits the child with a forwarder observing the child's
+ * run from its claim, so not even a fast child's first event is missed: on the claim it sends the parent's live
+ * `SubagentEvents.TaskStarted` for the admitted run, then each event of the run, a grandchild's included, goes to the
+ * parent's nested subscribers as `StreamEvent.Nested`, queued behind it, and the run's await waits for the forwarder
+ * to pass on its terminal event, so the call's result follows it. A child it cannot drive here - held by another
+ * runtime, or already suspended or settled - sends its live events nowhere this runtime can see: the parent's nested
+ * subscribers get `TaskStarted` and one `Nested(child, LiveGap(0))` instead, then the events of any run it drives later.
  */
 private[agent] object ChildRunner:
   /** The first pause while a child's claim is held elsewhere; it doubles up to [[MaxBackoff]]. */
@@ -162,6 +171,50 @@ private[agent] object ChildRunner:
     /** Whether the latest admission's timeout was the parent's deadline rather than the grant. */
     @volatile private var parentsDeadline = false
 
+    /** The run this attempt last sent `TaskStarted` for. */
+    @volatile private var announced = Option.empty[RunId]
+
+    /** The child runs whose events this attempt forwarded, or reported a gap for: each is in the merged stream. */
+    private var streamed = Set.empty[RunId]
+
+    /** The child as the parent's events name it, for run `runId`. */
+    private def ref(runId: RunId): ChildRef = ChildRef(childId, runId, origin.agent, ctx.toolCallId, origin.depth)
+
+    /** Sends the parent's live `TaskStarted` for the child's run `runId`. */
+    private def announce(runId: RunId): Unit =
+      SubagentEvents.TaskStarted.progress(ctx.run, TaskStarted(ref(runId)))
+      announced = Some(runId)
+
+    /**
+     * The live events of the child's run `runId` cannot reach the parent's subscribers from here: `TaskStarted` for it
+     * (unless the last one named it) and one `Nested(child, LiveGap(0))`, once per run, so the gap always follows a start
+     * naming the same run. Durable events are kept, and `Agent.subscribeChild` replays them.
+     */
+    private def gap(runId: RunId): Unit =
+      if !streamed.contains(runId) then
+        if !announced.contains(runId) then announce(runId)
+        ctx.run.nested(StreamEvent.Nested(ref(runId), StreamEvent.LiveGap(0)))
+        streamed += runId
+
+    /**
+     * The forwarder a child run `runId` is admitted with: it passes on every event of the run to the parent's nested
+     * subscribers, a grandchild's included; a disconnection (it fell behind) as a gap. It sends `TaskStarted` first, on
+     * the run's first event - its claim, so only a run that was admitted is announced - from the same thread as the
+     * events, so the start is queued ahead of them. A refused admission abandons the observer, which then sends nothing.
+     */
+    private def forwarder(runId: RunId): (Observer, RunScope) =
+      val child = ref(runId)
+      val first = new java.util.concurrent.atomic.AtomicBoolean(true)
+      val scope = RunScope(
+        runId,
+        event =>
+          if first.getAndSet(false) then announce(runId)
+          event match
+            case _: StreamEvent.Disconnected => ctx.run.nested(StreamEvent.Nested(child, StreamEvent.LiveGap(0)))
+            case other                       => ctx.run.nested(StreamEvent.Nested(child, other))
+      )
+      (Observer(Agent.StreamCapacity, scope, nested = true), scope)
+
     /**
      * A new run's config: each admission is a run of its own, with the timeout capped by what is left of the parent's
      * deadline now, so time spent waiting for a busy child never lets the child outlive its parent.
@@ -221,16 +274,20 @@ private[agent] object ChildRunner:
             )
           )
         case Right(None) =>
+          val run                = fresh()
+          val (observer, events) = forwarder(run.runId)
           admitted(
             runtime.startChild(
               childId,
               graph,
               input,
               origin,
-              fresh(),
+              run,
+              observer = Some(observer),
               notAfter = ctx.run.deadline,
               amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest)))
-            )
+            ),
+            events
           )
         // a thread at the child's id that is not this call's child - a top-level thread named like one, or a child of
         // another origin - is never adopted: its answer is not this call's
@@ -256,20 +313,36 @@ private[agent] object ChildRunner:
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
+              val run                = fresh()
+              val (observer, events) = forwarder(run.runId)
               admitted(
-                runtime.recoverChild(childId, graph, fresh(), amend = foldLostUsage, notAfter = ctx.run.deadline)
+                runtime.recoverChild(
+                  childId,
+                  graph,
+                  run,
+                  observer = Some(observer),
+                  amend = foldLostUsage,
+                  notAfter = ctx.run.deadline
+                ),
+                events
               )
             case CheckpointStatus.Suspended =>
               answering(exec) match
                 case Some(pending) => resumed(pending)
                 case None =>
+                  // nothing runs here, so the child's live events are gone
+                  gap(RunId(checkpoint.runId))
                   Step.Done(
                     AgentRun
                       .status(runtime.suspendedResult(graph, exec), isBlock = false, agent.loop)
                       .flatMap(status => rebuilt(checkpoint, exec, status))
                       .flatMap(result => usage().map(ChildEnd.Ended(result, _)))
                   )
-            case CheckpointStatus.Completed | CheckpointStatus.Failed => Step.Done(settled(checkpoint, exec))
+            case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+              // settled by a run whose events this attempt did not forward - an earlier run (a replay after a crash),
+              // or this attempt's settlement of a failed child - so the run that names the outcome gets a gap
+              gap(RunId(checkpoint.runId))
+              Step.Done(settled(checkpoint, exec))
 
     /**
      * The answers this resume gives the suspended child `exec` (design 4.46): composite ones grouped for its own `task`
@@ -291,10 +364,12 @@ private[agent] object ChildRunner:
      * again and its interrupts surfaced again, with a warning; any other refusal as [[admitted]] takes it.
      */
     private def resumed(pending: Map[InterruptId, ujson.Value]): Step =
-      runtime.resumeChild(childId, graph, pending, fresh(), notAfter = ctx.run.deadline) match
+      val run                = fresh()
+      val (observer, events) = forwarder(run.runId)
+      runtime.resumeChild(childId, graph, pending, run, observer = Some(observer), notAfter = ctx.run.deadline) match
         case handle @ Right(_) =>
           applied = true
-          admitted(handle)
+          admitted(handle, events)
         case Left(invalid: GraphError.InvalidResume) =>
           applied = true
           logger.warn(
@@ -302,7 +377,7 @@ private[agent] object ChildRunner:
               s"${invalid.problems.mkString("; ")}; its interrupts are asked again"
           )
           Step.Again
-        case refused => admitted(refused)
+        case refused => admitted(refused, events)
 
     /**
      * Adds the child's roll-up to the calling task's accumulator, unless the thread's committed state shows it counted
@@ -328,18 +403,30 @@ private[agent] object ChildRunner:
     private def ours(checkpoint: Checkpoint): Boolean =
       checkpoint.origin.exists(o => o.parent == origin.parent && o.call == origin.call && o.agent == origin.agent)
 
-    /** What an admission of the child calls for: its run awaited, or a refusal that reads the child again. */
-    private def admitted(handle: Result[RunHandle[TurnOutput]]): Step = handle match
+    /**
+     * What an admission of the child calls for: its run awaited - with its forwarder `events` drained, so its terminal
+     * event reaches the parent's subscribers before the call's result - or a refusal that reads the child again.
+     */
+    private def admitted(handle: Result[RunHandle[TurnOutput]], events: RunScope): Step = handle match
       // awaited even if the interrupt came after the admission: an admitted child is always cancelled with its parent
-      case Right(h) => ended(Agent.awaitBlocking(agent.agentRun(h, None, drain = false)))
+      case Right(h) =>
+        streamed += h.runId
+        val parent = Some(origin.parent -> ctx.run.position.runId)
+        ended(Agent.awaitBlocking(agent.agentRun(h, Some(events), drain = true, parent = parent)))
       // another runtime started it, settled it, or moved it on between the read and the admission
       case Left(
             _: GraphError.ThreadExists | _: GraphError.NothingToRecover | _: GraphError.IncompleteRun |
             _: GraphError.PendingInterrupts | _: GraphError.NotSuspended
           ) =>
         Step.Again
-      case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)
-      case Left(error)                       => Step.Done(Left(error))
+      case Left(busy: GraphError.ThreadBusy) =>
+        // another runtime (or run) holds the child: its live events cannot reach this one
+        gap(busy.holder match
+          case GraphError.BusyHolder.Run(runId) => runId
+          case _                                => config.runId
+        )
+        Step.Busy(busy)
+      case Left(error) => Step.Done(Left(error))
 
     /** What the end of a child's live run calls for. */
     private def ended(outcome: Result[AgentResult]): Step = outcome match

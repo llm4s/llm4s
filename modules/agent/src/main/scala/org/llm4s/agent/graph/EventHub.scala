@@ -281,9 +281,10 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean = false
   ): Result[Dispatched] =
-    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope)
+    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope, nested = nested)
     // joined before the dispatcher starts, so no live event sent after this returns is missed, and
     // marked with what the hub has handed over so far, so every live event it holds is placed
     withLock(hubLock) {
@@ -318,7 +319,8 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean = false
   ): Observation =
     val dispatcher =
       new Dispatcher(
@@ -328,7 +330,8 @@ final private[graph] class EventHub(
         listener,
         abandoned,
         scope,
-        preJoined = true
+        preJoined = true,
+        nested = nested
       )
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
@@ -497,7 +500,18 @@ final private[graph] class EventHub(
    */
   def live(threadId: ThreadId, event: StreamEvent.Live, current: () => Boolean = () => true): Unit =
     withLock(hubLock) {
-      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event))
+      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event, event.token))
+    }
+
+  /**
+   * Offers a delegated child's event (design 4.47), sent by a task of the run holding `threadId` under the claim
+   * `token`, to the thread's subscribers made with `nested = true`, as [[live]] offers live progress: in their live
+   * slots, behind what is queued, a `LiveGap` on overflow, never stored.
+   */
+  def nested(threadId: ThreadId, event: StreamEvent.Nested, token: FencingToken, current: () => Boolean): Unit =
+    withLock(hubLock) {
+      if current() then
+        subscribers.getOrElse(threadId.value, Vector.empty).filter(_.nested).foreach(_.offerLive(event, token))
     }
 
   /** Joins the live set; the caller holds `hubLock`. */
@@ -533,7 +547,10 @@ final private[graph] class EventHub(
    * none has been handed to the dispatcher since, until the first one is. An unplaced event was sent
    * after the dispatcher joined, so after every event its replay finds to be history.
    */
-  final private case class Held(after: Option[Long], event: StreamEvent.Live | StreamEvent.LiveGap)
+  final private case class Held(after: Option[Long], event: LiveItem | StreamEvent.LiveGap)
+
+  /** What takes a live slot: live progress, and a child's event forwarded to a nested subscriber. */
+  private type LiveItem = StreamEvent.Live | StreamEvent.Nested
 
   /**
    * One subscriber. It is in the live set from [[subscribe]] on, but until it has replayed it only
@@ -558,7 +575,9 @@ final private[graph] class EventHub(
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
     scope: TenantScope,
-    preJoined: Boolean = false
+    preJoined: Boolean = false,
+    /** Whether the subscriber takes delegated children's events ([[StreamEvent.Nested]]). */
+    val nested: Boolean = false
   ) extends Dispatched:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
@@ -608,7 +627,7 @@ final private[graph] class EventHub(
      * Whether `event` was sent under an older claim than this observer's run's: by a node of a lost run,
      * which ignored the interrupt and outlived it, whatever its `RunId` (#1918). Holding `lock`.
      */
-    private def superseded(event: StreamEvent.Live): Boolean = observing.exists(_.value > event.token.value)
+    private def superseded(token: FencingToken): Boolean = observing.exists(_.value > token.value)
 
     /** The store watch, once started; and whether the dispatcher has ended, which stops it. */
     @volatile private var watcher  = Option.empty[Thread]
@@ -845,10 +864,11 @@ final private[graph] class EventHub(
      */
     private def follows(seq: Long): Boolean = seq == lastQueuedSeq + 1 || (lastQueuedSeq == 0 && seq > 0)
 
-    def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
+    /** Offers a live item sent under the claim `token`. */
+    def offerLive(event: LiveItem, token: FencingToken): Unit = withLock(lock) {
       // an observer not yet anchored: no node of its run has run, so the event is another run's; and once
       // anchored, an event of an older claim than its run's is a lost run's, whatever its `RunId` (#1918)
-      if cancelled || !anchored || superseded(event) then ()
+      if cancelled || !anchored || superseded(token) then ()
       else if !joined then hold(event)
       else if !halted then
         // the gap marker needs one slot and the event one
@@ -861,7 +881,7 @@ final private[graph] class EventHub(
     }
 
     /** Holds `event` while replaying, under the same two-free-slots rule as the queue's live slots. */
-    private def hold(event: StreamEvent.Live): Unit =
+    private def hold(event: LiveItem): Unit =
       if capacity - held.size >= 2 then
         if droppedLive > 0 then
           held = held :+ Held(handedSeq, StreamEvent.LiveGap(droppedLive))

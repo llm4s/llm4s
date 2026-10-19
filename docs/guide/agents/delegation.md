@@ -137,6 +137,37 @@ new PermissionMiddleware(Seq(PermissionRule.allow(Operation.Invoke, "task:resear
 child's history through the runtime by its id. A child thread cannot be run, resumed or forgotten directly; forgetting
 its parent forgets it.
 
+## Following children
+
+Every `task` call sends the parent's live `SubagentEvents.TaskStarted` as its child starts, and commits one durable
+`SubagentEvents.TaskEnded` with its result: the child, a status label (`completed`, `blocked:<guardrail>`,
+`step_limit_reached`, `token_limit_reached`, `output_invalid`, `failed`; a call waiting on a suspended child commits none until the child settles), the child's whole usage and its
+duration. It carries no request, report or reason, so it is the event to count, time and cost subagents by.
+
+A subscription made with `nested = true` also receives every event of each child, as `StreamEvent.Nested(child,
+event)`, after the child's `TaskStarted` and before its `TaskEnded`; a grandchild's arrive nested twice. Match them
+with `EventHandlers.onChild`, which gives the innermost child:
+
+```scala
+agent.stream(threadId, "Research these three topics", nested = true)(
+  EventHandlers
+    .on(SubagentEvents.TaskStarted)(s => println(s"-> ${s.child.agent}"))
+    .onChild(AgentEvents.TextDelta)((child, d) => print(s"[${child.agent}] ${d.text}"))
+    .on(SubagentEvents.TaskEnded)(e => println(s"<- ${e.child.agent}: ${e.status} in ${e.duration}"))
+)
+```
+
+A child's text deltas arrive only if the subagent streams (`TypedAgent.withStreaming()`). Nested events are live: they
+take the subscription's live slots, so a slow listener loses them as a `LiveGap`, and a child this process cannot
+watch - one another process holds, or one that had already finished when a replay reattached to it - shows as one
+`Nested(child, LiveGap(0))`. Its durable events are kept: `agent.subscribeChild(ref)` replays and follows one child's
+own log, tenant-checked like any read of a thread. The cats-effect, ZIO and Pekko modules offer the merged stream as
+`nestedEvents(run, handlers)`.
+
+A subagent traces to its parent's `Tracing`; its `AgentRunEnded` names the parent thread and run
+(`parentThreadId`, `parentRunId`), which OpenTelemetry puts on the `invoke_agent <agent>` span and Langfuse in the
+trace metadata.
+
 ## Running a subagent alone
 
 `typedAgent.bind(client, runtime)` compiles a definition; `BoundAgent.run(input)` runs it once on a new top-level

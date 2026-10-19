@@ -88,9 +88,14 @@ final class AgentRun private[agent] (
    * `Durability.Async` write it abandoned may land afterwards, and is then not one of the turn's events
    * - it is never delivered here, even by a replay - but is visible only in the thread's log
    * ([[org.llm4s.agent.graph.GraphRuntime.subscribe]]).
+   *
+   * With `nested`, it also receives every event of each child the turn delegates to after this call, as
+   * `StreamEvent.Nested` (design 4.47; see [[Agent.stream]]).
    */
-  def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
-    subscribeEnding(capacity, () => ())(listener)
+  def subscribe(capacity: Int = Agent.StreamCapacity, nested: Boolean = false)(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    subscribeEnding(capacity, () => (), nested)(listener)
 
   /**
    * [[subscribe]], calling `onEnd` once when the subscription ends - after the turn's terminal event or
@@ -98,11 +103,11 @@ final class AgentRun private[agent] (
    * returned subscription is cancelled. For the bridges (fs2, ZIO, Pekko) that observe a run they do
    * not own and must end without a terminal event too.
    */
-  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit)(
+  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit, nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[Subscription] =
     val scope = RunScope(runId, listener, onEnd)
-    handle.subscribe(capacity)(scope).map { s =>
+    handle.subscribe(capacity, nested)(scope).map { s =>
       scope.attach(s)
       scopes.add(scope)
       // the caller's cancel ends the scope too, or `await` would wait out the drain for a terminal event it never sees
@@ -207,6 +212,7 @@ private[agent] object AgentRun:
    * of the observer the run was admitted with, and ends the handle's observation after the run;
    * `await` drains it when `drain` is set. The bridges (fs2, ZIO) pass `drain = false`: they end on
    * the scope's `onEnd`, and their release awaits the run without waiting on their own listener.
+   * `parent` is a delegated child run's parent thread and run, which its tracing names (design 4.47).
    */
   def apply(
     handle: RunHandle[TurnOutput],
@@ -215,7 +221,8 @@ private[agent] object AgentRun:
     runtime: GraphRuntime,
     tracing: Option[Tracing],
     scope: Option[RunScope],
-    drain: Boolean
+    drain: Boolean,
+    parent: Option[(ThreadId, RunId)] = None
   ): AgentRun =
     scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
@@ -223,7 +230,7 @@ private[agent] object AgentRun:
       loop,
       root,
       runtime,
-      tracing.map(AgentTracing(handle, root, loop, _)),
+      tracing.map(AgentTracing(handle, root, loop, _, parent)),
       scope.filter(_ => drain)
     )
 

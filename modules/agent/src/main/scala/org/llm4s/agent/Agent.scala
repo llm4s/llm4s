@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.delegation.{ DelegatedAnswers, DelegatedRequest }
+import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -180,6 +180,20 @@ final class Agent private[agent] (
     pages(None, Vector.empty)
 
   /**
+   * Follows one delegated child (design 4.47): replays the child thread's own log after `afterSeq`, then delivers its
+   * new events - durable, and live from runs of this runtime - as [[GraphRuntime.subscribe]] does, with `nested = true`
+   * so a grandchild's arrive as `StreamEvent.Nested`. Tenant-checked as every read of a thread is: a child of another
+   * tenant than `config`'s is `GraphError.TenantMismatch`. `ref` is a `SubagentEvents.TaskStarted`'s or
+   * `TaskEnded`'s child, or a `TaskOutcome`'s; a child's durable events outlive its live ones, so this is how to read
+   * what a parent's merged stream reported as a gap (`Nested(child, LiveGap(0))`). The subscription is the thread's:
+   * cancel it when done.
+   */
+  def subscribeChild(ref: ChildRef, afterSeq: Long = 0L, config: RunConfig = RunConfig())(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    runtime.subscribe(ref.threadId, afterSeq, Agent.StreamCapacity, config, nested = true)(listener)
+
+  /**
    * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
    * Interrupting the calling thread cancels the turn, as for [[run]].
    */
@@ -271,23 +285,38 @@ final class Agent private[agent] (
    * at the run's end-of-run barrier. A refused start
    * (a blank query, a busy thread, ...) is `Left`, and the listener hears nothing. The run's
    * [[AgentRun.await]] returns only once `listener` has returned from the turn's last event.
+   *
+   * With `nested`, `listener` also receives every event of each child the turn delegates to (design 4.47), as
+   * `StreamEvent.Nested(child, event)` after the turn's `SubagentEvents.TaskStarted` for it - a grandchild's nested
+   * twice - in the subscription's live slots, so an overflow is a `LiveGap`. Match them with `EventHandlers.onChild`.
    */
-  def stream(threadId: ThreadId, query: String, config: RunConfig = RunConfig(), history: Seq[Message] = Nil)(
+  def stream(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig = RunConfig(),
+    history: Seq[Message] = Nil,
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    startWith(threadId, query, config, history, Some(Listening(listener, NoEnd, drain = true)))
+    startWith(threadId, query, config, history, Some(Listening(listener, NoEnd, drain = true, nested)))
 
   /** [[startResume]] with `listener` subscribed first; see [[stream]]. */
-  def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(
+  def streamResume(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig = RunConfig(),
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    resumeWith(threadId, answers, config, Listening(listener, NoEnd, drain = true))
+    resumeWith(threadId, answers, config, Listening(listener, NoEnd, drain = true, nested))
 
   /** [[startRecover]] with `listener` subscribed first; see [[stream]]. */
-  def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig())(
+  def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig(), nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    recoverWith(threadId, config, Listening(listener, NoEnd, drain = true))
+    recoverWith(threadId, config, Listening(listener, NoEnd, drain = true, nested))
 
   /**
    * [[stream]], calling `onEnd` once when the subscription ends - after the terminal event or a
@@ -323,8 +352,16 @@ final class Agent private[agent] (
 
   private val NoEnd: () => Unit = () => ()
 
-  /** A run's listener, the scope end's callback, and whether the run's `await` waits for the listener. */
-  final private case class Listening(listener: StreamEvent => Unit, onEnd: () => Unit, drain: Boolean)
+  /**
+   * A run's listener, the scope end's callback, whether the run's `await` waits for the listener, and whether it takes
+   * delegated children's events.
+   */
+  final private case class Listening(
+    listener: StreamEvent => Unit,
+    onEnd: () => Unit,
+    drain: Boolean,
+    nested: Boolean = false
+  )
 
   private def resumeWith(
     threadId: ThreadId,
@@ -390,7 +427,7 @@ final class Agent private[agent] (
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
     val scope = RunScope(config.runId, listening.listener, listening.onEnd)
-    (Observer(Agent.StreamCapacity, scope), scope)
+    (Observer(Agent.StreamCapacity, scope, listening.nested), scope)
 
   /** History must be a valid conversation without system messages; checked before any thread is claimed. */
   private def importable(history: Seq[Message]): Result[Unit] =
@@ -398,8 +435,13 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private[agent] def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain)
+  private[agent] def agentRun(
+    handle: RunHandle[TurnOutput],
+    scope: Option[RunScope],
+    drain: Boolean,
+    parent: Option[(ThreadId, RunId)] = None
+  ): AgentRun =
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])

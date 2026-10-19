@@ -63,8 +63,11 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
         case StreamEvent.Durable(_) => ()
         case live: StreamEvent.Live if live.runId == runId.value && incarnation.contains(live.token) =>
           deliver(event)
-        case _: StreamEvent.Live                    => ()
-        case disconnected: StreamEvent.Disconnected =>
+        case _: StreamEvent.Live => ()
+        // a delegated child's event, forwarded by a task of the run holding the thread: none runs before the claim
+        case nested: StreamEvent.Nested if incarnation.isDefined => deliver(nested)
+        case _: StreamEvent.Nested                               => ()
+        case disconnected: StreamEvent.Disconnected              =>
           // the subscription is over whatever the listener does with its last event
           val delivered = Try(deliver(disconnected))
           end()

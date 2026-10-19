@@ -45,6 +45,7 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
         case StreamEvent.Disconnected(_, reason) => s"Disconnected($reason)"
         case StreamEvent.LiveGap(n)              => s"gap:$n"
         case _: StreamEvent.Live                 => "live"
+        case _: StreamEvent.Nested               => "nested"
       )
       onEvent(event)
     def runEnded(runId: RunId): Unit =

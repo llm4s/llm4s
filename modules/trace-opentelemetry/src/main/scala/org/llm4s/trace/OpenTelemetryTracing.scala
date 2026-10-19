@@ -143,11 +143,13 @@ class OpenTelemetryTracing(
 
       case e: TraceEvent.ToolExecuted =>
         (
-          "Tool Execution: " + e.name,
+          s"${TraceAttributes.ExecuteTool} ${e.name}",
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "span-create")
+            .put(TraceAttributes.OperationName, TraceAttributes.ExecuteTool)
             .put(TraceAttributes.ToolName, e.name)
+            .put(TraceAttributes.GenAiToolName, e.name)
             .put("tool.input", e.input.take(1000))
             .put("tool.output", e.output.take(1000))
             .put("duration_ms", e.duration.toMillis)
@@ -181,6 +183,26 @@ class OpenTelemetryTracing(
             .build()
         )
 
+      case e: TraceEvent.CustomEvent if e.name == TraceAttributes.AgentToolExecuted =>
+        val payload = e.data.objOpt.flatMap(_.get("payload")).flatMap(_.objOpt)
+        def text(fields: Option[collection.Map[String, ujson.Value]], key: String): String =
+          fields.flatMap(_.get(key)).flatMap(_.strOpt).getOrElse("")
+        val tool = text(payload, "tool")
+        (
+          s"${TraceAttributes.ExecuteTool} $tool",
+          Attributes
+            .builder()
+            .put(TraceAttributes.EventType, "custom")
+            .put(TraceAttributes.OperationName, TraceAttributes.ExecuteTool)
+            .put(TraceAttributes.ToolName, tool)
+            .put(TraceAttributes.GenAiToolName, tool)
+            .put(TraceAttributes.GenAiToolCallId, text(payload, "toolCallId"))
+            .put(TraceAttributes.AgentName, text(payload, "agent"))
+            .put(TraceAttributes.ConversationId, text(e.data.objOpt, "threadId"))
+            .put("data", e.data.toString())
+            .build()
+        )
+
       case e: TraceEvent.CustomEvent =>
         (
           e.name,
@@ -192,20 +214,22 @@ class OpenTelemetryTracing(
         )
 
       case e: TraceEvent.AgentRunEnded =>
-        (
-          "Agent Run",
-          Attributes
-            .builder()
-            .put(TraceAttributes.EventType, "agent-run")
-            .put("thread_id", e.threadId)
-            .put("run_id", e.runId)
-            .put("agent", e.agent)
-            .put("status", e.status)
-            .put("message_count", e.messages.size.toLong)
-            .put("gen_ai.usage.input_tokens", e.usage.inputTokens)
-            .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
-            .build()
-        )
+        val attributes = Attributes
+          .builder()
+          .put(TraceAttributes.EventType, "agent-run")
+          .put(TraceAttributes.OperationName, TraceAttributes.InvokeAgent)
+          .put(TraceAttributes.AgentName, e.agent)
+          .put(TraceAttributes.ConversationId, e.threadId)
+          .put("thread_id", e.threadId)
+          .put("run_id", e.runId)
+          .put("agent", e.agent)
+          .put("status", e.status)
+          .put("message_count", e.messages.size.toLong)
+          .put("gen_ai.usage.input_tokens", e.usage.inputTokens)
+          .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
+        e.parentThreadId.foreach(id => attributes.put(TraceAttributes.ParentThreadId, id))
+        e.parentRunId.foreach(id => attributes.put(TraceAttributes.ParentRunId, id))
+        (s"${TraceAttributes.InvokeAgent} ${e.agent}", attributes.build())
 
       case e: TraceEvent.EmbeddingUsageRecorded =>
         (
@@ -321,8 +345,22 @@ class OpenTelemetryTracing(
 }
 
 private[trace] object TraceAttributes {
-  val EventType = AttributeKey.stringKey("event.type")
-  val ToolName  = AttributeKey.stringKey("tool.name")
+  val EventType       = AttributeKey.stringKey("event.type")
+  val ToolName        = AttributeKey.stringKey("tool.name")
+  val OperationName   = AttributeKey.stringKey("gen_ai.operation.name")
+  val AgentName       = AttributeKey.stringKey("gen_ai.agent.name")
+  val ConversationId  = AttributeKey.stringKey("gen_ai.conversation.id")
+  val GenAiToolName   = AttributeKey.stringKey("gen_ai.tool.name")
+  val GenAiToolCallId = AttributeKey.stringKey("gen_ai.tool.call.id")
+  val ParentRunId     = AttributeKey.stringKey("llm4s.parent.run_id")
+  val ParentThreadId  = AttributeKey.stringKey("llm4s.parent.thread_id")
+
+  /** The GenAI semantic conventions' operation names, which also begin the span names. */
+  val InvokeAgent = "invoke_agent"
+  val ExecuteTool = "execute_tool"
+
+  /** The custom event an agent's tracing sends for each tool call (`AgentEvents.ToolExecuted`). */
+  val AgentToolExecuted = "agent.tool_executed"
 }
 
 object OpenTelemetryTracing {

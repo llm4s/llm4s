@@ -1,5 +1,6 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.agent.events.SubagentEvents
 import org.llm4s.agent.graph.{ RunConfig, RunOrigin }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, PromptSection }
 import org.llm4s.agent.graph.tool.{
@@ -132,10 +133,18 @@ final private[agent] class DelegationMiddleware(
     val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, Instant.now(), depth + 1)
     bound.delegated(input, origin, childConfig(ctx.run.config), ctx, answers) match
       case Left(error) => DelegationMiddleware.notRun(name, error, config.maxReportBytes)
-      case Right((outcome, cause)) =>
-        DelegationMiddleware.toolOutcome(name, bound.definition.failure, config.maxReportBytes, outcome, cause)(using
-          bound.definition.outputCodec
-        )
+      case Right((outcome, cause, ended)) =>
+        val result =
+          DelegationMiddleware.toolOutcome(name, bound.definition.failure, config.maxReportBytes, outcome, cause)(using
+            bound.definition.outputCodec
+          )
+        // committed with the call's terminal result only (design 4.47): a report or a tool error commits once and never
+        // runs again; a Fatal fails the task, which discards it, and the replay sends it; a suspension (none built)
+        // waits for the call that settles the child
+        result match
+          case _: ToolOutcome.Success | _: ToolOutcome.Error => ended.foreach(SubagentEvents.TaskEnded.emit(ctx.run, _))
+          case _                                             => ()
+        result
 
   /**
    * The child's config: its own run id, the parent's tenant and principal (rule 16), the parent's budgets without the
