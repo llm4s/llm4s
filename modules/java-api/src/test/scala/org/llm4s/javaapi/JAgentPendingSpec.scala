@@ -135,7 +135,9 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
 
   it should "list a subagent's interrupts as their kind in the child, under their composite ids (#2050)" in {
     import org.llm4s.agent.delegation.{ ChildInterrupt, ChildRef, DelegatedRequest }
-    import org.llm4s.agent.graph.{ RunId, ThreadId, ToolCallId }
+    import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, NodeId, RunId, ThreadId, ToolCallId }
+    import org.llm4s.agent.graph.middleware.MiddlewareId
+    import org.llm4s.agent.graph.toolloop.{ BreakpointRequest, MiddlewareHook, MiddlewareQuestionRequest }
     val c = call("k1", "probe", "x")
     val child =
       ChildRef(ThreadId("t1/child"), RunId("r1"), org.llm4s.agent.AgentId.unsafe("worker"), ToolCallId("c1"), 1)
@@ -145,13 +147,42 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
       Vector.empty,
       Vector.empty,
       delegated = Vector(
-        InterruptId("1.0~2.0") -> DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("2.0"), request))
+        InterruptId("1.0~2.0") -> DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("2.0"), request)),
+        InterruptId("1.0~2.1") -> DelegatedRequest(
+          child,
+          ChildInterrupt
+            .Question(InterruptId("2.1"), ToolQuestionRequest("m1", c, ujson.Str("unit?"), IdempotencyKey("q")))
+        ),
+        InterruptId("1.0~2.2") -> DelegatedRequest(
+          child,
+          ChildInterrupt.MiddlewareQuestion(
+            InterruptId("2.2"),
+            MiddlewareQuestionRequest(child.agent, MiddlewareId("ask"), MiddlewareHook.BeforeAgent, ujson.Str("ok?"))
+          )
+        ),
+        InterruptId("1.0~2.3") -> DelegatedRequest(
+          child,
+          ChildInterrupt.Breakpoint(InterruptId("2.3"), BreakpointRequest(NodeId("worker/model"), GraphPhase.Before))
+        ),
+        InterruptId("1.0~2.4") -> DelegatedRequest(
+          child,
+          ChildInterrupt.Delegated(
+            InterruptId("2.4~3.0"),
+            DelegatedRequest(child, ChildInterrupt.Approval(InterruptId("3.0"), request))
+          )
+        )
       )
     )
-    val List(p) = FacadeInternals.pending(status).asScala.toList: @unchecked
-    p.id shouldBe "1.0~2.0"
-    p.kind shouldBe InterruptKind.APPROVAL
-    p.reason() shouldBe java.util.Optional.of("check")
+    val pending = FacadeInternals.pending(status).asScala.toList
+    pending.map(_.id) shouldBe List("1.0~2.0", "1.0~2.1", "1.0~2.2", "1.0~2.3", "1.0~2.4")
+    pending.map(_.kind) shouldBe List(
+      InterruptKind.APPROVAL,
+      InterruptKind.QUESTION,
+      InterruptKind.MIDDLEWARE_QUESTION,
+      InterruptKind.BREAKPOINT,
+      InterruptKind.APPROVAL
+    )
+    pending.head.reason() shouldBe java.util.Optional.of("check")
   }
 
   "InterruptKind" should "be a Java enum" in {
