@@ -296,38 +296,36 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
 
   /**
    * The outcome of the standalone run `begin` starts on `ref`'s thread: a refused start, or a cancellation, is `Left`;
-   * a typed answer that fails its schema is `Refused(OutputInvalid)`; a run that failed with work to recover (its
-   * latest checkpoint `Running`) is `Refused(Failed)`, naming that run; any other failure is `Left`.
+   * a typed answer that fails its schema is `Refused(OutputInvalid)`; a run that failed with work to recover (the
+   * thread's latest checkpoint is that run's, `Running`) is `Refused(Failed)`, naming that run; any other failure -
+   * one whose checkpoint a concurrent continuation has since superseded included - is `Left`.
    */
   private def continued(ref: ChildRef, config: RunConfig)(begin: => Result[AgentRun]): Result[TaskOutcome[O]] =
     val awaited =
       if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
-      else begin.map(Agent.awaitBlocking)
-    awaited.flatMap {
-      case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
-      case Left(GraphError.OutputInvalid(all)) =>
-        // the turn is removed, its model calls are kept: the thread's usage counts them
-        // the ref names the run that failed its schema - this one - not the run the caller's ref came from
-        Right(
-          TaskOutcome.Refused(
-            ref.copy(runId = config.runId),
-            TaskRefusal.OutputInvalid(all),
-            BoundAgent.storedUsage(agent, ref.threadId, config)
-          )
-        )
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
-        agent.runtime.childAtRest(ref.threadId, agent.loop.graph, config) match
-          case Right(Some((checkpoint, _))) if checkpoint.status == CheckpointStatus.Running =>
-            val failed = ref.copy(runId = RunId(checkpoint.runId))
-            Right(
-              TaskOutcome.Refused(
-                failed,
-                TaskRefusal.Failed(error.message),
-                BoundAgent.storedUsage(agent, ref.threadId, config)
-              )
+      else begin.map(run => run.runId -> Agent.awaitBlocking(run))
+    awaited.flatMap { (runId, ended) =>
+      ended match
+        case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
+        case Left(GraphError.OutputInvalid(all)) =>
+          // the turn is removed, its model calls are kept: the thread's usage counts them
+          // the ref names the run that failed its schema - this one - not the run the caller's ref came from
+          Right(
+            TaskOutcome.Refused(
+              ref.copy(runId = runId),
+              TaskRefusal.OutputInvalid(all),
+              BoundAgent.storedUsage(agent, ref.threadId, config)
             )
-          case _ => Left(error)
+          )
+        case Left(cancelled: CancelledError) => Left(cancelled)
+        case Left(error)                     =>
+          // classified by this run's own checkpoint: a concurrent continuation may have admitted a successor since
+          agent.runtime.childAtRest(ref.threadId, agent.loop.graph, config) match
+            case Right(Some((checkpoint, exec)))
+                if checkpoint.runId == runId.value && checkpoint.status == CheckpointStatus.Running =>
+              val usage = exec.state.get(LoopKeys.usage).toOption.getOrElse(UsageSummary())
+              Right(TaskOutcome.Refused(ref.copy(runId = runId), TaskRefusal.Failed(error.message), usage))
+            case _ => Left(error)
     }
 
   /**
