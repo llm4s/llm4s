@@ -284,7 +284,10 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   does not keep a call's `IdempotencyKey` (`ToolResult` and `ToolMessage` carry none). The pass runs at two points:
   - **Before the parent's terminal `Completed` checkpoint**, once the store's latest checkpoint is the last
     superstep's and schedules no task: every call of the run has committed, so every settled child is prunable.
-    - Skipped when that checkpoint is not yet durable (Async, OnExit), and left to the next `start`.
+    - Under `Async` or `OnExit` durability the terminal checkpoint is not yet durable at that point, so the pass
+      runs instead once the run's buffered commits have drained (the terminal checkpoint is stored), still under
+      the parent's claim and before it is released. A one-shot parent is therefore within `childRetention` once
+      its run ends, whatever its durability; a drain that fails leaves the pass to the next `start`.
     - A crash during the pass leaves the parent unsettled; `recover` reaches the same point and runs it again,
       which is idempotent.
     - Not run at a Block or a failure, whose next admission handles it.
@@ -509,7 +512,8 @@ section listing each subagent's id and description.
     subagent.
 - **A call.**
   - Check the per-turn count. The task calls in **all** of the current turn's committed assistant messages (every
-    model step since the turn began or the last completed handoff), up to this call's position in its own message,
+    model step since the turn began, **across handoffs**: a handoff stays in the same turn, sharing its
+    `TurnState` and step count, so a handoff chain cannot multiply the bound), up to this call's position in its own message,
     must be `<= maxTasksPerTurn`, so one call per step over many steps is counted too. This is exact and stable
     under replay (rule 1); tested in one batch and across steps.
   - Check the depth. `origin.depth + 1 <= maxDepth`, and delegation must be granted (rule 15).
@@ -592,8 +596,12 @@ Tests:
   - **A child's grant is whole-life.** This applies to **every** continuation of a child, `recoverChild` and D3's
     `resumeChild` alike: a child suspended past its deadline, or near its token or step grant, is resumed with the
     same deductions, and settled the same way when nothing is left. A recovered or resumed child's limits are its grant less what its earlier attempts
-    used: its `usage` key plus `priorUsage.total` (K2) for tokens, its committed model steps for steps, and for
-    time a deadline of `RunOrigin.startedAt + granted timeout` (capped by the parent's), never a fresh timeout, so
+    used: its `usage` key plus `priorUsage.total` (K2) for tokens; for steps its committed model steps **plus the
+    model calls of failed attempts** (`priorUsage.total`'s request count, folded from their terminal events), so a
+    call that completed but never committed its step still counts; and for time the **effective deadline fixed at
+    first admission**, `min(RunOrigin.startedAt + granted timeout, the parent's deadline then)`, stored on the
+    child thread (a runtime-owned `DelegationKeys` key) and reused by every continuation, never recomputed from a
+    recovered parent's fresh deadline and never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
     run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
     (`settleChild`) and returns that refusal without running it. Likewise a child whose own deadline has passed by
