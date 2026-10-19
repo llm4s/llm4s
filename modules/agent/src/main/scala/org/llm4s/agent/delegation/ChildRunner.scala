@@ -212,6 +212,9 @@ private[agent] object ChildRunner:
               )
             case CheckpointStatus.Completed | CheckpointStatus.Failed => Step.Done(settled(checkpoint, exec))
 
+    /** Whether the parent's deadline has passed, by the runtime's clock: a child timing out then timed out with it. */
+    private def parentDeadlinePassed: Boolean = ctx.run.deadline.exists(d => !runtime.now().isBefore(d))
+
     /** Whether `checkpoint` is this call's child's: its origin names this call's parent, call and agent. */
     private def ours(checkpoint: Checkpoint): Boolean =
       checkpoint.origin.exists(o => o.parent == origin.parent && o.call == origin.call && o.agent == origin.agent)
@@ -234,7 +237,8 @@ private[agent] object ChildRunner:
       case Right(result)                   => Step.Done(usage().map(total => counted(ChildEnd.Ended(result, total))))
       case Left(cancelled: CancelledError) => Step.Done(Left(cancelled))
       // the parent's own deadline stopped the child: the parent is stopping too, and its recover reattaches
-      case Left(late: GraphError.DeadlineExceeded) if parentsDeadline => Step.Done(Left(late))
+      // (decided after the run as well as before it: a slow admission can make the parent's the sooner one)
+      case Left(late: GraphError.DeadlineExceeded) if parentsDeadline || parentDeadlinePassed => Step.Done(Left(late))
       // a Block: the child's run settled it with its outcome, which is rebuilt as replay rebuilds it
       case Left(invalid: GraphError.OutputInvalid) =>
         runtime.childAtRest(childId, graph, base) match

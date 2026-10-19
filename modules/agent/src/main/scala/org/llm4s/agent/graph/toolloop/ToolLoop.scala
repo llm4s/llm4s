@@ -1135,7 +1135,10 @@ object ToolLoop:
           case MiddlewareHook.WrapModelCall => steps(owner.agent.id).model(state, context, answers)
           case MiddlewareHook.WrapToolCall =>
             request.call.fold(missing("tool call")) { task =>
-              steps(owner.agent.id).pipeline.reasked(task, request.approved, state, context, answers)
+              // a tool call again: the usage its task records commits with its result, as the call-tool node's does
+              withUsage(context)(
+                steps(owner.agent.id).pipeline.reasked(task, request.approved, state, context, answers)
+              )
             }
           // the answer is the active agent's: a root middleware asks about a handoff target's answer too
           case MiddlewareHook.AfterAgent =>
