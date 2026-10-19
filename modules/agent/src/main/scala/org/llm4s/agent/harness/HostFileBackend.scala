@@ -84,7 +84,8 @@ final class HostFileBackend private (
   fileSystemId: Path => String,
   mountsBeneath: Path => Result[Vector[Path]],
   countsLinks: Boolean,
-  openDirectory: Path => java.nio.file.DirectoryStream[Path]
+  openDirectory: Path => java.nio.file.DirectoryStream[Path],
+  canonical: Path => Path
 ) extends FileBackend
     with AutoCloseable:
 
@@ -209,9 +210,37 @@ final class HostFileBackend private (
             if !p.normalize().startsWith(root) then refused(operation, path, "resolves outside the root")
             else if isFile(p) && linkCount(p) > 1 then
               refused(operation, path, "has other hard links, which are refused")
-            else Right(p)
+            else ownNames(operation, path, p)
           )
       }
+
+  /**
+   * `p`, if every component of it that exists is named by the name the file system itself gives it: the
+   * deepest existing prefix's canonical path (one lookup) must spell the same names, compared folded (case
+   * and Unicode normalisation are tolerated, as every mutation takes one lock). A component reached by
+   * another name - an 8.3 short name, whether the volume makes them now or made it before they were turned
+   * off - is refused, so a file has one path whatever names the volume keeps for it.
+   */
+  private def ownNames(operation: String, path: VPath, p: Path): Result[Path] =
+    val depth = Iterator
+      .iterate(p)(_.getParent)
+      .takeWhile(q => q != null && q.startsWith(root) && q != root)
+      .find(exists)
+      .map(q => root.relativize(q).getNameCount)
+      .getOrElse(0)
+    if depth == 0 then Right(p)
+    else
+      val named   = path.segments.take(depth)
+      val onDisk  = root.relativize(canonical(root.resolve(named.mkString("/"))))
+      val spelled = (0 until onDisk.getNameCount).map(i => onDisk.getName(i).toString).toVector
+      if spelled.map(HostFileBackend.fold) == named.map(HostFileBackend.fold) then Right(p)
+      else
+        refused(
+          operation,
+          path,
+          s"names an entry by a name that is not its own (it is ${spelled.mkString("/", "/", "")}: an 8.3 short " +
+            "name?); use the name a listing shows"
+        )
 
   /** Every existing ancestor of `target` below the root is a directory. */
   private def underDirectories(operation: String, path: VPath, target: Path): Result[Unit] =
@@ -728,6 +757,7 @@ object HostFileBackend:
     fileSystemId: Path => String = fileSystemIdOf,
     mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath,
     openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_),
+    canonical: Path => Path = _.toRealPath(),
     // called at each named step before the lock is held and the root revalidated, for tests that race it
     pause: String => Unit = _ => ()
   ): Result[HostFileBackend] =
@@ -787,7 +817,8 @@ object HostFileBackend:
                 fileSystemId,
                 mounts,
                 links,
-                openDirectory
+                openDirectory,
+                canonical
               )
             } match
             case Left(error) =>
@@ -928,7 +959,7 @@ object HostFileBackend:
       .map(e => ValidationError(field, s"$real cannot be identified: ${e.message}"): LLMError)
 
   /** A name as the most permissive file system compares it: Unicode NFC, then case-folded. */
-  private def fold(name: String): String =
+  private[harness] def fold(name: String): String =
     java.text.Normalizer
       .normalize(name, java.text.Normalizer.Form.NFC)
       .toUpperCase(java.util.Locale.ROOT)

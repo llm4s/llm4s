@@ -76,7 +76,8 @@ class HostFileBackendSpec
     countsLinks: Path => Boolean = HostFileBackend.reportsLinkCounts,
     fileSystemId: Path => String = HostFileBackend.fileSystemIdOf,
     mountsBeneath: Path => Result[Vector[Path]] = HostFileBackend.mountPointsBeneath,
-    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_)
+    openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_),
+    canonical: Path => Path = _.toRealPath()
   ): Result[HostFileBackend] = {
     Option(backend).foreach(_.close())
     val opened = HostFileBackend.openWith(
@@ -89,7 +90,8 @@ class HostFileBackendSpec
       countsLinks,
       fileSystemId,
       mountsBeneath,
-      openDirectory
+      openDirectory,
+      canonical
     )
     opened.foreach(b => backend = b)
     opened
@@ -928,6 +930,42 @@ class HostFileBackendSpec
       invalid(backend.delete(p(s"/d/$name"), call()))
     }
     Files.list(dir).iterator().asScala.toVector shouldBe empty
+  }
+
+  it should "refuse an entry named by a name that is not its own, as an 8.3 short name made before is" in {
+    // the volume names `PROGRA~1` as `Program Files`, as one that made short names before they were turned
+    // off still does: the injected lookup stands in for that, so the case runs on any file system
+    Files.createDirectories(dir.resolve("Program Files"))
+    Files.createDirectories(dir.resolve("PROGRA~1"))
+    Files.writeString(dir.resolve("Program Files/a.txt"), "x\n")
+    Files.writeString(dir.resolve("PROGRA~1/a.txt"), "x\n")
+    val real = dir.toRealPath()
+    reopen(canonical = q => {
+      val rel = real.relativize(q).toString.replace('\\', '/')
+      if (rel == "PROGRA~1" || rel.startsWith("PROGRA~1/")) real.resolve("Program Files" + rel.drop(8))
+      else q.toRealPath()
+    }).value
+    def alias[A](r: Result[A]) = r.left.value.message should include("not its own")
+    alias(backend.read(p("/PROGRA~1/a.txt"), 0, 1, call()))
+    alias(backend.write(p("/PROGRA~1/b.txt"), "y", call()))
+    alias(backend.edit(p("/PROGRA~1/a.txt"), "x", "y", replaceAll = false, call()))
+    alias(backend.delete(p("/PROGRA~1/a.txt"), call()))
+    alias(backend.ls(p("/PROGRA~1"), 10, call()))
+    alias(backend.glob(Glob("*"), p("/PROGRA~1"), 10, call()))
+    Files.exists(dir.resolve("PROGRA~1/b.txt")) shouldBe false
+    // its own name, and a case alias of it, are the file's names
+    backend.read(p("/Program Files/a.txt"), 0, 1, call()).value.lines shouldBe Vector("x")
+  }
+
+  it should "refuse a real 8.3 short name of an existing file, where the volume makes them" in {
+    assume(!posix && shortNames)
+    Files.writeString(dir.resolve("ABCDEFGHIJKL.txt"), "x\n")
+    assume(Files.exists(dir.resolve("ABCDEF~1.TXT")))
+    backend.read(p("/ABCDEF~1.TXT"), 0, 1, call()).left.value.message should include("not its own")
+    backend.write(p("/ABCDEF~1.TXT"), "y", call()).left.value.message should include("not its own")
+    onDisk("ABCDEFGHIJKL.txt") shouldBe "x\n"
+    backend.read(p("/ABCDEFGHIJKL.txt"), 0, 1, call()).value.lines shouldBe Vector("x")
+    backend.ls(VPath.root, 10, call()).value.items.map(_.path) shouldBe Vector(p("/ABCDEFGHIJKL.txt"))
   }
 
   it should "refuse a name ending in a dot or a space, which Windows reads as another" in {
