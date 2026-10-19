@@ -329,7 +329,7 @@ private[agent] object ChildRunner:
             case CheckpointStatus.Suspended =>
               answering(exec) match
                 case Some(pending) => resumed(pending)
-                case None =>
+                case None          =>
                   // nothing runs here, so the child's live events are gone
                   gap(RunId(checkpoint.runId))
                   Step.Done(

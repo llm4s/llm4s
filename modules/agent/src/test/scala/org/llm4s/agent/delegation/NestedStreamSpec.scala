@@ -236,6 +236,21 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
       .value
       .flatMap(r => SubagentEvents.TaskEnded.unapply(StreamEvent.Durable(r)))
 
+  it should "not be committed by a call whose child suspended, only by the resumed call that settles it" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    val runtime = GraphRuntime.inMemory()
+    val agent =
+      lead(approvingClient()).withRuntime(runtime).withSubagents(asking(probe(new AtomicInteger(0)))).build().value
+    val first = agent.run(ThreadId("t1"), "go").value
+    taskEnds(runtime) shouldBe empty
+
+    val id = suspendedOf(first).delegated.loneElement._1
+    agent.resume(ThreadId("t1"), Map(first.approve(id))).value
+    val ended = taskEnds(runtime).loneElement
+    ended.status shouldBe "completed"
+    ended.child.threadId shouldBe agent.children(ThreadId("t1")).value.loneElement.threadId
+  }
+
   "subscribeChild" should "replay the child's own log after the run, and refuse another tenant" in {
     val tenant = RunConfig().withTenantId(TenantId("acme"))
     val agent  = lead(delegatingClient("hello")).withSubagents(general).build().value
