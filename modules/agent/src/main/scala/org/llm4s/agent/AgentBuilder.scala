@@ -250,7 +250,8 @@ final class AgentBuilder private (
    * bind.
    */
   private def delegating(graphRuntime: GraphRuntime): Result[Option[DelegationMiddleware]] =
-    if subagents.isEmpty then Right(None)
+    // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
+    if subagents.isEmpty then delegation.validated.map(_ => None)
     else
       val ids        = subagents.map(_.id.value)
       val duplicated = ids.diff(ids.distinct).distinct

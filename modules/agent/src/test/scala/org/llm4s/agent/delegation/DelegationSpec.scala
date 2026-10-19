@@ -720,6 +720,8 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       .build()
       .isRight shouldBe
       true
+    lead(client).withDelegation(DelegationConfig().withMaxDepth(0)).build().left.value.message should
+      include("maxDepth must be positive")
     lead(client).withSubagents(TypedAgent.text("bad id!", "d")).build().left.value.message should include("bad id!")
     lead(client).withSubagents(TypedAgent.text("blank", " ")).build().left.value.message should include("blank")
     lead(client)
