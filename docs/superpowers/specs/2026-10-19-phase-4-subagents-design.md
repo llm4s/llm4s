@@ -330,8 +330,11 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
 - **Deadline.** The child's `RunBudgets.timeout` is `min(granted, ctx.run.deadline - now)` (K3). A parent with no
   deadline passes the grant.
 - **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
-  accumulator). That is the child thread's `usage` key plus the usage on its terminal event
-  (`AgentTracing.lostUsage`). It is added once, by the attempt that commits the call's **terminal** result, and covers
+  accumulator). That is the child thread's `usage` key plus the lost usage (`AgentTracing.lostUsage`) on **every**
+  terminal event in the child's log, one per attempt: a failed, cancelled or timed-out attempt that a later
+  `recover` finished is recorded only there. So that those events survive until they are counted, event retention
+  is not applied to a child thread before its `outcome` is written; after that, K1's child retention removes the
+  thread whole. It is added once, by the attempt that commits the call's **terminal** result, and covers
   the child's whole life. A call that suspends because its child did (D3) adds nothing: the child's usage so far
   stays in the child thread until the resumed call settles. A failed attempt commits nothing, so a replay adds it
   again without double counting.
@@ -348,7 +351,8 @@ Tests (each in-memory and on SQLite):
 - parent `cancel` during a child: child `RunCancelled`, parent `CancelledError`, both recoverable
 - a C2 timeout on the call cancels the child; parent `ClaimLost` cancels the child
 - the child's deadline is capped by the parent's
-- usage counted exactly once across a crash and replay
+- usage counted exactly once across a crash and replay, including tokens of a failed child attempt that a later
+  `recover` finished
 
 ### K3: token budgets and the run's deadline (#2047, 4.43)
 
@@ -514,7 +518,8 @@ Tests:
 - **Model.** The child uses the parent's client and `CompletionOptions` unless `withModel` is set. A model is not a
   capability, so inheriting it is the default. It is shown in the plan.
 - **Budgets (rule 18).** At call time each limit is `min(grant, parent's remaining)`:
-  - steps: the grant, else the parent agent's `maxSteps`
+  - steps: the grant, else the parent agent's `maxSteps`, capped by the parent turn's remaining steps (its `maxSteps`
+    less the model calls the turn has made at the snapshot), which D2 exposes as `RunContext.remainingSteps`
   - time: the parent's `deadline`
   - tokens: the parent's `maxTokens` less the run's usage at the snapshot
   - concurrency: the parent's `maxConcurrency`
@@ -637,8 +642,10 @@ Tests:
   never granted silently.
 - **`HarnessProfile.deepAgents`** turns on the general-purpose subagent, `TypedAgent.text("general-purpose", …)`.
   - Its own harness is the minimal profile over its own `StateFileBackend`.
-  - Its grant: `ToolGrant.AllExcept(FileTools.Names + "execute")` (its own harness brings file tools over its own
-    backend) and `delegate = false`. Deep Agents
+  - Its grant: every parent tool except the file tools and `execute` (its own harness brings file tools over its own
+    backend), and `delegate = false`. The preset computes it at `build()` from the parent's actual tools,
+    `ToolGrant.AllExcept((FileTools.Names + "execute") intersect parentTools)`, so D2's refusal of an absent name
+    never fires for it: a `deepAgents` agent with no sandbox (no `execute`) builds. Deep Agents
     gives its general-purpose subagent the main agent's tools; here that grant is written in the preset and shown
     by `DelegationPlan`.
   - Applications disable it with `withSubagents(SubagentConfig.none.withSpecialists(...))`, or change it with
@@ -659,6 +666,7 @@ Tests:
 
 Tests:
 - `deepAgents` offers `task` with `general-purpose`, and the minimal profile offers none
+- `deepAgents` builds with and without a sandbox (`execute` present or absent)
 - disabling the general-purpose subagent leaves specialists only
 - middleware order
 - config overrides and bad values refused at the edge
