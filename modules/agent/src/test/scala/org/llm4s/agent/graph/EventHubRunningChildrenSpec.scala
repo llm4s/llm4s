@@ -57,6 +57,12 @@ class EventHubRunningChildrenSpec extends AnyFlatSpec with Matchers with EitherV
     attached(hub) shouldBe Vector(started("r2", 2L), StreamEvent.Nested(ref("r2"), StreamEvent.LiveGap(0)))
   }
 
+  "a child start sent once its run is no longer current" should "be neither delivered nor remembered" in {
+    val hub = new EventHub(InMemoryCheckpointer())
+    hub.childStarted(parent, ref("r1"), started("r1", 1L), () => false)
+    attached(hub) shouldBe empty
+  }
+
   "a run's release" should "forget the thread's running children" in {
     val hub = new EventHub(InMemoryCheckpointer())
     hub.childStarted(parent, ref("r1"), started("r1", 1L), () => true)

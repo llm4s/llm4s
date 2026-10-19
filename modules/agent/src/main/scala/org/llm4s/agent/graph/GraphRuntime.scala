@@ -3580,9 +3580,15 @@ final class GraphRuntime(
       // same id, perhaps - may hold the thread. Checked under the hub's lock, so never after its claim (#1918)
       def progress(name: String, version: Int, payload: ujson.Value): Unit =
         hub.live(threadId, liveEvent(name, version, payload), () => !claimWasLost)
-      // a child's start, fenced as progress is, and remembered for a nested subscriber attaching mid-child (#2074)
+      // a child's start, remembered for a nested subscriber attaching mid-child (#2074): fenced as a nested event is,
+      // so a child that outlives its parent's run never announces itself into a later run's subscriptions
       override def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
-        hub.childStarted(threadId, child, liveEvent(name, version, payload), () => !claimWasLost)
+        hub.childStarted(
+          threadId,
+          child,
+          liveEvent(name, version, payload),
+          () => !claimWasLost && !claimReleased.get
+        )
       override def childEnded(child: ThreadId): Unit = hub.childEnded(threadId, child, token)
       private def liveEvent(name: String, version: Int, payload: ujson.Value): StreamEvent.Live =
         StreamEvent.Live(
