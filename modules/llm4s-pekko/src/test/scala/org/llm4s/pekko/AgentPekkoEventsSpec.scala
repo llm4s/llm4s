@@ -106,8 +106,11 @@ class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
   }
 
   it should "fail once a stalled consumer falls behind, naming the last seq it received, leaving the run alone" in {
-    val agent              = Pings.flooding()
-    val run                = ok(agent.start(ThreadId("pe5"), "go"))
+    val agent = Pings.flooding()
+    val run   = ok(agent.start(ThreadId("pe5"), "go"))
+    // what the source emitted, recorded before `mapAsync`: the stream's failure discards an element
+    // `mapAsync` still holds, so what reaches the sink can end one short of the source's position
+    val emitted            = new ConcurrentLinkedQueue[Long]()
     val received           = new ConcurrentLinkedQueue[Long]()
     val stalling           = new AtomicBoolean(true)
     given ExecutionContext = ExecutionContext.global
@@ -118,6 +121,9 @@ class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
         AgentPekko(agent)
           .events(run, Pings.seqs)
           .collect { case Some(seq) => seq }
+          .map { seq =>
+            emitted.add(seq); seq
+          }
           .mapAsync(1)(seq =>
             Future(blocking {
               if (stalling.getAndSet(false)) run.await(): Unit
@@ -128,9 +134,12 @@ class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       )
     )
     val message = failed.failed.toOption.collect { case e: LLMException => e.error.message }
+    // the source names the last seq it emitted: every one before it was delivered, none after it
     message.getOrElse(fail(s"expected an LLMException, got $failed")) should endWith(
-      s"after seq ${received.asScala.last}"
+      s"after seq ${emitted.asScala.last}"
     )
+    emitted.asScala.toSeq.take(received.size) shouldBe received.asScala.toSeq
+    emitted.size - received.size should be <= 1
     ok(run.await()).answer shouldBe Some("done")
   }
 
