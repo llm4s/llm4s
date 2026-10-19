@@ -41,19 +41,19 @@ private[agent] object ToolErrors:
       if fits(n) then candidate(n) else ""
 
   /**
-   * Why `tool`'s successful result `parts` is not stored: a [[BoundedErrors]] tool's result is text only - media would
-   * escape the bound - and at most its bound in UTF-8.
+   * Why `tool`'s successful result `parts` is not stored: a [[BoundedErrors]] tool's result is one text part - media or
+   * further parts would escape the bound - of at most its bound in UTF-8.
    */
   def overBound(tool: AgentTool[?], parts: Vector[ContentPart]): Option[String] =
     tool match
       case b: BoundedErrors =>
-        val texts = parts.collect { case ContentPart.Text(text) => text }
-        val bytes = texts.map(utf8).sum
-        if texts.size < parts.size then Some(s"Tool '${tool.spec.name}' result carries media, which it may not")
-        else
-          Option.when(bytes > b.maxErrorBytes)(
-            s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes ($bytes)"
-          )
+        parts match
+          case Vector(ContentPart.Text(text)) =>
+            val bytes = utf8(text)
+            Option.when(bytes > b.maxErrorBytes)(
+              s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes ($bytes)"
+            )
+          case _ => Some(s"Tool '${tool.spec.name}' result must be one text part, was ${parts.size} parts")
       case _ => None
 
   /**

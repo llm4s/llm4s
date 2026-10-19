@@ -359,6 +359,15 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case other => fail(s"expected a report, got $other")
   }
 
+  it should "return a renderer's failure as Left, not throw it" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val broken = researcher.withInputText(_ => throw new IllegalStateException("bad renderer"))
+    broken.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).left.value.message should include(
+      "bad renderer"
+    )
+    client.calls shouldBe empty
+  }
+
   it should "report a typed answer that fails its schema as a refusal" in {
     val client  = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}""")) }
     val outcome = researcher.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).value
@@ -565,6 +574,8 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       )
     ) shouldBe defined
     org.llm4s.agent.graph.tool.ToolErrors.overBound(tool, Vector(ContentPart.Text("x"))) shouldBe None
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(tool, Vector(ContentPart.Text("x"), ContentPart.Text(""))) shouldBe
+      defined
   }
 
   "a suspended child" should "have its usage counted in the parent, the call committing its error" in {

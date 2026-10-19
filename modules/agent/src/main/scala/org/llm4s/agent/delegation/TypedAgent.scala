@@ -202,7 +202,13 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   def run(input: I, config: RunConfig = RunConfig()): Result[TaskOutcome[O]] =
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
     val ref      = ChildRef(threadId, config.runId, agent.id, ToolCallId(""), 0)
-    agent.run(threadId, definition.rendered(input), config) match
+    // a renderer or input codec is caller code: what it throws is a refused input, not an escaped exception
+    scala.util
+      .Try(definition.rendered(input))
+      .toEither
+      .left
+      .map(thrown => ValidationError("input", s"subagent '${agent.id.value}': rendering the input failed: $thrown"))
+      .flatMap(query => agent.run(threadId, query, config)) match
       case Right(result)                       => Right(outcome(result, ref.copy(runId = result.runId)))
       case Left(GraphError.OutputInvalid(all)) =>
         // the turn is removed, its model calls are kept: the thread's usage counts them
