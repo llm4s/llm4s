@@ -497,8 +497,12 @@ section listing each subagent's id and description.
   - Run `ChildRunner`.
   - Map the outcome:
     - `Reported`: `Success(Json(writeJs(report)))`, or `Error("report over <n> bytes")` past `maxReportBytes`.
-    - `Refused`: under `Report`, `Error` naming the subagent, child thread and reason; under `Fail`,
-      `Fatal(GraphError...)`.
+    - `Refused` and `NotStarted`: under `Report`, `Error` naming the subagent, child thread and reason; under
+      `Fail`, `Fatal(GraphError...)`.
+    - **Every tool message is bounded.** Whatever the branch, the text that enters the parent's thread is at most
+      `maxReportBytes`: a refusal's reason (a provider message, an `OutputInvalid` error vector) is truncated to
+      fit, keeping its first errors and saying how many were dropped. The full reason stays in the child's thread
+      (`RunOutcome`) and in the typed `TaskOutcome` returned to code.
     - `Suspended`: until D3, `Error("subagent '<id>' suspended; …")`, with the child left suspended. D3 replaces
       this.
 - **Parallel.** Calls in one batch already run concurrently, bounded by the parent's `RunBudgets.maxConcurrency`.
