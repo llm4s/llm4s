@@ -412,8 +412,14 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child = onlyChild(runtime, thread)
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
     blocking.set(false)
-    eventually("the parent recovers")(parent.recover(thread).toOption.flatMap(_.answer).contains("composed"))
+    val recovered = new AtomicReference[Option[org.llm4s.agent.AgentResult]](None)
+    eventually("the parent recovers") {
+      recovered.set(parent.recover(thread).toOption)
+      recovered.get.flatMap(_.answer).contains("composed")
+    }
     onlyChild(runtime, thread).status shouldBe CheckpointStatus.Completed
+    // the parent's two calls, and the child's two - the one before the cancel and the one after - each once
+    tokens(recovered.get.get.usage) shouldBe ((4L, 40L, 80L))
   }
 
   behavior.of("A timeout on the delegating call")
@@ -429,9 +435,13 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     )
     val runtime = new GraphRuntime(open())
     val thread  = ThreadId("timed-out-call")
-    family(runtime, setup)._1.run(thread, "go").ok.answer shouldBe Some("moved on")
+    val result  = family(runtime, setup)._1.run(thread, "go").ok
+    result.answer shouldBe Some("moved on")
     val child = onlyChild(runtime, thread)
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
+    child.status shouldBe CheckpointStatus.Running
+    // the timed-out call committed the child's call with its error: the parent's two calls and the child's one
+    tokens(result.usage) shouldBe ((3L, 30L, 60L))
   }
 
   behavior.of("A parent that loses its claim during a child")

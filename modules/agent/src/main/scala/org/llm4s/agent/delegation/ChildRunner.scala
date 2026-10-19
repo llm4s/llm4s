@@ -63,7 +63,9 @@ private[agent] enum ChildEnd:
  * folded) is added to the calling task's accumulator by the result its call commits: a completed report, and with
  * `settleOnFailure` any other settled end. A suspended child, a refusal without `settleOnFailure` (it fails the
  * parent run) and a `Left` add nothing, because their call commits nothing final, and a later run of it adds the
- * child's whole life once.
+ * child's whole life once. The exception is a child cancelled with the calling task: its usage so far is added once it
+ * has drained, because a timeout on the call commits the call's error with the accumulator (a cancelled parent task
+ * commits nothing, and its replay counts the child once).
  */
 private[agent] object ChildRunner:
   /** The first pause while a child's claim is held elsewhere; it doubles up to [[MaxBackoff]]. */
@@ -234,8 +236,14 @@ private[agent] object ChildRunner:
 
     /** What the end of a child's live run calls for. */
     private def ended(outcome: Result[AgentResult]): Step = outcome match
-      case Right(result)                   => Step.Done(usage().map(total => counted(ChildEnd.Ended(result, total))))
-      case Left(cancelled: CancelledError) => Step.Done(Left(cancelled))
+      case Right(result) => Step.Done(usage().map(total => counted(ChildEnd.Ended(result, total))))
+      // cancelled with the calling task, and drained: the child's whole life so far goes into the task's accumulator,
+      // unsettled, so a recover still continues the child. A parent cancel or lost claim fails the task, which commits
+      // nothing, and the replay that reattaches counts the child once (its fold covers this RunCancelled); a timeout on
+      // the call commits its error with the accumulator, once, and that call never runs again
+      case Left(cancelled: CancelledError) =>
+        usage().foreach(ctx.run.usage.merge)
+        Step.Done(Left(cancelled))
       // the parent's own deadline stopped the child: the parent is stopping too, and its recover reattaches
       // (decided after the run as well as before it: a slow admission can make the parent's the sooner one)
       case Left(late: GraphError.DeadlineExceeded) if parentsDeadline || parentDeadlinePassed => Step.Done(Left(late))
@@ -293,9 +301,9 @@ private[agent] object ChildRunner:
             case _: AgentStatus.Completed => true
             case _                        => settleOnFailure
         case ChildEnd.Failed(_, _) => settleOnFailure
-      // an interrupted task commits nothing - its accumulator becomes the run's lost usage - and its call runs again,
-      // which adds the child's roll-up then: added now as well, it would be counted twice
-      if commits && !Thread.currentThread().isInterrupted then ctx.run.usage.merge(childEnd.usage)
+      // also when the calling task was interrupted as the child committed: a task that then fails commits nothing, and
+      // a timed-out call commits its error with the accumulator
+      if commits then ctx.run.usage.merge(childEnd.usage)
       childEnd
 
     private def rebuilt(checkpoint: Checkpoint, exec: Execution, status: AgentStatus): Result[AgentResult] =
