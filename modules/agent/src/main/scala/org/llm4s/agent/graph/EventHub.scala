@@ -302,8 +302,7 @@ final private[graph] class EventHub(
       // a child running now has sent live events this subscription never gets: its start, then a gap (#2074)
       if nested then
         running.getOrElse(threadId.value, Map.empty).values.foreach { (started, child) =>
-          dispatcher.offerLive(started, started.token)
-          dispatcher.offerLive(StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.token)
+          dispatcher.offerPair(started, StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.token)
         }
     }
     Try(dispatcher.start()).toResult.left
@@ -920,6 +919,34 @@ final private[graph] class EventHub(
           liveQueued += 1
         else droppedLive += 1
         notEmpty.signal()
+    }
+
+    /**
+     * Offers `first` then `second`, sent under the claim `token`, as one: both or neither (then counted as two dropped).
+     * For the `TaskStarted` and `Nested(child, LiveGap(0))` a nested subscription is given at attach (#2074): the gap
+     * must never be split from its start, even at the minimum capacity of 2. The pair needs no slot kept back for a
+     * later gap marker - an event offered after it finds the slots full and is counted, as any overflow is - only one
+     * for a gap already pending.
+     */
+    def offerPair(first: LiveItem, second: LiveItem, token: FencingToken): Unit = withLock(lock) {
+      if cancelled || !anchored || superseded(token) then ()
+      else if !halted then
+        val needed = 2 + (if droppedLive > 0 then 1 else 0)
+        if !joined then
+          if capacity - held.size >= needed then
+            if droppedLive > 0 then
+              held = held :+ Held(handedSeq, StreamEvent.LiveGap(droppedLive))
+              droppedLive = 0
+            held = held :+ Held(handedSeq, first) :+ Held(handedSeq, second)
+          else droppedLive += 2
+        else
+          if capacity - liveQueued >= needed then
+            flushGap()
+            queue.add(first)
+            queue.add(second)
+            liveQueued += 2
+          else droppedLive += 2
+          notEmpty.signal()
     }
 
     /** Holds `event` while replaying, under the same two-free-slots rule as the queue's live slots. */

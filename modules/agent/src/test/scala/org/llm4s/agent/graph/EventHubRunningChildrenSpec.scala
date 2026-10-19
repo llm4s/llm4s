@@ -23,11 +23,12 @@ class EventHubRunningChildrenSpec extends AnyFlatSpec with Matchers with EitherV
     StreamEvent.Live(parent.value, run, FencingToken(token), "1.0", "tools", "agent.task_started", 1, ujson.Obj())
 
   /** A nested subscription attached now, and the events it gets within a moment. */
-  private def attached(hub: EventHub): Vector[StreamEvent] =
+  private def attached(hub: EventHub, capacity: Int = 16): Vector[StreamEvent] =
     val seen = new LinkedBlockingQueue[StreamEvent]()
-    val sub  = hub.subscribe(parent, 0L, 16, e => seen.put(e), _ => false, TenantScope.Unscoped, nested = true).value
-    val got  = Iterator.continually(Option(seen.poll(300, TimeUnit.MILLISECONDS))).takeWhile(_.isDefined).flatten
-    val all  = got.toVector
+    val sub =
+      hub.subscribe(parent, 0L, capacity, e => seen.put(e), _ => false, TenantScope.Unscoped, nested = true).value
+    val got = Iterator.continually(Option(seen.poll(300, TimeUnit.MILLISECONDS))).takeWhile(_.isDefined).flatten
+    val all = got.toVector
     sub.cancel()
     all
 
@@ -37,6 +38,15 @@ class EventHubRunningChildrenSpec extends AnyFlatSpec with Matchers with EitherV
     attached(hub) shouldBe Vector(started("r1", 1L), StreamEvent.Nested(ref("r1"), StreamEvent.LiveGap(0)))
     hub.childEnded(parent, child, FencingToken(1L))
     attached(hub) shouldBe empty
+  }
+
+  it should "get the start and its gap together at the minimum capacity" in {
+    val hub = new EventHub(InMemoryCheckpointer())
+    hub.childStarted(parent, ref("r1"), started("r1", 1L), () => true)
+    attached(hub, capacity = 2) shouldBe Vector(
+      started("r1", 1L),
+      StreamEvent.Nested(ref("r1"), StreamEvent.LiveGap(0))
+    )
   }
 
   "a stale run's childEnded" should "leave a successor run's announcement of the same child" in {
