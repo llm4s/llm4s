@@ -1108,10 +1108,11 @@ final class GraphRuntime(
    * superstep is durable, or after it once an `Async` or `OnExit` run's commits drain ([[Run.retainBeforeSettling]]) - never at `recover` or `resume` admission, when a child whose
    * call has not committed must stay for that call's replay. Idempotent. Housekeeping: a failure is logged at WARN.
    *
-   * With `abandon` - at `start` admission, where no call of an earlier run can be replayed - a `Running` or
-   * `Suspended` child can never be reattached, so it is first settled `RunOutcome.Failed("abandoned", ...)` under its
-   * own claim ([[abandonChild]]) and then counts; one that is busy is skipped, and retried at the next `start`.
-   * Otherwise a `Running` or `Suspended` child is never touched.
+   * A `Running` or `Suspended` child for which `abandon` holds - at `start` admission, every one listed, since no call
+   * of an earlier run can be replayed; at a terminal pass, those admission left busy - can never be reattached, so it
+   * is first settled `RunOutcome.Failed("abandoned", ...)` under its own claim ([[abandonChild]]) and then counts; one
+   * that is busy is skipped and returned, for the same run's terminal pass to revisit (#2073), and is otherwise left
+   * to the next `start`. Any other `Running` or `Suspended` child - a child of the current run - is never touched.
    *
    * The judgment holds for the children that existed while the parent's latest checkpoint was `base`, the one the
    * caller judged by, and only while the caller holds the parent's claim. So the pass is fenced twice:
@@ -1129,21 +1130,26 @@ final class GraphRuntime(
     base: Option[String],
     token: FencingToken,
     fenced: () => Boolean,
-    abandon: Boolean
-  ): Unit =
+    abandon: ThreadId => Boolean
+  ): Set[ThreadId] =
     def atBase: Boolean =
       Try(checkpointer.latest(threadId)).toResult.flatten.toOption.flatten.map(_.checkpoint.id) == base
     def skipped(): Unit =
       GraphRuntime.logger.debug(
         s"Retention on ${threadId.value} skipped: its claim was lost or the thread moved on from ${base.getOrElse("none")}"
       )
-    if !fenced() || !atBase then skipped()
+    if !fenced() || !atBase then
+      skipped()
+      Set.empty
     else
       Try(allChildren(threadId)).toResult.flatten match
         case Left(error) =>
           GraphRuntime.logger.warn(s"Listing the children of ${threadId.value} for retention failed: ${error.message}")
-        case Right(_) if !fenced() || !atBase => skipped()
-        case Right(children)                  =>
+          Set.empty
+        case Right(_) if !fenced() || !atBase =>
+          skipped()
+          Set.empty
+        case Right(children) =>
           // once a fence fails the pass touches nothing more
           var stopped = false
           def holds(): Boolean =
@@ -1151,13 +1157,18 @@ final class GraphRuntime(
               stopped = true
               skipped()
             !stopped
+          val busy = Set.newBuilder[ThreadId]
           // in creation order, and lazily, so nothing is settled once a fence fails
           val prunable = children.iterator
             .filter { c =>
               c.status match
                 case CheckpointStatus.Completed | CheckpointStatus.Failed => true
                 case CheckpointStatus.Running | CheckpointStatus.Suspended =>
-                  abandon && holds() && abandonChild(c.threadId, threadId, token, config)
+                  abandon(c.threadId) && holds() && {
+                    val settled = abandonChild(c.threadId, threadId, token, config)
+                    if !settled then busy += c.threadId
+                    settled
+                  }
             }
             .map(_.threadId)
             .toVector
@@ -1169,13 +1180,14 @@ final class GraphRuntime(
                 )
               )
           }
+          busy.result()
 
   /**
    * Settles `child`, a `Running` or `Suspended` child of `parent` that no run can reattach ([[keepChildren]]), as
    * `RunOutcome.Failed("abandoned", ...)`: a `Failed` checkpoint over its latest, with the same snapshot and a
    * [[RunEvent.RunFailed]], under the child's own claim, fenced by the parent's, whose token is `token` (#2071).
    * Whether the child is now settled: one already settled is; one that is busy, gone, or whose commit fails - also
-   * for the parent's claim - is not, and is left for the next `start`.
+   * for the parent's claim - is not.
    */
   private def abandonChild(child: ThreadId, parent: ThreadId, token: FencingToken, config: RunConfig): Boolean =
     def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(child)
@@ -2708,6 +2720,13 @@ final class GraphRuntime(
     private var admittedState: Option[ThreadState] = None
 
     /**
+     * The earlier run's children that `start` admission's retention pass found busy (#2073): the only `Running` or
+     * `Suspended` children the run's terminal pass may abandon ([[retainBeforeSettling]]). Set at admission, before
+     * the run starts any child, so it never holds one of this run's.
+     */
+    @volatile private var abandonLater: Set[ThreadId] = Set.empty
+
+    /**
      * Claims the thread in two steps: a [[RunClaim]] from the store, then a synchronous commit of
      * `execution` as a new checkpoint whose parent is `parent`, carrying `carried` pending writes over
      * to it, fenced by the claim's token; [[execute]] then runs from there. A live claim of another
@@ -2762,13 +2781,13 @@ final class GraphRuntime(
                   // `amend`, which may read the events retention would remove
                   config.retention.foreach(retain)
                   if retainChildren then
-                    keepChildren(
+                    abandonLater = keepChildren(
                       threadId,
                       config,
                       parent,
                       granted.token,
                       parentFence(threadId, granted.token, () => lostAt.get.isDefined),
-                      abandon = true
+                      abandon = _ => true
                     )
                   committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused, fence)
               }
@@ -3229,17 +3248,23 @@ final class GraphRuntime(
      * pass, which is idempotent. Under `Durability.Async` or `OnExit` that checkpoint is not yet durable there - a crash
      * could replay its calls - so [[end]] runs the pass instead once the run's buffered commits have drained, with
      * `lastCommitted` the stored terminal checkpoint, still under the run's claim (#2067); a drain that fails leaves it
-     * to the next `start`.
+     * to the next `start`. The pass also settles as abandoned, and so may prune, the earlier run's children that
+     * admission skipped as busy and whose claims are free by now ([[abandonLater]], #2073); one still busy is left to
+     * the next `start`. It never abandons a child of this run.
      */
     private def retainBeforeSettling(lastCommitted: String): Unit =
-      keepChildren(
+      val left = keepChildren(
         threadId,
         config,
         Some(lastCommitted),
         token,
         parentFence(threadId, token, () => lostAt.get.isDefined),
-        abandon = false
+        abandon = abandonLater.contains
       )
+      if left.nonEmpty then
+        GraphRuntime.logger.debug(
+          s"Retention on ${threadId.value} left ${left.size} busy abandoned children to the next start"
+        )
 
     /**
      * Ends a run a task blocked: the superstep's updates are committed, so `execution` is the state the

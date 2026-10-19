@@ -9,7 +9,7 @@ import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import scala.concurrent.duration.*
 
 /**
@@ -325,7 +325,7 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
   }
 
-  it should "skip an abandoned child that is busy, leave it uncounted, and settle it at the next start" in {
+  it should "skip an abandoned child busy through the whole run, leave it uncounted, and settle it at the next start" in {
     val (store, runtime, parent) = fresh()
     val asking                   = startChild(runtime, parent, 1, "ask")
     val later                    = startChild(runtime, parent, 2)
@@ -338,6 +338,56 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     store.release(asking, held.token).value
     runtime.start(parent, graph, "again", RunConfig().withChildRetention(1)).awaited.value.completed
     runtime.children(parent).value.map(_.threadId) shouldBe Vector(later)
+  }
+
+  /**
+   * A parent graph whose single node, given the input "next", runs `free` - the release of a claim an earlier run's
+   * child is held by - and then starts child `own` of `parent`, which fails and stays `Running`, as a child this run
+   * leaves behind would. Any other input it just logs.
+   */
+  private def freeing(runtime: GraphRuntime, parent: ThreadId, own: Int, free: AtomicReference[() => Unit]) =
+    val b = GraphBuilder("freeing", "v1")
+    val act = b.node[String]("free", writes = Set(log)) { (input, _, context) =>
+      if input == "next" then
+        free.get()()
+        failing.set(true)
+        try
+          runtime
+            .startChild(
+              childOf(parent, own),
+              graph,
+              "fail",
+              origin(parent, own),
+              RunConfig().withTenantId(context.config.tenantId)
+            )
+            .awaited
+            .value
+        finally failing.set(false)
+      continue(Command.empty.update(log, input))
+    }
+    b.compile(act)(_.get(log)).value
+
+  Vector(Durability.Sync, Durability.Async, Durability.OnExit).foreach { durability =>
+    it should s"settle and prune at the terminal pass an earlier run's child busy at start and freed since, under $durability (#2073)" in {
+      val store   = InMemoryCheckpointer()
+      val runtime = GraphRuntime(store, clock)
+      val parent  = ThreadId(s"freed-$durability")
+      val free    = new AtomicReference[() => Unit](() => ())
+      val parents = freeing(runtime, parent, 3, free)
+      runtime.start(parent, parents, "go").awaited.value.completed
+      val asking = startChild(runtime, parent, 1, "ask")
+      val later  = startChild(runtime, parent, 2)
+      val held   = store.claim(asking, ClaimRequest(RunId("elsewhere"), None, 1.minute)).value
+      free.set(() => store.release(asking, held.token).value)
+
+      runtime.start(parent, parents, "next", RunConfig().withChildRetention(1), durability).awaited.value.completed
+
+      // busy at start, so skipped there; free at the end, so settled as abandoned and then pruned as the oldest
+      store.latest(asking).value shouldBe None
+      // the run's own unsettled child is never abandoned, and does not count
+      runtime.children(parent).value.map(_.threadId) shouldBe Vector(later, childOf(parent, 3))
+      store.latest(childOf(parent, 3)).value.value.checkpoint.status shouldBe CheckpointStatus.Running
+    }
   }
 
   /**
