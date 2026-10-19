@@ -9,7 +9,7 @@ import org.llm4s.toolapi.Schema
  * [[LoopHandoff]]. They are stand-ins: the model node intercepts a handoff call and routes it, and
  * the call-tool path never sees them, so `execute` is never reached.
  */
-private[agent] object HandoffTools:
+private[toolloop] object HandoffTools:
   val Prefix = "handoff_to_"
 
   def toolName(target: AgentId): String = s"$Prefix${target.value}"

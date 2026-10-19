@@ -13,7 +13,7 @@ import org.llm4s.agent.graph.tool.{
   ToolOutcome,
   ToolResource
 }
-import org.llm4s.agent.graph.toolloop.{ HandoffTools, Messages, StoredMessage }
+import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
@@ -286,13 +286,12 @@ private[agent] object TaskTools:
     val sinceUser = history.lastIndexWhere { case StoredMessage(_, _: UserMessage) => true; case _ => false } match
       case -1 => history
       case at => history.drop(at)
-    // the active agent's part of the turn: after the last handoff, whose calls were another agent's
-    val turn = sinceUser.lastIndexWhere {
-      case StoredMessage(_, a: AssistantMessage) => a.toolCalls.exists(_.name.startsWith(HandoffTools.Prefix))
-      case _                                     => false
-    } match
-      case -1 => sinceUser
-      case at => sinceUser.drop(at + 1)
+    // the active agent's part of the turn: after the thread's last completed handoff, when it is in this turn, since
+    // the calls before it were another agent's (a refused mixed batch records no transfer, so it resets nothing)
+    val lastTransfer = ctx.state.get(LoopKeys.transfer).toOption.flatten.map(_.messageId)
+    val turn = lastTransfer.map(id => sinceUser.indexWhere(_.id == id)).filter(_ >= 0) match
+      case Some(at) => sinceUser.drop(at + 1)
+      case None     => sinceUser
     val calls = turn.flatMap {
       case StoredMessage(_, assistant: AssistantMessage) => assistant.toolCalls.filter(c => names(c.name))
       case _                                             => Vector.empty

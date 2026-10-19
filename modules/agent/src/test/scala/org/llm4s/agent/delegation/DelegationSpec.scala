@@ -237,6 +237,33 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     agent.run(ThreadId("t1"), "go").value.answer.value shouldBe "report"
   }
 
+  it should "not reset its count at a mixed batch the loop refused" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages) if toolResults(messages).size == 1 =>
+        Right(
+          calling(
+            call("m1", "handoff_to_specialist", ujson.Obj()),
+            call("m2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))
+          )
+        )
+      case Lead(messages) if toolResults(messages).size == 3 =>
+        Right(calling(call("c3", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).last))
+      case Child("general", _) => Right(CompletionFixture.simple("report"))
+    }
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST")
+    val agent = lead(client)
+      .withSubagents(general)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(2))
+      .build()
+      .value
+    // c1 is the first task, m2 the second (refused with its batch), c3 the third: over the bound
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 2")
+  }
+
   "maxDepth" should "refuse a task that would nest deeper than the bound" in {
     val client = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("{}")) }
     val bound  = researcher.bind(client, GraphRuntime.inMemory()).value
