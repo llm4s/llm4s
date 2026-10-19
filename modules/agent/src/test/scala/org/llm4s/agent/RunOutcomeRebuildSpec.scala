@@ -1,7 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ GraphRuntime, InMemoryCheckpointer, RunOutcome, ThreadId }
+import org.llm4s.agent.graph.{ GraphRuntime, InMemoryCheckpointer, RunBudgets, RunConfig, RunOutcome, ThreadId }
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.types.Result
@@ -18,12 +18,13 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
   /** The live result of one turn on a fresh store, and the status rebuilt from what the store kept. */
   private def liveAndRebuilt(
     builder: AgentBuilder,
-    query: String
+    query: String,
+    config: RunConfig = RunConfig()
   ): (Result[AgentStatus], Result[AgentStatus], Option[RunOutcome]) =
     val store  = new InMemoryCheckpointer()
     val agent  = built(builder.withRuntime(GraphRuntime(store)))
     val thread = ThreadId("settled")
-    val live   = agent.run(thread, query).map(_.status)
+    val live   = agent.run(thread, query, config).map(_.status)
     val stored = store.latest(thread).value.get.checkpoint
     val state  = agent.loop.graph.restore(stored.snapshot).value.state
     val rebuilt = stored.outcome
@@ -44,6 +45,19 @@ class RunOutcomeRebuildSpec extends AnyFlatSpec with Matchers with EitherValues 
     val (live, rebuilt, outcome) = liveAndRebuilt(Agent.builder("assistant", looping).withMaxSteps(2), "loop")
     outcome shouldBe Some(RunOutcome.StepLimitReached)
     live.value shouldBe AgentStatus.StepLimitReached
+    rebuilt shouldBe live
+  }
+
+  it should "rebuild TokenLimitReached" in {
+    val call = SpecTools.calling(SpecTools.call("c1", "echo"))
+    val echo =
+      SpecTools.tool("echo")((a, _) => graph.tool.ToolOutcome.Success(graph.tool.ToolContent.Json(ujson.Str(a.text))))
+    val client = ScriptedLLMClient.of(call, CompletionFixture.simple("never sent"))
+    val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(30L))
+    val (live, rebuilt, outcome) =
+      liveAndRebuilt(Agent.builder("assistant", client).withTools(SpecTools.set(echo)), "go", budget)
+    outcome shouldBe Some(RunOutcome.TokenLimitReached)
+    live.value shouldBe AgentStatus.TokenLimitReached
     rebuilt shouldBe live
   }
 

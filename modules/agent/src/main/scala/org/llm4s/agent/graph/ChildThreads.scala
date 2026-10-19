@@ -86,7 +86,7 @@ enum RunOutcome derives ReadWriter:
   /** An agent turn reached its step limit (`AgentBuilder.withMaxSteps`). */
   case StepLimitReached
 
-  /** An agent turn reached its token budget. */
+  /** An agent turn reached its run's token budget (`RunBudgets.maxTokens`). */
   case TokenLimitReached
 
   /** A guardrail blocked the run: its name and reason. */

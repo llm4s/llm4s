@@ -500,8 +500,9 @@ object ToolLoop:
 
   /** How a turn that completed with `output` settled, as its terminal checkpoint records it (design 4.41). */
   private[agent] def settled(output: TurnOutput): RunOutcome = output.outcome match
-    case TurnOutcome.Completed        => RunOutcome.Answered
-    case TurnOutcome.StepLimitReached => RunOutcome.StepLimitReached
+    case TurnOutcome.Completed         => RunOutcome.Answered
+    case TurnOutcome.StepLimitReached  => RunOutcome.StepLimitReached
+    case TurnOutcome.TokenLimitReached => RunOutcome.TokenLimitReached
 
   /**
    * The error result of an approval whose edited arguments take a lock the proposed arguments' locks do
