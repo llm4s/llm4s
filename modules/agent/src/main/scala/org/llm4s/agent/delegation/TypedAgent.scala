@@ -227,7 +227,8 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   ): Result[(TaskOutcome[O], Option[LLMError])] =
     val threadId = ThreadId.child(origin.parent, origin.agent, origin.call)
     val ref      = ChildRef(threadId, config.runId, agent.id, ctx.toolCallId, origin.depth)
-    ChildRunner.run(agent, origin, AgentInput(definition.rendered(input)), config, ctx).map {
+    val settle   = definition.failure == ChildFailure.Report
+    ChildRunner.run(agent, origin, AgentInput(definition.rendered(input)), config, ctx, settleOnFailure = settle).map {
       case ChildEnd.Ended(result, _) => outcome(result, ref.copy(runId = result.runId)) -> None
       case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
         TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
@@ -245,6 +246,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       case AgentStatus.Blocked(guardrail, reason) =>
         TaskOutcome.Refused(ref, TaskRefusal.Blocked(guardrail, reason), result.usage)
       case AgentStatus.StepLimitReached     => TaskOutcome.Refused(ref, TaskRefusal.StepLimitReached, result.usage)
+      case AgentStatus.TokenLimitReached    => TaskOutcome.Refused(ref, TaskRefusal.TokenLimitReached, result.usage)
       case suspended: AgentStatus.Suspended => TaskOutcome.Suspended(ref, suspended)
 
   /** The report in `answer`: the text itself for a text subagent, else the answer decoded as `O`. */

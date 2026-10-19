@@ -235,14 +235,14 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case Lead(messages) if toolResults(messages).isEmpty =>
         Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
       case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
-      case Child("researcher", _) => Right(CompletionFixture.simple(s"""{"summary":"${"x" * 100}","sources":0}"""))
+      case Child("researcher", _) => Right(CompletionFixture.simple(s"""{"summary":"${"x" * 200}","sources":0}"""))
     }
     val agent = lead(client)
       .withSubagents(researcher)
-      .withDelegation(DelegationConfig().withMaxReportBytes(64))
+      .withDelegation(DelegationConfig().withMaxReportBytes(100))
       .build()
       .value
-    agent.run(ThreadId("t1"), "go").value.answer.value should include("report over 64 bytes")
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("report over 100 bytes")
   }
 
   "ChildFailure.Report" should "let the parent compose without a failed child" in {
@@ -438,6 +438,45 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     DelegationMiddleware.toolOutcome("researcher", ChildFailure.Fail, 1024, notStarted, None) match
       case ToolOutcome.Fatal(error) => error.message should include("was not started")
       case other                    => fail(s"expected Fatal, got $other")
+  }
+
+  "every task tool message" should "fit maxReportBytes, an oversized provider message cut" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) => Left(ValidationError("provider", "é" * 5000))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxReportBytes(300))
+      .build()
+      .value
+    val message = agent.run(ThreadId("t1"), "go").value.answer.value
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 300
+    message should include("subagent 'researcher'")
+    message should endWith("(truncated)\"}")
+  }
+
+  it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
+    val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
+    val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 200
+    message should include("error number 1 is wrong")
+    (message should not).include("error number 50 is wrong")
+    val kept = errors.count(e => message.contains(e + ";") || message.contains(e + " ("))
+    message should include(s"(and ${50 - kept} more errors dropped)")
+    // the typed outcome keeps them all
+    val refused: TaskOutcome[Findings] =
+      TaskOutcome.Refused(
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), researcher.id, ToolCallId("k"), 1),
+        TaskRefusal.OutputInvalid(errors),
+        UsageSummary()
+      )
+    DelegationMiddleware.toolOutcome("x", ChildFailure.Report, 200, refused, None) match
+      case ToolOutcome.Error(text) => text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 200
+      case other                   => fail(s"expected an error, got $other")
+    DelegationMiddleware.cut("ab", 1) shouldBe ""
   }
 
   "build()" should "refuse two subagents with one id, a clash with another tool, bad bounds and a bad subagent" in {

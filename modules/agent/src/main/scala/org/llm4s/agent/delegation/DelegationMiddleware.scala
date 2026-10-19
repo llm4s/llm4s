@@ -120,6 +120,9 @@ private[agent] object DelegationMiddleware:
    * What the parent model sees for subagent `name`'s `outcome`: its report as JSON, or past `maxReportBytes` a tool
    * error; a refusal (made with or without a child) as a tool error under `ChildFailure.Report`, or `Fatal` with the
    * child's error `cause` - else a `ProcessingError` with the same text - under `Fail`; a suspension as a tool error.
+   * Every tool message is at most `maxReportBytes` in UTF-8: a refusal's reason is cut to fit, an `OutputInvalid`
+   * keeping its first errors and saying how many it dropped. The full reason stays in the child's `RunOutcome` and in
+   * the typed `TaskOutcome`.
    */
   def toolOutcome[O: ReadWriter](
     name: String,
@@ -128,27 +131,77 @@ private[agent] object DelegationMiddleware:
     outcome: TaskOutcome[O],
     cause: Option[LLMError]
   ): ToolOutcome =
-    def refused(message: String): ToolOutcome = failure match
-      case ChildFailure.Report => ToolOutcome.Error(message)
-      case ChildFailure.Fail   => ToolOutcome.Fatal(cause.getOrElse(ProcessingError("task", message)))
+    def refused(prefix: String, reason: TaskRefusal): ToolOutcome = failure match
+      case ChildFailure.Report => ToolOutcome.Error(within(prefix, reason, maxReportBytes))
+      case ChildFailure.Fail   => ToolOutcome.Fatal(cause.getOrElse(ProcessingError("task", prefix + reason.describe)))
     outcome match
       case TaskOutcome.Reported(report, child, _) =>
         val json  = upickle.default.writeJs(report)
-        val bytes = json.render().getBytes(StandardCharsets.UTF_8).length
+        val bytes = utf8(json.render())
         if bytes > maxReportBytes then
           ToolOutcome.Error(
-            s"subagent '$name' report over $maxReportBytes bytes ($bytes); child thread ${child.threadId.value}"
+            cut(
+              s"subagent '$name' report over $maxReportBytes bytes ($bytes); child thread ${child.threadId.value}",
+              maxReportBytes
+            )
           )
         else ToolOutcome.Success(ToolContent.Json(json))
       case TaskOutcome.Refused(child, reason, _) =>
-        refused(s"subagent '$name' (child thread ${child.threadId.value}) ${reason.describe}")
+        refused(s"subagent '$name' (child thread ${child.threadId.value}) ", reason)
       case TaskOutcome.NotStarted(_, reason) =>
-        refused(s"subagent '$name' was not started: ${reason.describe}")
+        refused(s"subagent '$name' was not started: ", reason)
       case TaskOutcome.Suspended(child, _) =>
         ToolOutcome.Error(
-          s"subagent '$name' suspended (child thread ${child.threadId.value}): it waits for approvals or answers, " +
-            "which cannot be given through the parent yet"
+          cut(
+            s"subagent '$name' suspended (child thread ${child.threadId.value}): it waits for approvals or answers, " +
+              "which cannot be given through the parent yet",
+            maxReportBytes
+          )
         )
+
+  private def utf8(text: String): Int = text.getBytes(StandardCharsets.UTF_8).length
+
+  /** The bytes of `text` as the tool message the loop stores for an error: `{"error": text}`. */
+  private def wrapped(text: String): Int = utf8(ujson.Obj("error" -> ujson.Str(text)).render())
+
+  /**
+   * `prefix` and `reason`'s description, its tool message at most `max` bytes: whole when it fits; an `OutputInvalid`
+   * with as many of its first errors as fit and the count of those dropped; anything else cut.
+   */
+  private[delegation] def within(prefix: String, reason: TaskRefusal, max: Int): String =
+    val full = prefix + reason.describe
+    if wrapped(full) <= max then full
+    else
+      reason match
+        case TaskRefusal.OutputInvalid(errors) =>
+          (errors.size - 1 to 0 by -1).iterator
+            .map { kept =>
+              val dropped = errors.size - kept
+              val noun    = if dropped == 1 then "error" else "errors"
+              s"${prefix}its answer did not match its output schema: ${errors.take(kept).mkString("; ")} " +
+                s"(and $dropped more $noun dropped)"
+            }
+            .find(wrapped(_) <= max)
+            .getOrElse(cut(full, max))
+        case _ => cut(full, max)
+
+  private val Cut = " ... (truncated)"
+
+  /** `text`, cut on a code point and marked, so its tool message is at most `max` bytes; empty if no cut fits. */
+  private[delegation] def cut(text: String, max: Int): String =
+    if wrapped(text) <= max then text
+    else
+      val points            = text.codePoints().toArray
+      def candidate(n: Int) = new String(points, 0, n) + Cut
+      def fits(n: Int)      = wrapped(candidate(n)) <= max
+      @scala.annotation.tailrec
+      def largest(lo: Int, hi: Int): Int =
+        if lo >= hi then lo
+        else
+          val mid = (lo + hi + 1) / 2
+          if fits(mid) then largest(mid, hi) else largest(lo, mid - 1)
+      val n = largest(0, points.length)
+      if fits(n) then candidate(n) else ""
 
 /** The `task` tools' specs, shared by the middleware and by the parent's graph version, which covers them. */
 private[agent] object TaskTools:
