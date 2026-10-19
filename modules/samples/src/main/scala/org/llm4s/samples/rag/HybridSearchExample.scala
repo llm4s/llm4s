@@ -3,6 +3,8 @@ package org.llm4s.samples.rag
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ FusionStrategy, HybridSearchResult, HybridSearcher, KeywordDocument, VectorRecord }
 
+import scala.util.Using
+
 /**
  * Sample demonstrating `HybridSearcher`: one query, run with each fusion strategy, to show how vector and
  * keyword search disagree and how the strategies reconcile them.
@@ -31,6 +33,10 @@ import org.llm4s.vectorstore.{ FusionStrategy, HybridSearchResult, HybridSearche
  */
 object HybridSearchExample {
 
+  private given Using.Releasable[HybridSearcher] with {
+    def release(searcher: HybridSearcher): Unit = searcher.close()
+  }
+
   val Query: String                = "backup"
   val QueryEmbedding: Array[Float] = Array(1.0f, 0.0f, 0.0f)
   private val TopK                 = 4
@@ -58,15 +64,13 @@ object HybridSearchExample {
   def run(): Result[Seq[(String, Seq[HybridSearchResult])]] =
     for {
       searcher <- HybridSearcher.inMemory()
-      result <- {
-        try
-          for {
-            _ <- indexAll(searcher)
-            runs <- sequence(Strategies.map { case (name, strategy) =>
-              searcher.search(QueryEmbedding, Query, TopK, strategy).map(name -> _)
-            })
-          } yield runs
-        finally searcher.close()
+      result <- Using.resource(searcher) { scopedSearcher =>
+        for {
+          _ <- indexAll(scopedSearcher)
+          runs <- sequence(Strategies.map { case (name, strategy) =>
+            scopedSearcher.search(QueryEmbedding, Query, TopK, strategy).map(name -> _)
+          })
+        } yield runs
       }
     } yield result
 
