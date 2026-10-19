@@ -48,7 +48,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val child: AgentBuilder => AgentBuilder = identity,
     val childTools: Seq[AgentTool[?]] = Nil,
     val delegateTimeout: Option[FiniteDuration] = None,
-    val parentMiddleware: Seq[AgentMiddleware] = Nil
+    val parentMiddleware: Seq[AgentMiddleware] = Nil,
+    val childConfig: RunConfig = RunConfig()
   ) {
     val crashAfterChild                   = new AtomicBoolean(false)
     val ends                              = new CopyOnWriteArrayList[Result[ChildEnd]]()
@@ -79,7 +80,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val delegate = AgentTool(spec) { (args, ctx) =>
       val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
       setup.lastOrigin.set(origin)
-      val ended = ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, setup.settle)
+      val ended =
+        ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), setup.childConfig, ctx, setup.settle)
       setup.ends.add(ended)
       if (setup.crashAfterChild.getAndSet(false)) ToolOutcome.Fatal(ProcessingError("crash", "after the child"))
       else outcome(setup, ended)
@@ -210,6 +212,20 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         ),
       {
         case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.StepLimitReached
+        case other                => fail(s"unexpected $other")
+      }
+    ),
+    (
+      "the token limit",
+      () =>
+        new Setup(
+          delegating(),
+          ScriptedLLMClient.of(calling(call("k1", "flaky"))),
+          childTools = Seq(flaky(new AtomicBoolean(false))),
+          childConfig = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(1L))
+        ),
+      {
+        case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.TokenLimitReached
         case other                => fail(s"unexpected $other")
       }
     ),
