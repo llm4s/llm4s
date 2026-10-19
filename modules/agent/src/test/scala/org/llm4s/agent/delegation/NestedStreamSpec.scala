@@ -76,7 +76,7 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     nested.map(_._1.child).distinct.loneElement shouldBe ref
     ref.threadId shouldBe agent.children(ThreadId("t1")).value.loneElement.threadId
     ref.agent.value shouldBe "general"
-    ref.toolCallId.value shouldBe "c1"
+    ref.toolCallId.map(_.value) shouldBe Some("c1")
     ref.depth shouldBe 1
   }
 
@@ -333,7 +333,7 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val agent  = lead(delegatingClient("hello")).withSubagents(general).build().value
     agent.run(ThreadId("t1"), "go", tenant).value
     val child = agent.children(ThreadId("t1"), tenant).value.loneElement
-    val ref   = ChildRef(child.threadId, RunId("any"), child.origin.agent, ToolCallId("c1"), 1)
+    val ref   = ChildRef(child.threadId, RunId("any"), child.origin.agent, Some(ToolCallId("c1")), 1)
 
     val seen = new ConcurrentLinkedQueue[StreamEvent]()
     val done = new CountDownLatch(1)

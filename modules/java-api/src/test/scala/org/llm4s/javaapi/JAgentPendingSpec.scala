@@ -140,7 +140,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     import org.llm4s.agent.graph.toolloop.{ BreakpointRequest, MiddlewareHook, MiddlewareQuestionRequest }
     val c = call("k1", "probe", "x")
     val child =
-      ChildRef(ThreadId("t1/child"), RunId("r1"), org.llm4s.agent.AgentId.unsafe("worker"), ToolCallId("c1"), 1)
+      ChildRef(ThreadId("t1/child"), RunId("r1"), org.llm4s.agent.AgentId.unsafe("worker"), Some(ToolCallId("c1")), 1)
     val request =
       ApprovalRequest("m1", c, "check", ApprovalSource.Tool, IdempotencyKey("k1"))
     val status = AgentStatus.Suspended(

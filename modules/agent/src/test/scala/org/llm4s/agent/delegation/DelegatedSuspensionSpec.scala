@@ -297,7 +297,7 @@ class DelegatedSuspensionSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   "a DelegatedQuestion" should "round-trip through its codec with every kind of child interrupt" in {
-    val ref  = ChildRef(ThreadId("c"), RunId("r"), AgentId.unsafe("a"), ToolCallId("call"), 1)
+    val ref  = ChildRef(ThreadId("c"), RunId("r"), AgentId.unsafe("a"), Some(ToolCallId("call")), 1)
     val call = ToolCall("k", "probe", ujson.Obj())
     val held = BreakpointRequest(NodeId("n"), BreakpointPhase.Before, Some(call))
     val question = DelegatedQuestion(

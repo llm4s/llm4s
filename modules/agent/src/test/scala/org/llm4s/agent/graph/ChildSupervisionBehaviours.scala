@@ -392,7 +392,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       childTools = Seq(gate)
     )
     val thread = ThreadId("held-elsewhere")
-    val claims = ClaimPolicy(ttl = 300.millis, renewEvery = 100.millis)
+    // a lease long enough that the holder's renewals land on a slow runner (a 300 ms lease lapsed on Windows CI, so
+    // the waiter took the child over instead of waiting): the holder renews every 100 ms with 900 ms to spare
+    val claims = ClaimPolicy(ttl = 1.second, renewEvery = 100.millis)
     val here   = new GraphRuntime(open(), claims = claims)
     family(here, setup)._1.run(thread, "go").isLeft shouldBe true
     val childId = onlyChild(here, thread).threadId
@@ -405,7 +407,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
     val began = System.nanoTime()
     family(here, setup)._1.recover(thread).isLeft shouldBe true
-    (System.nanoTime() - began).nanos should be >= 500.millis
+    // waited twice the claim's life, less a little for the clock's granularity
+    (System.nanoTime() - began).nanos should be >= (claims.ttl * 2 - 100.millis)
     setup.allEnds.last.left.toOption.get shouldBe a[GraphError.ThreadBusy]
 
     release.countDown()

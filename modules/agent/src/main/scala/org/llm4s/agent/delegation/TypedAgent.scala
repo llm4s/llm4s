@@ -2,7 +2,7 @@ package org.llm4s.agent.delegation
 
 import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.events.TaskEnded
-import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunId, RunOrigin, ThreadId, ToolCallId }
+import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunId, RunOrigin, ThreadId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }

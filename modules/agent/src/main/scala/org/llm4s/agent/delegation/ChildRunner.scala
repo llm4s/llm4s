@@ -179,7 +179,7 @@ private[agent] object ChildRunner:
     private var streamed = Set.empty[RunId]
 
     /** The child as the parent's events name it, for run `runId`. */
-    private def ref(runId: RunId): ChildRef = ChildRef(childId, runId, origin.agent, ctx.toolCallId, origin.depth)
+    private def ref(runId: RunId): ChildRef = ChildRef(childId, runId, origin.agent, Some(ctx.toolCallId), origin.depth)
 
     /** Sends the parent's live `TaskStarted` for the child's run `runId`. */
     private def announce(runId: RunId): Unit =
