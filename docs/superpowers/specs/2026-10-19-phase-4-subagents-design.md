@@ -229,8 +229,12 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   an `AgentStatus` (a final answer and `StepLimitReached` both complete; a Block's typed `GuardrailBlocked` is not
   kept on a `Failed` checkpoint), so a settled run is read only through `outcome`.
   - `RunOutcome` is a small enum with a `ReadWriter`: `Answered`, `StepLimitReached`, `TokenLimitReached` (K3),
-    `Blocked(guardrail: String, reason: String)`, `Failed(kind: String, message: String)`. The answer itself is
-    already in the thread's state, so `Answered` carries none.
+    `Blocked(guardrail: String, reason: String)`, `OutputInvalid(errors: Vector[String])`,
+    `Failed(kind: String, message: String)`. The answer itself is already in the thread's state, so `Answered`
+    carries none.
+  - **Lossless for delegation.** Every `TaskRefusal` (D1) is rebuilt from exactly one `RunOutcome` case carrying all
+    its fields, so a replayed refusal equals the live one. `OutputInvalid` keeps the whole error vector, which
+    `GraphError.OutputInvalid.message` does not. A test enumerates the `TaskRefusal` cases against it.
   - The agent layer supplies it to the runtime with the turn's terminal result. A graph run that is not an agent
     turn writes `Answered` on completion and `Failed` on failure.
   - `AgentRun.status` for a settled thread reads `outcome` too, so a status rebuilt after a restart equals the one
@@ -261,11 +265,17 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   - A child with a live claim refuses the whole delete with `ThreadBusy`, before anything is removed.
   - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
   - `deleteThread` on a child thread directly is refused (rule 19).
-- **Child retention (rule 12).** At `start` admission on a parent whose latest checkpoint is settled (`Completed` or
-  `Failed`), the runtime keeps the newest `childRetention` settled children (default 64, set per agent by
-  `DelegationConfig`, D1) and cascade-deletes older settled children.
-  - It never deletes a `Running` or `Suspended` child.
-  - It never runs at `recover` or `resume`: a child whose parent call has not committed must stay for rule 14.
+- **Child retention (rule 12).** The runtime keeps the newest `childRetention` settled children of a parent (default
+  64, set per agent by `DelegationConfig`, D1) and cascade-deletes older settled children. It runs at two points:
+  - right after the parent's own terminal (`Completed` or `Failed`) checkpoint commits, when every child result of
+    the run is committed, so the bound holds for a parent that gets no later turn, such as a one-shot delegated
+    child;
+  - at `start` admission on a settled parent, which finishes a prune that a crash interrupted.
+  - It never deletes a `Running` or `Suspended` child. None is left behind a committed call: a reported child
+    failure settles its child before the call commits (K2, `settleChild`), so every child of a settled parent is
+    itself settled or belongs to a call that will be replayed.
+  - It never runs at `recover` or `resume` admission: before the run settles, a child whose parent call has not
+    committed must stay for rule 14.
   - A failed delete is logged at WARN, as retention prune is.
 - **`CheckpointerContract`** gains cases for:
   - origin round trip and copy-forward
@@ -278,7 +288,8 @@ Tests:
 - a child id stable for one key, different for another key, thread or agent
 - every refused operation on a child thread, with the allowed reads
 - cascade delete through two levels; a child with a live claim refuses the delete
-- retention keeps N, never touches a suspended child, never runs at `recover`
+- retention keeps N after the parent's terminal checkpoint (`childRetention = 1`, two calls: one child left) and
+  at `start`, never touches a suspended child, never runs at `recover`
 
 ### K2: child-run supervision (#2046, 4.42)
 
