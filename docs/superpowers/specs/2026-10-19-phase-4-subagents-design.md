@@ -231,6 +231,13 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
     (#2063): it commits only if the origin's parent's current claim is the admitting run's token. A stale task of
     a parent taken over or released therefore never registers a child after a successor's cascade-delete
     preflight, which would leave an orphan.
+  - **So is every admission or settlement the parent drives**: the claim commit of `recoverChild` and
+    `resumeChild`, and `settleChild`'s commit, carry the same parent fence. A stale task whose parent claim
+    expired just before it reached the child can therefore never take the child's claim and run more model
+    calls or side effects after a successor took the parent. Commits inside a child run that is already admitted
+    are fenced by the child's claim alone: that run stops when the parent's claim is lost (K2's cancellation),
+    and any later continuation is fenced again at its admission. The abandon at `start` passes the parent fence
+    too.
 - **`Checkpoint.outcome: Option[RunOutcome]`**, also format 8 (`None` from 7). The durable record of how a run
   settled, written atomically with every terminal (`Completed` or `Failed`) checkpoint of every thread, child or
   not, and cleared when a later run of the thread starts. `CheckpointStatus` and `RunCompleted` alone cannot rebuild
@@ -299,8 +306,11 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
     (`GraphError.IncompleteRun` otherwise), so no call of an earlier run can be replayed:
     - every settled child is prunable, whatever the parent's last status (a Block's retraction included);
     - a child of an earlier run still `Running` or `Suspended` can never be reattached, so it is first settled
-      `Failed(kind = "abandoned", ...)` under its own claim (busy: skipped, retried at the next `start`), then
-      counts.
+      `Failed(kind = "abandoned", ...)` under its own claim, then counts. A busy one is skipped, and revisited by
+      the same run's pre-terminal pass (and its post-drain pass under `Async`/`OnExit`), which also abandons an
+      earlier run's `Running` or `Suspended` children whose claims are free by then. Only a child still busy at
+      both passes is left to the next `start`; a holder's claim lapses within its TTL, so this needs a stale
+      holder outliving the whole new run.
   - **Fenced by the parent's claim.** Each listing and each deletion first checks the parent's fencing token, and
     the pass stops at the first mismatch, so a stale worker whose claim was lost never deletes a child that a
     successor run just made.
@@ -610,7 +620,11 @@ Tests:
     non-positive `RunBudgets`. A replay decides the same from the same snapshot.
   - **A child's grant is whole-life.** This applies to **every** continuation of a child, `recoverChild` and D3's
     `resumeChild` alike: a child suspended past its deadline, or near its token or step grant, is resumed with the
-    same deductions, and settled the same way when nothing is left. A recovered or resumed child's limits are its grant less what its earlier attempts
+    same deductions, and settled the same way when nothing is left. **Every effective grant is fixed at first
+    admission and stored on the child thread** (runtime-owned `DelegationKeys` keys, beside the deadline): the
+    step and token grants as computed then, from the grant and the parent's remainder at that time. A
+    continuation deducts from those stored values, never from a grant recomputed against a recovered parent's
+    fresh or larger budget. A recovered or resumed child's limits are its stored grant less what its earlier attempts
     used: its `usage` key plus `priorUsage.total` (K2) for tokens; for steps its committed model steps **plus the
     model calls of failed attempts** (`priorUsage.total`'s request count, folded from their terminal events), so a
     call that completed but never committed its step still counts; and for time the **effective deadline fixed at
