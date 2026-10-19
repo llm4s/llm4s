@@ -159,6 +159,9 @@ private[agent] object ChildRunner:
     private val childId = ThreadId.child(origin.parent, origin.agent, origin.call)
     private val parent  = ctx.run.config
 
+    /** The parent run's claim token: every admission and settlement of the child is fenced by it (#2071). */
+    private val parentClaim = ctx.run.position.fencingToken
+
     /**
      * The child's config, without its timeout: identity from the parent (rule 16) and the agent's breakpoints. Reads
      * use it; each admission adds the timeout ([[fresh]]).
@@ -288,7 +291,7 @@ private[agent] object ChildRunner:
               notAfter = ctx.run.deadline,
               amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest))),
               // the child is registered only while the parent run still holds its claim (#2071)
-              parentClaim = ctx.run.position.fencingToken
+              parentClaim = parentClaim
             ),
             events
           )
@@ -327,7 +330,8 @@ private[agent] object ChildRunner:
                   run,
                   observer = Some(observer),
                   amend = foldLostUsage,
-                  notAfter = ctx.run.deadline
+                  notAfter = ctx.run.deadline,
+                  parentClaim = parentClaim
                 ),
                 events
               )
@@ -374,7 +378,15 @@ private[agent] object ChildRunner:
     private def resumed(pending: Map[InterruptId, ujson.Value]): Step =
       val run                = fresh()
       val (observer, events) = forwarder(run.runId)
-      runtime.resumeChild(childId, graph, pending, run, observer = Some(observer), notAfter = ctx.run.deadline) match
+      runtime.resumeChild(
+        childId,
+        graph,
+        pending,
+        run,
+        observer = Some(observer),
+        notAfter = ctx.run.deadline,
+        parentClaim = parentClaim
+      ) match
         case handle @ Right(_) =>
           applied = true
           admitted(handle, events)
@@ -466,7 +478,8 @@ private[agent] object ChildRunner:
         error.message,
         base.withRunId(RunId.random()),
         foldLostUsage,
-        ours
+        ours,
+        parentClaim
       ) match
         case Right(_)                          => Step.Again
         case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)

@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -361,8 +362,9 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
       if of == parent && armed("children") then takeOver()
       listed
     override def commit(threadId: ThreadId, commit: Commit) =
-      // between the parent run's last check of its claim and its child's first commit, which writes the origin (#2071)
-      if threadId != parent && commit.checkpoint.exists(_.origin.isDefined) && armed("first-commit") then takeOver()
+      // between the parent run's last check of its claim and a commit the parent drives on its child, each of which
+      // carries the child's origin: its first, a reattachment's or a settlement's (#2071)
+      if threadId != parent && commit.checkpoint.exists(_.origin.isDefined) && armed("child-commit") then takeOver()
       store.commit(threadId, commit)
     override def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
       // between the runtime's last check of the claim above and the store's delete (#2063)
@@ -387,7 +389,7 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
       .awaited
       .value
       .completed
-    taking.armed = _ == "first-commit"
+    taking.armed = _ == "child-commit"
     val late = childOf(parent, 2)
 
     runtime.startChild(late, graph, "go", origin(parent, 2), RunConfig(), parentClaim = Some(held.token)) match
@@ -399,6 +401,66 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     runtime.children(parent).value.map(_.threadId) shouldBe Vector(kept)
     // the refused child's own claim was given back, not taken for lost
     store.claim(late, ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
+  }
+
+  /** Each admission or settlement the parent drives on an existing child, with the parent's token (#2071). */
+  private def driven: Vector[(String, String, (GraphRuntime, ThreadId, FencingToken) => Result[Unit])] = Vector(
+    ("recoverChild", "fail", (r, c, t) => r.recoverChild(c, graph, RunConfig(), parentClaim = Some(t)).map(_ => ())),
+    (
+      "resumeChild",
+      "ask",
+      (r, c, t) =>
+        r.resumeChild(c, graph, Map(InterruptId("0.0") -> ujson.Str("yes")), RunConfig(), parentClaim = Some(t))
+          .map(_ => ())
+    ),
+    (
+      "settleChild",
+      "fail",
+      (r, c, t) =>
+        r.settleChild(c, graph, RunOutcome.Failed("down", "down"), "down", RunConfig(), parentClaim = Some(t))
+    )
+  )
+
+  driven.foreach { (name, input, drive) =>
+    it should s"leave the child as it was when the parent is taken over before $name's commit (#2071)" in {
+      val store   = InMemoryCheckpointer()
+      val parent  = ThreadId(s"taken-before-$name")
+      val taking  = TakingOver(store, parent)
+      val runtime = GraphRuntime(taking, clock)
+      runtime.start(parent, graph, "go").awaited.value.completed
+      val child = childOf(parent, 1)
+      failing.set(true)
+      try runtime.startChild(child, graph, input, origin(parent, 1), RunConfig()).awaited.value
+      finally failing.set(false)
+      val before = store.latest(child).value.value.checkpoint
+      val held   = taking.claim(parent, ClaimRequest(RunId("parent-run"), None, 1.minute)).value
+      taking.armed = _ == "child-commit"
+
+      drive(runtime, child, held.token) match
+        case Left(lost: GraphError.ClaimLost) => lost.threadId shouldBe parent.value
+        case other                            => fail(s"expected ClaimLost on the parent, got $other")
+
+      taking.takenOver shouldBe true
+      store.latest(child).value.value.checkpoint.id shouldBe before.id
+      // the refused child's own claim was given back, not taken for lost
+      store.claim(child, ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
+    }
+  }
+
+  it should "leave an abandoned child unsettled when the parent is taken over before the abandon's commit (#2071)" in {
+    val store   = InMemoryCheckpointer()
+    val parent  = ThreadId("taken-before-abandon")
+    val taking  = TakingOver(store, parent)
+    val runtime = GraphRuntime(taking, clock)
+    runtime.start(parent, graph, "go").awaited.value.completed
+    val child = startChild(runtime, parent, 1, "ask")
+    taking.armed = _ == "child-commit"
+
+    runtime.start(parent, graph, "next").isLeft shouldBe true
+
+    taking.takenOver shouldBe true
+    store.latest(child).value.value.checkpoint.status shouldBe CheckpointStatus.Suspended
+    store.claim(child, ClaimRequest(RunId("next"), None, 1.minute)).isRight shouldBe true
   }
 
   it should "delete nothing when the parent is taken over between the fence's check and a delete (#2063)" in {

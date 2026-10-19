@@ -285,9 +285,10 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *  - `fence`, if present as `(other, otherToken)`, fences the commit by another thread's claim too: it applies only if
  *    `otherToken` is `other`'s current claim, checked in the same atomic step as `token` and the write (one
  *    transaction, or under one lock), and otherwise is `GraphError.StaleClaim(other, otherToken, otherCurrent)` with
- *    nothing written - `token` checked first. The runtime fences a child thread's first commit, the one that writes
- *    its [[Checkpoint.origin]], by the parent's claim (design 4.41), so a stale task of a parent taken over never
- *    registers a child after a successor's cascade delete looked for children.
+ *    nothing written - `token` checked first. The runtime fences every admission and settlement a parent drives on a
+ *    child thread - its first commit, which writes its [[Checkpoint.origin]], a reattachment's, a resume's and a
+ *    settlement's - by the parent's claim (design 4.41), so a stale task of a parent taken over never registers or
+ *    runs a child after a successor took the parent.
  */
 final case class Commit private (
   token: FencingToken,
