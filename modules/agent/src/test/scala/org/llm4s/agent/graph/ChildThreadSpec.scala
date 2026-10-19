@@ -294,7 +294,26 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     Vector(parent, first, second).map(store.latest(_).value) shouldBe Vector(None, None, None)
   }
 
-  "Child retention" should "keep the newest settled children at a settled parent's start, an abandoned one counting" in {
+  "Child retention" should "keep only the newest settled children when the parent's run ends Blocked (#2074)" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store, clock)
+    val parent  = ThreadId("blocked-parent")
+    // the run starts three children, which settle, then blocks: its calls never run again
+    val b = GraphBuilder("spawning", "v1")
+    val spawn = b.node[String]("spawn", writes = Set(log)) { (_, _, _) =>
+      Vector(1, 2, 3).foreach(n => startChild(runtime, parent, n))
+      NodeResult.Block(StateUpdate.update(log, "blocked"), GuardrailBlocked("LengthCheck", "long"))
+    }
+    val spawning = b.compile(spawn)(_.get(log)).value
+
+    runtime.start(parent, spawning, "go", RunConfig().withChildRetention(1)).awaited.value.failed
+
+    store.latest(parent).value.value.checkpoint.outcome.value shouldBe a[RunOutcome.Blocked]
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(childOf(parent, 3))
+    Vector(1, 2).map(n => store.latest(childOf(parent, n)).value) shouldBe Vector(None, None)
+  }
+
+  it should "keep the newest settled children at a settled parent's start, an abandoned one counting" in {
     val (store, runtime, parent) = fresh()
     val children = Vector(1, 2, 3, 4).map(n => startChild(runtime, parent, n, if n == 1 then "ask" else "go"))
     runtime.start(parent, graph, "next", RunConfig().withChildRetention(1)).awaited.value.completed

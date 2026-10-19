@@ -1161,7 +1161,7 @@ final class GraphRuntime(
    * settled (`Completed` or `Failed`, so with an outcome) - and deletes each older one with everything below it
    * ([[deleteTree]]). Called only where every settled child is prunable - its call committed and will never run
    * again: under the parent's claim at `start` admission, and before a run's terminal checkpoint once its last
-   * superstep is durable, or after it once an `Async` or `OnExit` run's commits drain ([[Run.retainBeforeSettling]]) - never at `recover` or `resume` admission, when a child whose
+   * superstep is durable, or after it once an `Async` or `OnExit` run's commits drain ([[Run.retainBeforeSettling]]), or after a blocked run's closing checkpoint - never at `recover` or `resume` admission, when a child whose
    * call has not committed must stay for that call's replay. Idempotent. Housekeeping: a failure is logged at WARN.
    *
    * A `Running` or `Suspended` child for which `abandon` holds - at `start` admission, every one listed, since no call
@@ -3310,7 +3310,9 @@ final class GraphRuntime(
      * `lastCommitted` the stored terminal checkpoint, still under the run's claim (#2067); a drain that fails leaves it
      * to the next `start`. The pass also settles as abandoned, and so may prune, the earlier run's children that
      * admission skipped as busy and whose claims are free by now ([[abandonLater]], #2073); one still busy is left to
-     * the next `start`. It never abandons a child of this run.
+     * the next `start`. It never abandons a child of this run. A run a node blocked ([[block]]) runs it too, once its
+     * closing `Failed` checkpoint is stored, with `lastCommitted` that checkpoint: a blocked turn is never recovered,
+     * so its calls never run again (#2074). A run that fails runs no pass, since `recover` may replay its calls.
      */
     private def retainBeforeSettling(lastCommitted: String): Unit =
       val left = keepChildren(
@@ -3341,9 +3343,12 @@ final class GraphRuntime(
           // the blocked turn leaves the history with it: nothing of it stays readable or forkable
           submit(saved, failed(error.message), retractTurn = true)
           closeCommitter()
-          committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
-            RunResult.Failed(execution.state, writeFailed(e, Some(error)))
-          )
+          committer.failure.fold[RunResult[O]] {
+            // the closing checkpoint is stored and the blocked turn's calls never run again, so every settled child is
+            // prunable, as at the next start (#2074); a failure, which `recover` may replay, runs no pass
+            retainBeforeSettling(saved.id)
+            RunResult.Failed(execution.state, error)
+          }(e => RunResult.Failed(execution.state, writeFailed(e, Some(error))))
 
     /** Runs `task`, recording its write; its digest is that of the write exactly as recorded (design §4.24). */
     private def runTask(task: Task, execution: Execution, checkpointId: String): Result[Settled] =
