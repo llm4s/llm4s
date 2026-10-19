@@ -858,7 +858,12 @@ object SqliteCheckpointer:
       query(c, "SELECT parent_thread_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
         Option(rows.getString(1))
       ).headOption.flatten
-    if current != parent then
+    // the checkpoint just written is the only one: a new thread under the id, whose tombstone's place was a cursor
+    val recreated =
+      query(c, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)(
+        _.getLong(1)
+      ).head == 1L
+    if current != parent || recreated then
       // one past the file's highest place: a tombstone keeps its place, so places only grow while children are kept
       val order = parent.map { _ =>
         query(c, "SELECT COALESCE(MAX(child_order), 0) + 1 FROM llm4s_checkpoint_threads")(_.getLong(1)).head

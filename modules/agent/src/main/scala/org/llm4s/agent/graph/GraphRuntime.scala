@@ -776,11 +776,19 @@ final class GraphRuntime(
       checked
         .flatMap(_ => descendants(threadId))
         .flatMap(below =>
-          holdingAll(below, config)(
-            _.foldLeft[Result[Unit]](Right(()))((done, child) =>
-              done.flatMap(_ => fenced).flatMap(_ => rootHolds).flatMap(_ => deleteHeld(child, config))
+          holdingAll(below, config) { heldBelow =>
+            // listed before they were held: a descendant's run may have made a child in between and let its
+            // claim go. Only a run of its parent makes a child, so with every listed thread held the tree can
+            // no longer grow; listed again now, a tree that grew refuses the delete rather than orphan the child
+            val unchanged = descendants(threadId).flatMap(now =>
+              Either.cond(now.toSet == below.toSet, (), GraphError.ThreadBusy(threadId.value, None))
             )
-          )
+            unchanged.flatMap(_ =>
+              heldBelow.foldLeft[Result[Unit]](Right(()))((done, child) =>
+                done.flatMap(_ => fenced).flatMap(_ => rootHolds).flatMap(_ => deleteHeld(child, config))
+              )
+            )
+          }
         )
         .flatMap(_ => fenced)
         .flatMap(_ => deleteHeld(held, config))

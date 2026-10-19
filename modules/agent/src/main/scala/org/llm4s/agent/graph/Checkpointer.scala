@@ -355,11 +355,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   /**
    * `current`'s place among the children of the parent `checkpoint`'s origin names: kept while that is the parent
-   * it is indexed under, a new last place under a new parent, and none for a top-level checkpoint.
+   * it is indexed under, a new last place under a new parent or for a new thread under the id (a tombstone keeps
+   * its place only as a cursor until then), and none for a top-level checkpoint.
    */
   private def placed(threadId: ThreadId, current: ThreadRecord, checkpoint: Checkpoint): Option[(String, Long)] =
     val parent = checkpoint.origin.map(_.parent.value)
-    if current.child.map(_._1) == parent then current.child
+    if current.history.nonEmpty && current.child.map(_._1) == parent then current.child
     else
       current.child.foreach(unindex)
       parent.map { p =>

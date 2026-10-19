@@ -1469,6 +1469,12 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
 
     s.reopened()
     s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1)
+
+    // a new thread under the deleted child's id is the newest child, not in the old one's place
+    childCommitted(s, children(1), Some(originOf(s.thread, 2)), tenant = Some("tenant-a"), id = "c3")
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1) :+ children(1)
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1) :+ children(1)
   }
 
   it should "stop listing a child whose latest checkpoint names no parent, or another" in {
