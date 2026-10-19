@@ -195,7 +195,11 @@ final class HostFileBackend private (
           .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
             acc.flatMap { parent =>
               val next = parent.resolve(segment)
-              if isLink(next) then refused(operation, path, "is or is beneath a symbolic link, which is refused")
+              // lexical first, before any I/O: a segment Windows reads as another drive (`a:b`) never reaches
+              // the file system, where it names a path outside the root, or fails as no file error does
+              if !next.normalize().startsWith(root) || next.getNameCount != parent.getNameCount + 1 then
+                refused(operation, path, "resolves outside the root")
+              else if isLink(next) then refused(operation, path, "is or is beneath a symbolic link, which is refused")
               else if mountedInside(next) then
                 refused(
                   operation,
