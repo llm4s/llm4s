@@ -268,20 +268,26 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
   - `deleteThread` on a child thread directly is refused (rule 19).
 - **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
-  (default 64, set per agent by `DelegationConfig`, D1) and cascade-deletes older prunable ones.
-  - **Prunable** means settled (`outcome` written) *and* either its call's result is in the parent's latest
-    committed checkpoint (the origin's `IdempotencyKey` matches a committed tool result), or the parent's latest
-    checkpoint is `Completed`, whose calls are never replayed (a new turn makes new keys). Such a child is never
-    read again by rule 14, so deleting it is safe at any moment, whatever happens to the parent afterwards. The
-    second arm covers a Block, which retracts the turn's tool results (rule 5).
-  - A `Running` or `Suspended` child, or a settled one whose call has not committed, is never pruned. None is left
-    behind a committed call: a reported child failure settles its child before the call commits (K2,
-    `settleChild`).
-  - The pass runs **before** the parent's terminal (`Completed` or `Failed`) checkpoint is committed, after the
-    last superstep's commit, so it needs no later turn. A crash during it leaves the parent unsettled; the parent's
-    `recover` reaches the same point and runs the pass again, which is idempotent. A parent that is never recovered
-    keeps at most one run's children beyond the bound, until `deleteThread`.
-  - It runs again at `start` admission on a `Completed` parent, which removes children a Block's retraction left.
+  (default 64, set per agent by `RunConfig.withChildRetention`, and by `DelegationConfig`, D1) and cascade-deletes
+  older prunable ones. A prunable child is never read again by rule 14, so deleting it is safe whatever happens to
+  the parent afterwards. Prunability is decided from run boundaries, never by matching keys: a parent checkpoint
+  does not keep a call's `IdempotencyKey` (`ToolResult` and `ToolMessage` carry none). The pass runs at two points:
+  - **Before the parent's terminal `Completed` checkpoint**, once the store's latest checkpoint is the last
+    superstep's and schedules no task: every call of the run has committed, so every settled child is prunable.
+    - Skipped when that checkpoint is not yet durable (Async, OnExit), and left to the next `start`.
+    - A crash during the pass leaves the parent unsettled; `recover` reaches the same point and runs it again,
+      which is idempotent.
+    - Not run at a Block or a failure, whose next admission handles it.
+  - **At `start` admission.** `start` is admitted only on a thread with no incomplete execution
+    (`GraphError.IncompleteRun` otherwise), so no call of an earlier run can be replayed:
+    - every settled child is prunable, whatever the parent's last status (a Block's retraction included);
+    - a child of an earlier run still `Running` or `Suspended` can never be reattached, so it is first settled
+      `Failed(kind = "abandoned", ...)` under its own claim (busy: skipped, retried at the next `start`), then
+      counts.
+  - **Fenced by the parent's claim.** Each listing and each deletion first checks the parent's fencing token, and
+    the pass stops at the first mismatch, so a stale worker whose claim was lost never deletes a child that a
+    successor run just made.
+  - Never at `recover` or `resume` admission, and never a child of the current run before its call commits.
   - A failed delete is logged at WARN, as retention prune is.
 - **`CheckpointerContract`** gains cases for:
   - origin round trip and copy-forward
@@ -295,7 +301,9 @@ Tests:
 - every refused operation on a child thread, with the allowed reads
 - cascade delete through two levels; a child with a live claim refuses the delete
 - retention: `childRetention = 1`, two calls, one child left when the parent completes; a crash during the pass is
-  finished by `recover`; never touches a suspended child or a settled child whose call has not committed
+  finished by `recover`; at `start`, a Block's children are pruned and an earlier run's unsettled child is
+  settled `abandoned`; a lost parent claim stops the pass before any deletion; never a child of the current run
+  whose call has not committed
 
 ### K2: child-run supervision (#2046, 4.42)
 
@@ -317,7 +325,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint's `outcome` (K1)
     and, for `Answered`, `decodeOutput`, with no run. A settled child checkpoint without an `outcome` is corrupt
     stored state: `ToolOutcome.Fatal`, never a guess from `status`.
-  - A `Left` that is not a refusal (provider error, tool `Fatal`, `OutputInvalid`, `DeadlineExceeded`) is `Failed`.
+  - `GraphError.OutputInvalid` (a typed child exhausted its corrective retry) is a refusal, mapped before the
+    generic branch to `TaskRefusal.OutputInvalid(errors)` with the full vector, the same refusal replay rebuilds
+    from `RunOutcome.OutputInvalid`. A Block and the step and token limits are statuses, not `Left`s.
+  - Any other `Left` (provider error, tool `Fatal`, `DeadlineExceeded`) is `Failed`.
     - Under `ChildFailure.Fail` the child thread stays `Running`, the parent run fails, and the parent's `recover`
       replays the call, which recovers the child.
     - Under `ChildFailure.Report` the call is about to commit, so it will never be replayed. Before returning the
