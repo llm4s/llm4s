@@ -106,8 +106,10 @@ agent.run(threadId, "research tides").flatMap { result =>
   result.status match
     case AgentStatus.Suspended(_, _, _, _, delegated) =>
       val answers = delegated.map {
-        case (id, DelegatedRequest(_, _: ChildInterrupt.Approval)) => result.approve(id)
-        case (id, _)                                              => result.proceed(id)
+        case (id, DelegatedRequest(_, _: ChildInterrupt.Approval))   => result.approve(id)
+        case (id, DelegatedRequest(_, _: ChildInterrupt.Breakpoint)) => result.proceed(id)
+        // a tool's or a middleware's question: reply with its answer type (here a tool's `UnitChoice`)
+        case (id, DelegatedRequest(_, _))                            => result.reply(id, UnitChoice("km"))
       }
       agent.resume(threadId, answers.toMap)
     case _ => Right(result)
