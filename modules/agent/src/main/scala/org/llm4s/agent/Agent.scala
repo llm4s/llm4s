@@ -42,7 +42,8 @@ final class Agent private[agent] (
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
   interruptAfter: Set[NodeId] = Set.empty,
-  retention: Option[RetentionPolicy] = None
+  retention: Option[RetentionPolicy] = None,
+  childRetention: Option[Int] = None
 ):
 
   /**
@@ -56,6 +57,12 @@ final class Agent private[agent] (
       // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
       // keepAll removes nothing, so it is not applied at all
       .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
+      // a delegating agent's DelegationConfig.childRetention, unless the run sets another (design 4.44)
+      .withChildRetention(
+        childRetention
+          .filter(_ => config.childRetention == RunConfig.DefaultChildRetention)
+          .getOrElse(config.childRetention)
+      )
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the

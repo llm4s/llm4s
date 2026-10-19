@@ -438,6 +438,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.41 | [Stage 4 slice K1: child threads](typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md) ([#2045](https://github.com/llm4s/llm4s/issues/2045)) |
 | 4.42 | [Stage 4 slice K2: child-run supervision](typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md) ([#2046](https://github.com/llm4s/llm4s/issues/2046)) |
 | 4.43 | [Stage 4 slice K3: token budgets and the run's deadline](typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md) ([#2047](https://github.com/llm4s/llm4s/issues/2047)) |
+| 4.44 | [Stage 4 slice D1: `TypedAgent[I, O]` and the `task` tools](typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md) ([#2048](https://github.com/llm4s/llm4s/issues/2048)) |
 
 ### 4.9 Stage 0 carry-forward
 

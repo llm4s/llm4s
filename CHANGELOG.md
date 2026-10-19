@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadline as `RunContext.deadline` [#2047](https://github.com/llm4s/llm4s/issues/2047); [design §4.43](docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md).
 - **Added** child-run supervision: a child started at most once and reattached on replay, cancelled with its parent,
   held to its deadline (`RunContext.deadline`), usage rolled up once; a tool's own model calls now count in the thread's usage [#2046](https://github.com/llm4s/llm4s/issues/2046); [design §4.42](docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md).
+- **Added** `TypedAgent[I, O]` subagents, offered with `AgentBuilder.withSubagents` through the `task` / `task_<id>` tools,
+  run in parallel on child threads within `DelegationConfig`'s bounds [#2048](https://github.com/llm4s/llm4s/issues/2048); [design §4.44](docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md).
 
 ### Agent harness (Phase 3)
 

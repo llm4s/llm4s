@@ -4,6 +4,7 @@ import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId, RetentionP
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, OutputFormat, ToolLoop }
+import org.llm4s.agent.delegation.{ BoundAgent, DelegationConfig, DelegationMiddleware, TaskTools, TypedAgent }
 import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -43,7 +44,9 @@ final class AgentBuilder private (
   private val interruptAfter: Vector[AgentNode],
   maxPromptSectionTokens: Int,
   output: Option[OutputFormat],
-  harness: Option[HarnessProfile]
+  harness: Option[HarnessProfile],
+  subagents: Vector[TypedAgent[?, ?]],
+  delegation: DelegationConfig
 ):
 
   private def copy(
@@ -61,7 +64,9 @@ final class AgentBuilder private (
     interruptAfter: Vector[AgentNode] = interruptAfter,
     maxPromptSectionTokens: Int = maxPromptSectionTokens,
     output: Option[OutputFormat] = output,
-    harness: Option[HarnessProfile] = harness
+    harness: Option[HarnessProfile] = harness,
+    subagents: Vector[TypedAgent[?, ?]] = subagents,
+    delegation: DelegationConfig = delegation
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -80,7 +85,9 @@ final class AgentBuilder private (
       interruptAfter,
       maxPromptSectionTokens,
       output,
-      harness
+      harness,
+      subagents,
+      delegation
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -139,6 +146,19 @@ final class AgentBuilder private (
    * (see [[org.llm4s.agent.harness.HarnessProfile]]).
    */
   def withHarness(profile: HarnessProfile): AgentBuilder = copy(harness = Some(profile))
+
+  /**
+   * Appends `agents` to the subagents this agent may delegate to (design 4.44), in order. At [[build]] each is bound
+   * to this agent's client and runtime, and a `delegation` middleware, innermost in the stack, offers them: the
+   * `task` tool for every subagent taking a `TaskRequest`, a `task_<id>` tool for each other one, and a cacheable
+   * prompt section listing each subagent's id and description. A call runs the subagent on a child thread of the
+   * calling thread and returns only its typed report. [[build]] refuses two subagents with one id, a subagent that does
+   * not bind, and a task tool whose name clashes with another tool. Bounded by [[withDelegation]].
+   */
+  def withSubagents(agents: TypedAgent[?, ?]*): AgentBuilder = copy(subagents = subagents ++ agents)
+
+  /** The bounds on this agent's delegated tasks, replacing the defaults; [[build]] refuses a bound that is not positive. */
+  def withDelegation(config: DelegationConfig): AgentBuilder = copy(delegation = config)
 
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
@@ -202,11 +222,12 @@ final class AgentBuilder private (
    * schemas, keys the loop owns, handoffs to self or twice to one target.
    */
   def build(): Result[Agent] =
+    val graphRuntime = runtime.getOrElse(GraphRuntime.inMemory())
     for
       family <- AgentBuilder.family(this)
       _      <- AgentBuilder.idTargetsDefined(family)
       agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
-        acc.flatMap(done => builder.loopAgent.map(done :+ _))
+        acc.flatMap(done => builder.loopAgent(graphRuntime).map(done :+ _))
       }
       root      <- AgentId.of(id)
       loop      <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
@@ -214,12 +235,35 @@ final class AgentBuilder private (
     yield new Agent(
       root,
       loop,
-      runtime.getOrElse(GraphRuntime.inMemory()),
+      graphRuntime,
       tracing,
       family.flatMap(b => b.held(loop, b.interruptBefore, BreakpointPhase.Before)).toSet,
       family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
-      installed.retention
+      installed.retention,
+      Option.when(subagents.nonEmpty)(delegation.childRetention)
     )
+
+  /**
+   * The `delegation` middleware offering this agent's subagents, each bound to its client and `graphRuntime`; none
+   * without subagents. Refuses a bound that is not positive, two subagents with one id, and a subagent that does not
+   * bind.
+   */
+  private def delegating(graphRuntime: GraphRuntime): Result[Option[DelegationMiddleware]] =
+    if subagents.isEmpty then Right(None)
+    else
+      val ids        = subagents.map(_.id.value)
+      val duplicated = ids.diff(ids.distinct).distinct
+      for
+        config <- delegation.validated
+        _ <- Either.cond(
+          duplicated.isEmpty,
+          (),
+          ValidationError("subagents", s"agent '$id': subagent ids defined twice: ${duplicated.mkString(", ")}")
+        )
+        bound <- subagents.foldLeft[Result[Vector[BoundAgent[?, ?]]]](Right(Vector.empty)) { (acc, definition) =>
+          acc.flatMap(done => definition.bind(client, graphRuntime).map(done :+ _))
+        }
+      yield Some(new DelegationMiddleware(bound, config, depth = 0))
 
   /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
   private def held(loop: ToolLoop, nodes: Vector[AgentNode], phase: BreakpointPhase): Vector[NodeId] =
@@ -250,7 +294,7 @@ final class AgentBuilder private (
             )
           )
 
-  private def loopAgent: Result[LoopAgent] =
+  private def loopAgent(graphRuntime: GraphRuntime): Result[LoopAgent] =
     for
       agentId <- AgentId.of(id)
       _ <- Either.cond(
@@ -258,8 +302,9 @@ final class AgentBuilder private (
         (),
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
-      installed <- effective
-      toolSet   <- ToolSet.of(validator, installed.tools*)
+      installed  <- effective
+      delegating <- delegating(graphRuntime)
+      toolSet    <- ToolSet.of(validator, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
@@ -268,7 +313,7 @@ final class AgentBuilder private (
       .withOutput(output)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
-      .withMiddleware(installed.middleware)
+      .withMiddleware(installed.middleware ++ delegating)
       .withHandoffs(loopHandoffs)
 
   private def loopHandoff(handoff: Handoff): Result[LoopHandoff] =
@@ -320,6 +365,11 @@ final class AgentBuilder private (
     )
     // only when set, so the version of an agent without a response format is what it was before formats existed
     output.foreach(format => settings("output") = format.schema)
+    // only when set, likewise: the task tools the delegation middleware contributes
+    if subagents.nonEmpty then
+      settings("subagents") = ujson.Arr.from(
+        TaskTools.specs(subagents).map(s => ujson.Obj("name" -> s.name, "definition" -> s.toolDefinition.render()))
+      )
     if harness.isDefined && effective.isLeft then settings("harness") = "invalid"
     settings
 
@@ -343,7 +393,9 @@ object AgentBuilder:
       interruptAfter = Vector.empty,
       maxPromptSectionTokens = LoopAgent.DefaultMaxPromptSectionTokens,
       output = None,
-      harness = None
+      harness = None,
+      subagents = Vector.empty,
+      delegation = DelegationConfig.default
     )
 
   /** What an agent runs with once its harness is installed; `retention` only with a harness. */
