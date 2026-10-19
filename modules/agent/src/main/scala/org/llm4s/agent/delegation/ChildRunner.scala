@@ -4,7 +4,7 @@ import org.llm4s.agent.{ Agent, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.ToolContext
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys, TurnOutput }
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.types.Result
 
@@ -185,6 +185,17 @@ private[agent] object ChildRunner:
       runtime.childAtRest(childId, graph, base) match
         case Left(error) => Step.Done(Left(error))
         case Right(None) => admitted(runtime.startChild(childId, graph, input, origin, fresh()))
+        // a thread at the child's id that is not this call's child - a top-level thread named like one, or a child of
+        // another origin - is never adopted: its answer is not this call's
+        case Right(Some((checkpoint, _))) if !ours(checkpoint) =>
+          Step.Done(
+            Left(
+              ValidationError(
+                "threadId",
+                s"'${childId.value}' exists and is not the child thread of call ${origin.call.value} on '${origin.parent.value}'"
+              )
+            )
+          )
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
@@ -197,6 +208,10 @@ private[agent] object ChildRunner:
                   .flatMap(result => usage().map(ChildEnd.Ended(result, _)))
               )
             case CheckpointStatus.Completed | CheckpointStatus.Failed => Step.Done(settled(checkpoint, exec))
+
+    /** Whether `checkpoint` is this call's child's: its origin names this call's parent, call and agent. */
+    private def ours(checkpoint: Checkpoint): Boolean =
+      checkpoint.origin.exists(o => o.parent == origin.parent && o.call == origin.call && o.agent == origin.agent)
 
     /** What an admission of the child calls for: its run awaited, or a refusal that reads the child again. */
     private def admitted(handle: Result[RunHandle[TurnOutput]]): Step = handle match

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.agent.{ Agent, AgentBuilder, AgentId, AgentOutputSpec, AgentStatus, CompletionFixture }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentStatus, CompletionFixture }
 import org.llm4s.agent.{ ScriptedLLMClient, SpecTools }
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.delegation.{ ChildEnd, ChildRunner, DelegationKeys, PriorUsage }
@@ -37,8 +37,6 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   /** A new storage: each call of the function it returns opens that same storage again. */
   protected def storage(): () => Checkpointer
 
-  private val worker = AgentId.unsafe("worker")
-
   extension [A](result: Result[A])
     private def ok: A = result.fold(e => fail(s"expected Right, got ${e.message}"), identity)
 
@@ -53,6 +51,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   ) {
     val crashAfterChild                   = new AtomicBoolean(false)
     val ends                              = new CopyOnWriteArrayList[Result[ChildEnd]]()
+    val lastOrigin                        = new AtomicReference[RunOrigin]()
     def allEnds: Vector[Result[ChildEnd]] = ends.asScala.toVector
   }
 
@@ -78,7 +77,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val spec = setup.delegateTimeout.fold(SpecTools.spec("delegate"))(t => SpecTools.spec("delegate").withTimeout(t))
     val delegate = AgentTool(spec) { (args, ctx) =>
       val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
-      val ended  = ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, setup.settle)
+      setup.lastOrigin.set(origin)
+      val ended = ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, setup.settle)
       setup.ends.add(ended)
       if (setup.crashAfterChild.getAndSet(false)) ToolOutcome.Fatal(ProcessingError("crash", "after the child"))
       else outcome(setup, ended)
@@ -300,9 +300,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
           // the other runtime starts the child first
           val other    = new GraphRuntime(open())
           val (_, kid) = family(other, new Setup(answers(), setup.childClient))
-          val origin   = RunOrigin(ThreadId("race"), IdempotencyKey("c1"), worker, Instant.now(), 1)
           other
-            .startChild(threadId, kid.loop.graph, AgentInput("task", Vector.empty), origin, RunConfig())
+            .startChild(threadId, kid.loop.graph, AgentInput("task", Vector.empty), setup.lastOrigin.get, RunConfig())
             .ok
             .await()
             .ok
@@ -317,6 +316,29 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.Completed("report")
       case other                => fail(s"unexpected $other")
     }
+  }
+
+  behavior.of("A thread at the child's id that is not the call's child")
+
+  it should "never be adopted" in {
+    val open  = storage()
+    val setup = new Setup(delegating(), answers("not the child's answer"))
+    // before the runner's first read, a top-level thread is run at the child's id
+    val planted = new AtomicBoolean(false)
+    val store = new ForwardingCheckpointer(open()) {
+      override def latest(threadId: ThreadId) = {
+        if (threadId.value.contains("/~task/") && planted.compareAndSet(false, true)) {
+          val (_, kid) = family(new GraphRuntime(open()), new Setup(answers(), setup.childClient))
+          kid.run(threadId, "planted").ok
+        }
+        super.latest(threadId)
+      }
+    }
+    val thread = ThreadId("planted")
+    val failed = family(new GraphRuntime(store), setup)._1.run(thread, "go")
+    failed.isLeft shouldBe true
+    setup.allEnds.head.left.toOption.get.message should include("is not the child thread")
+    setup.childClient.callCount shouldBe 1
   }
 
   behavior.of("A child another runtime holds")
