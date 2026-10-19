@@ -1073,6 +1073,50 @@ class HostFileBackendSpec
     onDisk("locked/a.txt") shouldBe "x"
   }
 
+  it should "take a target whose attributes cannot be read for a refusal, never for an absent file" in {
+    assume(posix)
+    val locked = Files.createDirectories(dir.resolve("locked"))
+    Files.writeString(locked.resolve("a.txt"), "x")
+    // without search permission on its directory, the file's attributes cannot be read: it is not absent
+    Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"))
+    cleanups += (() =>
+      Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")): Unit
+    )
+    assume(scala.util.Try(Files.readAttributes(locked.resolve("a.txt"), "size")).isFailure) // a superuser reads it
+    def denied[A](r: Result[A]) =
+      r.left.value match {
+        case refused: BackendRefused =>
+          refused.kind should not be BackendRefused.Kind.NotFound
+          refused.message should include("permission denied")
+        case other => fail(s"expected a refusal, got $other")
+      }
+    denied(backend.read(p("/locked/a.txt"), 0, 1, call()))
+    denied(backend.write(p("/locked/a.txt"), "y", call()))
+    denied(backend.delete(p("/locked/a.txt"), call()))
+  }
+
+  it should "refuse to replace a file whose attributes Windows denies, rather than replace it as new" in {
+    assume(!posix)
+    val f = dir.resolve("protected.txt")
+    Files.writeString(f, "x")
+    val view = Files.getFileAttributeView(f, classOf[java.nio.file.attribute.AclFileAttributeView])
+    assume(view != null)
+    val me = view.getOwner
+    val deny = java.nio.file.attribute.AclEntry
+      .newBuilder()
+      .setType(java.nio.file.attribute.AclEntryType.DENY)
+      .setPrincipal(me)
+      .setPermissions(java.nio.file.attribute.AclEntryPermission.READ_ATTRIBUTES)
+      .build()
+    val before = view.getAcl
+    view.setAcl((deny +: before.asScala.toVector).asJava)
+    cleanups += (() => view.setAcl(before))
+    assume(scala.util.Try(Files.readAttributes(f, "size")).isFailure)
+    backend.write(p("/protected.txt"), "y", call()).left.value shouldBe a[BackendRefused]
+    view.setAcl(before)
+    onDisk("protected.txt") shouldBe "x"
+  }
+
   it should "refuse a search over a file it cannot read, rather than skip it, while still skipping binary" in {
     assume(posix)
     Files.writeString(dir.resolve("open.txt"), "needle\n")

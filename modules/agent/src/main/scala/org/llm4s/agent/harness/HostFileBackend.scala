@@ -174,7 +174,7 @@ final class HostFileBackend private (
 
   /** A file another name also reaches, or one on another file system. */
   private def aliased(p: Path): Boolean =
-    Files.isSymbolicLink(p) || (isFile(p) && linkCount(p) > 1) || mountedInside(p)
+    isLink(p) || (isFile(p) && linkCount(p) > 1) || mountedInside(p)
 
   /**
    * `path` under the root, checked: the root is intact, nothing is mounted beneath it, and no component
@@ -195,8 +195,7 @@ final class HostFileBackend private (
           .foldLeft[Result[Path]](Right(root)) { (acc, segment) =>
             acc.flatMap { parent =>
               val next = parent.resolve(segment)
-              if Files.isSymbolicLink(next) then
-                refused(operation, path, "is or is beneath a symbolic link, which is refused")
+              if isLink(next) then refused(operation, path, "is or is beneath a symbolic link, which is refused")
               else if mountedInside(next) then
                 refused(
                   operation,
@@ -250,9 +249,15 @@ final class HostFileBackend private (
       .find(p => exists(p) && !isDir(p))
       .fold[Result[Unit]](Right(()))(_ => refused(operation, path, "is beneath a file"))
 
-  private def isDir(p: Path)  = Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)
-  private def isFile(p: Path) = Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS)
-  private def exists(p: Path) = Files.exists(p, LinkOption.NOFOLLOW_LINKS)
+  // Every existence and type check reads `p`'s attributes once, not following a link, and only "no such
+  // file" means absent. `Files.exists` and its kin answer `false` when the attributes cannot be read, which
+  // would take a protected file for an absent one, and replace it without its ACL; here that failure
+  // throws, and the operation's `io` makes it a refusal.
+  private def attributes(p: Path): Option[BasicFileAttributes] = HostFileBackend.attributesOf(p)
+  private def isDir(p: Path)                                   = attributes(p).exists(_.isDirectory)
+  private def isFile(p: Path)                                  = attributes(p).exists(_.isRegularFile)
+  private def isLink(p: Path)                                  = attributes(p).exists(_.isSymbolicLink)
+  private def exists(p: Path)                                  = attributes(p).isDefined
 
   /**
    * An I/O step that has changed nothing: a file-system refusal is the model's, an interrupt is a
@@ -1197,42 +1202,44 @@ object HostFileBackend:
 
     /** `target`'s attributes, `None` if there is no file to replace, or why a replacement cannot keep them. */
     def of(target: Path): Either[String, Option[Kept]] =
-      if !Files.exists(target, LinkOption.NOFOLLOW_LINKS) then Right(None)
-      else
-        Try {
-          def view[V <: java.nio.file.attribute.FileAttributeView](c: Class[V]): Option[V] =
-            Option(Files.getFileAttributeView(target, c, LinkOption.NOFOLLOW_LINKS))
-          // setuid, setgid and sticky: no portable API sets them, so a replacement would drop them
-          val special = Try(Files.getAttribute(target, "unix:mode", LinkOption.NOFOLLOW_LINKS)) match
-            case Success(mode: Integer) => Some((mode.intValue & 0xe00) != 0)
-            case Success(_) | Failure(_: UnsupportedOperationException | _: IllegalArgumentException) => None
-            case Failure(e)                                                                           => throw e
-          val posix = view(classOf[PosixFileAttributeView]).map { v =>
-            val a = v.readAttributes()
-            (a.permissions(), a.owner(), a.group())
-          }
-          // both where both exist: a POSIX mode does not carry an ACL's named entries
-          val acl = view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
-          // beside POSIX too (Linux keeps DOS flags in extended attributes); unreadable only where the file
-          // store has no extended attributes, so no flag can be set to lose
-          val dos = view(classOf[DosFileAttributeView]).flatMap { v =>
-            Try(v.readAttributes()) match
-              case Success(a) => Some(a)
-              case Failure(_)
-                  if posix.isDefined && !Files
-                    .getFileStore(target)
-                    .supportsFileAttributeView(classOf[java.nio.file.attribute.UserDefinedFileAttributeView]) =>
-                None
-              case Failure(e) => throw e
-          }
-          if special.contains(true) then Left("has a setuid, setgid or sticky bit, which a replacement cannot keep")
-          else if dos.exists(_.isReadOnly) then Left("is read-only")
-          else if posix.isEmpty && acl.isEmpty then
-            Left("is on a file system whose permissions the backend cannot copy onto a replacement")
-          else Right(Some(new Kept(posix, acl, dos.map(a => (a.isHidden, a.isSystem)))))
-        } match
-          case Success(kept) => kept
-          case Failure(e)    => Left(s"its permissions cannot be read: $e")
+      Try(attributesOf(target)) match
+        case Failure(e)    => Left(s"its permissions cannot be read: $e")
+        case Success(None) => Right(None)
+        case Success(Some(_)) =>
+          Try {
+            def view[V <: java.nio.file.attribute.FileAttributeView](c: Class[V]): Option[V] =
+              Option(Files.getFileAttributeView(target, c, LinkOption.NOFOLLOW_LINKS))
+            // setuid, setgid and sticky: no portable API sets them, so a replacement would drop them
+            val special = Try(Files.getAttribute(target, "unix:mode", LinkOption.NOFOLLOW_LINKS)) match
+              case Success(mode: Integer) => Some((mode.intValue & 0xe00) != 0)
+              case Success(_) | Failure(_: UnsupportedOperationException | _: IllegalArgumentException) => None
+              case Failure(e)                                                                           => throw e
+            val posix = view(classOf[PosixFileAttributeView]).map { v =>
+              val a = v.readAttributes()
+              (a.permissions(), a.owner(), a.group())
+            }
+            // both where both exist: a POSIX mode does not carry an ACL's named entries
+            val acl = view(classOf[AclFileAttributeView]).map(v => (v.getOwner(), v.getAcl()))
+            // beside POSIX too (Linux keeps DOS flags in extended attributes); unreadable only where the file
+            // store has no extended attributes, so no flag can be set to lose
+            val dos = view(classOf[DosFileAttributeView]).flatMap { v =>
+              Try(v.readAttributes()) match
+                case Success(a) => Some(a)
+                case Failure(_)
+                    if posix.isDefined && !Files
+                      .getFileStore(target)
+                      .supportsFileAttributeView(classOf[java.nio.file.attribute.UserDefinedFileAttributeView]) =>
+                  None
+                case Failure(e) => throw e
+            }
+            if special.contains(true) then Left("has a setuid, setgid or sticky bit, which a replacement cannot keep")
+            else if dos.exists(_.isReadOnly) then Left("is read-only")
+            else if posix.isEmpty && acl.isEmpty then
+              Left("is on a file system whose permissions the backend cannot copy onto a replacement")
+            else Right(Some(new Kept(posix, acl, dos.map(a => (a.isHidden, a.isSystem)))))
+          } match
+            case Success(kept) => kept
+            case Failure(e)    => Left(s"its permissions cannot be read: $e")
 
   /**
    * Whether `e` is how the JDK reports an interrupt of a blocking call: one class for a closed channel,
@@ -1268,6 +1275,21 @@ object HostFileBackend:
         total += n
         if total <= max then out.write(buffer.array(), 0, n)
     Option.when(total <= max)(out.toByteArray)
+
+  /**
+   * `p`'s attributes, not following a link, or `None` if nothing is there: no such file, or a path beneath
+   * something that is not a directory (POSIX reports that as its own error). Any other failure - access
+   * denied above all - throws, never reads as absent.
+   */
+  private[harness] def attributesOf(p: Path): Option[BasicFileAttributes] =
+    Try(Files.readAttributes(p, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)) match
+      case Success(a)                      => Some(a)
+      case Failure(_: NoSuchFileException) => None
+      case Failure(e: FileSystemException)
+          if !e.isInstanceOf[AccessDeniedException] &&
+            Option(p.getParent).exists(q => attributesOf(q).exists(a => !a.isDirectory)) =>
+        None
+      case Failure(e) => throw e
 
   /**
    * Creates `dirs` (top first) one by one with `mkdir`, and returns the ones this call created, and whether
