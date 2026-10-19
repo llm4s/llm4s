@@ -369,6 +369,24 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case other => fail(s"expected a refusal, got $other")
   }
 
+  it should "forget the thread of a run that fails, which its Left cannot name" in {
+    val seen = new java.util.concurrent.atomic.AtomicReference[Option[ThreadId]](None)
+    val spy = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("spy")
+      override def beforeAgent(input: String, context: org.llm4s.agent.graph.middleware.ModelContext) = {
+        seen.set(Some(context.run.position.threadId))
+        Right(org.llm4s.agent.graph.middleware.BoundaryResult(input))
+      }
+    }
+    val client  = RoutingClient { case Child("researcher", _) => Left(ValidationError("provider", "down")) }
+    val runtime = GraphRuntime.inMemory()
+    researcher.withMiddleware(spy).bind(client, runtime).value.run(Question("x")).left.value.message should include(
+      "down"
+    )
+    client.calls should have size 1
+    runtime.history(seen.get.value).value shouldBe empty
+  }
+
   "ChildFailure.Fail" should "fail the parent with a typed child's OutputInvalid, every error kept" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>

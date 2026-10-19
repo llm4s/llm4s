@@ -1,6 +1,6 @@
 package org.llm4s.agent.delegation
 
-import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, RunOrigin, ThreadId, ToolCallId }
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
@@ -195,8 +195,9 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
 
   /**
    * Runs the subagent once, on a new top-level thread of its runtime, with `config`, and returns its outcome: its
-   * report, the refusal its status or its typed answer's failure gives, or its suspension. Any other failure is `Left`.
-   * The thread, named by the outcome's `child.threadId` (depth 0, no tool call), stays in the runtime until deleted.
+   * report, the refusal its status or its typed answer's failure gives, or its suspension. The thread, named by the
+   * outcome's `child.threadId` (depth 0, no tool call), stays in the runtime until deleted. Any other failure is `Left`,
+   * which names no thread, so that thread is forgotten once its run has ended (as for `Agent.run(query)`).
    */
   def run(input: I, config: RunConfig = RunConfig()): Result[TaskOutcome[O]] =
     val threadId = ThreadId(java.util.UUID.randomUUID().toString)
@@ -206,7 +207,13 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       case Left(GraphError.OutputInvalid(all)) =>
         // the turn is removed, its model calls are kept: the thread's usage counts them
         Right(TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), BoundAgent.storedUsage(agent, threadId, config)))
-      case Left(error) => Left(error)
+      case Left(error) =>
+        // a Left names no thread, so nothing could recover or forget it: forget it here, as Agent.run(query) does
+        AgentRun.uninterrupted(agent.forget(threadId, config)).left.foreach { e =>
+          BoundAgent.logger
+            .warn(s"The thread ${threadId.value} of a failed standalone subagent run was not forgotten: ${e.message}")
+        }
+        Left(error)
 
   /**
    * Runs the subagent as the child of the parent call `ctx` (design 4.44), through the child runner: the outcome, and
@@ -245,6 +252,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     definition.output.fold(text => Right(text(answer)), _ => result.decodeOutput[O](using definition.outputCodec))
 
 object BoundAgent:
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[BoundAgent[?, ?]])
 
   /** The usage `threadId`'s latest checkpoint records, read under `config`'s tenant; none for a thread with none. */
   private[delegation] def storedUsage(agent: Agent, threadId: ThreadId, config: RunConfig): UsageSummary =
