@@ -2201,9 +2201,7 @@ object ToolLoop:
           if undeclared.isEmpty then
             // a tool that bounds its messages (the task tools, design 4.44) has its final result checked too: a wrapper
             // outside it may have replaced the result it checked
-            resultParts(name, content).flatMap(parts =>
-              ToolErrors.overBound(tool, ContentPart.text(parts)).toLeft(parts)
-            ) match
+            resultParts(name, content).flatMap(parts => ToolErrors.overBound(tool, parts).toLeft(parts)) match
               case Left(problem) => record(task, problem, isError = true, context, ToolExecutionOutcome.Errored, took)
               case Right(parts)  =>
                 // live only, and the text view only: media is not put on the event bus
@@ -2347,6 +2345,4 @@ object ToolLoop:
      * A string result is the string itself, not a quoted JSON string - except a blank one, which a
      * `ToolMessage` refuses, so it is recorded in its quoted JSON form.
      */
-    private def rendered(content: ujson.Value): String = content match
-      case ujson.Str(s) if s.trim.nonEmpty => s
-      case other                           => other.render()
+    private def rendered(content: ujson.Value): String = ToolErrors.storedText(content)

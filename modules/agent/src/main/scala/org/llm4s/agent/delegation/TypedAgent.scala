@@ -229,7 +229,13 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     val ref      = ChildRef(threadId, config.runId, agent.id, ctx.toolCallId, origin.depth)
     val settle   = definition.failure == ChildFailure.Report
     ChildRunner.run(agent, origin, AgentInput(definition.rendered(input)), config, ctx, settleOnFailure = settle).map {
-      case ChildEnd.Ended(result, _) => outcome(result, ref.copy(runId = result.runId)) -> None
+      case ChildEnd.Ended(result, usage) =>
+        // a suspended child is reported as the call's tool error until D3, so the call commits now and never runs
+        // again: its roll-up, which the runner leaves for the resumed call, is counted here, once (rules 10, 11)
+        if result.status.isInstanceOf[AgentStatus.Suspended] &&
+          !ctx.state.get(DelegationKeys.counted).toOption.exists(_.contains(threadId.value))
+        then ctx.run.usage.merge(usage, threadId)
+        outcome(result, ref.copy(runId = result.runId)) -> None
       case ChildEnd.Failed(invalid @ GraphError.OutputInvalid(all), usage) =>
         TaskOutcome.Refused(ref, TaskRefusal.OutputInvalid(all), usage) -> Some(invalid)
       case ChildEnd.Failed(error, usage) =>

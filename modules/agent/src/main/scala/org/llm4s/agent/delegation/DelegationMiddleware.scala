@@ -150,7 +150,7 @@ private[agent] object DelegationMiddleware:
     outcome match
       case TaskOutcome.Reported(report, child, _) =>
         val json  = upickle.default.writeJs(report)
-        val bytes = json.render().getBytes(StandardCharsets.UTF_8).length
+        val bytes = ToolErrors.storedText(json).getBytes(StandardCharsets.UTF_8).length
         if bytes > maxReportBytes then
           ToolOutcome.Error(
             cut(

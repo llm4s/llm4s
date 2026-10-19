@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.llmconnect.model.ContentPart
+
 import java.nio.charset.StandardCharsets
 
 /**
@@ -38,12 +40,29 @@ private[agent] object ToolErrors:
       val n = largest(0, points.length)
       if fits(n) then candidate(n) else ""
 
-  /** Why `tool`'s successful result `text` is not stored: a [[BoundedErrors]] tool's result over its bound. */
-  def overBound(tool: AgentTool[?], text: String): Option[String] =
+  /**
+   * Why `tool`'s successful result `parts` is not stored: a [[BoundedErrors]] tool's result is text only - media would
+   * escape the bound - and at most its bound in UTF-8.
+   */
+  def overBound(tool: AgentTool[?], parts: Vector[ContentPart]): Option[String] =
     tool match
-      case b: BoundedErrors if utf8(text) > b.maxErrorBytes =>
-        Some(s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes (${utf8(text)})")
+      case b: BoundedErrors =>
+        val texts = parts.collect { case ContentPart.Text(text) => text }
+        val bytes = texts.map(utf8).sum
+        if texts.size < parts.size then Some(s"Tool '${tool.spec.name}' result carries media, which it may not")
+        else
+          Option.when(bytes > b.maxErrorBytes)(
+            s"Tool '${tool.spec.name}' result over ${b.maxErrorBytes} bytes ($bytes)"
+          )
       case _ => None
+
+  /**
+   * A JSON result as the loop stores it: a string is the string itself, not a quoted JSON string - except a blank one,
+   * which a `ToolMessage` refuses, so it is stored in its quoted JSON form.
+   */
+  def storedText(content: ujson.Value): String = content match
+    case ujson.Str(s) if s.trim.nonEmpty => s
+    case other                           => other.render()
 
   /** `content` as the loop records it for a call of `tool`: an error of a [[BoundedErrors]] tool cut to its bound. */
   def recorded(tool: Option[AgentTool[?]], content: String, isError: Boolean): String =

@@ -535,6 +535,54 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     message should include("result over 100 bytes")
   }
 
+  it should "measure a text report as it is stored, unquoted" in {
+    val report: TaskOutcome[String] =
+      TaskOutcome.Reported(
+        "a" * 64,
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), general.id, ToolCallId("k"), 1),
+        UsageSummary()
+      )
+    DelegationMiddleware.toolOutcome("general", ChildFailure.Report, 64, report, None) shouldBe
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("a" * 64)))
+  }
+
+  it should "refuse media a wrapper put in a task result" in {
+    val tool = new DelegationMiddleware(
+      Vector(general.bind(RoutingClient(PartialFunction.empty), GraphRuntime.inMemory()).value),
+      DelegationConfig(),
+      0
+    ).tools.head
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(
+      tool,
+      Vector(
+        ContentPart.Text("x"),
+        ContentPart
+          .image(
+            org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+            org.llm4s.media.MediaType.Png
+          )
+          .value
+      )
+    ) shouldBe defined
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(tool, Vector(ContentPart.Text("x"))) shouldBe None
+  }
+
+  "a suspended child" should "have its usage counted in the parent, the call committing its error" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+    }
+    val asking = researcher
+      .withTools(ToolSet.of(echo("child_tool")).value)
+      .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.ask(Operation.Invoke, "child_tool"))))
+    val result = lead(client).withSubagents(asking).build().value.run(ThreadId("t1"), "go").value
+    result.answer.value should include("suspended")
+    result.usage.requestCount shouldBe 3 // the lead's two calls and the child's one
+  }
+
   it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
     val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
     val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)
