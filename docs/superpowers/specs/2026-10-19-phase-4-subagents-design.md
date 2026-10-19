@@ -268,7 +268,13 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   each by its own claim, before the first deletion; then deletes depth-first, then the thread.
   - A descendant with a live claim, anywhere in the tree, refuses the whole delete with `ThreadBusy` before anything
     is removed. Once all are held the descendants are listed again; a tree that grew in between refuses too.
-  - Each deletion is fenced by the root's claim.
+  - Each deletion is fenced by the root's claim **atomically in the store**: a check of the root's claim followed
+    by the descendant's delete leaves a takeover race (a successor parent could take the root between the two and
+    then find the child gone). `Checkpointer.deleteThread(threadId, token, fence: Option[(ThreadId, FencingToken)])`
+    deletes only if, in the same transaction (or under the same lock), the thread's claim is `token` **and** the
+    fence thread's current claim is the fence token; otherwise `StaleClaim` and nothing is removed. The cascade
+    passes the root's token as the fence, and child retention (below) passes the parent's.
+    `CheckpointerContract` tests a fence token superseded by a takeover.
   - A crash part-way leaves fewer children and the parent. Running the delete again finishes it.
   - `deleteThread` on a child thread directly is refused (rule 19).
 - **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
@@ -351,8 +357,11 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - Children of children are cancelled by the same mechanism, one level at a time.
 - **Deadline.** The child's `RunBudgets.timeout` is `min(granted, ctx.run.deadline - now)` (K3). A parent with no
   deadline passes the grant.
-- **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner adds the child's usage to `ctx.run.usage` (the task
-  accumulator). A failed, cancelled or timed-out attempt that a later `recover` finished records its tokens only on
+- **Usage (rules 10, 11).** On `Ended` or `Failed`, the runner merges the child's whole-life roll-up into
+  `ctx.run.usage` (the task accumulator) as a **separate part** (`TaskUsage.merge`) that commits with the call's
+  result. A parent task that fails drops that part: it is never the parent's lost usage, since the child's own
+  events keep it, and the attempt that finally commits the result adds the roll-up once. Summing a parent's
+  `AgentRunEnded` records therefore counts each child request once. A failed, cancelled or timed-out attempt that a later `recover` finished records its tokens only on
   its terminal event (`AgentTracing.lostUsage`), so they are carried forward instead of re-read from the log:
   - A runtime-owned child-thread key, `DelegationKeys.priorUsage`, holds `PriorUsage(total: UsageSummary,
     foldedThrough: Long)`, the same type as `AgentTracing.lostUsage` (requests, tokens per model, cost): the lost usage folded so far and the sequence number of the last terminal event folded.
@@ -457,7 +466,9 @@ object TypedAgent:
 
 ```scala
 @Experimental final case class ChildRef(threadId: ThreadId, runId: RunId, agent: AgentId,
-  toolCallId: ToolCallId, depth: Int) derives ReadWriter
+  toolCallId: Option[ToolCallId], depth: Int) derives ReadWriter
+// toolCallId is None, and depth 0, for a standalone BoundAgent.run, which has no parent call
+
 @Experimental enum TaskOutcome[+O]:
   case Reported(report: O, child: ChildRef, usage: UsageSummary)
   case Refused(child: ChildRef, reason: TaskRefusal, usage: UsageSummary)
@@ -491,8 +502,10 @@ section listing each subagent's id and description.
   - Each call's resource is `(Invoke, task:<id>)`, so a `PermissionMiddleware` can allow, ask or deny per
     subagent.
 - **A call.**
-  - Check the per-turn count. The turn's task calls up to this call's position in the committed assistant message
-    must be `<= maxTasksPerTurn`. This is exact and stable under replay (rule 1).
+  - Check the per-turn count. The task calls in **all** of the current turn's committed assistant messages (every
+    model step since the turn began or the last completed handoff), up to this call's position in its own message,
+    must be `<= maxTasksPerTurn`, so one call per step over many steps is counted too. This is exact and stable
+    under replay (rule 1); tested in one batch and across steps.
   - Check the depth. `origin.depth + 1 <= maxDepth`, and delegation must be granted (rule 15).
   - Acquire a slot from the parent run's semaphore of `maxConcurrentChildren` permits. It is keyed by
     `RunContext.incarnation` and acquired interruptibly. A call over the bound waits; it is not refused.
@@ -505,7 +518,10 @@ section listing each subagent's id and description.
     - **Every tool message is bounded.** Whatever the branch, the text that enters the parent's thread is at most
       `maxReportBytes`: a refusal's reason (a provider message, an `OutputInvalid` error vector) is truncated to
       fit, keeping its first errors and saying how many were dropped. The full reason stays in the child's thread
-      (`RunOutcome`) and in the typed `TaskOutcome` returned to code.
+      (`RunOutcome`) and in the typed `TaskOutcome` returned to code. The bound covers the whole serialized message
+      (fixed prefixes, `report over <n> bytes`, the suspended error), so `build()` refuses a `maxReportBytes` below
+      `DelegationConfig.MinReportBytes` (64), the smallest that every fixed message fits; past that, the whole
+      message is cut to the bound.
     - `Suspended`: until D3, `Error("subagent '<id>' suspended; …")`, with the child left suspended. D3 replaces
       this.
 - **Parallel.** Calls in one batch already run concurrently, bounded by the parent's `RunBudgets.maxConcurrency`.
