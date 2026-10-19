@@ -436,6 +436,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.39 | [Workspace command confinement](typed-agent-runtime/4.39-workspace-command-confinement.md) ([#1983](https://github.com/llm4s/llm4s/issues/1983)) |
 | 4.40 | [`HostFileBackend`: a file backend over a host directory](typed-agent-runtime/4.40-host-file-backend.md) ([#1964](https://github.com/llm4s/llm4s/issues/1964)) |
 | 4.41 | [Stage 4 slice K1: child threads](typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md) ([#2045](https://github.com/llm4s/llm4s/issues/2045)) |
+| 4.43 | [Stage 4 slice K3: token budgets and the run's deadline](typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md) ([#2047](https://github.com/llm4s/llm4s/issues/2047)) |
 
 ### 4.9 Stage 0 carry-forward
 

@@ -360,6 +360,14 @@ class AssistantAgent(
             "extract-response"
           )
         )
+      case Some(AgentStatus.TokenLimitReached) =>
+        Left(
+          AssistantError.SessionError(
+            "The agent reached its token budget without a final answer",
+            state.sessionId,
+            "extract-response"
+          )
+        )
       case Some(_: AgentStatus.Suspended) =>
         Left(
           AssistantError.SessionError(

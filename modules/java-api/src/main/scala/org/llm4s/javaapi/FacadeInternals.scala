@@ -102,6 +102,8 @@ private[llm4s] object FacadeInternals {
       )
     case AgentStatus.StepLimitReached =>
       new JAgentStatus(AgentStatusKind.STEP_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
+    case AgentStatus.TokenLimitReached =>
+      new JAgentStatus(AgentStatusKind.TOKEN_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
     case suspended: AgentStatus.Suspended =>
       new JAgentStatus(AgentStatusKind.SUSPENDED, Optional.empty, Optional.empty, Optional.empty, pending(suspended))
   }

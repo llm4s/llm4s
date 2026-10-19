@@ -57,6 +57,17 @@ A thread can now be a child thread: its checkpoints record a `RunOrigin` naming 
 - **Settled children are pruned.** A thread keeps its newest 64 settled children (`RunConfig.withChildRetention`); older ones are deleted as the parent's run completes and when its next run starts, where a child an earlier run left `Running` or `Suspended` is first settled `Failed("abandoned", ...)`.
 - **`Checkpoint.apply` and `RunConfig.apply`** gain parameters with defaults (`origin`, `outcome`; `childRetention`); calls that pass every previous argument resolve to the kept overloads unchanged.
 
+### Token budgets and the run's deadline (#2047)
+
+- **`AgentStatus.TokenLimitReached`** is a new case, so an exhaustive `match` on `AgentStatus` needs it. A turn ends
+  with it when the run's token budget is used; like `StepLimitReached` it is a completed turn with no answer. In Java
+  and Kotlin, `AgentStatusKind.TOKEN_LIMIT_REACHED` is a new constant, so a `switch` or `when` without a `default`
+  needs it too. `TurnOutcome.TokenLimitReached` likewise, for code reading a `TurnOutput`.
+- **`RunBudgets.maxTokens`** is a new field (default `None`, no budget). `RunBudgets(maxSupersteps, timeout,
+  maxConcurrency)` still compiles; a pattern `case RunBudgets(s, t, c)` needs a fourth binder. Set a budget with
+  `RunBudgets.default.withMaxTokens(n)`; a run can overshoot it by the one model call in flight
+  ([design 4.43](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md)).
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

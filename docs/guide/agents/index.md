@@ -134,6 +134,7 @@ result.map { r =>
     case AgentStatus.Completed(answer)         => println(answer)
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
+    case AgentStatus.TokenLimitReached         => println("Hit the run's token budget")
     case AgentStatus.Suspended(approvals, qs, asked, held) => println("Waiting for a person")
   }
 }
@@ -173,6 +174,7 @@ target answers in its own format, or freely.
 ## Safety Defaults
 
 - **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
+- **Run token budget**: off by default. `RunConfig().withBudgets(RunBudgets.default.withMaxTokens(n))` bounds the input and output tokens one run (`run`, `recover` or `resume`) may use, counted from the thread's usage when the run started. Before each model call the loop compares the run's tokens with it, and at the budget the turn ends `AgentStatus.TokenLimitReached` without calling the model. A call in flight is never interrupted, so a run can overshoot the budget by one model call. Each run brings its own budget, like its `timeout`; a task reads the run's deadline as `RunContext.deadline`.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
@@ -204,7 +206,7 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
 `answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
 `JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
-`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `TOKEN_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
 status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its tool
 questions, middleware questions and breakpoints; it is empty for any other status, and

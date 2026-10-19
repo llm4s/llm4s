@@ -21,6 +21,12 @@ public enum AgentStatusKind {
   STEP_LIMIT_REACHED,
 
   /**
+   * The run used its token budget ({@code RunBudgets.maxTokens}) without a final answer; the turn ended
+   * before the next model call. The thread stays usable.
+   */
+  TOKEN_LIMIT_REACHED,
+
+  /**
    * The turn waits for tool approvals or answers to tool questions: {@link JAgentStatus#pending()}
    * lists them. Answer them with {@link Answer} and continue with {@code JAgent.resume}.
    */

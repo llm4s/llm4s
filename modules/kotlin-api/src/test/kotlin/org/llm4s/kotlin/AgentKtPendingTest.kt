@@ -227,6 +227,7 @@ class AgentKtPendingTest {
             AgentStatusKind.COMPLETED -> "completed:" + result.answer().get()
             AgentStatusKind.BLOCKED -> "blocked:" + result.status().guardrail().get()
             AgentStatusKind.STEP_LIMIT_REACHED -> "step-limit"
+            AgentStatusKind.TOKEN_LIMIT_REACHED -> "token-limit"
             AgentStatusKind.SUSPENDED -> "suspended:" + result.status().pending().joinToString { it.toolName().get() }
         }
         assertEquals("suspended:deploy", describe(first))

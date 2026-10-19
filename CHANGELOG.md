@@ -18,11 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
+- `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
+  matches and `RunBudgets` patterns break; [migration](docs/reference/migration.md#token-budgets-and-the-runs-deadline-2047).
 
 ### Agent subagents (Phase 4)
 
 - **Added** child threads: `RunOrigin` on checkpoints (format 8), `ThreadId.child`, `Checkpointer.children` /
   `Agent.children`, cascade delete, child retention and a durable `Checkpoint.outcome` [#2045](https://github.com/llm4s/llm4s/issues/2045); [design §4.41](docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md).
+- **Added** a per-run token budget, `RunBudgets.maxTokens`, ending the turn `AgentStatus.TokenLimitReached`, and the run's
+  deadline as `RunContext.deadline` [#2047](https://github.com/llm4s/llm4s/issues/2047); [design §4.43](docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md).
 
 ### Agent harness (Phase 3)
 

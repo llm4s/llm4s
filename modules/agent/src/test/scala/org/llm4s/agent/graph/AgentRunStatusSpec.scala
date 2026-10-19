@@ -49,3 +49,15 @@ class AgentRunStatusSpec extends AnyFlatSpec with Matchers:
     status shouldBe Right(AgentStatus.Completed("a"))
     AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "completed"
   }
+
+  it should "map a turn that ended at the token budget to TokenLimitReached, and tracing call it token_limit_reached" in {
+    val ended  = RunResult.Completed(stateWith(), TurnOutput(TurnOutcome.TokenLimitReached, AgentId.unsafe("a")), 1)
+    val status = AgentRun.status(ended, isBlock = false, loop)
+    status shouldBe Right(AgentStatus.TokenLimitReached)
+    AgentTracing.label(RunEvent.RunCompleted, status) shouldBe "token_limit_reached"
+  }
+
+  "TurnOutcome.TokenLimitReached" should "round-trip through the turn's stored codec" in {
+    val turn = org.llm4s.agent.graph.toolloop.TurnState(3, Some(TurnOutcome.TokenLimitReached))
+    upickle.default.read[org.llm4s.agent.graph.toolloop.TurnState](upickle.default.write(turn)) shouldBe turn
+  }

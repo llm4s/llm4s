@@ -74,6 +74,9 @@ enum TurnOutcome derives ReadWriter:
   /** The active agent used its `maxSteps` model calls without a final answer. */
   case StepLimitReached
 
+  /** The run used its `RunBudgets.maxTokens` without a final answer; no model call was made at the budget. */
+  case TokenLimitReached
+
 /**
  * What an output Block needs to undo a turn's writes to one key: its `value` before the turn first wrote it,
  * encoded with the key's codec (`None`: no stored entry), and the fingerprint of what the turn's own writes last

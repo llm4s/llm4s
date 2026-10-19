@@ -4,6 +4,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.types.Result
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration.FiniteDuration
@@ -12,34 +13,64 @@ import scala.concurrent.duration.FiniteDuration
  * Limits on one run; each `start`, `recover` or `resume` brings its own. Every value is validated
  * on the way in: `apply` and the `with*` setters throw `IllegalArgumentException` for a
  * non-positive one, and [[RunBudgets.of]] returns it as a `ValidationError`.
+ *
+ * `maxTokens` is the input and output tokens the run may use, counted from the thread's usage when
+ * the run was admitted: before each model call the agent's tool loop compares the run's tokens so
+ * far with it, and at or above it ends the turn `TokenLimitReached` without calling the model. A
+ * model call in flight is never interrupted, so a run can overshoot the budget by one call (with
+ * its wrappers' retries). `None`, the default, sets no token budget. A plain graph's nodes never
+ * read it.
  */
-final case class RunBudgets private (maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int):
-  def withMaxSupersteps(n: Int): RunBudgets              = RunBudgets(n, timeout, maxConcurrency)
-  def withTimeout(t: FiniteDuration): RunBudgets         = RunBudgets(maxSupersteps, Some(t), maxConcurrency)
-  def withTimeout(t: Option[FiniteDuration]): RunBudgets = RunBudgets(maxSupersteps, t, maxConcurrency)
-  def withMaxConcurrency(n: Int): RunBudgets             = RunBudgets(maxSupersteps, timeout, n)
+final case class RunBudgets private (
+  maxSupersteps: Int,
+  timeout: Option[FiniteDuration],
+  maxConcurrency: Int,
+  maxTokens: Option[Long]
+):
+  def withMaxSupersteps(n: Int): RunBudgets              = RunBudgets(n, timeout, maxConcurrency, maxTokens)
+  def withTimeout(t: FiniteDuration): RunBudgets         = RunBudgets(maxSupersteps, Some(t), maxConcurrency, maxTokens)
+  def withTimeout(t: Option[FiniteDuration]): RunBudgets = RunBudgets(maxSupersteps, t, maxConcurrency, maxTokens)
+  def withMaxConcurrency(n: Int): RunBudgets             = RunBudgets(maxSupersteps, timeout, n, maxTokens)
+  def withMaxTokens(n: Long): RunBudgets                 = RunBudgets(maxSupersteps, timeout, maxConcurrency, Some(n))
+  def withMaxTokens(n: Option[Long]): RunBudgets         = RunBudgets(maxSupersteps, timeout, maxConcurrency, n)
 
 object RunBudgets:
-  private def problems(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): List[String] =
+  private def problems(
+    maxSupersteps: Int,
+    timeout: Option[FiniteDuration],
+    maxConcurrency: Int,
+    maxTokens: Option[Long]
+  ): List[String] =
     List(
       Option.when(maxSupersteps <= 0)(s"maxSupersteps must be positive, was $maxSupersteps"),
       timeout.filter(_.length <= 0).map(t => s"timeout must be positive, was $t"),
-      Option.when(maxConcurrency <= 0)(s"maxConcurrency must be positive, was $maxConcurrency")
+      Option.when(maxConcurrency <= 0)(s"maxConcurrency must be positive, was $maxConcurrency"),
+      maxTokens.filter(_ <= 0).map(n => s"maxTokens must be positive, was $n")
     ).flatten
 
   /** Throws `IllegalArgumentException` for a non-positive value; use [[of]] for untrusted input. */
-  def apply(maxSupersteps: Int = 1000, timeout: Option[FiniteDuration] = None, maxConcurrency: Int = 16): RunBudgets =
-    val found = problems(maxSupersteps, timeout, maxConcurrency)
+  def apply(
+    maxSupersteps: Int = 1000,
+    timeout: Option[FiniteDuration] = None,
+    maxConcurrency: Int = 16,
+    maxTokens: Option[Long] = None
+  ): RunBudgets =
+    val found = problems(maxSupersteps, timeout, maxConcurrency, maxTokens)
     require(found.isEmpty, found.mkString("; "))
-    new RunBudgets(maxSupersteps, timeout, maxConcurrency)
+    new RunBudgets(maxSupersteps, timeout, maxConcurrency, maxTokens)
+
+  /** Budgets without a token budget, as before `maxTokens` existed. */
+  def apply(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): RunBudgets =
+    apply(maxSupersteps, timeout, maxConcurrency, None)
 
   def of(
     maxSupersteps: Int = 1000,
     timeout: Option[FiniteDuration] = None,
-    maxConcurrency: Int = 16
+    maxConcurrency: Int = 16,
+    maxTokens: Option[Long] = None
   ): Result[RunBudgets] =
-    problems(maxSupersteps, timeout, maxConcurrency) match
-      case Nil   => Right(new RunBudgets(maxSupersteps, timeout, maxConcurrency))
+    problems(maxSupersteps, timeout, maxConcurrency, maxTokens) match
+      case Nil   => Right(new RunBudgets(maxSupersteps, timeout, maxConcurrency, maxTokens))
       case found => Left(ValidationError("budgets", found))
 
   val default: RunBudgets = apply()
@@ -243,11 +274,20 @@ final class RunContext private[graph] (
   /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
   owner: Option[(TaskId, String)] = None,
   /** A resume continuation's identity, kept with its task ([[CompiledGraph.resumeDigest]]). */
-  private[agent] val resumeDigest: Option[String] = None
+  private[agent] val resumeDigest: Option[String] = None,
+  /**
+   * When the run's `RunBudgets.timeout` expires, by the clock of the [[GraphRuntime]] running it: fixed as the run
+   * is admitted, so each `start`, `recover` and `resume` has its own. `None` for a run without a timeout, and
+   * outside a runtime, which enforces no timeout. A task that starts work of its own bounded in time (a child run)
+   * ends it no later than this.
+   */
+  val deadline: Option[Instant] = None,
+  /** The thread's state as the run was admitted: what the run's own usage is counted from. `None` outside a runtime. */
+  private[agent] val admitted: Option[ThreadState] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest)
+    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest, deadline, admitted)
 
   /**
    * An object unique to this run incarnation: the same for every task of one run of a runtime (or one execution of a

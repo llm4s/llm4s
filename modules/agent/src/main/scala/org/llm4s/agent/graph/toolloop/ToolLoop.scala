@@ -337,8 +337,12 @@ object ModelStep:
  *    imported history and the root as its active agent. The turn's [[TurnOutput]] is its outcome
  *    and the active agent.
  *  - `<id>/model` counts the turn's steps: at the agent's `maxSteps` it ends the turn with
- *    [[TurnOutcome.StepLimitReached]] without calling the model. Otherwise it sends the agent's
- *    system prompt, then the history; the prompt is never stored.
+ *    [[TurnOutcome.StepLimitReached]] without calling the model. It counts the run's tokens too -
+ *    the thread's usage since the run was admitted, plus the task's own - and at the run's
+ *    `RunBudgets.maxTokens` ends the turn with [[TurnOutcome.TokenLimitReached]], also without
+ *    calling the model; the call in flight when the budget is crossed is never interrupted, so a run
+ *    can overshoot it by one call. Otherwise it sends the agent's system prompt, then the history;
+ *    the prompt is never stored.
  *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
  *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every
  *    `wrapModelCall`, and `finish` runs every `afterAgent` (in reverse) on the final answer,
@@ -863,6 +867,18 @@ object ToolLoop:
   private def usageOf(context: RunContext): StateUpdate =
     if context.usage.isEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.summary)
 
+  /**
+   * The input and output tokens the run has used, for `RunBudgets.maxTokens` (design 4.43): the thread's usage in
+   * `state` less its usage when the run was admitted, plus what this task has recorded and not yet committed.
+   * Outside a runtime there is no admission, so the thread's whole usage counts.
+   */
+  private def runTokens(state: ThreadState, context: RunContext): Result[Long] =
+    def tokens(usage: UsageSummary): Long = usage.inputTokens + usage.outputTokens
+    for
+      now   <- state.get(LoopKeys.usage)
+      start <- context.admitted.fold[Result[UsageSummary]](Right(UsageSummary()))(_.get(LoopKeys.usage))
+    yield tokens(now) - tokens(start) + tokens(context.usage.summary)
+
   /** The fingerprint of `key`'s stored value in `state`: its encoded form's SHA-256, or `None` with no entry. */
   private def fingerprint(key: StateKey[?, ?], state: ThreadState): Option[String] =
     if state.isSet(key) then state.get(key).toOption.map(v => Sha256.hex(upickle.default.write(key.encode(v))))
@@ -1321,97 +1337,107 @@ object ToolLoop:
      * usage and announced with `ModelCallCompleted`, whichever response the wrappers return.
      */
     def modelStep(state: ThreadState, context: RunContext, answers: Vector[GivenAnswer]): NodeResult =
-      val outcome = state.get(LoopKeys.turn).flatMap { turn =>
-        // at the limit the turn ends here: no route, so the run completes without calling the model
-        if turn.steps >= agent.maxSteps then
-          Right(
-            NodeResult.Continue(
-              Command.empty.update(
-                LoopKeys.turn,
-                turn.copy(outcome = Some(TurnOutcome.StepLimitReached), priorValues = Map.empty)
-              )
-            )
+      // at a limit the turn ends here: no route, so the run completes without calling the model
+      def ended(turn: TurnState, outcome: TurnOutcome): Result[NodeResult] =
+        Right(
+          NodeResult.Continue(
+            Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(outcome), priorValues = Map.empty))
           )
+        )
+      val outcome = state.get(LoopKeys.turn).flatMap { turn =>
+        if turn.steps >= agent.maxSteps then ended(turn, TurnOutcome.StepLimitReached)
         else
-          val hooks = hookContext(agent.id, context, answers, state)
-          for
-            history  <- state.get(messages)
-            _        <- Message.validateConversation(history.map(_.message).toList)
-            transfer <- state.get(LoopKeys.transfer)
-            view     <- sent(agent.id, history, transfer, root, preserves)
-            sections <- stack.promptSections(hooks)
-            // the response format's section is the loop's own, counted against the same budget as every other
-            system <- systemPrompt(
-              agent.systemPrompt,
-              sections ++ agent.output.map(OutputFormat.Owner -> _.section),
-              agent.maxPromptSectionTokens
-            )
-          yield
-            val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
-            val attempts = AtomicInteger(0)
-            // every wrapper's update is checked as it returns, so one in a discarded response fails the run too
-            val check = MiddlewareStack.WriteCheck()
-            // one request through every wrapper; each provider call is counted in the task's usage as it returns
-            def call(req: ModelRequest): Result[ModelResponse] =
-              val result = stack.wrapModelCall(req, hooks, check) { r =>
-                callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
-                  hooks.recordCall(completion, attempt)
-                  ModelResponse(completion)
-                }
-              }
-              // an undeclared write fails the step whatever the wrappers returned
-              check.failure.fold(result)(Left(_))
-            // an answer (no tool calls) checked against the response format; None when there is nothing to check
-            def checked(response: ModelResponse): Option[Either[Vector[String], ujson.Value]] =
-              agent.output
-                .filter(_ => response.completion.message.toolCalls.isEmpty)
-                .map(_.check(response.completion.message.content, tools.validator))
-            // a blank answer without tool calls is refused before it is stored, so the history stays valid
-            // and recover asks the model again; so are calls whose ids could not each be given one result.
-            // A validated answer is stored as its JSON alone.
-            def accepted(response: ModelResponse, answer: Option[ujson.Value]): NodeResult =
-              val completion = answer.fold(response.completion) { json =>
-                val content = ujson.write(json)
-                response.completion.withMessage(response.completion.message.withContent(content)).withContent(content)
-              }
-              NodeResult.fromResult(
-                for
-                  update <- Right(response.update)
-                  _      <- completion.message.validate
-                  _      <- ToolResultRule.callIdsUsable(completion.message)
-                  // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
-                  after <- state.applyUpdate(update)
-                yield stored(turn, completion, update, state, after, context)
-              )
-            def answered(result: Result[ModelResponse])(invalid: (ModelResponse, Vector[String]) => NodeResult) =
-              result match
-                // nothing of the step is stored while the question waits - it runs again once answered - but
-                // the model calls a wrapper made before asking were made, and are counted
-                case Left(asked: MiddlewareAsked) =>
-                  askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
-                case Left(error) => NodeResult.Fail(error)
-                case Right(response) =>
-                  checked(response) match
-                    case None                 => accepted(response, None)
-                    case Some(Right(json))    => accepted(response, Some(json))
-                    case Some(Left(problems)) => invalid(response, problems)
-            answered(call(request)) { (first, problems) =>
-              // one corrective retry in this task (design 4.26): the request again, with the invalid answer and its
-              // problems, neither of them stored; every wrapper sees it as a request of its own, and the rejected
-              // response's update is discarded with it
-              val corrective = request.withMessages(
-                request.messages :+ AssistantMessage(OutputFormat.echoed(first.completion.message.content)) :+
-                  UserMessage(OutputFormat.correction(problems))
-              )
-              // a second invalid answer ends the turn through the Block path, so the task's usage and events commit
-              // with a Failed checkpoint and the turn is retracted, as an output Block retracts it
-              answered(call(corrective)) { (_, invalid) =>
-                retraction(history, turn, state, context)
-                  .fold(NodeResult.Fail(_), NodeResult.Block(_, GraphError.OutputInvalid(invalid)))
-              }
-            }
+          runTokens(state, context).flatMap { used =>
+            if context.config.budgets.maxTokens.exists(used >= _) then ended(turn, TurnOutcome.TokenLimitReached)
+            else modelCall(turn, state, context, answers)
+          }
       }
       outcome.fold(NodeResult.Fail(_), identity)
+
+    /** One model call of the step, once neither the step limit nor the token budget ended the turn. */
+    def modelCall(
+      turn: TurnState,
+      state: ThreadState,
+      context: RunContext,
+      answers: Vector[GivenAnswer]
+    ): Result[NodeResult] =
+      val hooks = hookContext(agent.id, context, answers, state)
+      for
+        history  <- state.get(messages)
+        _        <- Message.validateConversation(history.map(_.message).toList)
+        transfer <- state.get(LoopKeys.transfer)
+        view     <- sent(agent.id, history, transfer, root, preserves)
+        sections <- stack.promptSections(hooks)
+        // the response format's section is the loop's own, counted against the same budget as every other
+        system <- systemPrompt(
+          agent.systemPrompt,
+          sections ++ agent.output.map(OutputFormat.Owner -> _.section),
+          agent.maxPromptSectionTokens
+        )
+      yield
+        val request  = ModelRequest(system.map(SystemMessage(_)).toVector ++ view, nodes.offered)
+        val attempts = AtomicInteger(0)
+        // every wrapper's update is checked as it returns, so one in a discarded response fails the run too
+        val check = MiddlewareStack.WriteCheck()
+        // one request through every wrapper; each provider call is counted in the task's usage as it returns
+        def call(req: ModelRequest): Result[ModelResponse] =
+          val result = stack.wrapModelCall(req, hooks, check) { r =>
+            callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
+              hooks.recordCall(completion, attempt)
+              ModelResponse(completion)
+            }
+          }
+          // an undeclared write fails the step whatever the wrappers returned
+          check.failure.fold(result)(Left(_))
+        // an answer (no tool calls) checked against the response format; None when there is nothing to check
+        def checked(response: ModelResponse): Option[Either[Vector[String], ujson.Value]] =
+          agent.output
+            .filter(_ => response.completion.message.toolCalls.isEmpty)
+            .map(_.check(response.completion.message.content, tools.validator))
+        // a blank answer without tool calls is refused before it is stored, so the history stays valid
+        // and recover asks the model again; so are calls whose ids could not each be given one result.
+        // A validated answer is stored as its JSON alone.
+        def accepted(response: ModelResponse, answer: Option[ujson.Value]): NodeResult =
+          val completion = answer.fold(response.completion) { json =>
+            val content = ujson.write(json)
+            response.completion.withMessage(response.completion.message.withContent(content)).withContent(content)
+          }
+          NodeResult.fromResult(
+            for
+              update <- Right(response.update)
+              _      <- completion.message.validate
+              _      <- ToolResultRule.callIdsUsable(completion.message)
+              // the wrappers' keys as they leave them, for an output Block to tell the turn's writes from another's
+              after <- state.applyUpdate(update)
+            yield stored(turn, completion, update, state, after, context)
+          )
+        def answered(result: Result[ModelResponse])(invalid: (ModelResponse, Vector[String]) => NodeResult) =
+          result match
+            // nothing of the step is stored while the question waits - it runs again once answered - but
+            // the model calls a wrapper made before asking were made, and are counted
+            case Left(asked: MiddlewareAsked) =>
+              askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, None, usageOf(context))
+            case Left(error) => NodeResult.Fail(error)
+            case Right(response) =>
+              checked(response) match
+                case None                 => accepted(response, None)
+                case Some(Right(json))    => accepted(response, Some(json))
+                case Some(Left(problems)) => invalid(response, problems)
+        answered(call(request)) { (first, problems) =>
+          // one corrective retry in this task (design 4.26): the request again, with the invalid answer and its
+          // problems, neither of them stored; every wrapper sees it as a request of its own, and the rejected
+          // response's update is discarded with it
+          val corrective = request.withMessages(
+            request.messages :+ AssistantMessage(OutputFormat.echoed(first.completion.message.content)) :+
+              UserMessage(OutputFormat.correction(problems))
+          )
+          // a second invalid answer ends the turn through the Block path, so the task's usage and events commit
+          // with a Failed checkpoint and the turn is retracted, as an output Block retracts it
+          answered(call(corrective)) { (_, invalid) =>
+            retraction(history, turn, state, context)
+              .fold(NodeResult.Fail(_), NodeResult.Block(_, GraphError.OutputInvalid(invalid)))
+          }
+        }
 
     // a response format's second invalid answer retracts the turn from here, restoring any key the turn wrote
     val formatWrites = if agent.output.isDefined then harness.writes else Set.empty

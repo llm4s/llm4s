@@ -149,6 +149,7 @@ final class GuideSnippets {
             case COMPLETED -> System.out.println(result.answer().orElseThrow());
             case BLOCKED -> System.out.println("Blocked by " + result.status().guardrail().orElseThrow());
             case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
+            case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
             case SUSPENDED -> System.out.println("Waiting for " + result.status().pending().size() + " answers");
         }
         for (JMessage message : result.messages()) {

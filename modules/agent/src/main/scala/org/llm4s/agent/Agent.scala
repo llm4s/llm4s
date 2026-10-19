@@ -22,8 +22,8 @@ import org.slf4j.LoggerFactory
  * }}}
  *
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
- * `Completed` or `StepLimitReached`; one a guardrail blocks is `Right` with `Blocked`, the blocked
- * turn absent from the thread; one that parks on approvals, questions or breakpoints is `Right` with
+ * `Completed`, `StepLimitReached` or `TokenLimitReached`; one a guardrail blocks is `Right` with
+ * `Blocked`, the blocked turn absent from the thread; one that parks on approvals, questions or breakpoints is `Right` with
  * `Suspended`, and continues with [[resume]]. Anything else is `Left`: a blank query and the
  * runtime's refusals (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...)
  * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure

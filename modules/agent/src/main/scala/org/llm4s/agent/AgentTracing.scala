@@ -167,12 +167,13 @@ private[agent] object AgentTracing:
 
   /**
    * The `AgentRunEnded` status of a run whose terminal event is `terminal` and whose turn ended with
-   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `suspended`,
+   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `token_limit_reached`, `suspended`,
    * `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed` - a turn `await` refuses is `failed`.
    */
   def label(terminal: RunEvent, status: Result[AgentStatus]): String = status match
     case Right(_: AgentStatus.Completed)          => "completed"
     case Right(AgentStatus.StepLimitReached)      => "step_limit_reached"
+    case Right(AgentStatus.TokenLimitReached)     => "token_limit_reached"
     case Right(_: AgentStatus.Suspended)          => "suspended"
     case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
     case Left(_) =>

@@ -44,10 +44,11 @@ object TracingUtil {
         runId = result.runId.value,
         agent = result.activeAgent.value,
         status = result.status match {
-          case AgentStatus.Completed(_)     => "completed"
-          case AgentStatus.Blocked(g, _)    => s"blocked:$g"
-          case AgentStatus.StepLimitReached => "step_limit_reached"
-          case _: AgentStatus.Suspended     => "suspended"
+          case AgentStatus.Completed(_)      => "completed"
+          case AgentStatus.Blocked(g, _)     => s"blocked:$g"
+          case AgentStatus.StepLimitReached  => "step_limit_reached"
+          case AgentStatus.TokenLimitReached => "token_limit_reached"
+          case _: AgentStatus.Suspended      => "suspended"
         },
         messages = result.messages,
         usage = result.usage

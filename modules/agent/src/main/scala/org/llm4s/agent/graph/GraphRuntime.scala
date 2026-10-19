@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
-import java.time.Clock
+import java.time.{ Clock, Instant }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, RejectedExecutionException, TimeUnit }
 import scala.annotation.tailrec
@@ -171,8 +171,8 @@ object GraphRuntime:
  * however long it takes in all. Every other store call is waited for as long as it takes: every
  * [[Checkpointer]] must return from each call within a bound it documents.
  *
- * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits. When it
- * passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
+ * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits; its tasks read it, by the
+ * runtime's `clock`, as [[RunContext.deadline]]. When it passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
  * [[RunEvent.RunTimedOut]]. The first of cancel and expiry to be recorded wins, so a run reports
  * exactly one. `DeadlineExceeded` is recoverable: `recover` with a new budget continues the run.
  *
@@ -2432,6 +2432,12 @@ final class GraphRuntime(
     /** When `budgets.timeout` expires, as a `System.nanoTime` value; fixed by the claim. */
     var deadline: Option[Long] = None
 
+    /** The same deadline by the runtime's `clock`, for [[RunContext.deadline]]; fixed by the claim. */
+    private var deadlineAt: Option[Instant] = None
+
+    /** The thread's state the claim continues from, for [[RunContext.admitted]]; set by the claim. */
+    private var admittedState: Option[ThreadState] = None
+
     /**
      * Claims the thread in two steps: a [[RunClaim]] from the store, then a synchronous commit of
      * `execution` as a new checkpoint whose parent is `parent`, carrying `carried` pending writes over
@@ -2564,6 +2570,8 @@ final class GraphRuntime(
         claimedReused = reused
         claimSeq = seq
         deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
+        deadlineAt = config.budgets.timeout.map(timeout => clock.instant().plusNanos(timeout.toNanos))
+        admittedState = Some(execution.state)
         this
 
     /**
@@ -2964,7 +2972,9 @@ final class GraphRuntime(
         sink,
         journal = effectJournal,
         owner = Some(task.arrivalId -> task.arrivalLineage),
-        resumeDigest = task.resumeDigest
+        resumeDigest = task.resumeDigest,
+        deadline = deadlineAt,
+        admitted = admittedState
       )
       def settled(executed: Result[TaskResult]): Result[Settled] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match

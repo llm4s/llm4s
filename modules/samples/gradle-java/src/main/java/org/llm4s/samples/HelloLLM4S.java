@@ -170,6 +170,7 @@ public final class HelloLLM4S {
             case BLOCKED -> System.out.println("(blocked by " + status.guardrail().orElse("?") + ": "
                 + status.reason().orElse("") + ")");
             case STEP_LIMIT_REACHED -> System.out.println("(reached the step limit)");
+            case TOKEN_LIMIT_REACHED -> System.out.println("(reached the token budget)");
             case SUSPENDED -> System.out.println("(waiting for " + status.pending().size() + " answers)");
         }
 
