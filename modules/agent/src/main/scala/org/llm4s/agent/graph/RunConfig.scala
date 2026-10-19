@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.types.Result
@@ -334,6 +335,16 @@ final class RunContext private[graph] (
 
   /** Forwards a delegated child's event to this task's thread's nested subscribers (design 4.47). */
   private[agent] def nested(event: StreamEvent.Nested): Unit = sink.nested(event)
+
+  /**
+   * Sends `child`'s live `TaskStarted` (`name`, `version`, `payload`), as [[progress]] does, and remembers the child as
+   * running until [[childEnded]]: a nested subscriber attaching meanwhile gets it and a gap (design 4.47, #2074).
+   */
+  private[agent] def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
+    sink.childStarted(child, name, version, payload)
+
+  /** The call that ran the child thread `child` has ended; see [[childStarted]]. */
+  private[agent] def childEnded(child: ThreadId): Unit = sink.childEnded(child)
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted

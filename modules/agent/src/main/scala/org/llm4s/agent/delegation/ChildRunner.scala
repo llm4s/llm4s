@@ -186,7 +186,9 @@ private[agent] object ChildRunner:
 
     /** Sends the parent's live `TaskStarted` for the child's run `runId`. */
     private def announce(runId: RunId): Unit =
-      SubagentEvents.TaskStarted.progress(ctx.run, TaskStarted(ref(runId)))
+      val started = SubagentEvents.TaskStarted
+      // remembered as running until the call ends, so a nested subscriber attaching mid-child gets it and a gap (#2074)
+      ctx.run.childStarted(ref(runId), started.name, started.version, started.encode(TaskStarted(ref(runId))))
       announced = Some(runId)
 
     /**
@@ -250,7 +252,9 @@ private[agent] object ChildRunner:
               pause(until, waits, error) match
                 case Left(stop) => Left(stop)
                 case Right(_)   => loop(Some(until), waits + 1)
-      loop(None, 0)
+      val result = loop(None, 0)
+      ctx.run.childEnded(childId)
+      result
 
     /** Waits before the next read of a busy child; `Left` once `until` has passed, or when interrupted. */
     private def pause(until: Long, waits: Int, busy: GraphError.ThreadBusy): Result[Unit] =

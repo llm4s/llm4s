@@ -375,6 +375,52 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
     events.flatMap(SubagentEvents.TaskEnded.unapply) should have size 1
   }
 
+  "a nested subscription attached mid-child" should "get TaskStarted and one gap for the child before its further events (#2074)" in {
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val client = Streaming(
+      RoutingClient {
+        case Lead(messages) if toolResults(messages).isEmpty =>
+          Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "summarise X"))))
+        case Lead(_) => Right(CompletionFixture.simple("composed"))
+        case Child("general", _) =>
+          entered.countDown()
+          release.await(30, TimeUnit.SECONDS)
+          Right(CompletionFixture.simple("hello world"))
+      },
+      chunks = 4
+    )
+    val agent = lead(client).withSubagents(general.withStreaming()).build().value
+    val run   = agent.start(ThreadId("t1"), "go").value
+    entered.await(10, TimeUnit.SECONDS) shouldBe true
+    // the child is running, blocked in its model call: its earlier live events are gone
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    run.subscribe(nested = true)(seen.add(_): Unit).value
+    release.countDown()
+    run.await().value
+    eventually(seen.asScala.exists(SubagentEvents.TaskEnded.unapply(_).isDefined))
+    val events = seen.asScala.toVector
+
+    val started = events.indexWhere(SubagentEvents.TaskStarted.unapply(_).isDefined)
+    started should be >= 0
+    val ref    = SubagentEvents.TaskStarted.unapply(events(started)).value.child
+    val nested = events.zipWithIndex.collect { case (n: StreamEvent.Nested, i) => n -> i }
+    nested.head._1 shouldBe StreamEvent.Nested(ref, StreamEvent.LiveGap(0))
+    started should be < nested.head._2
+    // then the child's events from there: its streamed text, and its end
+    val deltas = nested.collect { case (StreamEvent.Nested(_, AgentEvents.TextDelta(d)), _) => d.text }
+    deltas.mkString shouldBe "hello world"
+    nested.map(_._1.child).distinct.loneElement shouldBe ref
+    nested.count(_._1.event == StreamEvent.LiveGap(0)) shouldBe 1
+    events.flatMap(SubagentEvents.TaskStarted.unapply) should have size 1
+  }
+
+  it should "get no gap when it attaches before the child starts" in {
+    val agent = lead(delegatingClient("hello world")).withSubagents(general.withStreaming()).build().value
+    val seen  = streamed(agent)
+    seen.collect { case StreamEvent.Nested(_, StreamEvent.LiveGap(_)) => () } shouldBe empty
+  }
+
   "a child another runtime holds" should "give the merged stream one gap for it" in {
     val open    = new InMemoryCheckpointer()
     val claims  = ClaimPolicy(ttl = 300.millis, renewEvery = 100.millis)

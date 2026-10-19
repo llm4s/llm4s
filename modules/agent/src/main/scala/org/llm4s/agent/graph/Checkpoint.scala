@@ -53,7 +53,13 @@ final case class Checkpoint private (
   /** Where a child thread came from; `None` for a top-level thread (format 7 and earlier: always `None`). */
   origin: Option[RunOrigin] = None,
   /** How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. */
-  outcome: Option[RunOutcome] = None
+  outcome: Option[RunOutcome] = None,
+  /**
+   * Whether a cascade delete of the thread has begun (design 4.41, #2074): written under the thread's claim before its
+   * first descendant is deleted, so a cascade stopped part-way leaves the thread refusing every admission
+   * ([[GraphError.ThreadDeleting]]) until `deleteThread` finishes it. `false` on every other checkpoint.
+   */
+  deleting: Boolean = false
 ):
   def withFormatVersion(v: Int): Checkpoint                 = copy(formatVersion = v)
   def withId(i: String): Checkpoint                         = copy(id = i)
@@ -71,6 +77,7 @@ final case class Checkpoint private (
   def withOrigin(o: Option[RunOrigin]): Checkpoint          = copy(origin = o)
   def withOutcome(o: RunOutcome): Checkpoint                = copy(outcome = Some(o))
   def withOutcome(o: Option[RunOutcome]): Checkpoint        = copy(outcome = o)
+  def withDeleting(d: Boolean): Checkpoint                  = copy(deleting = d)
 
 object Checkpoint:
 
@@ -86,7 +93,8 @@ object Checkpoint:
     tenantId: Option[String] = None,
     fencingToken: Option[FencingToken] = None,
     origin: Option[RunOrigin] = None,
-    outcome: Option[RunOutcome] = None
+    outcome: Option[RunOutcome] = None,
+    deleting: Boolean = false
   ): Checkpoint =
     new Checkpoint(
       formatVersion,
@@ -100,7 +108,8 @@ object Checkpoint:
       tenantId,
       fencingToken,
       origin,
-      outcome
+      outcome,
+      deleting
     )
 
   /** A checkpoint of a top-level thread recording no outcome, as before format 8. */
@@ -134,9 +143,10 @@ object Checkpoint:
    * 6 -> 7: task lineages (#1921 follow-up) give each pending task and continuation origin a digest of what
    * scheduled it; nothing to rewrite, as tasks written before read with an empty lineage, but a build that
    * predates them refuses format 7 rather than key a task's effects without its lineage.
-   * 7 -> 8: child threads (#2045) record their [[RunOrigin]], and terminal checkpoints how their run settled
-   * ([[RunOutcome]]); nothing to rewrite, as both default to none - every earlier thread is top-level - but a build
-   * that predates them refuses format 8 rather than drive a child thread as a top-level one.
+   * 7 -> 8: child threads (#2045) record their [[RunOrigin]], terminal checkpoints how their run settled
+   * ([[RunOutcome]]), and a cascade delete marks its root `deleting` (#2074); nothing to rewrite, as all three default
+   * to none - every earlier thread is top-level, and none is being deleted - but a build that predates them refuses
+   * format 8 rather than drive a child thread as a top-level one, or admit a half-deleted thread.
    */
   private val formatVersion: SchemaVersion =
     SchemaVersion(8)(

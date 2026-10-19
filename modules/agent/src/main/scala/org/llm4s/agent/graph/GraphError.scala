@@ -161,6 +161,16 @@ object GraphError:
     override val message: String =
       s"Thread '$threadId' is a child thread of '$parent'; it is driven only through its parent's run"
 
+  /**
+   * A cascade delete of the thread began and did not finish (design 4.41, #2074): its latest checkpoint is marked
+   * [[Checkpoint.deleting]], and some of its descendants may already be gone, so a replayed task could re-run a deleted
+   * child. `start`, `recover`, `resume`, `fork` (from it) and `updateState` on it are refused before any claim, and
+   * nothing was changed; `deleteThread` finishes the delete.
+   */
+  final case class ThreadDeleting(threadId: String) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Thread '$threadId' is being deleted; run deleteThread again to finish the delete"
+
   /** Events before `earliestSeq` were compacted away and cannot be replayed. */
   final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"

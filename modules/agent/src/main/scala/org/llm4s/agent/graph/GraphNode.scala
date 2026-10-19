@@ -1,8 +1,11 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
+
+import scala.annotation.unused
 
 /**
  * A handle to a node that consumes `I`, issued by a [[GraphBuilder]].
@@ -110,6 +113,16 @@ private[graph] trait NodeEventSink:
    * does; a no-op outside a runtime.
    */
   def nested(event: StreamEvent.Nested): Unit = ()
+
+  /**
+   * Sends `child`'s live `TaskStarted` (`name`, `version`, `payload`) as `progress` does, and remembers the child as
+   * running until [[childEnded]], for a nested subscriber that attaches meanwhile (design 4.47, #2074).
+   */
+  def childStarted(@unused child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
+    progress(name, version, payload)
+
+  /** The call that ran the child thread `child` has ended; see [[childStarted]]. */
+  def childEnded(@unused child: ThreadId): Unit = ()
 
   /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
   def discardCustom(): Unit

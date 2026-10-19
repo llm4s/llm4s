@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.{ Result, TryOps }
 
@@ -274,6 +275,14 @@ final private[graph] class EventHub(
    */
   private var handed = Map.empty[String, Long]
 
+  /**
+   * The delegated children a task of the run holding each thread announced and whose call has not yet ended, by thread
+   * then child thread: the live `TaskStarted` that announced each, and the child it names (design 4.47, #2074). A
+   * subscription made with `nested = true` is given, at attach, that `TaskStarted` and one `Nested(child, LiveGap(0))`
+   * for each, since it missed the child's earlier live events. Guarded by `hubLock`; [[release]] forgets the thread's.
+   */
+  private var running = Map.empty[String, Map[String, (StreamEvent.Live, ChildRef)]]
+
   /** Starts a dispatcher that replays events with `seq > afterSeq`, then delivers new ones. */
   def subscribe(
     threadId: ThreadId,
@@ -290,6 +299,12 @@ final private[graph] class EventHub(
     withLock(hubLock) {
       dispatcher.seedHanded(handed.get(threadId.value))
       join(threadId, dispatcher)
+      // a child running now has sent live events this subscription never gets: its start, then a gap (#2074)
+      if nested then
+        running.getOrElse(threadId.value, Map.empty).values.foreach { (started, child) =>
+          dispatcher.offerLive(started, started.token)
+          dispatcher.offerLive(StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.token)
+        }
     }
     Try(dispatcher.start()).toResult.left
       .map { error =>
@@ -462,6 +477,7 @@ final private[graph] class EventHub(
   def release(threadId: ThreadId): Unit =
     withLock(hubLock) {
       handed = handed - threadId.value
+      running = running - threadId.value
     }
 
   /**
@@ -512,6 +528,24 @@ final private[graph] class EventHub(
     withLock(hubLock) {
       if current() then
         subscribers.getOrElse(threadId.value, Vector.empty).filter(_.nested).foreach(_.offerLive(event, token))
+    }
+
+  /**
+   * Offers `started`, the live `TaskStarted` of `child`, to the thread's subscribers as [[live]] does, and remembers the
+   * child as running until [[childEnded]], so that a nested subscription made meanwhile is told of it ([[running]]).
+   */
+  def childStarted(threadId: ThreadId, child: ChildRef, started: StreamEvent.Live, current: () => Boolean): Unit =
+    withLock(hubLock) {
+      if current() then
+        subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(started, started.token))
+        val children = running.getOrElse(threadId.value, Map.empty).updated(child.threadId.value, started -> child)
+        running = running.updated(threadId.value, children)
+    }
+
+  /** The call that ran `child` on the thread has ended: a nested subscription made from now on is not told of it. */
+  def childEnded(threadId: ThreadId, child: ThreadId): Unit =
+    withLock(hubLock) {
+      running = running.updatedWith(threadId.value)(_.map(_ - child.value).filter(_.nonEmpty))
     }
 
   /** Joins the live set; the caller holds `hubLock`. */
