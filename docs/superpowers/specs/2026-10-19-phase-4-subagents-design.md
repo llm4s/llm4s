@@ -588,7 +588,11 @@ Tests:
     time a deadline of `RunOrigin.startedAt + granted timeout` (capped by the parent's), never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
     run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
-    (`settleChild`) and returns that refusal without running it.
+    (`settleChild`) and returns that refusal without running it. Likewise a child whose own deadline has passed by
+    recovery (`startedAt + granted timeout <= now`) is settled `RunOutcome.Failed(kind = "deadline-exceeded", ...)`
+    and returns `TaskRefusal.Failed`, the outcome a child timing out mid-run gets, and never builds a non-positive
+    `RunBudgets.timeout`. When the *parent's* deadline has passed instead, the rule below applies. Each check reads
+    the clock once at recovery; the settled outcome is what any later replay reads (rule 14).
   - **An expired deadline starts no child either.** When the parent's deadline has passed at call time, the call
     fails with the parent's own `DeadlineExceeded`, as any step past the deadline does, and never builds a
     non-positive timeout.
@@ -835,8 +839,9 @@ The suite also checks the runtime rules that apply:
    `TaskRequest` subagent, and `task_<id>` per typed input.
 3. **The default on child failure.** *Recommend `ChildFailure.Report`.* It is what "composes after failure" needs,
    and the child thread stays for inspection or a later explicit retry. `Fail` is one setter away.
-4. **Child retention default.** *Recommend keeping 64 settled children per parent, pruned only at `start` on a
-   settled parent.* That is bounded (rule 12) and never races rule 14.
+4. **Child retention default.** *Recommend keeping 64 prunable children per parent, pruned by the two passes of
+   K1's child retention: before the parent's terminal `Completed` checkpoint, and at `start` admission.* A one-shot
+   parent is within its limit as soon as it completes. That is bounded (rule 12) and never races rule 14.
 5. **Token budget across parallel children.** Reserving shares needs cross-task coordination that rule 1 rules out.
    *Recommend the snapshot-based remainder, with the documented one-batch overshoot.*
 6. **OpenTelemetry span hierarchy.** Today's backend emits each `TraceEvent` as an instantaneous span. *Recommend
