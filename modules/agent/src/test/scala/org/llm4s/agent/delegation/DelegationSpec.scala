@@ -507,6 +507,19 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       .left
       .value
       .message should (include("maxConcurrentChildren must be positive").and(include("maxDepth must be positive")))
+    lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(11))
+      .build()
+      .left
+      .value
+      .message should include("maxReportBytes must be at least 64, was 11")
+    lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(64))
+      .build()
+      .isRight shouldBe
+      true
     lead(client).withSubagents(TypedAgent.text("bad id!", "d")).build().left.value.message should include("bad id!")
     lead(client).withSubagents(TypedAgent.text("blank", " ")).build().left.value.message should include("blank")
     lead(client)

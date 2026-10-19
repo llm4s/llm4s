@@ -75,7 +75,7 @@ report is that answer decoded. The child uses the parent's client unless `withMo
 | `maxConcurrentChildren` | 4 | children one parent run has live at once; a call over it waits |
 | `maxTasksPerTurn` | 16 | task calls per parent turn, by their order in the turn's messages; a call over it is a tool error |
 | `maxDepth` | 1 | how deep delegation nests |
-| `maxReportBytes` | 64 KiB | the report, as the JSON the parent model reads; a larger one is a tool error |
+| `maxReportBytes` | 64 KiB | every task tool message, at least 64 bytes: a larger report is a tool error, and an error's reason is cut to fit |
 | `childRetention` | 64 | settled child threads each parent thread keeps |
 
 Task calls in one model message run in parallel, as any tool calls do, bounded by the run's `maxConcurrency` and then
