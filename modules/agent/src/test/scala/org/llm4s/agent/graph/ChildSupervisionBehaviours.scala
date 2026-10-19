@@ -647,6 +647,128 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     tokens(rollUp) shouldBe ((2L, 20L, 40L))
   }
 
+  /** A child config whose retention removes every event older than a millisecond. */
+  private val ageing: RunConfig = RunConfig().withRetention(RetentionPolicy.keepAll.withMaxAge(1.millis))
+
+  /** The roll-up of the last child call that ended. */
+  private def lastRollUp(setup: Setup): UsageSummary = setup.allEnds.last.ok match {
+    case ChildEnd.Ended(_, usage) => usage
+    case other                    => fail(s"unexpected $other")
+  }
+
+  it should "keep a failed attempt's lost usage when the retention's maxAge is shorter than the gap between attempts" in {
+    val open    = storage()
+    val failing = new AtomicBoolean(true)
+    val setup = new Setup(
+      delegating(),
+      answers("report", "report", "report"),
+      settle = false,
+      child = _.withMiddleware(failingOnce(failing)),
+      childConfig = ageing
+    )
+    val thread = ThreadId("usage-aged")
+    family(new GraphRuntime(open()), setup)._1.run(thread, "go").isLeft shouldBe true
+    // each failed attempt's terminal event, which carries its lost usage, is older than the retention's maxAge when
+    // the next attempt is admitted
+    Thread.sleep(50)
+    failing.set(true)
+    family(new GraphRuntime(open()), setup)._1.recover(thread).isLeft shouldBe true
+    Thread.sleep(50)
+
+    val result = family(new GraphRuntime(open()), setup)._1.recover(thread).ok
+    result.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 3
+    // each lost call was folded, and committed, before an admission pruned its event
+    tokens(lastRollUp(setup)) shouldBe ((3L, 30L, 60L))
+    tokens(result.usage) shouldBe ((5L, 50L, 100L))
+  }
+
+  it should "fold the next attempt's lost usage when an admission's prune also removed its own claim's event" in {
+    val open    = storage()
+    val failing = new AtomicBoolean(true)
+    // as if the claim's event had aged out too by the time the prune ran: every event of the child goes
+    val store = new ForwardingCheckpointer(open()) {
+      override def prune(threadId: ThreadId, policy: RetentionPolicy) =
+        if (threadId.value.contains("/~task/")) super.prune(threadId, policy.withMaxEvents(0))
+        else super.prune(threadId, policy)
+    }
+    val setup = new Setup(
+      delegating(),
+      answers("report", "report", "report"),
+      settle = false,
+      child = _.withMiddleware(failingOnce(failing)),
+      childConfig = ageing
+    )
+    val thread = ThreadId("usage-floor")
+    family(new GraphRuntime(store), setup)._1.run(thread, "go").isLeft shouldBe true
+    failing.set(true)
+    family(new GraphRuntime(store), setup)._1.recover(thread).isLeft shouldBe true
+
+    val result = family(new GraphRuntime(store), setup)._1.recover(thread).ok
+    result.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 3
+    // the events below the floor were folded before the prune: the fold reads on from the floor
+    tokens(lastRollUp(setup)) shouldBe ((3L, 30L, 60L))
+  }
+
+  it should "keep a failed attempt's lost usage when the recover's claim commit fails after the fold" in {
+    val open    = storage()
+    val failing = new AtomicBoolean(true)
+    // once armed, the next claim commit of a child's recover is refused: the fold it carried is never stored
+    val armed = new AtomicBoolean(false)
+    val store = new ForwardingCheckpointer(open()) {
+      override def commit(threadId: ThreadId, commit: Commit) =
+        if (
+          threadId.value.contains("/~task/") &&
+          commit.events.exists(_.event.isInstanceOf[RunEvent.RunRecovered]) &&
+          armed.getAndSet(false)
+        ) Left(ProcessingError("store", "the process died"))
+        else super.commit(threadId, commit)
+    }
+    val setup = new Setup(
+      delegating(),
+      answers("report", "report"),
+      settle = false,
+      child = _.withMiddleware(failingOnce(failing)),
+      childConfig = ageing
+    )
+    val thread  = ThreadId("usage-commit-lost")
+    val runtime = new GraphRuntime(store)
+    family(runtime, setup)._1.run(thread, "go").isLeft shouldBe true
+    Thread.sleep(50)
+
+    armed.set(true)
+    family(runtime, setup)._1.recover(thread).isLeft shouldBe true
+    armed.get shouldBe false
+    setup.childClient.callCount shouldBe 1
+    Thread.sleep(50)
+
+    val result = family(new GraphRuntime(open()), setup)._1.recover(thread).ok
+    result.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 2
+    // the refused claim commit pruned nothing, so the next recover folded the lost call's event
+    tokens(lastRollUp(setup)) shouldBe ((2L, 20L, 40L))
+    tokens(result.usage) shouldBe ((4L, 40L, 80L))
+  }
+
+  it should "prune a top-level thread's admission before the claim's own checkpoint and event exist" in {
+    val store   = storage()()
+    val runtime = new GraphRuntime(store)
+    val agent   = Agent.builder("solo", answers("one", "two")).withRuntime(runtime).build().ok
+    val thread  = ThreadId("top-level-retention")
+    agent.run(thread, "first").ok.answer shouldBe Some("one")
+    val config = RunConfig().withRetention(RetentionPolicy.keepAll.withMaxEvents(1))
+    agent.run(thread, "second", config).ok.answer shouldBe Some("two")
+    // admission kept only the first run's newest event, then the second run wrote all of its own
+    val kept = store.eventsAfter(thread, 0L, 10_000) match {
+      case Left(GraphError.ReplayUnavailable(_, earliest)) =>
+        store.eventsAfter(thread, earliest - 1, 10_000).ok.map(_.event)
+      case other => other.ok.map(_.event)
+    }
+    kept.head shouldBe RunEvent.RunCompleted
+    kept.collect { case started: RunEvent.RunStarted => started } should have size 1
+  }
+
   /** A wrapper that runs the call, then asks for approval; approved, it runs the call again or answers itself. */
   private def reviewing(rerun: Boolean): AgentMiddleware = new AgentMiddleware {
     val id: MiddlewareId = MiddlewareId("review")

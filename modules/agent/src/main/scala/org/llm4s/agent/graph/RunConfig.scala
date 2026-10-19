@@ -124,6 +124,12 @@ final case class RunConfig private (
    * events beyond the policy are removed, raising the replay floor for their handles. `RetentionPolicy.keepAll`
    * removes nothing and is skipped. A prune that fails is logged at WARN and the run goes on: retention is
    * housekeeping.
+   *
+   * A child thread's run (design 4.42) is the exception: its admission prunes only after the claim commit, which stores
+   * the usage folded from the earlier attempts' terminal events, and before the run is launched. A run refused at
+   * admission, or whose claim commit fails, still leaves the thread unchanged; but the claim's own checkpoint and event
+   * exist by then and count against the limits (`maxEvents` is at least 1 on a child), and `maxAge` may remove that
+   * event, raising the replay floor above the run's start.
    */
   def withRetention(policy: RetentionPolicy): RunConfig = copy(retention = Some(policy))
 

@@ -51,7 +51,8 @@ object GraphRuntime:
   /**
    * `config` for a run of a child thread (design 4.42): a child keeps at least its newest event, so the terminal
    * event of an attempt that committed nothing survives until the next `recoverChild` folds its usage - its
-   * retention's `maxEvents` is at least 1. Otherwise its retention is the one it was given.
+   * retention's `maxEvents` is at least 1. Otherwise its retention is the one it was given. That floor does not hold
+   * off `maxAge`: what does is that a child's admission prunes only after the claim commit storing the fold (`Run.admit`).
    */
   private[agent] def childConfig(config: RunConfig): RunConfig =
     config.withRetention(config.retention.map { policy =>
@@ -2844,9 +2845,11 @@ final class GraphRuntime(
               // the tasks created for the run before its claim get the claim's root lineage (design §4.24)
               carry().flatMap((carried, reused) => amend(execution).map((carried, reused, _))).flatMap {
                 (carried, reused, execution) =>
-                  // under the store claim, before the run's first event: nothing of the run exists to be pruned; and after
-                  // `amend`, which may read the events retention would remove
-                  config.retention.foreach(retain)
+                  // a top-level thread is pruned under the store claim, before the run's first event: nothing of the
+                  // run exists to be pruned. A child thread only after the claim commit, which stores what `amend`
+                  // folded from the events retention would remove (design 4.42): a commit that fails prunes nothing
+                  val child = origin.isDefined
+                  if !child then config.retention.foreach(retain)
                   if retainChildren then
                     abandonLater = keepChildren(
                       threadId,
@@ -2857,6 +2860,10 @@ final class GraphRuntime(
                       abandon = _ => true
                     )
                   committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused, fence)
+                    .map { run =>
+                      if child then config.retention.foreach(retain)
+                      run
+                    }
               }
             )
           admitted = outcome.isRight
@@ -2949,9 +2956,12 @@ final class GraphRuntime(
         this
 
     /**
-     * Prunes the thread to `policy` as the run is admitted - under the store claim, before the run's claim commit, so no
-     * other run writes meanwhile and nothing of this run exists yet to be pruned, by any limit; a failure is logged,
-     * never the run's. `keepAll` removes nothing, so it is skipped.
+     * Prunes the thread to `policy` as the run is admitted, under the store claim, so no other run writes meanwhile; a
+     * failure is logged, never the run's. `keepAll` removes nothing, so it is skipped. A top-level thread is pruned
+     * before the run's claim commit, so nothing of this run exists yet to be pruned, by any limit. A child thread is
+     * pruned only after it, before the run is launched (design 4.42): the claim checkpoint stores the usage the child
+     * runner folded from the terminal events this removes, so a crash before it removes nothing unfolded; the claim's
+     * own checkpoint and event count against the limits, and `maxEvents` is at least 1 ([[GraphRuntime.childConfig]]).
      */
     private def retain(policy: RetentionPolicy): Unit =
       if policy != RetentionPolicy.keepAll then

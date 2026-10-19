@@ -701,7 +701,9 @@ private[agent] object ChildRunner:
 
     /**
      * The child's terminal events of attempts that committed nothing after `afterSeq`: each one's seq, usage and agent
-     * model steps.
+     * model steps. Events below the replay floor are skipped: the admission's retention removes only events at or below
+     * its claim's, after the claim checkpoint carrying their fold has committed (design 4.42), so they are already in
+     * the prior usage.
      */
     private def terminalsAfter(afterSeq: Long): Result[Vector[(Long, UsageSummary, Long)]] =
       @tailrec def pages(
@@ -709,7 +711,8 @@ private[agent] object ChildRunner:
         found: Vector[(Long, UsageSummary, Long)]
       ): Result[Vector[(Long, UsageSummary, Long)]] =
         runtime.storedEvents(childId, after, EventPage) match
-          case Left(error) => Left(error)
+          case Left(GraphError.ReplayUnavailable(_, earliest)) if earliest - 1 > after => pages(earliest - 1, found)
+          case Left(error)                                                             => Left(error)
           case Right(page) =>
             val terminals = page.flatMap { record =>
               val lost = record.event match
