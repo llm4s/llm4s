@@ -257,6 +257,23 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     refused.message should include("agent 'specialist' has a tool named 'task_researcher'")
   }
 
+  it should "refuse a family where an agent's middleware contributes a tool named like a family task tool (#2067)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val contributing = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id: org.llm4s.agent.graph.middleware.MiddlewareId =
+        org.llm4s.agent.graph.middleware.MiddlewareId("contributes")
+      override def tools: Vector[AgentTool[?]] = Vector(echo("task_researcher"))
+    }
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST").withMiddleware(contributing)
+    val refused = lead(client)
+      .withSubagents(researcher)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused.message should include("agent 'specialist' has a tool named 'task_researcher'")
+  }
+
   it should "not reset its count at a mixed batch the loop refused" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>

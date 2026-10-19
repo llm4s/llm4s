@@ -466,7 +466,11 @@ object AgentBuilder:
     family
       .foldLeft[Result[Vector[(String, String)]]](Right(Vector.empty)) { (acc, b) =>
         acc.flatMap(found =>
-          b.effective.map(e => found ++ e.tools.map(_.spec.name).filter(taskNames).distinct.map(b.id -> _))
+          b.effective.map { e =>
+            // the tools the loop offers: the agent's own and its middleware's, not the task tools themselves
+            val offered = e.tools ++ e.middleware.filterNot(_.isInstanceOf[DelegationMiddleware]).flatMap(_.tools)
+            found ++ offered.map(_.spec.name).filter(taskNames).distinct.map(b.id -> _)
+          }
         )
       }
       .flatMap {
