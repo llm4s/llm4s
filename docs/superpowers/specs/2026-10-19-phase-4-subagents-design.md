@@ -492,8 +492,12 @@ object TypedAgent:
   is built `withOutput(output)` (F8a), and the report is `decodeOutput[O]`.
 - **Errors.** The id and prompt are checked at the parent's `build()`, as `AgentBuilder` checks its own.
 - **`BoundAgent[I, O]`** is the definition compiled onto a runtime.
-  - `run(input: I, config: RunConfig): Result[TaskOutcome[O]]` runs it on a new top-level thread. This is for graph
-    nodes and tests, with no parent.
+  - `run(input: I, config: RunConfig): Result[TaskOutcome[O]]` runs it on a new top-level thread, for tests and
+    one-off calls.
+  - `run(threadId: ThreadId, input: I, config: RunConfig): Result[TaskOutcome[O]]` runs it on a caller-chosen
+    thread with start-or-reattach semantics (a settled thread returns its stored outcome, a running or suspended
+    one is reattached, as K2 does for a child), so a recoverable graph node that derives the id from its own
+    replay-stable key never runs the agent twice after a crash. Graph nodes use this one.
   - `resume(ref: ChildRef, answers: Map[InterruptId, ujson.Value], config)` (the same answers as `Agent.resume`) and `recover(ref: ChildRef, config)`, both
     `Result[TaskOutcome[O]]`, continue a standalone run that suspended or failed, so a `Suspended` outcome is never
     a dead end. They accept only a standalone ref (`toolCallId = None`); a delegated child is continued only
@@ -641,7 +645,9 @@ Tests:
     child thread (a runtime-owned `DelegationKeys` key) and reused by every continuation, never recomputed from a
     recovered parent's fresh deadline and never a fresh timeout, so
     repeated recoveries never exceed the grant or the parent's remainder. `recoverChild` passes these to the child
-    run. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
+    run. `settleChild` folds the newest terminal event's lost usage and failed agent steps into `priorUsage` in
+    the same commit as the terminal outcome (K2's fold, which it already shares with `recoverChild`), so a
+    settlement never leaves the accounting stale. A grant already spent settles the child with `RunOutcome.TokenLimitReached` or `StepLimitReached`
     (`settleChild`) and returns that refusal without running it. Likewise a child whose own deadline has passed by
     recovery or resume (its **stored effective deadline** `<= now`, whichever of the grant or the original
     parent cap it came from, whatever a recovered parent's own deadline now is) is settled `RunOutcome.Failed(kind = "deadline-exceeded", ...)`
