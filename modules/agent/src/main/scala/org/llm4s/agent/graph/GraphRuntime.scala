@@ -785,16 +785,29 @@ final class GraphRuntime(
     outcome: RunOutcome,
     message: String,
     config: RunConfig,
-    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    owns: Checkpoint => Boolean = _ => true
   ): Result[Unit] =
     def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(threadId)
+    // checked before the claim, and again under it: the thread may have been deleted and recreated in between
+    def valid(stored: StoredCheckpoint): Result[Unit] =
+      checkTenant(threadId, stored, config)
+        .flatMap(_ => childAs(threadId, stored, child = true))
+        .flatMap(_ =>
+          Either.cond(
+            owns(stored.checkpoint),
+            (),
+            ValidationError("threadId", s"'${threadId.value}' is not the child thread being settled")
+          )
+        )
     val checked = latest.flatMap {
       case None         => Left(GraphError.NothingToRecover(threadId.value))
-      case Some(stored) => checkTenant(threadId, stored, config).flatMap(_ => childAs(threadId, stored, child = true))
+      case Some(stored) => valid(stored)
     }
     holding(threadId, config)(checked) { held =>
       latest.flatMap {
-        case None => Left(GraphError.NothingToRecover(threadId.value))
+        case None                                 => Left(GraphError.NothingToRecover(threadId.value))
+        case Some(stored) if valid(stored).isLeft => valid(stored)
         case Some(stored)
             if stored.checkpoint.status == CheckpointStatus.Completed ||
               stored.checkpoint.status == CheckpointStatus.Failed =>

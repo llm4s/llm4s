@@ -12,7 +12,7 @@ import org.llm4s.agent.graph.middleware.{
   ModelResponse
 }
 import org.llm4s.agent.graph.middleware.ModelContext
-import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolOutcome }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolContext, ToolOutcome }
 import org.llm4s.agent.graph.toolloop.AgentInput
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.{ CancelledError, ProcessingError }
@@ -47,7 +47,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val settle: Boolean = true,
     val child: AgentBuilder => AgentBuilder = identity,
     val childTools: Seq[AgentTool[?]] = Nil,
-    val delegateTimeout: Option[FiniteDuration] = None
+    val delegateTimeout: Option[FiniteDuration] = None,
+    val parentMiddleware: Seq[AgentMiddleware] = Nil
   ) {
     val crashAfterChild                   = new AtomicBoolean(false)
     val ends                              = new CopyOnWriteArrayList[Result[ChildEnd]]()
@@ -84,7 +85,13 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       else outcome(setup, ended)
     }
     val parent =
-      Agent.builder("lead", setup.parentClient).withRuntime(runtime).withTools(SpecTools.set(delegate)).build().ok
+      Agent
+        .builder("lead", setup.parentClient)
+        .withRuntime(runtime)
+        .withTools(SpecTools.set(delegate))
+        .withMiddleware(setup.parentMiddleware*)
+        .build()
+        .ok
     (parent, child)
   }
 
@@ -587,6 +594,33 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
     // the attempt that crashed made a call no event recorded; the other two are counted once each
     tokens(rollUp) shouldBe ((2L, 20L, 40L))
+  }
+
+  it should "be counted once when a wrapper asks for approval after the child ran, and the call runs again" in {
+    val open = storage()
+    val review = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("review")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome = {
+        val out = next()
+        if (context.approved) out else ToolOutcome.NeedsApproval("check the report")
+      }
+    }
+    val setup   = new Setup(delegating(), answers("report"), parentMiddleware = Seq(review))
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId("approved-after-child")
+    val parked  = parent.run(thread, "go").ok
+    val id = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+      case other                                     => fail(s"unexpected $other")
+    }
+    val done = parent.resume(thread, Map(parked.approve(id))).ok
+    done.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 1
+    // the parent's two calls and the child's one, once, though the call ran twice
+    tokens(done.usage) shouldBe ((3L, 30L, 60L))
   }
 
   behavior.of("A child thread")

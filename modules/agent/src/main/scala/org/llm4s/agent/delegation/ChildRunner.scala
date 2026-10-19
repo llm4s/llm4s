@@ -263,7 +263,8 @@ private[agent] object ChildRunner:
         RunOutcome.failed(error),
         error.message,
         base.withRunId(RunId.random()),
-        foldLostUsage
+        foldLostUsage,
+        ours
       ) match
         case Right(_)                          => Step.Again
         case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)

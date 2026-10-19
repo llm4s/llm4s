@@ -873,8 +873,12 @@ object ToolLoop:
   private def withUsage(context: RunContext)(result: NodeResult): NodeResult = result match
     case NodeResult.Continue(command) =>
       NodeResult.Continue(command.copy(update = command.update.combine(usageOf(context))))
+    // a suspended call runs again when answered, and a child it ran is reattached then and its roll-up added with the
+    // final result: only the task's own model calls commit with the suspension
     case NodeResult.Suspend(update, question, resumeAt) =>
-      NodeResult.Suspend(update.combine(usageOf(context)), question, resumeAt)
+      val own =
+        if context.usage.lostIsEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.lost)
+      NodeResult.Suspend(update.combine(own), question, resumeAt)
     case other => other
 
   /** The usage the task recorded, as its update to [[LoopKeys.usage]]; nothing when it recorded none. */
