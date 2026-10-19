@@ -213,7 +213,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     again.take(2).foreach(_ should include("summary"))
   }
 
-  it should "count only the active agent's calls after a handoff in the turn" in {
+  it should "count the turn's task calls across handoffs, whichever agent's task tool made them (#2067)" in {
     val client = RoutingClient {
       case Lead(messages) if toolResults(messages).isEmpty =>
         Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
@@ -221,20 +221,24 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
         if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
           Right(CompletionFixture.simple(toolResults(messages).last))
-        else Right(calling(call("c2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
-      case Child("general", _) => Right(CompletionFixture.simple("report"))
+        else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("general", _)    => Right(CompletionFixture.simple("report"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
     }
+    // delegate -> handoff -> delegate in one turn: a handoff stays in the turn, so the second task is over the bound
     val specialist = Agent
       .builder("specialist", client)
       .withSystemPrompt("SPECIALIST")
-      .withSubagents(general)
+      .withSubagents(researcher)
       .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
     val agent = lead(client)
       .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
       .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
       .build()
       .value
-    agent.run(ThreadId("t1"), "go").value.answer.value shouldBe "report"
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 1")
+    agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
   }
 
   it should "not reset its count at a mixed batch the loop refused" in {

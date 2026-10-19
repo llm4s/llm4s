@@ -1065,7 +1065,7 @@ final class GraphRuntime(
    * settled (`Completed` or `Failed`, so with an outcome) - and deletes each older one with everything below it
    * ([[deleteTree]]). Called only where every settled child is prunable - its call committed and will never run
    * again: under the parent's claim at `start` admission, and before a run's terminal checkpoint once its last
-   * superstep is durable ([[Run.retainBeforeSettling]]) - never at `recover` or `resume` admission, when a child whose
+   * superstep is durable, or after it once an `Async` or `OnExit` run's commits drain ([[Run.retainBeforeSettling]]) - never at `recover` or `resume` admission, when a child whose
    * call has not committed must stay for that call's replay. Idempotent. Housekeeping: a failure is logged at WARN.
    *
    * With `abandon` - at `start` admission, where no call of an earlier run can be replayed - a `Running` or
@@ -3159,10 +3159,16 @@ final class GraphRuntime(
             case Left(error)                                                       => fail(execution, error)
             case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
             case Right(saved) =>
-              if status == CheckpointStatus.Completed then retainBeforeSettling(checkpointId)
+              val completed = status == CheckpointStatus.Completed
+              if completed && !committer.drains then retainBeforeSettling(checkpointId)
               submit(saved, event)
               closeCommitter()
-              committer.failure.fold(result)(e => RunResult.Failed(execution.state, writeFailed(e, None)))
+              committer.failure match
+                case Some(e) => RunResult.Failed(execution.state, writeFailed(e, None))
+                case None    =>
+                  // Async or OnExit: the buffered commits have drained, so the terminal checkpoint is stored
+                  if completed && committer.drains then retainBeforeSettling(saved.id)
+                  result
 
     /**
      * Child retention before the run settles (design 4.41): once `lastCommitted`, the checkpoint of the run's last
@@ -3170,8 +3176,10 @@ final class GraphRuntime(
      * committed and none will run again, and every settled child is prunable ([[keepChildren]]). Run before the
      * terminal checkpoint commits, so a parent that gets no later turn is bounded too; a crash during it leaves the
      * thread `Running` at that checkpoint, and `recover` reaches this point again with nothing to run and repeats the
-     * pass, which is idempotent. When `lastCommitted` is not yet durable - a `Durability.Async` commit still queued, or
-     * `OnExit` - a crash could replay its calls, so the pass is left to the next `start` on the completed thread.
+     * pass, which is idempotent. Under `Durability.Async` or `OnExit` that checkpoint is not yet durable there - a crash
+     * could replay its calls - so [[end]] runs the pass instead once the run's buffered commits have drained, with
+     * `lastCommitted` the stored terminal checkpoint, still under the run's claim (#2067); a drain that fails leaves it
+     * to the next `start`.
      */
     private def retainBeforeSettling(lastCommitted: String): Unit =
       keepChildren(

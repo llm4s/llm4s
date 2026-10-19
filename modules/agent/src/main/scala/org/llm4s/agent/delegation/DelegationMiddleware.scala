@@ -14,7 +14,7 @@ import org.llm4s.agent.graph.tool.{
   ToolOutcome,
   ToolResource
 }
-import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage }
+import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
@@ -36,18 +36,21 @@ import scala.util.control.Exception.ultimately
  *  - Each other subagent has its own tool, `task_<id>`, whose arguments are its input's schema.
  *
  * A call is refused, as a tool error, past `maxTasksPerTurn` (counted in the turn's committed assistant messages up to
- * the call, so exact and stable under replay) or `maxDepth`; it waits for one of the parent run's
+ * the call, across handoffs, so exact and stable under replay) or `maxDepth`; it waits for one of the parent run's
  * `maxConcurrentChildren` slots; then it runs the child through the child runner and maps its outcome.
  *
  * A child that suspends makes its call ask a [[DelegatedQuestion]] (design 4.46): the parent suspends too, listing the
  * child's interrupts under composite ids, and the call's resume, with the [[DelegatedAnswers]], resumes the child.
  *
  * @param depth how deep the agent this is installed in runs: 0 for a top-level agent
+ * @param familyTaskNames the task tools of the agent's family (its handoff graph), whose calls before a handoff in the
+ *   turn count towards `maxTasksPerTurn` too; this agent's own always count
  */
 final private[agent] class DelegationMiddleware(
   subagents: Vector[BoundAgent[?, ?]],
   config: DelegationConfig,
-  depth: Int
+  depth: Int,
+  familyTaskNames: Set[String] = Set.empty
 ) extends AgentMiddleware:
 
   val id: MiddlewareId = DelegationMiddleware.Id
@@ -59,6 +62,9 @@ final private[agent] class DelegationMiddleware(
   private val taskShaped = subagents.filter(_.definition.takesTaskRequest)
 
   private val toolNames: Set[String] = TaskTools.names(subagents.map(_.definition))
+
+  /** The task tools whose calls in the turn count towards `maxTasksPerTurn`: this agent's and its family's. */
+  private val turnTaskNames: Set[String] = toolNames ++ familyTaskNames
 
   override val tools: Vector[AgentTool[?]] =
     val shared =
@@ -110,7 +116,7 @@ final private[agent] class DelegationMiddleware(
     ctx: ToolContext
   ): ToolOutcome =
     val name     = bound.id.value
-    val position = TaskTools.positionInTurn(ctx, toolNames)
+    val position = TaskTools.positionInTurn(ctx, turnTaskNames)
     if position > config.maxTasksPerTurn then
       error(
         s"task for subagent '$name' refused: this turn's task calls are over maxTasksPerTurn = ${config.maxTasksPerTurn}"
@@ -317,21 +323,15 @@ private[agent] object TaskTools:
 
   /**
    * The call's position among the task calls of the current turn's assistant messages, from 1, counting every call
-   * of `names` from the turn's user message - or, after a handoff in the turn, from the handoff, since the calls before
-   * it were another agent's - up to and including this one (the last call with its id); one more than
-   * the turn's count when the call is not found.
+   * of `names` from the turn's user message up to and including this one (the last call with its id); one more than
+   * the turn's count when the call is not found. A handoff stays in the turn, so the calls before it count too (#2067):
+   * `names` are the task tools of the agent's whole family, whichever agent made the call.
    */
   def positionInTurn(ctx: ToolContext, names: Set[String]): Int =
     val history = ctx.state.get(Messages.key).getOrElse(Vector.empty)
-    val sinceUser = history.lastIndexWhere { case StoredMessage(_, _: UserMessage) => true; case _ => false } match
+    val turn = history.lastIndexWhere { case StoredMessage(_, _: UserMessage) => true; case _ => false } match
       case -1 => history
       case at => history.drop(at)
-    // the active agent's part of the turn: after the thread's last completed handoff, when it is in this turn, since
-    // the calls before it were another agent's (a refused mixed batch records no transfer, so it resets nothing)
-    val lastTransfer = ctx.state.get(LoopKeys.transfer).toOption.flatten.map(_.messageId)
-    val turn = lastTransfer.map(id => sinceUser.indexWhere(_.id == id)).filter(_ >= 0) match
-      case Some(at) => sinceUser.drop(at + 1)
-      case None     => sinceUser
     val calls = turn.flatMap {
       case StoredMessage(_, assistant: AssistantMessage) => assistant.toolCalls.filter(c => names(c.name))
       case _                                             => Vector.empty

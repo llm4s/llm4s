@@ -434,15 +434,35 @@ class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
     b.compile(delegate)(_.get(log)).value
 
-  it should "keep the newest settled children when the parent completes: one of two calls' children at 1" in {
-    val runtime = GraphRuntime(InMemoryCheckpointer(), clock)
-    val parent  = ThreadId("one-shot")
+  Vector(Durability.Sync, Durability.Async, Durability.OnExit).foreach { durability =>
+    it should s"keep the newest settled children when a one-shot parent completes under $durability (#2067)" in {
+      val runtime = GraphRuntime(InMemoryCheckpointer(), clock)
+      val parent  = ThreadId("one-shot")
+      runtime
+        .start(parent, delegating(runtime, parent, 2), "go", RunConfig().withChildRetention(1), durability)
+        .awaited
+        .value
+        .completed
+      runtime.children(parent).value.map(_.threadId) shouldBe Vector(childOf(parent, 2))
+    }
+  }
+
+  it should "leave the pass to the next start when an Async parent's buffered commits fail to drain" in {
+    val store  = InMemoryCheckpointer()
+    val parent = ThreadId("undrained")
+    val flaky = new ForwardingCheckpointer(store) {
+      override def commit(threadId: ThreadId, commit: Commit) =
+        if threadId == parent && commit.checkpoint.exists(_.status == CheckpointStatus.Completed)
+        then Left(ValidationError("store", "down"))
+        else store.commit(threadId, commit)
+    }
+    val runtime = GraphRuntime(flaky, clock)
     runtime
-      .start(parent, delegating(runtime, parent, 2), "go", RunConfig().withChildRetention(1))
+      .start(parent, delegating(runtime, parent, 2), "go", RunConfig().withChildRetention(1), Durability.Async)
       .awaited
       .value
-      .completed
-    runtime.children(parent).value.map(_.threadId) shouldBe Vector(childOf(parent, 2))
+      .failed
+    runtime.children(parent).value.map(_.threadId) shouldBe Vector(childOf(parent, 1), childOf(parent, 2))
   }
 
   it should "prune before the parent settles, so a crash during the pass is finished by recover" in {

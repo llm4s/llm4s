@@ -226,9 +226,11 @@ final class AgentBuilder private (
     for
       family <- AgentBuilder.family(this)
       _      <- AgentBuilder.idTargetsDefined(family)
+      // a handoff stays in the turn, so each agent counts the whole family's task calls in it (#2067)
+      taskNames = family.flatMap(b => TaskTools.names(b.subagents)).toSet
       agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
         // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
-        acc.flatMap(done => builder.loopAgent(graphRuntime, tracing).map(done :+ _))
+        acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames).map(done :+ _))
       }
       root      <- AgentId.of(id)
       loop      <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
@@ -250,7 +252,11 @@ final class AgentBuilder private (
    * without subagents. Refuses a bound that is not positive, two subagents with one id, and a subagent that does not
    * bind.
    */
-  private def delegating(graphRuntime: GraphRuntime, tracing: Option[Tracing]): Result[Option[DelegationMiddleware]] =
+  private def delegating(
+    graphRuntime: GraphRuntime,
+    tracing: Option[Tracing],
+    familyTaskNames: Set[String]
+  ): Result[Option[DelegationMiddleware]] =
     // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
     if subagents.isEmpty then delegation.validated.map(_ => None)
     else
@@ -266,7 +272,7 @@ final class AgentBuilder private (
         bound <- subagents.foldLeft[Result[Vector[BoundAgent[?, ?]]]](Right(Vector.empty)) { (acc, definition) =>
           acc.flatMap(done => definition.bind(client, graphRuntime, tracing).map(done :+ _))
         }
-      yield Some(new DelegationMiddleware(bound, config, depth = 0))
+      yield Some(new DelegationMiddleware(bound, config, depth = 0, familyTaskNames))
 
   /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
   private def held(loop: ToolLoop, nodes: Vector[AgentNode], phase: BreakpointPhase): Vector[NodeId] =
@@ -297,7 +303,11 @@ final class AgentBuilder private (
             )
           )
 
-  private def loopAgent(graphRuntime: GraphRuntime, tracing: Option[Tracing]): Result[LoopAgent] =
+  private def loopAgent(
+    graphRuntime: GraphRuntime,
+    tracing: Option[Tracing],
+    familyTaskNames: Set[String]
+  ): Result[LoopAgent] =
     for
       agentId <- AgentId.of(id)
       _ <- Either.cond(
@@ -306,7 +316,7 @@ final class AgentBuilder private (
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
       installed  <- effective
-      delegating <- delegating(graphRuntime, tracing)
+      delegating <- delegating(graphRuntime, tracing, familyTaskNames)
       toolSet    <- ToolSet.of(validator, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))

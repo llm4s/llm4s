@@ -10,7 +10,7 @@ import org.llm4s.types.Result
  *  - `maxConcurrentChildren`: child runs one parent run has live at once. A `task` call over it waits for a slot; it
  *    is not refused.
  *  - `maxTasksPerTurn`: `task` calls one parent turn may make, counted in the order of the turn's assistant messages,
- *    so a call is refused (a tool error) exactly when the calls before it, its own included, are over the bound,
+ *    across handoffs (every agent of the family's calls in the turn count), so a call is refused (a tool error) exactly when the calls before it, its own included, are over the bound,
  *    whichever order the calls run in and however often they are replayed.
  *  - `maxDepth`: how deep delegation nests; 1, the default, lets the agent delegate and its children not.
  *  - `maxReportBytes`: the most any `task` tool message may be, in UTF-8: a child's report, as the JSON the parent
