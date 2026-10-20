@@ -45,6 +45,9 @@ case class SafeParameterExtractor(params: ujson.Value) {
   /**
    * Extract a required double (number) parameter from the JSON params.
    *
+   * A whole number above 2^53 (9007199254740992) has already been rounded to the nearest double when the tool call's
+   * arguments were parsed, so it cannot be recovered here. Declare large identifiers as strings in the tool's schema.
+   *
    * @param path Dot-separated path to the parameter
    * @return `Right(value)` on success, `Left(errorMessage)` on failure
    */

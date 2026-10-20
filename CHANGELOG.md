@@ -98,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
+- **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with
+  tests pinning it, in `SafeParameterExtractor`, `ToolCall` and the structured-output limits [#1597](https://github.com/llm4s/llm4s/issues/1597).
 
 ### Memory
 

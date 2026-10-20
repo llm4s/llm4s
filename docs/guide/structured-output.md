@@ -258,6 +258,10 @@ use these providers.
   support response schemas, the schema is dropped without an error (and with it Anthropic's prompt
   instruction), and `completeStructured` then parses an unconstrained reply.
 - **Every property is required** (section 4), whatever you declared.
+- **Integers above 2^53.** A uPickle `Long` field reads a number such as 9007199254740993 exactly, because
+  `completeStructured` reads `A` from the reply's text. A reader that starts from `ujson.Value` (the circe,
+  play-json and zio-json bridges) and every tool argument get the rounded double instead, so send large identifiers as
+  strings there; see [Numbers](json-libraries.md#numbers).
 - **One call, no streaming, no repair.** There is no automatic retry inside `completeStructured`.
 - **The content goes to the provider.** The conversation and the schema are sent to whichever provider the client
   talks to, like any other completion.
