@@ -313,8 +313,9 @@ private[agent] object ChildRunner:
     /**
      * When waiting on a busy child gives up, as a `System.nanoTime` value: twice the claim's life from now, or the
      * parent's deadline or the child's stored one ([[childDeadline]]) if sooner (#2086), so a recovered parent with a
-     * fresh, long deadline never waits past the child's own. Fixed at the first `ThreadBusy`. The read after the wait
-     * then settles a child whose own deadline is what passed `Failed`, as [[continued]] does, if its holder is gone.
+     * fresh, long deadline never waits past the child's own. Fixed at the first `ThreadBusy`. A holder still there then
+     * is `ThreadBusy` for the call (settling needs the child's claim); the next admission that holds the claim settles
+     * the expired child `Failed` ([[continued]]).
      */
     private def busyCutoff(): Long =
       val now = runtime.now()
