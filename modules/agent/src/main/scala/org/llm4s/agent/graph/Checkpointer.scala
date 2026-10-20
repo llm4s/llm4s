@@ -142,7 +142,7 @@ trait Checkpointer:
 
   /**
    * Applies `commit` atomically, fenced by its token, and returns its events with their sequence numbers,
-   * each recording that token. A [[Commit.fence]] of `(other, otherToken)` fences it by `other`'s claim too, checked
+   * each recording that token. A `Commit.fence` of `(other, otherToken)` fences it by `other`'s claim too, checked
    * in the same transaction or under the same lock as the write, after the thread's own claim: otherwise
    * `Left(GraphError.StaleClaim(other, otherToken, otherCurrent))` with nothing written.
    */
@@ -233,13 +233,13 @@ trait Checkpointer:
 
   /**
    * Up to `limit` of `parent`'s direct children (design 4.41), oldest first: every thread whose latest checkpoint's
-   * [[Checkpoint.origin]] names `parent`, in the order each first committed a checkpoint with that origin, starting
+   * `Checkpoint.origin` names `parent`, in the order each first committed a checkpoint with that origin, starting
    * after child `after` when it is given, so a caller pages through them by passing the last id of each page. A
    * thread [[deleteThread]] removed is not listed, nor is a thread whose latest checkpoint names another parent or
    * none. An `after` the store does not know as a child of `parent` is `Left(ValidationError)`; a child deleted
    * since it was listed keeps its place as long as its tombstone does ([[deleteThread]]), so a page boundary survives
    * retention deleting it. A thread with no children has none; `limit` below 1 reads none. Needs no claim, and reads no tenant: the runtime
-   * checks the parent's tenant ([[GraphRuntime.children]]).
+   * checks the parent's tenant (`GraphRuntime.children`).
    */
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]]
 
@@ -274,7 +274,7 @@ trait Checkpointer:
    * it happens only if `otherToken` is `other`'s current claim too, checked in the same atomic step as the
    * thread's own claim and the delete (one transaction, or under one lock), and otherwise is
    * `Left(GraphError.StaleClaim(other, otherToken, otherCurrent))` with nothing deleted. The thread's own claim is
-   * checked first. [[GraphRuntime.deleteThread]] fences a cascade's delete of each descendant by the root's claim,
+   * checked first. `GraphRuntime.deleteThread` fences a cascade's delete of each descendant by the root's claim,
    * and child retention each delete by the parent's (design 4.41), so a successor run that took the thread above
    * over never finds a child it may reattach gone. `None` fences by the thread's own claim alone.
    */
