@@ -685,6 +685,39 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     client.calls should have size sent
   }
 
+  it should "refuse a thread another agent started at the id, returning nothing of its run (#2086)" in {
+    val client = RoutingClient {
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"theirs","sources":1}"""))
+      case Child("auditor", _)    => Right(CompletionFixture.simple("""{"summary":"ours","sources":1}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val node    = ThreadId("node-shared")
+    researcher.bind(client, runtime).value.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+    val auditor = TypedAgent("auditor", "Audits one topic", questionSchema, findingsSchema)
+      .withSystemPrompt("CHILD:auditor")
+      .bind(client, runtime)
+      .value
+
+    auditor.run(node, Question("tides")).left.value shouldBe a[ValidationError]
+    client.calls should have size 1
+  }
+
+  it should "refuse the id when it was started with other input, or not by this overload (#2086)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"tides","sources":1}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-input")
+    bound.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+
+    bound.run(node, Question("moons")).left.value shouldBe a[ValidationError]
+    client.calls should have size 1
+    // a thread the agent's own run started records no input, so it is never taken as this call's
+    bound.agent.run(ThreadId("node-plain"), "tides").value
+    bound.run(ThreadId("node-plain"), Question("tides")).left.value shouldBe a[ValidationError]
+    client.calls should have size 2
+  }
+
   "BoundAgent.resume" should "continue a standalone run that suspended, and map its answer as run does (#2069)" in {
     val runs   = new AtomicInteger(0)
     val client = DelegatedSuspensionSpec.approvingClient()

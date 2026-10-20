@@ -12,6 +12,7 @@ import org.llm4s.agent.graph.{
   RunConfig,
   RunId,
   RunOrigin,
+  StateUpdate,
   ThreadId
 }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, PermissionMiddleware }
@@ -360,9 +361,11 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
    *  - `Suspended`: its `Suspended` outcome, nothing run; answer it with [[resume]].
    *  - `Completed` or `Failed`: the outcome its terminal checkpoint records, rebuilt as a run's is, nothing run.
    *
-   * The thread is the call: one found at `threadId` is taken as this call's whatever input it was started with, so the
-   * key `threadId` comes from must identify the input too. A delegated child's thread is refused (`ValidationError`):
-   * its parent continues it (rule 19). Unlike the fresh-thread overload, a `Left` forgets nothing: the caller can name
+   * The thread is the call: its first checkpoint records a digest of the rendered input (as a child's records its
+   * input), and one found at `threadId` is reattached only if it is this agent's and was started by this overload with
+   * the same input; another agent's thread, one started with other input or not by this overload, is refused
+   * (`ValidationError`), so an id collision never returns another run's outcome (#2086). A delegated child's thread is
+   * refused (`ValidationError`) too: its parent continues it (rule 19). Unlike the fresh-thread overload, a `Left` forgets nothing: the caller can name
    * the thread, and its next call reattaches to it.
    */
   def run(threadId: ThreadId, input: I, config: RunConfig): Result[TaskOutcome[O]] =
@@ -398,22 +401,33 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   /** One read of the caller-chosen thread `ref` names, and what it calls for (see the thread-id [[run]]). */
   private def attach(ref: ChildRef, input: I, config: RunConfig): BoundAgent.Step[O] =
     val graph = agent.loop.graph
+    def refused(field: String, why: String) =
+      BoundAgent.Step.Done(Left(ValidationError(field, s"subagent '${agent.id.value}': ${ref.threadId.value} $why")))
     agent.runtime.childAtRest(ref.threadId, graph, agent.configured(config)) match
+      case Left(rejected: GraphError.RestoreRejected) =>
+        // a thread another agent wrote does not restore into this one's graph: named as the collision it is (#2086)
+        agent.runtime.storedGraphId(ref.threadId, agent.configured(config)) match
+          case Right(Some(other)) if other != graph.id => refused("threadId", s"is a thread of '$other'")
+          case Left(error)                             => BoundAgent.Step.Done(Left(error))
+          case Right(_)                                => BoundAgent.Step.Done(Left(rejected))
       case Left(error) => BoundAgent.Step.Done(Left(error))
       case Right(None) =>
         rendered(input).fold(
-          refused => BoundAgent.Step.Done(Left(refused)),
-          // only a new thread is started: one another caller created since the read is read again, never given a turn
-          query => admitted(ref, config)(agent.startNew(ref.threadId, query, config))
+          failed => BoundAgent.Step.Done(Left(failed)),
+          // only a new thread is started: one another caller created since the read is read again, never given a turn;
+          // its first checkpoint records the input, so a later call with other input is refused (#2086)
+          query =>
+            val record = StateUpdate.update(DelegationKeys.input, Some(DelegationKeys.digest(AgentInput(query))))
+            admitted(ref, config)(agent.startNew(ref.threadId, query, config, record))
         )
       case Right(Some((checkpoint, _))) if checkpoint.origin.isDefined =>
-        BoundAgent.Step.Done(
-          Left(
-            ValidationError(
-              "threadId",
-              s"subagent '${agent.id.value}': ${ref.threadId.value} is a delegated child; continue it through its parent"
-            )
-          )
+        refused("threadId", "is a delegated child; continue it through its parent")
+      case Right(Some((_, exec))) if !sameInput(exec, input) =>
+        // a thread this overload did not start records no input: it is never taken as this call's (#2086)
+        rendered(input).fold(
+          failed => BoundAgent.Step.Done(Left(failed)),
+          _ =>
+            refused("input", "was not started by this call's input; a caller-chosen thread id must identify its input")
         )
       case Right(Some((checkpoint, exec))) =>
         val at = ref.copy(runId = RunId(checkpoint.runId))
@@ -428,6 +442,11 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
             )
           case CheckpointStatus.Completed | CheckpointStatus.Failed =>
             BoundAgent.Step.Done(settled(at, checkpoint, exec))
+
+  /** Whether the caller-chosen thread `exec` rests at was started with `input`, as its recorded digest says. */
+  private def sameInput(exec: Execution, input: I): Boolean =
+    val recorded = exec.state.get(DelegationKeys.input).toOption.flatten
+    recorded.isDefined && rendered(input).toOption.map(q => DelegationKeys.digest(AgentInput(q))) == recorded
 
   /**
    * What an admission on the caller-chosen thread calls for: its run's outcome, mapped as [[continued]] maps it; a read

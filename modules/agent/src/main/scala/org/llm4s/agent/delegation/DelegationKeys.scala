@@ -1,6 +1,7 @@
 package org.llm4s.agent.delegation
 
 import org.llm4s.agent.graph.StateKey
+import org.llm4s.agent.graph.toolloop.AgentInput
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
@@ -36,14 +37,11 @@ private[agent] object DelegationKeys:
     StateKey.replace[PriorUsage]("delegation-prior-usage", PriorUsage.empty)
 
   /**
-   * The child threads whose roll-up this turn's committed results already counted (design 4.42), on the parent's
-   * thread: a call that suspended after its child ran committed the roll-up with the suspension, and when it runs again
-   * the reattached child is not counted twice. Written only with a tool call's result, and cleared as each turn starts.
-   */
-  /**
-   * The digest of the input a child thread was started with (design 4.42), written with its first checkpoint: a call
-   * that runs again with other arguments (an approval that edited them) derives the same child id, and is refused
-   * rather than given the report of the input it no longer asks about.
+   * The digest ([[digest]]) of the input a child thread was started with (design 4.42), written with its first
+   * checkpoint: a call that runs again with other arguments (an approval that edited them) derives the same child id,
+   * and is refused rather than given the report of the input it no longer asks about. `BoundAgent.run` on a
+   * caller-chosen thread writes it on its top-level thread too, and refuses a thread without it or with another
+   * (#2086).
    */
   val input: StateKey[Option[String], Option[String]] =
     StateKey.replace[Option[String]]("delegation-input", None)
@@ -56,6 +54,16 @@ private[agent] object DelegationKeys:
   val grant: StateKey[Option[ChildGrant], Option[ChildGrant]] =
     StateKey.replace[Option[ChildGrant]]("delegation-grant", None)
 
+  /** The SHA-256 of `input`'s canonical encoding, in hex: what [[input]] records. */
+  def digest(input: AgentInput): String =
+    val bytes = upickle.default.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8)
+    java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
+
+  /**
+   * The child threads whose roll-up this turn's committed results already counted (design 4.42), on the parent's
+   * thread: a call that suspended after its child ran committed the roll-up with the suspension, and when it runs again
+   * the reattached child is not counted twice. Written only with a tool call's result, and cleared as each turn starts.
+   */
   val counted: StateKey[Set[String], CountedUpdate] =
     StateKey[Set[String], CountedUpdate]("delegation-counted", Set.empty)((ids, update) =>
       Right(update match

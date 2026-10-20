@@ -652,6 +652,39 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     client.sentTo("CHILD:researcher") should have size 1
   }
 
+  it should "stop waiting on a busy child at its own stored deadline, and settle it Failed once free (#2086)" in {
+    val fails  = new AtomicBoolean(true)
+    val client = RoutingClient(delegatingOnce.orElse(looping("probe")))
+    val store  = new org.llm4s.agent.graph.InMemoryCheckpointer()
+    val claims = org.llm4s.agent.graph.ClaimPolicy(ttl = 3.seconds, renewEvery = 100.millis)
+    val agent = lead(client)
+      .withRuntime(new GraphRuntime(store, claims = claims))
+      .withSubagents(
+        researcher
+          .withTools(ToolSet.of(failingOnce("probe", fails)).value)
+          .withFailure(ChildFailure.Fail)
+          .withInheritance(Inheritance().withBudget(TaskBudget().withTimeout(1500.millis)))
+      )
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").left.value
+    val child = agent.children(ThreadId("t1")).value.loneElement.threadId
+
+    // another runtime's run holds the child's claim past the child's own deadline
+    val held = store
+      .claim(child, org.llm4s.agent.graph.ClaimRequest(org.llm4s.agent.graph.RunId("elsewhere"), None, 30.seconds))
+      .value
+    val began = System.nanoTime()
+    agent.recover(ThreadId("t1")).left.value.message should include("held by run 'elsewhere'")
+    // cut off at the child's deadline (1.5 s after it started), not after twice the claim's life (6 s)
+    (System.nanoTime() - began).nanos should be < claims.ttl
+    store.release(child, held.token).value
+
+    agent.recover(ThreadId("t1")).left.value.message should include("deadline")
+    agent.children(ThreadId("t1")).value.loneElement.status shouldBe CheckpointStatus.Failed
+    client.sentTo("CHILD:researcher") should have size 1
+  }
+
   /** A lead whose researcher calls `probe` each step, asking approval for every call; with `grant` and `runtime`. */
   private def askingFamily(client: RoutingClient, ran: AtomicInteger, grant: TaskBudget, runtime: GraphRuntime) = {
     val probe = AgentTool(SpecText.spec("probe")) { (_, _) =>

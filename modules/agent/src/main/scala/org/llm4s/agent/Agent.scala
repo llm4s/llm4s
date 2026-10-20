@@ -432,9 +432,15 @@ final class Agent private[agent] (
   /**
    * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
    * `GraphError.ThreadExists`, no run started. For `BoundAgent.run` on a caller-chosen thread (#2077), which must
-   * never start a second turn on a thread another caller has created since its read.
+   * never start a second turn on a thread another caller has created since its read, and which records the run's
+   * identity on the thread with `record`, written with its first checkpoint (#2086).
    */
-  private[agent] def startNew(threadId: ThreadId, query: String, config: RunConfig): Result[AgentRun] =
+  private[agent] def startNew(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig,
+    record: StateUpdate = StateUpdate.empty
+  ): Result[AgentRun] =
     if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
     else
       runtime
@@ -443,7 +449,8 @@ final class Agent private[agent] (
           loop.graph,
           AgentInput(query),
           configured(config),
-          GraphError.ThreadExists(threadId.value)
+          GraphError.ThreadExists(threadId.value),
+          amend = _ => Right(record)
         )
         .map(agentRun(_, None, drain = false))
 

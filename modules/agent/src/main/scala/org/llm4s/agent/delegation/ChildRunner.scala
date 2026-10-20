@@ -43,7 +43,8 @@ private[agent] enum ChildEnd:
  *    again.
  *  - `Running`: the child is recovered ([[GraphRuntime.recoverChild]]), folding the usage of the attempts that
  *    committed nothing into [[DelegationKeys.priorUsage]]. A child whose claim another run holds is waited on, with
- *    backoff, for up to twice the claim's lifetime (no later than the parent's deadline), then the call returns that
+ *    backoff, for up to twice the claim's lifetime (no later than the parent's deadline or the child's own stored
+ *    deadline, #2086), then the call returns that
  *    `ThreadBusy` as a `Left`, for the parent to fail and recover later.
  *  - `Suspended`: `Ended` with the `Suspended` status, nothing run - unless the call is a resume with answers to
  *    interrupts the child still waits on, which resume it ([[GraphRuntime.resumeChild]], design 4.46). Answers the
@@ -213,6 +214,9 @@ private[agent] object ChildRunner:
     /** Whether this attempt resumed the child: it resumes it at most once. */
     private var applied = false
 
+    /** The deadline of the child's stored grant, as [[continued]] last read it: it bounds a wait on a busy child. */
+    private var childDeadline: Option[java.time.Instant] = None
+
     /** Whether the latest admission's timeout was the parent's deadline rather than the grant. */
     @volatile private var parentsDeadline = false
 
@@ -308,12 +312,15 @@ private[agent] object ChildRunner:
 
     /**
      * When waiting on a busy child gives up, as a `System.nanoTime` value: twice the claim's life from now, or the
-     * parent's deadline if that is sooner. Fixed at the first `ThreadBusy`.
+     * parent's deadline or the child's stored one ([[childDeadline]]) if sooner (#2086), so a recovered parent with a
+     * fresh, long deadline never waits past the child's own. Fixed at the first `ThreadBusy`. The read after the wait
+     * then settles a child whose own deadline is what passed `Failed`, as [[continued]] does, if its holder is gone.
      */
     private def busyCutoff(): Long =
-      val claims = runtime.claimTtl * 2
-      val window =
-        ctx.run.deadline.fold(claims)(d => claims.min(JDuration.between(runtime.now(), d).toNanos.max(0L).nanos))
+      val now = runtime.now()
+      val window = (ctx.run.deadline ++ childDeadline).foldLeft(runtime.claimTtl * 2) { (bound, d) =>
+        bound.min(JDuration.between(now, d).toNanos.max(0L).nanos)
+      }
       System.nanoTime() + window.toNanos
 
     def drive(): Result[ChildEnd] =
@@ -508,6 +515,7 @@ private[agent] object ChildRunner:
           else if counted.steps.exists(turn.steps + counted.lostSteps >= _) then Some(RunOutcome.StepLimitReached)
           else None
         (counted, consumed, outcome)
+      spent.foreach((grant, _, _) => childDeadline = grant.deadline)
       spent match
         case Left(error) => Step.Done(Left(error))
         case Right((_, _, Some(limitHit))) =>
@@ -551,9 +559,7 @@ private[agent] object ChildRunner:
     private def parentDeadlinePassed: Boolean = ctx.run.deadline.exists(d => !runtime.now().isBefore(d))
 
     /** The digest of the input this call delegates: its query and history, canonically encoded. */
-    private lazy val inputDigest: String =
-      val bytes = upickle.default.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8)
-      java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
+    private lazy val inputDigest: String = DelegationKeys.digest(input)
 
     /** Whether the child was started with this call's input; a child recorded with none is taken as started with it. */
     private def sameInput(state: ThreadState): Boolean =

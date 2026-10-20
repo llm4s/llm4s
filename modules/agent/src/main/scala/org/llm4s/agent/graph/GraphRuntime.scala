@@ -452,7 +452,8 @@ final class GraphRuntime(
    * Starts a run on `threadId` only if the thread is new: an existing thread of the caller's tenant
    * is refused with `existing`, no run started. Checked during admission, under the thread's
    * exclusivity and against the claim's parent checkpoint, so no other run can create the thread
-   * between the check and the claim. Another tenant's thread is still `TenantMismatch` first.
+   * between the check and the claim. Another tenant's thread is still `TenantMismatch` first. `amend`'s update is
+   * written with the thread's first checkpoint, as [[startChild]]'s is.
    */
   private[agent] def startNew[I, O](
     threadId: ThreadId,
@@ -460,9 +461,10 @@ final class GraphRuntime(
     input: I,
     config: RunConfig,
     existing: => LLMError,
-    observer: Option[Observer] = None
+    observer: Option[Observer] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] =
-    startOn(threadId, graph, input, config, Durability.Sync, Some(() => existing), observer, None)
+    startOn(threadId, graph, input, config, Durability.Sync, Some(() => existing), observer, None, amend = amend)
 
   /**
    * Starts the first run of the child thread `threadId`, recording `origin` - its `startedAt` stamped now, by the
@@ -837,6 +839,19 @@ final class GraphRuntime(
           .map(execution => Some(stored.checkpoint -> execution))
     }
   }
+
+  /**
+   * The id of the graph whose run wrote `threadId`'s latest checkpoint - for an agent, the agent's id - with no
+   * restore; `None` for a thread with none. Tenant-checked as [[childAtRest]] is. For `BoundAgent.run` on a
+   * caller-chosen thread (#2086), to name another agent's thread rather than report a failed restore.
+   */
+  private[agent] def storedGraphId(threadId: ThreadId, config: RunConfig): Result[Option[String]] =
+    admission(threadId) {
+      checkpointer.latest(threadId).flatMap {
+        case None         => Right(None)
+        case Some(stored) => checkTenant(threadId, stored, config).map(_ => Some(stored.checkpoint.snapshot.graphId))
+      }
+    }
 
   /** A suspended `execution` of `graph` as the run result a live run that suspended there returned. */
   private[agent] def suspendedResult[I, O](graph: CompiledGraph[I, O], execution: Execution): RunResult[O] =
