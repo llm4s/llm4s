@@ -74,7 +74,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       completion.usage,
       completion.estimatedCost,
       attempt,
-      Option(completion.message.toolCalls).fold(0)(_.size),
+      Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
       completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions))
     )
 

@@ -247,14 +247,17 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
       .simple("ok")
       .withMessage(AssistantMessage(Some("ok"), null))
       .withUsage(None)
-    val judge   = ScriptedLLMClient.of(malformed)
+    val judge   = ScriptedLLMClient.of(malformed, malformed.withMessage(null))
     val outcome = new java.util.concurrent.atomic.AtomicReference[Option[Boolean]](None)
     val judging = new AgentMiddleware {
       val id: MiddlewareId = MiddlewareId("judge")
       override def wrapModelCall(request: ModelRequest, context: ModelContext)(
         next: ModelRequest => Result[ModelResponse]
       ): Result[ModelResponse] =
-        outcome.set(Some(context.accounted(judge).complete(Conversation(Seq(UserMessage("judge")))).isRight))
+        val client = context.accounted(judge)
+        // a null tool-call list, then a null message
+        val both = (1 to 2).map(_ => client.complete(Conversation(Seq(UserMessage("judge")))).isRight)
+        outcome.set(Some(both.forall(identity)))
         next(request)
     }
     val agent =
@@ -264,7 +267,7 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
 
     outcome.get shouldBe Some(true)
     result.answer shouldBe Some("done")
-    result.usage.requestCount shouldBe 2
+    result.usage.requestCount shouldBe 3
 
     // a null message list with calls only on the completion: the calls' arguments are still charged
     val big     = ToolCall("c1", "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
