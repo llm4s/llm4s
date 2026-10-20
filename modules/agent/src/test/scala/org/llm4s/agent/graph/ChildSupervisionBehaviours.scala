@@ -1009,8 +1009,11 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val seen = new CopyOnWriteArrayList[StreamEvent]()
     parent.streamResume(thread, Map(edited), nested = true)(seen.add(_): Unit).ok.await().isLeft shouldBe true
     setup.allEnds.last.left.toOption.get shouldBe a[GraphError.ThreadBusy]
-    // the run found is announced, with a gap, though the busy child could not be settled
-    announced(seen.asScala.toVector) shouldBe ((Vector(original), Vector(original)))
+    // the run found, then the run holding the child, each announced with a gap, though it could not be settled
+    announced(seen.asScala.toVector) shouldBe ((
+      Vector(original, RunId("elsewhere")),
+      Vector(original, RunId("elsewhere"))
+    ))
     open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
 
     open().release(childId, held.token).ok

@@ -251,6 +251,13 @@ private[agent] object ChildRunner:
         ctx.run.nested(StreamEvent.Nested(ref(runId), StreamEvent.LiveGap(0)))
         streamed += runId
 
+    /** Another runtime (or run) holds the child, as `busy` names it: its live events cannot reach this one. */
+    private def held(busy: GraphError.ThreadBusy): Unit =
+      gap(busy.holder match
+        case GraphError.BusyHolder.Run(runId) => runId
+        case _                                => config.runId
+      )
+
     /**
      * The forwarder a child run `runId` is admitted with: it passes on every event of the run to the parent's nested
      * subscribers, a grandchild's included; a disconnection (it fell behind) as a gap. It sends `TaskStarted` first, on
@@ -414,6 +421,9 @@ private[agent] object ChildRunner:
                 // read again: the run that settled it - this one, or another that got there first - is announced below
                 case Right(_) => Step.Again
                 // the next admission of the call settles it
+                case Left(busy: GraphError.ThreadBusy) =>
+                  held(busy)
+                  Step.Done(Left(busy))
                 case Left(error) => Step.Done(Left(error))
             case _ =>
               // the run that settled it names the child's latest checkpoint, and no event of it was forwarded here
@@ -568,9 +578,11 @@ private[agent] object ChildRunner:
         ours,
         parentClaim
       ) match
-        case Right(_)                          => Step.Again
-        case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)
-        case Left(other)                       => Step.Done(Left(other))
+        case Right(_) => Step.Again
+        case Left(busy: GraphError.ThreadBusy) =>
+          held(busy)
+          Step.Busy(busy)
+        case Left(other) => Step.Done(Left(other))
 
     /**
      * Adds the child's roll-up to the calling task's accumulator, unless the thread's committed state shows it counted
@@ -611,11 +623,7 @@ private[agent] object ChildRunner:
           ) =>
         Step.Again
       case Left(busy: GraphError.ThreadBusy) =>
-        // another runtime (or run) holds the child: its live events cannot reach this one
-        gap(busy.holder match
-          case GraphError.BusyHolder.Run(runId) => runId
-          case _                                => config.runId
-        )
+        held(busy)
         Step.Busy(busy)
       case Left(error) => Step.Done(Left(error))
 
