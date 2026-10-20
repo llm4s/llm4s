@@ -38,7 +38,7 @@ import scala.util.Try
  * carries them). Usage that arrives without a client call is recorded with [[recordUsage]].
  *
  * Under a token budget (`RunBudgets.maxTokens`) every accounted call is checked before it is made, as the loop checks
- * its own: at the budget it is refused with a `Left`. In `wrapModelCall` the model step then ends the turn
+ * its own: at the budget it is refused with a `Left`. In `wrapModelCall` and `promptSections` the model step then ends the turn
  * `TokenLimitReached`, whatever the wrapper does with the refusal; in `beforeAgent` and `afterAgent` the hook handles
  * it as any failed call (an LLM guardrail blocks). A completion that reports no usage is charged an
  * estimate (the request's messages in, the completion out), never zero, so the budget still advances.

@@ -297,6 +297,36 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     }
   }
 
+  it should "end the turn TokenLimitReached when a prompt-section hook's accounted call is refused" in {
+    val judge = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    // the first call uses the budget, the second is refused, and the hook propagates the refusal
+    val sectioning = middleware(
+      "sections",
+      sections = c =>
+        val client = c.accounted(judge)
+        for
+          _ <- client.complete(Conversation(Seq(UserMessage("one"))))
+          _ <- client.complete(Conversation(Seq(UserMessage("two"))))
+        yield Vector.empty
+    )
+    val model           = ScriptedModel(answer("never"))
+    val budget          = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(50))
+    val (state, output) = runInMemory(loopOf(model, Seq(sectioning)).graph, AgentInput("go"), budget).completed
+    output.outcome shouldBe TurnOutcome.TokenLimitReached
+    model.calls shouldBe 0
+    state.get(LoopKeys.usage).value.requestCount shouldBe 1
+  }
+
   "ModelContext.accounted" should "count every call a hook makes through it, also when a hook makes it outside next" in {
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

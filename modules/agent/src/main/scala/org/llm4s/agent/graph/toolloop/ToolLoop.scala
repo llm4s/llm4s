@@ -1449,7 +1449,14 @@ object ToolLoop:
       answers: Vector[GivenAnswer]
     ): Result[NodeResult] =
       val hooks = hookContext(agent.id, context, answers, state)
-      for
+      // a call refused at the token budget ends the turn as the step check does, keeping the usage of the calls made
+      // before it (#2084)
+      def limitReached: NodeResult =
+        NodeResult.Continue(
+          Command(usageOf(context), Nil)
+            .update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.TokenLimitReached), priorValues = Map.empty))
+        )
+      val prepared = for
         history  <- state.get(messages)
         _        <- Message.validateConversation(history.map(_.message).toList)
         transfer <- state.get(LoopKeys.transfer)
@@ -1514,14 +1521,7 @@ object ToolLoop:
           result match
             // a call refused at the token budget ends the turn as the step check does, whatever the wrappers
             // returned; the calls made before it are counted (#2084)
-            case Left(ToolLoop.TokenLimitStop) =>
-              NodeResult.Continue(
-                Command(usageOf(context), Nil)
-                  .update(
-                    LoopKeys.turn,
-                    turn.copy(outcome = Some(TurnOutcome.TokenLimitReached), priorValues = Map.empty)
-                  )
-              )
+            case Left(ToolLoop.TokenLimitStop) => limitReached
             // nothing of the step is stored while the question waits - it runs again once answered - but
             // the model calls a wrapper made before asking were made, and are counted
             case Left(asked: MiddlewareAsked) =>
@@ -1547,6 +1547,8 @@ object ToolLoop:
               .fold(NodeResult.Fail(_), NodeResult.Block(_, GraphError.OutputInvalid(invalid)))
           }
         }
+      // a prompt-section hook's accounted call may be refused too, failing the step's preparation
+      prepared.left.flatMap(error => if context.usage.refused then Right(limitReached) else Left(error))
 
     // a response format's second invalid answer retracts the turn from here, restoring any key the turn wrote
     val formatWrites = if agent.output.isDefined then harness.writes else Set.empty
