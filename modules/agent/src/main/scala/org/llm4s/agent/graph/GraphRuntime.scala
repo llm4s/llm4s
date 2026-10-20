@@ -3640,10 +3640,11 @@ final class GraphRuntime(
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
       def discardCustom(): Unit = withLock(lock)(buffered.clear())
-      // once the claim is found lost, a node that ignores the stop sends nothing more: a later run - of the
-      // same id, perhaps - may hold the thread. Checked under the hub's lock, so never after its claim (#1918)
+      // once the claim is found lost, or released, a node that ignores the stop or keeps its context sends
+      // nothing more: a later run - of the same id, perhaps - may hold the thread. Checked under the hub's lock,
+      // so never after a later run's claim (#1918, #1737)
       def progress(name: String, version: Int, payload: ujson.Value): Unit =
-        hub.live(threadId, liveEvent(name, version, payload), () => !claimWasLost)
+        hub.live(threadId, liveEvent(name, version, payload), () => !claimWasLost && !claimReleased.get)
       // a child's start, remembered for a nested subscriber attaching mid-child (#2074): fenced as a nested event is,
       // so a child that outlives its parent's run never announces itself into a later run's subscriptions
       override def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =

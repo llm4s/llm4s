@@ -713,6 +713,56 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
   }
 
+  "A record the store wrote but reported as failed" should "reach a subscription that was replaying when later commits are handed over during its replay (#1737)" in {
+    // 1 is handed over; 2 is in the store but never handed over, as a commit whose store returned `Left`
+    // after its COMMIT landed. The replay reads [1, 2], delivers 1 and leaves 2 to a hand-over; the
+    // catch-up read (the second) blocks while 3, 4 and 5 are handed over, which a replaying subscription
+    // only notes
+    val log = BlockingLog(Vector(record(1), record(2)), blockOn = 2)
+    val hub = EventHub(log)
+    hub.durable(thread, Vector(record(1)))
+    val fifth    = new CountDownLatch(1)
+    val listener = recording(countAt(5, fifth))
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
+    log.reading.await(5, TimeUnit.SECONDS) shouldBe true
+    (3L to 5L).foreach { seq =>
+      log.records = log.records :+ record(seq)
+      hub.durable(thread, Vector(record(seq)))
+    }
+    log.release.countDown()
+    fifth.await(5, TimeUnit.SECONDS) shouldBe true
+    // a subscription that skipped the unhanded record for good would see 1, 3, 4, 5
+    listener.seen.asScala.toVector shouldBe Vector("1", "2", "3", "4", "5")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  it should "reach a subscription that switched to live past it, at the next hand-over, with no store watch (#1737)" in {
+    val log = BlockingLog(Vector(record(1), record(2)), blockOn = 0)
+    val hub = EventHub(log, ThreadLocks(), WatchPolicy.disabled)
+    hub.durable(thread, Vector(record(1)))
+    val joined = new CountDownLatch(1)
+    val third  = new CountDownLatch(1)
+    val listener = recording {
+      case _: StreamEvent.Live => joined.countDown()
+      case event               => countAt(3, third)(event)
+    }
+    val sub = hub
+      .subscribe(thread, afterSeq = 0L, capacity = 16, listener, AbandonedWrites.none, TenantScope.Unscoped)
+      .fold(e => fail(e.message), identity)
+    // a live event is delivered only once the subscription has switched to live, which left 2 to a hand-over
+    hub.live(thread, live(0))
+    joined.await(5, TimeUnit.SECONDS) shouldBe true
+    log.records = log.records :+ record(3)
+    hub.durable(thread, Vector(record(3)))
+    third.await(5, TimeUnit.SECONDS) shouldBe true
+    listener.seen.asScala.toVector shouldBe Vector("1", "live", "2", "3")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
   /** Counts `latch` down once the durable event `seq` has been recorded. */
   private def countAt(seq: Long, latch: CountDownLatch): StreamEvent => Unit = {
     case StreamEvent.Durable(r) if r.seq == seq => latch.countDown()

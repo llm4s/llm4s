@@ -71,6 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
   thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
+- **Fixed** `RunContext.progress` from a node that keeps its context past its run reaching a later run's subscribers:
+  once the run has released the thread it is a no-op, as it already was once the claim was lost [#1737](https://github.com/llm4s/llm4s/issues/1737).
 
 ### Providers
 

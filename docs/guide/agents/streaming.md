@@ -383,6 +383,10 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 `RunContext.progress(name, version, payload)` is the untyped form. A tool emits through its
 context's run: `Checked.progress(context.run, value)`.
 
+Progress is sent only while the task's run holds the thread. A node that keeps its `RunContext`, or
+a thread of its own, past the end of its run sends nothing: once the run has released the thread, or
+found its claim lost, `progress` is a no-op, so it never reaches a later run's subscribers.
+
 ### Typed handlers
 
 `EventHandlers` packages typed handlers with their event types, so a selection of mixed types is a

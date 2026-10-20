@@ -378,6 +378,27 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     } shouldBe Vector(1, 2, 3)
   }
 
+  it should "deliver no progress a node sends after its run has released the thread, though it kept its context (#1737)" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val kept    = new java.util.concurrent.atomic.AtomicReference[RunContext]()
+    val graph = chain(1) { (_, context) =>
+      kept.compareAndSet(null, context): Unit
+      context.progress("during", 1, ujson.Null)
+    }
+    runtime.start(thread, graph, "first").awaited.value.completed
+    // joins while the thread is idle: the hub has no hand-over mark for it
+    val collector = Collector()
+    val sub       = runtime.subscribe(thread, afterSeq = 0L)(collector.listener).value
+    // the first run's node, outliving its run, sends progress before the next run's claim
+    kept.get.progress("late", 1, ujson.Null)
+    runtime.start(thread, graph, "second").awaited.value.completed
+    val received = collector.untilRunEnds(runs = 2)
+    received.collect { case l: StreamEvent.Live => l.name } shouldBe Vector("during")
+    durableSeqs(received) shouldBe (1L to store.eventsAfter(thread, 0L, 1000).value.size.toLong).toVector
+    sub.cancel()
+  }
+
   it should "disconnect a listener that throws, without delivering anything after" in {
     val runtime   = GraphRuntime.inMemory()
     val collector = Collector()
