@@ -354,7 +354,8 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - **none:** `startChild`. A `ThreadExists` race (another runtime started it) loops back to the read.
   - **`Running`:** `recoverChild`.
     - A `ThreadBusy` is waited on interruptibly, with backoff, until the claim frees or
-      `min(2 × ClaimPolicy.ttl, parent's remaining deadline)` passes. The holder is a lapsed run, or one draining
+      `min(2 × ClaimPolicy.ttl, parent's remaining deadline, the child's stored effective deadline)` passes; when
+      the child's own deadline is what passed, the child is settled `Failed` as D2 does, not waited on further. The holder is a lapsed run, or one draining
       after a cancel.
     - After that the call returns `ToolOutcome.Fatal(ThreadBusy)`. The parent run then fails, and `recover` later
       reattaches.
@@ -513,7 +514,10 @@ object TypedAgent:
   - `run(threadId: ThreadId, input: I, config: RunConfig): Result[TaskOutcome[O]]` runs it on a caller-chosen
     thread with start-or-reattach semantics (a settled thread returns its stored outcome, a running or suspended
     one is reattached, as K2 does for a child), so a recoverable graph node that derives the id from its own
-    replay-stable key never runs the agent twice after a crash. Graph nodes use this one.
+    replay-stable key never runs the agent twice after a crash. Graph nodes use this one. Like K2's child check,
+    the first run stores the bound agent's id and a digest of the canonical input on the thread; an existing thread
+    is reattached only if both match, and otherwise refused with a `ValidationError`, so an id collision never
+    returns another agent's or another input's stored outcome.
   - `resume(ref: ChildRef, answers: Map[InterruptId, ujson.Value], config)` (the same answers as `Agent.resume`) and `recover(ref: ChildRef, config)`, both
     `Result[TaskOutcome[O]]`, continue a standalone run that suspended or failed, so a `Suspended` outcome is never
     a dead end. They accept only a standalone ref (`toolCallId = None`); a delegated child is continued only
