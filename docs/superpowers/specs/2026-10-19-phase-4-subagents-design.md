@@ -361,7 +361,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - **Every reattach branch first validates the stored origin.** An existing thread at the derived id is adopted
     only if its latest checkpoint's origin names this call's parent, call and agent; otherwise (a top-level thread
     pre-created at that id, or another delegation's) the call is refused with a `ValidationError` and nothing of
-    that thread is run or reported.
+    that thread is run or reported. It also checks the **admitted input**: the child's first claim stores a
+    digest of the call's canonical input (`DelegationKeys.input`), and a reattach whose input digest differs
+    (an approval that edited the arguments after a first attempt started the child) is refused the same way, so a
+    child started for one input is never returned for another.
   - **`Suspended`:** returned as `Ended` with the `Suspended` status. D3 surfaces it.
   - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint's `outcome` (K1)
     and, for `Answered`, `decodeOutput`, with no run. A settled child checkpoint without an `outcome` is corrupt
