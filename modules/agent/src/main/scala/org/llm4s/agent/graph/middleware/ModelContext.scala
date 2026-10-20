@@ -9,7 +9,16 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.context.ConversationTokenCounter
 import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, Message, StreamedChunk, TokenUsage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  Completion,
+  CompletionOptions,
+  Conversation,
+  Message,
+  StreamedChunk,
+  ThinkingBlock,
+  TokenUsage
+}
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -110,17 +119,35 @@ object ModelContext:
 
   /**
    * A conservative estimate of a call's usage, for a completion that reports none (#2084): `request`'s messages in,
-   * the completion's message out, at least one token each way, so a call is never free.
+   * the whole assistant message out - its text, every tool call's name and arguments, and its thinking - at least one
+   * token each way, so a call is never free. Tool calls only on `Completion.toolCalls` count too.
    */
   private[agent] def estimated(completion: Completion, request: Seq[Message]): TokenUsage =
-    def count(messages: Seq[Message]): Int = counter.fold(
-      messages.map(m => ConversationTokenCounter.estimateOpaqueTokens(m.content)).sum
-    )(c => messages.map(c.countMessage).sum)
-    val in    = math.max(1, count(request))
-    val out   = math.max(1, count(Seq(completion.message)))
+    val answer =
+      if completion.message.toolCalls.isEmpty && completion.toolCalls.nonEmpty then
+        completion.message.withToolCalls(completion.toolCalls)
+      else completion.message
+    val in    = math.max(1, request.map(tokens).sum)
+    val out   = math.max(1, tokens(answer))
     val usage = TokenUsage(in, out, in + out)
     logger.debug(s"model '${completion.model}' reported no usage: charged an estimated $in in, $out out")
     usage
+
+  /** `message`'s tokens by the estimate's tokenizer, else its whole text - tool calls and thinking too - at four characters a token. */
+  private def tokens(message: Message): Int =
+    counter.fold(ConversationTokenCounter.estimateOpaqueTokens(text(message)))(
+      _.countMessage(message)
+    )
+
+  private def text(message: Message): String = message match
+    case a: AssistantMessage =>
+      (Seq(a.content) ++ a.toolCalls.flatMap(c => Seq(c.name, c.arguments.render())) ++
+        a.thinking.map {
+          case ThinkingBlock.Text(thought, _) => thought
+          case ThinkingBlock.Redacted(data)   => data
+          case ThinkingBlock.Opaque(_, data)  => data
+        }).mkString
+    case other => other.content
 
   /** An accounted call refused at the run's token budget (#2084): the model step ends the turn `TokenLimitReached`. */
   final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:

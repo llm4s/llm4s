@@ -200,4 +200,17 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     model.callCount shouldBe 0
     tokens(result.usage) shouldBe 60L
   }
+
+  it should "estimate a usage-less tool-only answer from its whole message, its tool call's arguments included" in {
+    // no text: the answer is one tool call with large arguments, which the estimate must charge as output
+    val big    = ToolCall("c1", "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
+    val client = ScriptedLLMClient.of(calling(big).withUsage(None), CompletionFixture.simple("never sent"))
+    val agent  = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+
+    val result = agent.run(thread, "go", limited(500)).value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    client.callCount shouldBe 1
+    result.usage.outputTokens should be > 500L
+  }
 }
