@@ -398,6 +398,8 @@ private[agent] object ChildRunner:
           checkpoint.status match
             // no call will reattach the original child, so it is settled before the refusal, never left open (#2096)
             case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+              // an earlier attempt's run, whose live events this attempt never saw, as for any child it reattaches
+              gap(RunId(checkpoint.runId))
               val message = s"abandoned: its call on '${origin.parent.value}' was run again with other input"
               runtime.settleChild(
                 childId,

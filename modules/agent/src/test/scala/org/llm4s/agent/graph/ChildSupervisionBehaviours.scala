@@ -936,6 +936,17 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     (setup, runtime, parent, thread, parked.edit(id, ujson.Obj("text" -> "another task")), child.threadId)
   }
 
+  private def latestRun(store: Checkpointer, child: ThreadId): RunId = RunId(
+    store.latest(child).ok.get.checkpoint.runId
+  )
+
+  /** The child runs `events` announced (`TaskStarted`) and gave a `LiveGap(0)`, in order. */
+  private def announced(events: Vector[StreamEvent]): (Vector[RunId], Vector[RunId]) =
+    (
+      events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId),
+      events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId }
+    )
+
   private def abandoned(store: Checkpointer, child: ThreadId): Unit =
     store.latest(child).ok.map(s => (s.checkpoint.status, s.checkpoint.outcome)) match {
       case Some((CheckpointStatus.Failed, Some(RunOutcome.Failed("abandoned", _)))) => ()
@@ -945,21 +956,21 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   it should "settle the Running child of a call whose arguments an approval edited, then refuse it (#2096)" in {
     val open                                        = storage()
     val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-running", open)
+    val original                                    = latestRun(open(), childId)
     val seen                                        = new CopyOnWriteArrayList[StreamEvent]()
     parent.streamResume(thread, Map(edited), nested = true)(seen.add(_): Unit).ok.await().isLeft shouldBe true
     setup.allEnds.last.left.toOption.get.message should include("started with other input")
     abandoned(open(), childId)
     setup.childClient.callCount shouldBe 1
-    // the settlement run, now the child's latest checkpoint, is announced and given a gap to nested subscribers
-    val settlement = RunId(open().latest(childId).ok.get.checkpoint.runId)
-    val events     = seen.asScala.toVector
-    events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId) should contain(settlement)
-    events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId } should contain(settlement)
+    // the run found, then the settlement run, now the child's latest checkpoint, each announced with a gap
+    val runs = Vector(original, latestRun(open(), childId))
+    announced(seen.asScala.toVector) shouldBe ((runs, runs))
   }
 
   it should "announce the run that settled the child first when another settles it before its abandon (#2096)" in {
     val open                                   = storage()
     val (setup, _, _, thread, edited, childId) = parkedOverRunningChild("edited-raced", open)
+    val original                               = latestRun(open(), childId)
     val racing                                 = new AtomicBoolean(false)
     val other                                  = new GraphRuntime(open())
     val otherGraph                             = family(other, setup)._2.loop.graph
@@ -987,17 +998,19 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     racing.get shouldBe false
     setup.allEnds.last.left.toOption.get.message should include("started with other input")
     open().latest(childId).ok.map(_.checkpoint.runId) shouldBe Some(otherRun.value)
-    val events = seen.asScala.toVector
-    events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId) shouldBe Vector(otherRun)
-    events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId } shouldBe Vector(otherRun)
+    announced(seen.asScala.toVector) shouldBe ((Vector(original, otherRun), Vector(original, otherRun)))
   }
 
   it should "return ThreadBusy for an edited call over a busy child, and settle it on a later recover (#2096)" in {
     val open                                        = storage()
     val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-busy", open)
+    val original                                    = latestRun(open(), childId)
     val held = open().claim(childId, ClaimRequest(RunId("elsewhere"), None, 1.minute)).ok
-    parent.resume(thread, Map(edited)).isLeft shouldBe true
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    parent.streamResume(thread, Map(edited), nested = true)(seen.add(_): Unit).ok.await().isLeft shouldBe true
     setup.allEnds.last.left.toOption.get shouldBe a[GraphError.ThreadBusy]
+    // the run found is announced, with a gap, though the busy child could not be settled
+    announced(seen.asScala.toVector) shouldBe ((Vector(original), Vector(original)))
     open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
 
     open().release(childId, held.token).ok
