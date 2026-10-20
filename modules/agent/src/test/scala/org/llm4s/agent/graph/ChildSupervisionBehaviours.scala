@@ -913,6 +913,58 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     setup.childClient.callCount shouldBe 1
   }
 
+  /** A family whose reviewed call left its failed child `Running`, the parent parked on the approval (#2096). */
+  private def parkedOverRunningChild(name: String, open: () => Checkpointer) = {
+    val setup = new Setup(
+      delegating(),
+      ScriptedLLMClient.of(calling(call("k1", "flaky"))),
+      settle = false,
+      childTools = Seq(flaky(new AtomicBoolean(true))),
+      parentMiddleware = Seq(reviewing(rerun = true))
+    )
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId(name)
+    val parked  = parent.run(thread, "go").ok
+    val id = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+      case other                                        => fail(s"unexpected $other")
+    }
+    val child = onlyChild(runtime, thread)
+    child.status shouldBe CheckpointStatus.Running
+    (setup, runtime, parent, thread, parked.edit(id, ujson.Obj("text" -> "another task")), child.threadId)
+  }
+
+  private def abandoned(store: Checkpointer, child: ThreadId): Unit =
+    store.latest(child).ok.map(s => (s.checkpoint.status, s.checkpoint.outcome)) match {
+      case Some((CheckpointStatus.Failed, Some(RunOutcome.Failed("abandoned", _)))) => ()
+      case other => fail(s"expected the child settled abandoned, got $other")
+    }
+
+  it should "settle the Running child of a call whose arguments an approval edited, then refuse it (#2096)" in {
+    val open                                        = storage()
+    val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-running", open)
+    parent.resume(thread, Map(edited)).isLeft shouldBe true
+    setup.allEnds.last.left.toOption.get.message should include("started with other input")
+    abandoned(open(), childId)
+    setup.childClient.callCount shouldBe 1
+  }
+
+  it should "return ThreadBusy for an edited call over a busy child, and settle it on a later recover (#2096)" in {
+    val open                                        = storage()
+    val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-busy", open)
+    val held = open().claim(childId, ClaimRequest(RunId("elsewhere"), None, 1.minute)).ok
+    parent.resume(thread, Map(edited)).isLeft shouldBe true
+    setup.allEnds.last.left.toOption.get shouldBe a[GraphError.ThreadBusy]
+    open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+    open().release(childId, held.token).ok
+    parent.recover(thread).isLeft shouldBe true
+    setup.allEnds.last.left.toOption.get.message should include("started with other input")
+    abandoned(open(), childId)
+    setup.childClient.callCount shouldBe 1
+  }
+
   it should "be counted once when a wrapper runs the call twice" in {
     val open = storage()
     val twice = new AgentMiddleware {

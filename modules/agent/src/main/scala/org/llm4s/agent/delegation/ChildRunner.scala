@@ -52,6 +52,10 @@ private[agent] enum ChildEnd:
  *  - `Completed` or `Failed`: the outcome the child's terminal checkpoint records, nothing run. A settled checkpoint
  *    without one is corrupt stored state, a `Left`.
  *
+ * A child started with other input than this call's ([[DelegationKeys.input]]) is refused with a `ValidationError`,
+ * after an unsettled one is settled `Failed("abandoned")` ([[GraphRuntime.settleChild]], #2096); a busy one is
+ * `ThreadBusy` for the call, and the next admission settles it.
+ *
  * A child failure is `Failed`. With `settleOnFailure` (the caller's `ChildFailure.Report`, whose call commits the
  * failure as a tool error) the child is first settled ([[GraphRuntime.settleChild]]), so no child is left `Running`
  * behind a committed call, and the failure returned is the one replay rebuilds from the settled checkpoint. Without it
@@ -385,16 +389,30 @@ private[agent] object ChildRunner:
               )
             )
           )
-        case Right(Some((_, exec))) if !sameInput(exec.state) =>
-          Step.Done(
-            Left(
-              ValidationError(
-                "input",
-                s"the child thread '${childId.value}' was started with other input; a delegated call's arguments " +
-                  "cannot change once its child has started"
-              )
-            )
+        case Right(Some((checkpoint, exec))) if !sameInput(exec.state) =>
+          val refusal = ValidationError(
+            "input",
+            s"the child thread '${childId.value}' was started with other input; a delegated call's arguments " +
+              "cannot change once its child has started"
           )
+          checkpoint.status match
+            // no call will reattach the original child, so it is settled before the refusal, never left open (#2096)
+            case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+              val message = s"abandoned: its call on '${origin.parent.value}' was run again with other input"
+              runtime.settleChild(
+                childId,
+                graph,
+                RunOutcome.Failed("abandoned", message),
+                message,
+                base.withRunId(RunId.random()),
+                foldLostUsage,
+                ours,
+                parentClaim
+              ) match
+                case Right(_) => Step.Done(Left(refusal))
+                // the next admission of the call settles it
+                case Left(error) => Step.Done(Left(error))
+            case _ => Step.Done(Left(refusal))
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
