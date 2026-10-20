@@ -25,8 +25,7 @@ private[javaapi] object JavaRecords {
 
   /** The object schema of record class `cls`, or a message naming the component that cannot be described. */
   def schema(cls: Class[?]): Either[String, ObjectSchema[ujson.Value]] =
-    if (cls == null) Left("the record class is null")
-    else if (!cls.isRecord) Left(s"${cls.getName} is not a record")
+    if (!cls.isRecord) Left(s"${cls.getName} is not a record")
     else recordSchema(cls, cls.getSimpleName, Set.empty)
 
   /** `json` read as an instance of record class `cls`, or a message naming the field that does not fit. */
@@ -119,14 +118,7 @@ private[javaapi] object JavaRecords {
     }
 
   private def readInteger(c: Class[?], json: ujson.Value, path: String): Either[String, Any] = {
-    val (min, max, box): (Double, Double, Double => Any) =
-      if (c == classOf[Int] || c == classOf[Integer])
-        (Int.MinValue.toDouble, Int.MaxValue.toDouble, (d: Double) => d.toInt)
-      else if (c == classOf[Long] || c == classOf[java.lang.Long])
-        (Long.MinValue.toDouble, Long.MaxValue.toDouble, (d: Double) => d.toLong)
-      else if (c == classOf[Short] || c == classOf[java.lang.Short])
-        (Short.MinValue.toDouble, Short.MaxValue.toDouble, (d: Double) => d.toShort)
-      else (Byte.MinValue.toDouble, Byte.MaxValue.toDouble, (d: Double) => d.toByte)
+    val (min, max, box) = Integers(c)
     json.numOpt.toRight(mismatch(path, "an integer", json)).flatMap { d =>
       if (d != Math.rint(d) || d < min || d > max)
         Left(s"${label(path)}: $d is not an integer of type ${c.getSimpleName}")
@@ -134,20 +126,28 @@ private[javaapi] object JavaRecords {
     }
   }
 
-  private val Integers: Set[Class[?]] = Set(
-    classOf[Int],
-    classOf[Integer],
-    classOf[Long],
-    classOf[java.lang.Long],
-    classOf[Short],
-    classOf[java.lang.Short],
-    classOf[Byte],
-    classOf[java.lang.Byte]
-  )
+  /** Each integer type, primitive and boxed: its range, and how a whole `double` becomes one. */
+  private val Integers: Map[Class[?], (Double, Double, Double => Any)] = {
+    val int: (Double, Double, Double => Any)   = (Int.MinValue.toDouble, Int.MaxValue.toDouble, _.toInt)
+    val long: (Double, Double, Double => Any)  = (Long.MinValue.toDouble, Long.MaxValue.toDouble, _.toLong)
+    val short: (Double, Double, Double => Any) = (Short.MinValue.toDouble, Short.MaxValue.toDouble, _.toShort)
+    val byte: (Double, Double, Double => Any)  = (Byte.MinValue.toDouble, Byte.MaxValue.toDouble, _.toByte)
+    Map(
+      classOf[Int]             -> int,
+      classOf[Integer]         -> int,
+      classOf[Long]            -> long,
+      classOf[java.lang.Long]  -> long,
+      classOf[Short]           -> short,
+      classOf[java.lang.Short] -> short,
+      classOf[Byte]            -> byte,
+      classOf[java.lang.Byte]  -> byte
+    )
+  }
   private def isInteger(c: Class[?]): Boolean = Integers.contains(c)
+  private val Booleans: Set[Class[?]]         = Set(classOf[Boolean], classOf[java.lang.Boolean])
   private def isNumber(c: Class[?]): Boolean =
     Set[Class[?]](classOf[Double], classOf[java.lang.Double], classOf[Float], classOf[java.lang.Float]).contains(c)
-  private def isBoolean(c: Class[?]): Boolean = c == classOf[Boolean] || c == classOf[java.lang.Boolean]
+  private def isBoolean(c: Class[?]): Boolean = Booleans.contains(c)
 
   private def isList(p: ParameterizedType): Boolean     = p.getRawType == classOf[java.util.List[?]]
   private def isOptional(p: ParameterizedType): Boolean = p.getRawType == classOf[Optional[?]]
@@ -168,8 +168,7 @@ private[javaapi] object JavaRecords {
     case _: ujson.Num  => "a number"
     case _: ujson.Bool => "a boolean"
     case _: ujson.Arr  => "an array"
-    case _: ujson.Obj  => "an object"
-    case _             => "null"
+    case _             => "an object" // null never gets here: it is read before the type is checked
   }
 
   @scala.annotation.tailrec

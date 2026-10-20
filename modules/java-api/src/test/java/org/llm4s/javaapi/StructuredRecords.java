@@ -32,5 +32,11 @@ public final class StructuredRecords {
 
     public record Node(String name, List<Node> children) {}
 
+    public record Positive(int n) {
+        public Positive {
+            if (n < 0) throw new IllegalArgumentException("n must not be negative");
+        }
+    }
+
     public record Boxed(Integer count, Double ratio, Boolean flag, short small, float f) {}
 }

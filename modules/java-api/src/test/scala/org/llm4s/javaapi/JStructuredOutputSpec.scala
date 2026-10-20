@@ -113,6 +113,34 @@ class JStructuredOutputSpec extends AnyFlatSpec with Matchers {
       include("field 'address': expected an object, got an array")
   }
 
+  it should "name the expected and the received JSON type for every kind of field" in {
+    def fails(from: String, to: String) = failure(ask(customerJson.replace(from, to), classOf[Customer]))
+    fails("\"score\":9.5", "\"score\":\"high\"") should include("field 'score': expected a number, got a string")
+    fails("\"active\":true", "\"active\":\"yes\"") should include("field 'active': expected a boolean, got a string")
+    fails("\"tier\":\"PRO\"", "\"tier\":1") should include("field 'tier': expected a string, got a number")
+    fails("\"tags\":[\"math\",\"code\"]", "\"tags\":{}") should include(
+      "field 'tags': expected an array, got an object"
+    )
+    fails("\"name\":\"Ada\"", "\"name\":true") should include("field 'name': expected a string, got a boolean")
+  }
+
+  it should "name the answer itself when it is not an object" in {
+    failure(ask("[1, 2]", classOf[Address])) should include("the answer: expected an object, got an array")
+  }
+
+  it should "report a record constructor that refuses the values, with its reason" in {
+    failure(ask("""{"n":-1}""", classOf[Positive])) should include(
+      "could not build org.llm4s.javaapi.StructuredRecords$Positive: n must not be negative"
+    )
+    ask("""{"n":2}""", classOf[Positive]).get() shouldBe new Positive(2)
+  }
+
+  it should "refuse, in JavaRecords.read too, a component type it cannot read without the schema check first" in {
+    JavaRecords.read(classOf[WithMap], ujson.Obj("values" -> ujson.Obj())) shouldBe Left(
+      "field 'values': java.util.Map<java.lang.String, java.lang.String> is not supported"
+    )
+  }
+
   it should "refuse a null for a field that is not an Optional" in {
     failure(ask(customerJson.replace("\"name\":\"Ada\"", "\"name\":null"), classOf[Customer])) should include(
       "field 'name' is null"
