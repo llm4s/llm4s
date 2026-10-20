@@ -582,6 +582,10 @@ section listing each subagent's id and description.
   - Check the depth. `origin.depth + 1 <= maxDepth`, and delegation must be granted (rule 15). `maxDepth` is the
     **root's**: a delegating child is built with its parent's `DelegationConfig` (a `TypedAgent` has none of its
     own), so every level checks the same absolute cap and no descendant can raise an ancestor's bound.
+  - **One `DelegationConfig` per handoff family.** A handoff target is its own builder and could set its own
+    bounds, which would raise `maxDepth` or `maxTasksPerTurn` mid-turn. So `build()` refuses a handoff family whose
+    agents' resolved `DelegationConfig`s differ (an agent that sets none takes the family's): the whole turn runs
+    under one depth cap and one task cap whichever agent is active.
   - Acquire a slot from the parent run's semaphore of `maxConcurrentChildren` permits. It is keyed by
     `RunContext.incarnation` and acquired interruptibly. A call over the bound waits; it is not refused.
   - Run `ChildRunner`.
@@ -640,7 +644,9 @@ Tests:
 - **Permissions (rule 15).** At `bind`, the child's stack gets an `AncestorPermissions` middleware, outermost, built
   from every ancestor's `PermissionMiddleware` rules.
   - Permission middleware reaches a child **only** this way: naming a `PermissionMiddleware` id in
-    `Inheritance.middleware` is refused at `build()`, so one policy is never evaluated twice.
+    `Inheritance.middleware` is refused at `build()`, so one policy is never evaluated twice. Likewise the
+    `delegation` middleware and the task tools can never be granted (refused at `build()`): a child delegates
+    only through its own subagents, under the `delegate` grant.
   - A call runs only if each ancestor's rules allow it, and then the child's own.
   - `Deny` anywhere denies. `Ask` anywhere asks once (D3), and the approval covers every level, as an edited call is
     evaluated again by every level.
