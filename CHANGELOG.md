@@ -146,6 +146,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** a lightweight RFC process for public API changes ([docs/rfcs](docs/rfcs/README.md)): when one is required, a
   template, a 7-day final comment period, an index with the earlier frozen-API decisions, and RFC 0001 on when
   `llm4s-agent` gets its MiMa baseline [#1480](https://github.com/llm4s/llm4s/issues/1480).
+- **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
+  [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
+  and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
 
 ### Memory
 

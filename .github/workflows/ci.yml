@@ -129,6 +129,11 @@ jobs:
       - name: Test that the required workflows run in a merge queue
         run: scripts/test-merge-queue-workflows.sh
 
+      # The dependency-footprint table in docs/reference/dependency-conflicts.md (#1496): the script against a fake `cs`,
+      # with no network.
+      - name: Test the dependency-footprint script
+        run: scripts/test-dependency-footprint.sh
+
       # Which pull requests run the workspace tier (#1982): scripts/workspace-tier-changes.sh against scratch git repos.
       - name: Test the workspace-tier change detection
         run: scripts/test-workspace-tier-changes.sh
