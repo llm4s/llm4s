@@ -806,8 +806,11 @@ Tests:
     has missed that child's earlier live events, which are never replayed. At attach it gets, for each child
     running then, `TaskStarted` for that child's current run followed by one `Nested(child, LiveGap(0))`, then the
     child's events from there. The same goes for a child already settled whose call's result the parent has not
-    yet committed (its `TaskEnded` still to come): `TaskStarted`, the gap, then `TaskEnded`. So a late subscriber
-    never sees a `TaskEnded` without its `TaskStarted`. The every-event guarantee holds only for subscriptions in place before the child
+    yet committed (its `TaskEnded` still to come): `TaskStarted`, the gap, then `TaskEnded`. That covers every
+    child still live at attach. A `TaskEnded` already committed before attach comes from durable replay, where
+    no `TaskStarted` exists (it is live-only, never stored): replay delivers that `TaskEnded` alone. It carries the
+    full `ChildRef`, so a consumer needs no prior start to place it. Live `TaskStarted`/`TaskEnded` pairing is
+    promised from attach onward, not for replayed history. The every-event guarantee holds only for subscriptions in place before the child
     was admitted (`stream`'s).
 - **Tracing.**
   - A child's `AgentTracing` is the parent's `Tracing` (rule 16).
