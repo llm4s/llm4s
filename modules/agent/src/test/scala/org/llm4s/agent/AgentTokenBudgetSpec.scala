@@ -265,5 +265,10 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     outcome.get shouldBe Some(true)
     result.answer shouldBe Some("done")
     result.usage.requestCount shouldBe 2
+
+    // a null message list with calls only on the completion: the calls' arguments are still charged
+    val big     = ToolCall("c1", "echo", ujson.Obj("text" -> ("lorem ipsum dolor sit amet " * 200)))
+    val topOnly = malformed.withToolCalls(List(big))
+    ModelContext.estimated(topOnly, Seq(UserMessage("go")), Nil).completionTokens should be > 500
   }
 }
