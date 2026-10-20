@@ -137,6 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
 - **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with
   tests pinning it, in `SafeParameterExtractor`, `ToolCall` and the structured-output limits [#1597](https://github.com/llm4s/llm4s/issues/1597).
+- **Added** a lightweight RFC process for public API changes ([docs/rfcs](docs/rfcs/README.md)): when one is required, a
+  template, a 7-day final comment period, an index with the earlier frozen-API decisions, and RFC 0001 on when
+  `llm4s-agent` gets its MiMa baseline [#1480](https://github.com/llm4s/llm4s/issues/1480).
 
 ### Memory
 

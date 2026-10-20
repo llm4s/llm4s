@@ -109,6 +109,8 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
    - Search [existing issues](https://github.com/llm4s/llm4s/issues) to avoid duplicates
    - Use [issue templates](https://github.com/llm4s/llm4s/issues/new/choose) for bugs, features, or enhancements
    - Wait for maintainer feedback before coding
+   - Changing a Frozen module's public API, a module's tier, an SPI or a wire format? Propose it as an
+     [RFC](docs/rfcs/README.md) first
 
 3. **Make your changes:**
    - Follow code conventions in [CLAUDE.md](CLAUDE.md)
