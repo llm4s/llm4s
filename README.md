@@ -96,6 +96,10 @@ The path to 1.0 is focused on stable API boundaries, provider capability parity 
 - **Performance**: JVM speed with functional elegance.
 - **Ecosystem Interoperability**: Seamless integration with enterprise JVM systems and cloud-native tooling.
 
+Choosing between JVM libraries? [Comparing LLM4S](https://llm4s.org/guide/comparison) sets LLM4S beside LangChain4j,
+Spring AI, Koog and Embabel, with a source and a date for every claim, and
+[Migrating from LangChain4j](https://llm4s.org/guide/migrating-from-langchain4j) maps its concepts to LLM4S.
+
 ## Features
 
 - **Multi-Provider Support**: Connect to multiple LLM providers, including OpenAI, Anthropic, Azure OpenAI, Google Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Requesty, Z.ai, and Ollama.
