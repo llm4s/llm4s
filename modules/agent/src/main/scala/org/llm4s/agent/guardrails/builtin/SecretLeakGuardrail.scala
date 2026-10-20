@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory
  *  - AWS Access Key IDs (AKIA...)
  *  - JWT tokens (eyJ...eyJ...sig)
  *
- * Behaviour is controlled by [[GuardrailAction]]:
+ * Behaviour is controlled by [[org.llm4s.agent.guardrails.GuardrailAction GuardrailAction]]:
  *  - `Block` (default) – reject the text and return a `Left` error.
  *  - `Fix`             – replace secrets with typed placeholders and continue
  *                        (e.g. `[REDACTED_OPENAI_KEY]`).

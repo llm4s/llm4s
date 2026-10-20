@@ -9,12 +9,12 @@ import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig,
 import org.llm4s.types.Result
 
 /**
- * cats-effect wrapper for [[Agent]].
+ * cats-effect wrapper for [[org.llm4s.agent.Agent Agent]].
  *
  * Lifts every `Result[AgentResult]` into `F[AgentResult]`, raising an `LLMError` as
  * [[LLMException]] in the error channel. `run` and `continueConversation` start the turn on a
  * blocking thread and then await it, so cancelling the fiber cancels the turn itself
- * ([[AgentRun.cancel]]) and returns once it has ended: its model call and tool calls are interrupted, and the thread is left for
+ * ([[org.llm4s.agent.AgentRun.cancel AgentRun.cancel]]) and returns once it has ended: its model call and tool calls are interrupted, and the thread is left for
  * `recover`. `recover` and `resume` do the same through `Agent.startRecover` and `Agent.startResume`.
  *
  * `stream`, `streamResume` and `streamRecover` run a turn as an fs2 stream of its events
@@ -30,21 +30,21 @@ import org.llm4s.types.Result
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it is
  * raised as an [[LLMException]], not as the raw throwable.
  *
- * Intentionally a thin wrapper: build the [[Agent]] with its tools, middleware (guardrails),
+ * Intentionally a thin wrapper: build the [[org.llm4s.agent.Agent Agent]] with its tools, middleware (guardrails),
  * handoffs and options through `Agent.builder`, or `LLMClientIO.agent`.
  */
 trait AgentIO[F[_]] {
 
-  /** One turn on a new thread; see [[Agent.run]]. */
+  /** One turn on a new thread; see [[org.llm4s.agent.Agent.run Agent.run]]. */
   def run(query: String, config: RunConfig = RunConfig()): F[AgentResult]
 
-  /** The next turn on `previous`'s thread; see [[Agent.continueConversation]]. */
+  /** The next turn on `previous`'s thread; see [[org.llm4s.agent.Agent.continueConversation Agent.continueConversation]]. */
   def continueConversation(previous: AgentResult, query: String, config: RunConfig = RunConfig()): F[AgentResult]
 
-  /** Continues `threadId`'s failed or interrupted run; see [[Agent.recover]]. */
+  /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): F[AgentResult]
 
-  /** Answers pending approvals and questions and continues; see [[Agent.resume]]. */
+  /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
@@ -52,7 +52,7 @@ trait AgentIO[F[_]] {
   ): F[AgentResult]
 
   /**
-   * One turn on `threadId`, as a stream: every event of the turn ([[Agent.stream]]), then
+   * One turn on `threadId`, as a stream: every event of the turn ([[org.llm4s.agent.Agent.stream Agent.stream]]), then
    * `Done(result)`. A refused start or a failed turn raises [[LLMException]]; so does a subscription
    * that disconnects (its listener failed). A slow consumer loses live events and gets a
    * `StreamEvent.LiveGap` instead; it does not cancel the run. Interrupting the stream cancels the
@@ -78,7 +78,7 @@ trait AgentIO[F[_]] {
 
   /**
    * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
-   * order. It observes the run, through [[AgentRun.subscribe]]: it replays the run's durable events
+   * order. It observes the run, through [[org.llm4s.agent.AgentRun.subscribe AgentRun.subscribe]]: it replays the run's durable events
    * from its start and then follows it live, but misses the live events sent before the stream
    * started - use [[stream]] to see every one. It ends after the run's terminal event, or once a run
    * that ends without one has delivered its last event; the run's own outcome is not raised - await
@@ -112,7 +112,7 @@ object AgentIO {
    */
   private val StreamBufferSize = 256
 
-  /** Wraps an already-constructed [[Agent]]. */
+  /** Wraps an already-constructed [[org.llm4s.agent.Agent Agent]]. */
   def apply[F[_]: Async](agent: Agent): AgentIO[F] = new Impl[F](agent)
 
   final private class Impl[F[_]](agent: Agent)(using F: Async[F]) extends AgentIO[F] {

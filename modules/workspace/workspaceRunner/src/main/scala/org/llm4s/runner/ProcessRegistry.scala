@@ -1,4 +1,4 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
+// scalafix:off DisableSyntax.NoKeywordFinally
 package org.llm4s.runner
 
 import org.llm4s.shared.WorkspaceAgentException

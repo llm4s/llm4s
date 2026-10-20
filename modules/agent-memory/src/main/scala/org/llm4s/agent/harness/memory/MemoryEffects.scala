@@ -14,7 +14,7 @@ private[memory] object MemoryEffects:
   /** C4's key as the store's: its scope and value. */
   def keyOf(key: EffectKey): AppliedWriteKey = AppliedWriteKey(key.scope, key.value)
 
-  /** The guard stores and replays the outcome with [[AppliedWrite]]'s own versioned JSON. */
+  /** The guard stores and replays the outcome with [[org.llm4s.agent.memory.AppliedWrite AppliedWrite]]'s own versioned JSON. */
   given ReadWriter[AppliedWrite] =
     upickle.default
       .readwriter[ujson.Value]

@@ -33,7 +33,7 @@ import scala.jdk.DurationConverters.*
  * The client then comes from [[Llm4s.createClient]], with the collector the builder was given, as for a config a
  * caller made.
  *
- * Every check of the caller's values is a [[ValidationError]] naming the builder's field, so a Java caller reads one
+ * Every check of the caller's values is a [[org.llm4s.error.ValidationError ValidationError]] naming the builder's field, so a Java caller reads one
  * kind, `VALIDATION`, for anything it set wrong or left out.
  */
 private[javaapi] object ClientBuilds {

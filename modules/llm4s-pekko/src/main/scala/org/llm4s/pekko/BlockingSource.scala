@@ -71,7 +71,7 @@ private[pekko] object BlockingSource {
 
   /**
    * A source of the items `newProducer()` produces. `newProducer` is called once per materialization.
-   * A `capacity` below 1 gives a stream that fails at once with a [[ValidationError]]. `beforeEnd` is a test hook,
+   * A `capacity` below 1 gives a stream that fails at once with a [[org.llm4s.error.ValidationError ValidationError]]. `beforeEnd` is a test hook,
    * called on the producer's thread with the materialized `Future[Done]` just before the stream can see how the
    * producer ended; it lets a spec hold the producer there and check the ordering deterministically. `startThread`
    * is a test hook too: it starts the producer's thread, and lets a spec make that start fail as the JVM can (an

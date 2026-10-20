@@ -9,7 +9,7 @@ import org.llm4s.types.Result
  * A tracing backend: what one integration contributes to `Tracing.create`.
  *
  * `Tracing.create` builds the two backends that need nothing beyond core -
- * `NoOp` and `Console` - itself, and hands every other [[TracingMode]] to the
+ * `NoOp` and `Console` - itself, and hands every other [[org.llm4s.trace.TracingMode TracingMode]] to the
  * backend registered for it. Adding a backend is then adding a dependency, with
  * no edit to core: the same arrangement slice 4 gave providers (#1131, #1133).
  *
@@ -41,7 +41,7 @@ trait TracingBackend:
 
   /**
    * The mode this backend serves. A backend outside core uses
-   * `TracingMode.Named`; matching is by [[TracingMode.name]], case-insensitively.
+   * `TracingMode.Named`; matching is by [[org.llm4s.trace.TracingMode.name TracingMode.name]], case-insensitively.
    */
   def mode: TracingMode
 

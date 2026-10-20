@@ -20,7 +20,7 @@ import scala.concurrent.duration.*
  * The clock, the sleep and the random source are parameters so a test runs it without waiting.
  *
  * @param nanoTime a monotonic clock in nanoseconds
- * @param sleep    pauses the calling thread; an interrupt during a pause ends the call with a [[CancelledError]]
+ * @param sleep    pauses the calling thread; an interrupt during a pause ends the call with a [[org.llm4s.error.CancelledError CancelledError]]
  * @param random   a random number in `[0, 1)`
  */
 final private[jev] class JevRetry(

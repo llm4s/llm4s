@@ -27,7 +27,7 @@ object GraphQueryToolResult {
 /**
  * Agent tool integration for graph-guided question answering.
  *
- * Wraps [[GraphQAPipeline]] as a [[ToolFunction]] that an Agent can call to query
+ * Wraps [[org.llm4s.knowledgegraph.query.GraphQAPipeline GraphQAPipeline]] as a [[org.llm4s.toolapi.ToolFunction ToolFunction]] that an Agent can call to query
  * a knowledge graph using natural language. The tool accepts a question and optional
  * configuration, executes the full QA pipeline, and returns the answer with citations.
  *

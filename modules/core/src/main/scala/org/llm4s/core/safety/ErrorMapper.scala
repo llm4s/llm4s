@@ -17,18 +17,18 @@ trait ErrorMapper {
  *
  * A cancellation - mapped while the current thread is interrupted, or caused by an
  * `InterruptedException` or `ClosedByInterruptException` (see `CancelledError.isCancellation`) -
- * becomes a [[CancelledError]]. Mapping classifies only and never sets the interrupt flag: it may
+ * becomes a [[org.llm4s.error.CancelledError CancelledError]]. Mapping classifies only and never sets the interrupt flag: it may
  * run on a thread other than the interrupted one, such as a `Future` callback's pool thread.
  *
- * An exception whose message names HTTP status 401 becomes an [[AuthenticationError]] (code `401`,
- * carrying the redacted message), and one naming 429 a [[RateLimitError]]; 401 wins when a message
+ * An exception whose message names HTTP status 401 becomes an [[org.llm4s.error.AuthenticationError AuthenticationError]] (code `401`,
+ * carrying the redacted message), and one naming 429 a [[org.llm4s.error.RateLimitError RateLimitError]]; 401 wins when a message
  * names both. A message names a status only in an HTTP context, at a word boundary: after `HTTP`,
  * `status`, `status code`, `http status`, `error code` or `response code`, optionally quoted as a
  * JSON key (`HTTP 401`, `Status Code: 429`, `"status": 401`, `http_status=429`), before its reason
  * phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the message as `openai-java` and
  * `anthropic-java` write it (`401: <body>`, also behind up to eight wrapping exceptions'
  * `ClassName: `). A message that merely contains the digits - an index, an id, a port or a count -
- * is an [[UnknownError]] carrying the exception as its cause, as is anything else not matched above.
+ * is an [[org.llm4s.error.UnknownError UnknownError]] carrying the exception as its cause, as is anything else not matched above.
  *
  * Known false positive: that last, SDK shape carries no other HTTP marker, so any message that
  * starts with `401: ` or `429: ` (optionally behind `SomeException: ` prefixes) is classified, even
@@ -39,7 +39,7 @@ trait ErrorMapper {
  *
  * The message of every error built here is redacted and capped (`Redaction.safeBody`), since an
  * exception's message often echoes a provider's response body and with it a request header or a key.
- * The cause is not: an [[UnknownError]] keeps the original exception, whose own `getMessage` and stack
+ * The cause is not: an [[org.llm4s.error.UnknownError UnknownError]] keeps the original exception, whose own `getMessage` and stack
  * trace are unredacted. A logger or handler that prints the cause (`logger.error(msg, err.cause)`,
  * `printStackTrace`) writes that text in the clear.
  */

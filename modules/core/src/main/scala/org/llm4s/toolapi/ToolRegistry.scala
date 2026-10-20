@@ -213,7 +213,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             // (the caller's own timeoutError below still resolves the promise), but the
             // uncaught exception would otherwise propagate to this virtual thread's
             // default uncaught-exception handler for no useful purpose.
-            // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+            // scalafix:off DisableSyntax.NoKeywordCatch
             val resultOrEx: Either[Throwable, Either[ToolCallError, ujson.Value]] =
               try Right(runOneAttempt(request))
               catch {

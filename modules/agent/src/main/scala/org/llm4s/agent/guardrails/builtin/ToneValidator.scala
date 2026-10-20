@@ -45,7 +45,7 @@ object Tone {
 /**
  * Rejects LLM output whose detected [[Tone]] is not in an allowed set.
  *
- * An [[OutputGuardrail]] only: it checks what the model says, not what the user sends. Detection is a fixed
+ * An [[org.llm4s.agent.guardrails.OutputGuardrail OutputGuardrail]] only: it checks what the model says, not what the user sends. Detection is a fixed
  * keyword heuristic with no model call, so it is fast and deterministic, and it is crude. For a judgement that
  * understands context, use [[LLMToneGuardrail]] instead.
  *

@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory
  *
  * Text modality selection is intentionally disallowed here; callers should
  * load text embedding models through their typed config layer. Image, audio,
- * and video modalities are resolved from the supplied [[LocalEmbeddingModels]] config.
+ * and video modalities are resolved from the supplied [[org.llm4s.llmconnect.config.LocalEmbeddingModels LocalEmbeddingModels]] config.
  */
 @Stable
 object ModelSelector {
@@ -24,11 +24,11 @@ object ModelSelector {
    *
    * Text modality returns an error since text model selection is configuration-driven.
    * Image, audio, and video modalities resolve against the supplied local-model configuration
-   * and look up dimensions from the [[ModelDimensionRegistry]].
+   * and look up dimensions from the [[org.llm4s.llmconnect.config.ModelDimensionRegistry ModelDimensionRegistry]].
    *
    * @param modality the input modality to select a model for
    * @param localModels local model configuration containing model names per modality
-   * @return the resolved [[EmbeddingModelConfig]] or an error
+   * @return the resolved [[org.llm4s.llmconnect.config.EmbeddingModelConfig EmbeddingModelConfig]] or an error
    */
   def selectModel(modality: Modality, localModels: LocalEmbeddingModels): Result[EmbeddingModelConfig] =
     modality match {

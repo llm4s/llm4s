@@ -22,9 +22,9 @@ import scala.util.control.NonFatal
  * last as long as the server liked, whatever [[MCPServerConfig.timeout]] said.
  *
  * When `deadline` passes, the stream is closed from a timer thread. A read blocked on it wakes, and
- * every read from then on is a [[TimeoutError]]. Closing the stream before its end also abandons the
+ * every read from then on is a [[org.llm4s.error.TimeoutError TimeoutError]]. Closing the stream before its end also abandons the
  * connection, so the server sees the client leave. An interrupt of the reading thread stays a
- * [[CancelledError]], with the flag kept, as for any other `Llm4sHttpClient` stream read.
+ * [[org.llm4s.error.CancelledError CancelledError]], with the flag kept, as for any other `Llm4sHttpClient` stream read.
  *
  * The body is also bounded in size ([[https://github.com/llm4s/llm4s/issues/1846 #1846]]): [[readAll]] and
  * [[readLine]] refuse to hold more than `maxChars` characters, so a server cannot make the client buffer an

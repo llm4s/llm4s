@@ -12,7 +12,7 @@ import scala.concurrent.ExecutionContext
 
 /**
  * `TuiApp` for the chat-tui demo. Threads the immutable [[ChatTuiConfig]],
- * the resolved [[LLMClient]], and the registered tools through the runtime
+ * the resolved [[org.llm4s.llmconnect.LLMClient LLMClient]], and the registered tools through the runtime
  * via constructor parameters; every `update` call has access to all three
  * without further env wiring.
  */
@@ -23,6 +23,7 @@ final class ChatTuiApp(
 )(using ec: ExecutionContext)
     extends TuiApp[Model, Msg]:
 
+  /** Subscribes to key input and terminal resizes, and builds the initial model. */
   override def init(ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
     Sub.InputKey(Msg.ConsoleInputKey.apply, Msg.ConsoleInputError.apply, ctx)
     Sub.TerminalResize(250L, Msg.Resize.apply, ctx)
@@ -49,8 +50,10 @@ final class ChatTuiApp(
   override def update(model: Model, msg: Msg, ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
     ChatTuiUpdate(registry, model, msg, ctx)
 
+  /** Renders the model. */
   override def view(model: Model): RootNode = ChatTuiView.view(model)
 
+  /** Turns a submitted prompt line into a message. */
   override def toMsg(input: PromptLine): Result[Msg] =
     // Note: this is the fallback used when the runtime parses input outside
     // of a focused PromptHistory — the prompt itself routes through

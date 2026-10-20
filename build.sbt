@@ -161,8 +161,9 @@ lazy val commonSettings = Seq(
   // The Java sources (core's annotations, java-api's value types and enums) at the same JDK 21 bytecode level as the
   // Scala ones (`Common.javaRelease`, #1493), whichever JDK runs the build.
   javacOptions ++= Seq("--release", javaRelease),
-  // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
-  Compile / doc / scalacOptions ++= Seq("-Wconf:cat=scaladoc:silent"),
+  // No `-Wconf` for `doc`: Scala 3's Scaladoc skips `-Wconf` and `-Werror` ("Skipping unused scalacOptions"), so
+  // they can neither silence nor fail a Scaladoc warning. CI's ScalaDoc job fails on a warning in an llm4s source
+  // with scripts/check-scaladoc-warnings.sh instead (#1967).
   semanticdbEnabled                      := true,
   Test / scalafix / unmanagedSources     := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,

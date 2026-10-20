@@ -23,7 +23,7 @@ import scala.concurrent.duration.{ Duration, FiniteDuration }
  *
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
- * @param hints what the tool is likely to do, for a middleware to read; see [[ToolHints]]
+ * @param hints what the tool is likely to do, for a middleware to read; see [[org.llm4s.toolapi.ToolHints ToolHints]]
  * @param timeout how long one run of the tool may take; see [[withTimeout]]
  * @param resourcesOf what a call touches, from its decoded arguments; see [[withResources]]
  * @param locksOf the locks a call holds, from its decoded arguments, when the tool declares any; see [[withLocks]]
@@ -156,7 +156,7 @@ object AgentToolSpec:
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
 /**
- * What a tool call knows: the run, the call's id, the call's [[IdempotencyKey]], the thread state
+ * What a tool call knows: the run, the call's id, the call's [[org.llm4s.agent.graph.IdempotencyKey IdempotencyKey]], the thread state
  * it may read, and whether the call has been approved. Built with `ToolContext(...)`; a field added
  * later gets a default there and a `with*` setter, so existing callers keep compiling.
  *

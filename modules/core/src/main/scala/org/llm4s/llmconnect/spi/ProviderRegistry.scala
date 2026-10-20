@@ -364,13 +364,11 @@ object ProviderRegistry:
    *
    * @param what what was being attempted, used to build the failure's detail.
    */
-  // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
   private def guarded[A](what: => String)(body: => A): Either[ProviderDiscoveryFailure, A] =
     try Right(body)
     catch
       case error: LinkageError => Left(failureOf(what, error))
       case NonFatal(error)     => Left(failureOf(what, error))
-  // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 
   private def failureOf(what: String, error: Throwable): ProviderDiscoveryFailure =
     // The throwable's type is half the diagnosis at this boundary - `AbstractMethodError`

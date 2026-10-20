@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 
 /**
- * cats-effect wrapper for [[LLMClient]].
+ * cats-effect wrapper for [[org.llm4s.llmconnect.LLMClient LLMClient]].
  *
  * All blocking LLM calls are shifted to the blocking thread pool via
  * `Async[F].interruptible`, keeping the compute pool free for fibers. Cancelling the fiber (or a
@@ -27,7 +27,7 @@ trait LLMClientIO[F[_]] {
   ): F[Completion]
 
   /**
-   * Streams chunks incrementally as an fs2 [[Stream]].
+   * Streams chunks incrementally as an fs2 `Stream`.
    *
    * The underlying blocking call runs on an interruptible blocking thread and pushes each chunk
    * into a bounded queue (backpressure: the provider thread blocks while the consumer lags).
@@ -57,13 +57,13 @@ object LLMClientIO {
    */
   private val StreamBufferSize = 64
 
-  /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
+  /** Wraps an already-constructed [[org.llm4s.llmconnect.LLMClient LLMClient]]. Does not manage its lifecycle. */
   def apply[F[_]: Async](underlying: LLMClient): LLMClientIO[F] =
     new Impl[F](underlying)
 
   /**
-   * Creates a [[Resource]] that acquires an [[LLMClient]] from the environment
-   * (via [[Llm4sConfig]]) on the blocking thread pool and releases it on scope exit.
+   * Creates a `Resource` that acquires an [[org.llm4s.llmconnect.LLMClient LLMClient]] from the environment
+   * (via [[org.llm4s.config.Llm4sConfig Llm4sConfig]]) on the blocking thread pool and releases it on scope exit.
    */
   def resource[F[_]](using F: Async[F]): Resource[F, LLMClientIO[F]] =
     Resource

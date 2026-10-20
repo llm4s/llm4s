@@ -21,7 +21,7 @@ import scala.util.{ Failure, Try }
  * usage as `TokenUsageRecorded(usage, model, "agent_completion")`, which it also sums into the run's
  * own usage (the shape of `AgentResult.usage`, for this run's calls only). On the run's terminal event it
  * takes the run's result from its handle (set just after the closing commit) and traces one
- * [[TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
+ * [[org.llm4s.trace.TraceEvent.AgentRunEnded TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
  * failed run also traces `ErrorOccurred`. A run that ends without a terminal event (a crash, or a
  * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered the run's
  * last event, at the run's end-of-run barrier, its error is traced as `ErrorOccurred` and logged at

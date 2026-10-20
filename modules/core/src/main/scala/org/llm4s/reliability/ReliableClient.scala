@@ -307,7 +307,7 @@ final class ReliableClient(
 
   /**
    * The outcome when the thread is interrupted while waiting to retry `pending`: always a
-   * [[CancelledError]], with the interrupt restored for the caller - whether the wait was a
+   * [[org.llm4s.error.CancelledError CancelledError]], with the interrupt restored for the caller - whether the wait was a
    * provider backoff or for a local token. A wait for a local token is noted in
    * `cancelledAwaitingToken`, so the circuit counts it as it would the local throttle.
    */
@@ -356,10 +356,10 @@ final class ReliableClient(
   /**
    * Record the outcome metric for an attempt that exhausted retries.
    *
-   * Skips [[RateLimitError]]s of [[RateLimitOrigin.LocalThrottle]] origin: those were
+   * Skips [[org.llm4s.error.RateLimitError RateLimitError]]s of [[org.llm4s.error.RateLimitOrigin.LocalThrottle RateLimitOrigin.LocalThrottle]] origin: those were
    * rejected by this client's own token bucket inside the retry loop (see `rateLimited`),
    * which already recorded its own
-   * [[ErrorKind.RateLimit]] event at the point of rejection. Recording it again here
+   * [[org.llm4s.metrics.ErrorKind.RateLimit ErrorKind.RateLimit]] event at the point of rejection. Recording it again here
    * would double-count the same event. Upstream-provider rate limits (the default
    * origin) are never recorded anywhere else, so they still go through.
    */

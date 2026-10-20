@@ -8,9 +8,9 @@ import org.llm4s.types.Result
 import java.util.Base64
 
 /**
- * What every chat client needs to map [[ContentPart]]s: a client describes the parts it sends as
+ * What every chat client needs to map [[org.llm4s.llmconnect.model.ContentPart ContentPart]]s: a client describes the parts it sends as
  * a partial function from part to its wire form, and a part it does not cover fails the request
- * with an [[UnsupportedContentPartError]] - never dropped, never sent as text.
+ * with an [[org.llm4s.error.UnsupportedContentPartError UnsupportedContentPartError]] - never dropped, never sent as text.
  */
 private[llm4s] object PartEncoding {
 

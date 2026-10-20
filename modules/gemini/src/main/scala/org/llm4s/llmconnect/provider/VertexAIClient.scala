@@ -45,7 +45,7 @@ import scala.util.{ Try, Using }
  *  - Tool results are sent as `functionResponse` parts keyed by function name.
  *  - Synthetic UUIDs are generated for tool-call IDs (Vertex AI does not return them).
  *
- * @param config         [[VertexAIConfig]] with project, location, model, and credential path.
+ * @param config         [[org.llm4s.llmconnect.config.VertexAIConfig VertexAIConfig]] with project, location, model, and credential path.
  * @param metrics        Receives per-call latency and token-usage events.
  * @param exchangeLogging Controls whether raw request/response bodies are recorded.
  * @param httpClient     HTTP client (injectable for testing).
@@ -443,7 +443,7 @@ class VertexAIClient(
     }
 
   /**
-   * Parse a streaming chunk into the parts it held and the [[StreamedChunk]]s they make: one per function call
+   * Parse a streaming chunk into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per function call
    * (a chunk holds a single call), or one when there is none. `textOffset` is the number of answer-text
    * characters streamed before this chunk, so a text signature records where it sits.
    */

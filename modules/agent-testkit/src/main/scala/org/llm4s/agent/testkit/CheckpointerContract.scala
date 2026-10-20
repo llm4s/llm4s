@@ -34,13 +34,13 @@ import scala.jdk.CollectionConverters.*
  * The cases are the ones the `Checkpointer` Scaladoc states, in three groups:
  *
  *  - '''The store''', called directly: commits applied atomically or not at all; a new checkpoint
- *    accepted only over the latest ([[GraphError.CheckpointConflict]]) and pending writes only for
- *    it ([[GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
+ *    accepted only over the latest ([[org.llm4s.agent.graph.GraphError.CheckpointConflict GraphError.CheckpointConflict]]) and pending writes only for
+ *    it ([[org.llm4s.agent.graph.GraphError.InvalidCommit GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
  *    reused, also after a refused commit, compaction or `deleteThread` - a new thread of a deleted
  *    thread's id is numbered on past the deleted thread's events, and a read from inside the deleted
- *    log is refused ([[GraphError.ThreadDeleted]]), also while waiting; compaction and
- *    [[GraphError.ReplayUnavailable]]; `deleteThread`, fenced by the current claim's token like a
- *    commit ([[GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
+ *    log is refused ([[org.llm4s.agent.graph.GraphError.ThreadDeleted GraphError.ThreadDeleted]]), also while waiting; compaction and
+ *    [[org.llm4s.agent.graph.GraphError.ReplayUnavailable GraphError.ReplayUnavailable]]; `deleteThread`, fenced by the current claim's token like a
+ *    commit ([[org.llm4s.agent.graph.GraphError.StaleClaim GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
  *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
  *    by age, by count and by event count, never the latest checkpoint; effect records (design §4.24) -
@@ -54,18 +54,18 @@ import scala.jdk.CollectionConverters.*
  *    holder as `takenOverFrom`), the tenant recorded on each claim - a holder named, in a refusal or as
  *    `takenOverFrom`, only to a claim of its own tenant, also across a reopen - renewal and release by the
  *    current token only, a refused claim leaving the live one as it was, and every commit refused
- *    with [[GraphError.StaleClaim]] unless it carries the current token - checked before any other
+ *    with [[org.llm4s.agent.graph.GraphError.StaleClaim GraphError.StaleClaim]] unless it carries the current token - checked before any other
  *    refusal, and including from many threads at once; one claim granted of many raced at once from
  *    as many stores over the storage ([[contenders]]); stored values kept apart from those callers
  *    pass in and are given back - and change notification:
  *    `awaitEventsAfter` returns what is there at once, returns a commit made meanwhile through
  *    this store or another over the same storage within about its `timeout`, returns empty when
  *    nothing lands, and ends its wait when interrupted.
- *  - '''Two runtimes over one store''': a second [[GraphRuntime]] is refused a thread whose run is
- *    live in the first ([[GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
+ *  - '''Two runtimes over one store''': a second [[org.llm4s.agent.graph.GraphRuntime GraphRuntime]] is refused a thread whose run is
+ *    live in the first ([[org.llm4s.agent.graph.GraphError.ThreadBusy GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
  *    the first run's completed tasks, and the first run's later commits are refused as stale, so it
- *    ends with [[GraphError.ClaimLost]] and leaves nothing in the thread; and of several
+ *    ends with [[org.llm4s.agent.graph.GraphError.ClaimLost GraphError.ClaimLost]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted; `updateState` and `fork` from a
  *    second runtime are refused while a run is live in the first, and fenced by their own claim; and
  *    a run a node blocks leaves nothing of its turn in the history; and a claim of another tenant on a
@@ -77,7 +77,7 @@ import scala.jdk.CollectionConverters.*
  *    runtime commits - in order, without gap or duplicate, when it joined before or mid-run - while
  *    runs alternate between the runtimes; resumes from a sequence number after its runtime restarts;
  *    never receives another runtime's live progress; stops watching the store when cancelled; and
- *    ends with [[DisconnectReason.TenantMismatch]], delivering nothing of it, when another runtime
+ *    ends with [[org.llm4s.agent.graph.DisconnectReason.TenantMismatch DisconnectReason.TenantMismatch]], delivering nothing of it, when another runtime
  *    creates the thread for another tenant.
  *
  * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`

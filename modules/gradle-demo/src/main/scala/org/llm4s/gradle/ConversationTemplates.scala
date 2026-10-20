@@ -21,7 +21,7 @@ import org.llm4s.types.Result
  */
 object ConversationTemplates {
 
-  /** Rejects a blank argument here, since [[Conversation.fromPrompts]] only trims ASCII whitespace. */
+  /** Rejects a blank argument here, since [[org.llm4s.llmconnect.model.Conversation.fromPrompts Conversation.fromPrompts]] only trims ASCII whitespace. */
   private def nonBlank(field: String, value: String): Result[String] =
     if (value.isBlank) Left(InvalidInputError(field, value, "must not be blank")) else Right(value)
 

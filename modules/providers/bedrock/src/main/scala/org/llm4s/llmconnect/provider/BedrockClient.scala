@@ -817,11 +817,11 @@ object BedrockClient {
       redacted.fold[ThinkingBlock](ThinkingBlock.Text(text.toString, signature))(ThinkingBlock.Redacted(_))
   }
 
-  /** Redacted reasoning is bytes on the wire; [[ThinkingBlock.Redacted]] holds them base64-encoded. */
+  /** Redacted reasoning is bytes on the wire; [[org.llm4s.llmconnect.model.ThinkingBlock.Redacted ThinkingBlock.Redacted]] holds them base64-encoded. */
   private[provider] def encodeRedacted(bytes: Array[Byte]): String =
     java.util.Base64.getEncoder.encodeToString(bytes)
 
-  /** The bytes of a [[ThinkingBlock.Redacted]]; data that is not base64 is sent as its UTF-8 bytes. */
+  /** The bytes of a [[org.llm4s.llmconnect.model.ThinkingBlock.Redacted ThinkingBlock.Redacted]]; data that is not base64 is sent as its UTF-8 bytes. */
   private[provider] def decodeRedacted(data: String): SdkBytes =
     SdkBytes.fromByteArray(
       Try(java.util.Base64.getDecoder.decode(data)).getOrElse(data.getBytes(java.nio.charset.StandardCharsets.UTF_8))

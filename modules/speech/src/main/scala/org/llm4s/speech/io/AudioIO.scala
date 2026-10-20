@@ -11,7 +11,7 @@ import org.llm4s.types.TryOps
 
 object AudioIO {
 
-  /** Audio could not be saved; a [[NonRecoverableError]], as a core `ProcessingError` is. */
+  /** Audio could not be saved; a [[org.llm4s.error.NonRecoverableError NonRecoverableError]], as a core `ProcessingError` is. */
   sealed trait AudioIOError extends LLMError with NonRecoverableError
   final case class SaveFailed(message: String, override val context: Map[String, String] = Map.empty)
       extends AudioIOError

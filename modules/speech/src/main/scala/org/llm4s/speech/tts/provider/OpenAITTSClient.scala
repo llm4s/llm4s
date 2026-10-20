@@ -13,8 +13,8 @@ import scala.concurrent.duration._
  * OpenAI text-to-speech (`POST /v1/audio/speech`).
  *
  * Asks for `response_format = pcm`, which OpenAI documents as raw 24 kHz, 16-bit, mono
- * little-endian samples, so [[GeneratedAudio.data]] is headerless PCM described by an honest
- * [[AudioMeta]] - the same shape [[org.llm4s.speech.tts.Tacotron2TextToSpeech]] produces. Write it out
+ * little-endian samples, so [[org.llm4s.speech.GeneratedAudio.data GeneratedAudio.data]] is headerless PCM described by an honest
+ * [[org.llm4s.speech.AudioMeta AudioMeta]] - the same shape [[org.llm4s.speech.tts.Tacotron2TextToSpeech]] produces. Write it out
  * with [[org.llm4s.speech.io.WavFileGenerator.saveAsWav]].
  *
  * With `options.outputFormat = AudioFormat.Mp3` it asks for `response_format = mp3` instead and returns

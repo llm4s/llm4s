@@ -31,7 +31,7 @@ import org.llm4s.util.Redaction
  * candidate stopped for safety or recitation, a body that is not Gemini JSON) is an
  * [[org.llm4s.error.APIError]] too, never a made-up description.
  *
- * @param config [[GeminiVisionConfig]] containing the API key, model, and base URL.
+ * @param config [[org.llm4s.imageprocessing.config.GeminiVisionConfig GeminiVisionConfig]] containing the API key, model, and base URL.
  * @param httpClient the HTTP transport; defaults to the JDK client honouring `config.connectTimeoutSeconds`.
  */
 class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient)
@@ -49,7 +49,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
    *
    * @param imagePath Path to the image file to analyse.
    * @param prompt    Optional custom prompt; a default comprehensive prompt is used when absent.
-   * @return Either an [[LLMError]] on failure or an [[ImageAnalysisResult]].
+   * @return Either an [[org.llm4s.error.LLMError LLMError]] on failure or an [[org.llm4s.imageprocessing.ImageAnalysisResult ImageAnalysisResult]].
    */
   override def analyzeImage(
     imagePath: String,
@@ -107,7 +107,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
    * Detects the MIME media type of the image from its file extension.
    *
    * @param imagePath Path to the image file.
-   * @return [[MediaType]] inferred from the file extension (defaults to JPEG).
+   * @return [[org.llm4s.media.MediaType MediaType]] inferred from the file extension (defaults to JPEG).
    */
   def detectMediaType(imagePath: String): ImageMediaType =
     MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)

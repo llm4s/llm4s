@@ -85,7 +85,7 @@ private[runner] object ProgramResolver {
   val ExecutableNotAllowed = "EXECUTABLE_NOT_ALLOWED"
   val ExecutableNotFound   = "EXECUTABLE_NOT_FOUND"
 
-  /** The name an allowlist entry or a command's first word is matched by; see [[WorkspaceSandboxConfig.programKey]]. */
+  /** The name an allowlist entry or a command's first word is matched by; see [[org.llm4s.shared.WorkspaceSandboxConfig.programKey WorkspaceSandboxConfig.programKey]]. */
   def programKey(name: String, windows: Boolean): String = WorkspaceSandboxConfig.programKey(name, windows)
 
   /**

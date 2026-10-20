@@ -8,11 +8,11 @@ import zio.ZIO
 import zio.stream.ZStream
 
 /**
- * ZIO wrapper for [[Agent]].
+ * ZIO wrapper for [[org.llm4s.agent.Agent Agent]].
  *
  * Lifts every `Result[AgentResult]` into `ZIO[Any, LLMError, AgentResult]`. `run` and
  * `continueConversation` start the turn on ZIO's blocking pool and then await it, so interrupting
- * the fiber cancels the turn itself ([[AgentRun.cancel]]) and returns once it has ended: its model call and tool calls are
+ * the fiber cancels the turn itself ([[org.llm4s.agent.AgentRun.cancel AgentRun.cancel]]) and returns once it has ended: its model call and tool calls are
  * interrupted, and the thread is left for `recover`. `recover` and `resume` do the same through
  * `Agent.startRecover` and `Agent.startResume`.
  *
@@ -29,25 +29,25 @@ import zio.stream.ZStream
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it
  * fails the effect with that error, not as a defect.
  *
- * Intentionally a thin wrapper: build the [[Agent]] with its tools, middleware (guardrails),
+ * Intentionally a thin wrapper: build the [[org.llm4s.agent.Agent Agent]] with its tools, middleware (guardrails),
  * handoffs and options through `Agent.builder`, or `LLMClientZ.agent`.
  */
 trait AgentZ {
 
-  /** One turn on a new thread; see [[Agent.run]]. */
+  /** One turn on a new thread; see [[org.llm4s.agent.Agent.run Agent.run]]. */
   def run(query: String, config: RunConfig = RunConfig()): ZIO[Any, LLMError, AgentResult]
 
-  /** The next turn on `previous`'s thread; see [[Agent.continueConversation]]. */
+  /** The next turn on `previous`'s thread; see [[org.llm4s.agent.Agent.continueConversation Agent.continueConversation]]. */
   def continueConversation(
     previous: AgentResult,
     query: String,
     config: RunConfig = RunConfig()
   ): ZIO[Any, LLMError, AgentResult]
 
-  /** Continues `threadId`'s failed or interrupted run; see [[Agent.recover]]. */
+  /** Continues `threadId`'s failed or interrupted run; see [[org.llm4s.agent.Agent.recover Agent.recover]]. */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): ZIO[Any, LLMError, AgentResult]
 
-  /** Answers pending approvals and questions and continues; see [[Agent.resume]]. */
+  /** Answers pending approvals and questions and continues; see [[org.llm4s.agent.Agent.resume Agent.resume]]. */
   def resume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
@@ -55,7 +55,7 @@ trait AgentZ {
   ): ZIO[Any, LLMError, AgentResult]
 
   /**
-   * One turn on `threadId`, as a stream: every event of the turn ([[Agent.stream]]), then
+   * One turn on `threadId`, as a stream: every event of the turn ([[org.llm4s.agent.Agent.stream Agent.stream]]), then
    * `Done(result)`. A refused start or a failed turn fails the stream with the `LLMError`; so does a
    * subscription that disconnects (its listener failed), which also cancels the run. A slow consumer
    * loses live events and gets a `StreamEvent.LiveGap` instead; it does not cancel the run.
@@ -86,7 +86,7 @@ trait AgentZ {
 
   /**
    * What `handlers` make of `run`'s events: one element for each event a handler takes, in delivery
-   * order. It observes the run, through [[AgentRun.subscribe]]: it replays the run's durable events
+   * order. It observes the run, through [[org.llm4s.agent.AgentRun.subscribe AgentRun.subscribe]]: it replays the run's durable events
    * from its start and then follows it live, but misses the live events sent before the stream
    * started - use [[stream]] to see every one. It ends after the run's terminal event, or once a run
    * that ends without one has delivered its last event; the run's own outcome is not failed with -
@@ -120,7 +120,7 @@ object AgentZ {
    */
   private val StreamBufferSize = 256
 
-  /** Wraps an already-constructed [[Agent]]. */
+  /** Wraps an already-constructed [[org.llm4s.agent.Agent Agent]]. */
   def apply(agent: Agent): AgentZ = new Impl(agent)
 
   final private class Impl(agent: Agent) extends AgentZ {

@@ -315,7 +315,14 @@ jobs:
         # that the docs site publishes (see the `docs` project in build.sbt). Both run here so
         # a module missing from that project's source list fails a PR rather than quietly
         # disappearing from the published Scaladoc.
-        run: sbt doc docs/doc
+        #
+        # Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` is only a `[warn]` line and `doc` still
+        # succeeds. The log is checked instead: a Scaladoc warning in an llm4s source fails the job (#1967).
+        run: |
+          set -o pipefail
+          scripts/test-check-scaladoc-warnings.sh
+          sbt doc docs/doc 2>&1 | tee scaladoc.log
+          scripts/check-scaladoc-warnings.sh scaladoc.log
 
   # Code coverage, measured on one configuration (ubuntu) to avoid duplication, in four legs that run in parallel.
   #

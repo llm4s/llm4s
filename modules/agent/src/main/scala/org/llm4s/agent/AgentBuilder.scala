@@ -187,7 +187,7 @@ final class AgentBuilder private (
   def withMaxPromptSectionTokens(n: Int): AgentBuilder = copy(maxPromptSectionTokens = n)
 
   /**
-   * The runtime the agent's threads live on; by default a new [[GraphRuntime.inMemory]] per
+   * The runtime the agent's threads live on; by default a new [[org.llm4s.agent.graph.GraphRuntime.inMemory GraphRuntime.inMemory]] per
    * [[build]]. A runtime keeps every thread - a one-shot [[Agent.run]]'s too - until
    * [[Agent.forget]] removes it.
    */

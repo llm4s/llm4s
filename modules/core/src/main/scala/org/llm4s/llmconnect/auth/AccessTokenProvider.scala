@@ -156,7 +156,7 @@ object CachingAccessTokenProvider:
 
   /**
    * `fetch`, with a non-fatal exception it throws returned as an `AuthenticationError` naming the exception's
-   * class. `InterruptedException` is not caught here: [[CancelledError.attempt]] turns it into a cancellation.
+   * class. `InterruptedException` is not caught here: [[org.llm4s.error.CancelledError.attempt CancelledError.attempt]] turns it into a cancellation.
    */
   private[llm4s] def guarded[A](fetch: => Result[A]): Result[A] =
     Try(fetch).fold(
@@ -166,7 +166,7 @@ object CachingAccessTokenProvider:
 
   private val Provider = "workload-identity"
 
-  /** The operation a [[CancelledError]] names when a caller is interrupted waiting for a token. */
+  /** The operation a [[org.llm4s.error.CancelledError CancelledError]] names when a caller is interrupted waiting for a token. */
   private[llm4s] val Operation: String = "workload-identity.token"
 
   /** How long a rejected fetch (not recoverable) is shared with the callers that arrive meanwhile. */

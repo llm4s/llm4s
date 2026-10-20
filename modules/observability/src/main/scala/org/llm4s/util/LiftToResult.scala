@@ -16,7 +16,7 @@ import scala.util.{ Failure, Success, Try }
  */
 trait LiftToResult[F[_]] {
 
-  /** Evaluate `fa` and lift the outcome into [[Result]], wrapping a successful value in `Right`. */
+  /** Evaluate `fa` and lift the outcome into [[org.llm4s.types.Result Result]], wrapping a successful value in `Right`. */
   def apply[A](fa: F[A]): Result[A]
 }
 

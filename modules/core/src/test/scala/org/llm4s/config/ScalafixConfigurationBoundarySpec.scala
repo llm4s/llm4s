@@ -62,6 +62,11 @@ class ScalafixConfigurationBoundarySpec extends AnyWordSpec with Matchers {
         }
       }
     }
+
+    "treat a suppression that suppresses nothing as an error" in {
+      // Left a warning, an unused `// scalafix:off` goes unread and outlives the code it was for (#1967).
+      scalafixConf.getStringList("lint.error").asScala should contain("UnusedScalafixSuppression")
+    }
   }
 
   private def scalafixConf = ConfigFactory.parseFile(findRepoFile(".scalafix.conf").toFile)

@@ -13,7 +13,7 @@ import java.util.regex.Pattern
 import scala.util.Try
 
 /**
- * A containerised workspace's files as a [[FileBackend]] (design §4.33): `/src/a.txt` is the workspace's
+ * A containerised workspace's files as a [[org.llm4s.agent.harness.FileBackend FileBackend]] (design §4.33): `/src/a.txt` is the workspace's
  * `src/a.txt`, `/` its root. One workspace is one tenant's: an application serving several builds one
  * backend per tenant and picks it with `FileBackend.resolved` (rule 8).
  *

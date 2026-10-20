@@ -59,7 +59,7 @@ final class PermissionMiddleware(rules: Seq[PermissionRule], val id: MiddlewareI
 
   /**
    * The decision for `resource`: for a concrete target, the first matching rule's, or `Deny` when none
-   * matches. A target is read as a [[Glob]], so one written as a pattern - an envelope such as `/out/&#42;&#42;`,
+   * matches. A target is read as a [[org.llm4s.agent.graph.tool.Glob Glob]], so one written as a pattern - an envelope such as `/out/&#42;&#42;`,
    * declared by a tool whose answer picks the path - is decided for every target in it: the rules are read
    * in order, and the envelope is denied as soon as a `Deny` rule reaches any of its targets, asked about
    * once an `Ask` rule reaches some, and allowed only when an `Allow` rule covers all that remain; if no

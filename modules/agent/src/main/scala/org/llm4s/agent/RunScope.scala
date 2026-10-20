@@ -16,10 +16,10 @@ import scala.util.Try
  * any run given one with `RunConfig.withRunId` - so a thread's log can hold two runs of one id. Every
  * subscription a scope is attached to starts at its run's claim (the run's observer, or
  * `RunHandle.subscribe`), so the first durable event of its id it is given is its own claim's; the
- * scope keeps that event's [[EventRecord.token]], and passes on a durable event only if it has both the
+ * scope keeps that event's [[org.llm4s.agent.graph.EventRecord.token EventRecord.token]], and passes on a durable event only if it has both the
  * run's id and that token. A lost earlier run's late write, or a later run of the same id - one replayed
  * to a scope subscribed after its run ended without a terminal event - is never this run's. A live event
- * is matched the same way, by id and [[StreamEvent.Live.token]]: a node of a lost run that ignores the
+ * is matched the same way, by id and [[org.llm4s.agent.graph.StreamEvent.Live.token StreamEvent.Live.token]]: a node of a lost run that ignores the
  * interrupt can send progress after this run's claim. A live event before the scope has its run's
  * claim is never the run's - no node of a run runs before its claim is committed - and is dropped.
  *

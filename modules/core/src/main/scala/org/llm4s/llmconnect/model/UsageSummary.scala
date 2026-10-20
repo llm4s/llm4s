@@ -9,7 +9,7 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  *
  * `totalCost` is stored as [[BigDecimal]] to avoid floating-point accumulation drift
  * that would occur when summing many `Double` values; incoming `Option[Double]` costs
- * are converted once via [[BigDecimal.decimal]] on first contact.
+ * are converted once via `BigDecimal.decimal` on first contact.
  *
  * @param requestCount   number of API calls attributed to this model
  * @param inputTokens    cumulative prompt tokens sent to the model

@@ -363,7 +363,6 @@ private[llm4s] object HttpFailures {
    * This is the one place transport exceptions become `Result`s, so no caller of
    * [[Llm4sHttpClient]] needs a `try`/`catch` of its own.
    */
-  // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
   def attempt[A](method: String, url: String, timeout: FiniteDuration)(thunk: => A): Result[A] =
     try Right(thunk)
     catch
@@ -371,7 +370,6 @@ private[llm4s] object HttpFailures {
         Thread.currentThread().interrupt()
         Left(toLLMError(e, method, url, timeout))
       case NonFatal(e) => Left(toLLMError(e, method, url, timeout))
-  // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 
   /** JDK response headers as an immutable multi-valued map with lower-case keys. */
   def headerMap(headers: JHttpHeaders): Map[String, Seq[String]] =

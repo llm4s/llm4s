@@ -64,7 +64,7 @@ import scala.util.{ Try, Using }
  * `CompletionOptions.tools` are sent as `tools` (`type: function`, `function: {name, description,
  * parameters}`; the OpenAI `strict` flag is dropped) with `tool_choice_option: "auto"`. Tool calls in a reply
  * (`message.tool_calls`, whole, or streamed as `delta.tool_calls` pieces merged by `index`) become
- * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[ToolMessage]] as a `tool` message
+ * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] as a `tool` message
  * with its `tool_call_id`. `arguments` is a JSON string on the wire (SDK-evidenced: NODE types/messages.ts:19-24)
  * and a JSON object in a `ToolCall`. A call without an `id` gets a generated one, defensively: the SDK's type makes
  * `id` required (NODE types/messages.ts:29-30), and a stream sends it on a call's first piece only (LCIBM
@@ -93,7 +93,7 @@ import scala.util.{ Try, Using }
  * == Timeouts ==
  *
  * A chat call times out after two minutes and a streamed one after ten, unless the section's
- * `timeouts { request = ..., stream = ... }` block sets either ([[WatsonXConfig.timeouts]]). The IAM
+ * `timeouts { request = ..., stream = ... }` block sets either ([[org.llm4s.llmconnect.config.WatsonXConfig.timeouts WatsonXConfig.timeouts]]). The IAM
  * token exchange keeps its own 30 seconds.
  *
  * @param config          model, credentials, project or space and endpoints.
