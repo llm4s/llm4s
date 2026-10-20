@@ -170,6 +170,9 @@ because the section binds it.
 `CompletionOptions.reasoning` is sent as `reasoning_effort` to OpenAI's reasoning models:
 
 ```scala
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+
+// client: LLMClient, conversation: Conversation
 client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.High))
 ```
 
@@ -851,6 +854,10 @@ separates the provider, so `LLM_MODEL=openai-compatible/openai/gpt-oss-120b` nam
 Then load it by name, or as the default:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.types.Result
+
 val groq: Result[ProviderConfig]  = Llm4sConfig.provider("groq-main")
 val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 ```
@@ -1278,6 +1285,8 @@ Fireworks), and hosted catalogues retire models regularly. List what the endpoin
 the section's key and headers:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 Llm4sConfig.listModels("groq-main")   // GET <baseUrl>/models
 ```
 
@@ -1677,12 +1686,22 @@ it is. Thinking also counts toward token estimates (`ConversationTokenCounter`),
 resend it.
 
 ```scala
-for {
-  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
-  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
-  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
-  answer <- client.complete(next, options)             // the provider gets it back
-} yield answer
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, ToolCall, ToolMessage }
+import org.llm4s.types.Result
+
+def toolTurn(
+  client: LLMClient,
+  conversation: Conversation,
+  options: CompletionOptions,
+  runTools: Seq[ToolCall] => Seq[ToolMessage]          // your tool execution
+): Result[Completion] =
+  for {
+    first <- client.complete(conversation, options)   // a tool-call turn, with thinking
+    results = runTools(first.message.toolCalls)
+    next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+    answer <- client.complete(next, options)           // the provider gets it back
+  } yield answer
 ```
 
 ---
@@ -1781,6 +1800,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 **Good:**
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 // Keys come from the vendor's variable or the section's own ${?VAR} binding - never hardcoded
 val providerConfig = Llm4sConfig.defaultProvider()
 ```
@@ -1879,6 +1900,11 @@ place. Defaults when `baseUrl` is omitted:
 Configure one named section per provider, then load the default or any section by name:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
+
+// conversation: the Conversation to send
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry

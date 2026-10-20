@@ -29,8 +29,13 @@ object DocSnippets {
   val pages: Seq[String] = Seq(
     "getting-started/configuration.md",
     "getting-started/first-example.md",
+    "getting-started/installation.md",
+    "getting-started/next-steps.md",
     "getting-started/ollama-quickstart.md",
-    "getting-started/testing-guide.md"
+    "getting-started/testing-guide.md",
+    "guide/basic-usage.md",
+    "guide/error-handling.md",
+    "guide/providers.md"
   )
 
   val packageName = "org.llm4s.docsnippets"
