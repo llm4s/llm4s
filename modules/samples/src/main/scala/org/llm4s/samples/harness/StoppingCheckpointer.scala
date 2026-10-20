@@ -1,6 +1,7 @@
 package org.llm4s.samples.harness
 
 import org.llm4s.agent.AgentId
+import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.toolloop.ToolLoop
 import org.llm4s.error.ProcessingError
@@ -8,6 +9,7 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
  * A store that stops for good at the first commit `at` picks, before or after writing it, as the store of a process
@@ -84,6 +86,19 @@ object StoppingCheckpointer {
   /** A commit with the result of one of agent `agent`'s tool calls. */
   def ranTool(commit: Commit, agent: AgentId): Boolean =
     commit.pendingWrites.exists(_.nodeId == ToolLoop.callToolNode(agent).value)
+
+  /**
+   * A commit with the report of a task subagent `agent` completed: the delegating call's result, committed with its
+   * durable `TaskEnded` (design §4.47).
+   */
+  def reports(commit: Commit, agent: AgentId): Boolean =
+    commit.events.exists(_.event match {
+      case RunEvent.Custom(name, _, payload) if name == SubagentEvents.TaskEnded.name =>
+        Try(upickle.default.read[TaskEnded](payload)).toOption.exists(e =>
+          e.child.agent == agent && e.status == "completed"
+        )
+      case _ => false
+    })
 
   /** A commit that records a completed external effect of `operation`, such as `memory.record`. */
   def completes(commit: Commit, operation: String): Boolean =

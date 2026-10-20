@@ -52,21 +52,23 @@ object ParallelDeepResearchExample {
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       client <- LLMConnect.getClient(providerConfig)
-      lead   <- AgentId.of(ParallelDeepResearch.AgentName)
       db = dir.resolve("research.db")
-      stopped <- processOne(client, lead, db)
+      stopped <- processOne(client, ParallelDeepResearch.researcher.id, db)
       _       <- if (stopped) processTwo(client, db) else Right(())
     } yield ()
     outcome.left.foreach(e => println(s"Failed: ${e.formatted}"))
   }
 
   /** Runs the research until the first child's report is committed to the lead, then stops; whether it stopped. */
-  private def processOne(client: LLMClient, lead: AgentId, db: Path): Result[Boolean] = {
+  private def processOne(client: LLMClient, researcher: AgentId, db: Path): Result[Boolean] = {
     println("--- process 1: research, until the first child's report is committed ---")
     SqliteCheckpointer.open(db).flatMap { sqlite =>
       Using.resource(sqlite) { s =>
         val store =
-          new StoppingCheckpointer(s, c => Option.when(StoppingCheckpointer.ranTool(c, lead))(Stop.AfterWriting))
+          new StoppingCheckpointer(
+            s,
+            c => Option.when(StoppingCheckpointer.reports(c, researcher))(Stop.AfterWriting)
+          )
         for {
           agent <- ParallelDeepResearch.agent(client, GraphRuntime(store, claims = claims))
           run   <- agent.stream(thread, ParallelDeepResearch.Query, config, nested = true)(printing)

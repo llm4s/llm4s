@@ -54,9 +54,10 @@ object ParallelDeepResearch {
     ResearchQuestion("delegation", Site + "delegation")
   )
 
-  /** The query the example asks. */
+  /** The query the example asks: it names each topic's page, so a live model knows what it may research. */
   val Query: String =
-    "Research how durable agents checkpoint, recover and delegate, one researcher a topic, and write a sourced report."
+    "Research how durable agents checkpoint, recover and delegate, one researcher a topic, and write a sourced report. " +
+      Questions.map(q => s"${q.topic}: ${q.url}").mkString("Start each topic from its page - ", "; ", ".")
 
   /** What the lead asks a researcher: one topic, and the page to start from. */
   final case class ResearchQuestion(topic: String, url: String) derives ReadWriter

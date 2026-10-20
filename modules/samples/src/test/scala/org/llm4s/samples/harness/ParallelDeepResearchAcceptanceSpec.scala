@@ -275,6 +275,29 @@ class ParallelDeepResearchAcceptanceSpec
     next.close()
   }
 
+  it should "stop where the example stops, once a researcher's report is committed to the lead, and recover" in {
+    val world  = new World
+    val thread = ThreadId("example-stop")
+    // the example's stop: the first commit of a researcher's completed report, not merely any lead tool result
+    val first = world.process(c => Option.when(StoppingCheckpointer.reports(c, researcher))(Stop.AfterWriting))
+    first.agent.run(thread, Query, config).isLeft shouldBe true
+    first.store.stopped shouldBe true
+    first.close()
+
+    world.clock.advance(3.hours)
+    val next      = world.process()
+    val atStop    = next.agent.children(thread, config).value
+    val completed = atStop.count(c => c.origin.agent == researcher && c.status == CheckpointStatus.Completed)
+    completed should be >= 1
+    val result = next.agent.recover(thread, config).value
+    brief(result).sources.toSet shouldBe Questions.map(_.url).toSet
+    // a completed child is not run again: process 2 ran only the others, two model calls at most each
+    val again = Questions.map(q => next.researcherCalls(q.topic).size).sum
+    again should be <= 2 * (Questions.size - completed)
+    result.usage.requestCount should be <= world.modelCalls.toLong
+    next.close()
+  }
+
   it should "compose a Brief naming the gap when one researcher's provider fails" in {
     val world   = new World
     val failed  = Questions(1)
