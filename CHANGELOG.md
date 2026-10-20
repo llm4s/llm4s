@@ -80,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `provider` and `model`; `OLLAMA_BASE_URL` is the one documented variable (`baseUrl = ${?OLLAMA_BASE_URL}`) [#1991](https://github.com/llm4s/llm4s/issues/1991).
 - **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
+- **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
+  (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
 
 ### Java & Kotlin APIs
 

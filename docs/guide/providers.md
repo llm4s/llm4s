@@ -484,10 +484,18 @@ Behaviour to know about:
   Whether a model supports tools depends on the model; a model that does not is answered by the service,
   and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
   given a generated one.
-- **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
-  `budgetTokens` are dropped without error; the chat API documents some of them, and this client does
-  not expose them yet. `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
-  1.0) when set.
+- **Sampling options.** `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
+  1.0) when set. `presencePenalty` and `frequencyPenalty` go as `presence_penalty` and `frequency_penalty`
+  when not 0.0, their default, so leaving them alone sends nothing new; the service checks their range.
+- **Structured output.** `responseFormat` goes as `response_format`: `ResponseFormat.Json` as
+  `{"type": "json_object"}`, and `ResponseFormat.JsonSchema(schema, name, strict)` as
+  `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": ...}}`, the shapes IBM's
+  Python SDK and LangChain integration send (IBM's Node.js SDK names only `json_object`). JSON mode needs
+  the prompt to ask for JSON too; the client adds no instruction. Whether a model honours either format
+  depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
+- **Ignored options.** `reasoning` and `budgetTokens` are dropped without error. The chat API has
+  `reasoning_effort` and `include_reasoning`, which this client does not send yet, and it does not read a
+  reply's `reasoning_content`.
 - **Abnormal endings.** A stream that ends without a `finish_reason`, or whose `finish_reason` is
   `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
   partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`

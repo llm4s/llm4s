@@ -245,11 +245,12 @@ taken from its code:
 | Gemini, Vertex AI | `responseMimeType: application/json` and `responseSchema` set to the schema | Yes, by Gemini |
 | Ollama | The schema as the top-level `format` field of `/api/chat` | Yes, on Ollama 0.5 or later; an older server rejects or ignores it. `name` and `strict` are ignored |
 | Anthropic | **Nothing is enforced.** The schema is appended to the system prompt as an instruction to answer with JSON only | **No**: best effort. Expect section 7 errors more often |
-| watsonx, AWS Bedrock | **Nothing.** These clients do not read `responseFormat` | **No**: the model sees only your conversation |
+| watsonx (Beta) | `response_format` of type `json_schema`, with your `name` and `strict` (`ResponseFormat.Json` as `json_object`) | Depends on the model; not yet confirmed against the live service ([#1314](https://github.com/llm4s/llm4s/issues/1314)) |
+| AWS Bedrock | **Nothing.** This client does not read `responseFormat` | **No**: the model sees only your conversation |
 
 For the last row, `completeStructured` still parses whatever comes back, so a model that happens to answer
 in JSON works and one that does not gives a `ValidationError`. Ask for JSON in the prompt yourself when you
-use these providers.
+use that provider.
 
 ## 9. Limits and gotchas
 
