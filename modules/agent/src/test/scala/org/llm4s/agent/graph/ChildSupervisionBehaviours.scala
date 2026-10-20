@@ -4,6 +4,7 @@ import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentStatus, Comp
 import org.llm4s.agent.{ ScriptedLLMClient, SpecTools }
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.delegation.{ ChildEnd, ChildRunner, DelegationKeys, PriorUsage }
+import org.llm4s.agent.events.SubagentEvents
 import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   GuardrailMiddleware,
@@ -944,10 +945,16 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   it should "settle the Running child of a call whose arguments an approval edited, then refuse it (#2096)" in {
     val open                                        = storage()
     val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-running", open)
-    parent.resume(thread, Map(edited)).isLeft shouldBe true
+    val seen                                        = new CopyOnWriteArrayList[StreamEvent]()
+    parent.streamResume(thread, Map(edited), nested = true)(seen.add(_): Unit).ok.await().isLeft shouldBe true
     setup.allEnds.last.left.toOption.get.message should include("started with other input")
     abandoned(open(), childId)
     setup.childClient.callCount shouldBe 1
+    // the settlement run, now the child's latest checkpoint, is announced and given a gap to nested subscribers
+    val settlement = RunId(open().latest(childId).ok.get.checkpoint.runId)
+    val events     = seen.asScala.toVector
+    events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId) should contain(settlement)
+    events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId } should contain(settlement)
   }
 
   it should "return ThreadBusy for an edited call over a busy child, and settle it on a later recover (#2096)" in {
