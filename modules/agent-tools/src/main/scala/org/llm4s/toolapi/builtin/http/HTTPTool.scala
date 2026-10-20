@@ -47,6 +47,9 @@ object HTTPResult {
  * - Domain allowlist/blocklist for security
  * - Response size limits
  * - Configurable timeout, bounding the whole call (connect, every redirect hop and the body read)
+ * - Run as an agent's call, a POST, PUT, PATCH or DELETE carries the call's idempotency key as an `Idempotency-Key`
+ *   header, so a server that honours it does the write once however often the agent runs the call; a header of that
+ *   name set in the call's `headers` is kept instead
  *
  * @example
  * {{{{
@@ -118,7 +121,7 @@ object HTTPTool {
       for {
         urlStr <- extractor.getString("url")
         method      = extractor.getString("method").fold(_ => "GET", identity)
-        headersOpt  = extractHeaders(extractor)
+        headersOpt  = withIdempotencyKey(extractHeaders(extractor), method, extractor.call)
         bodyOpt     = extractor.getString("body").toOption
         contentType = extractor.getString("content_type").toOption
         result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config)
@@ -127,6 +130,26 @@ object HTTPTool {
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
     extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))
+
+  /** Methods that write, and so carry an agent call's idempotency key (#1740). */
+  private val KeyedMethods: Set[String] = Set("POST", "PUT", "PATCH", "DELETE")
+
+  /**
+   * `headers` with `Idempotency-Key: <the call's key>` added when the tool runs as an agent's call (`call` is set) with
+   * a method that writes, unless the headers already name one (in any case).
+   */
+  private[http] def withIdempotencyKey(
+    headers: Option[Map[String, String]],
+    method: String,
+    call: Option[ToolCallInfo]
+  ): Option[Map[String, String]] =
+    call match {
+      case Some(c) if KeyedMethods.contains(method.trim.toUpperCase(Locale.ROOT)) =>
+        val current = headers.getOrElse(Map.empty)
+        if (current.keys.exists(k => headerKey(k) == "idempotency-key")) headers
+        else Some(current + ("Idempotency-Key" -> c.idempotencyKey))
+      case _ => headers
+    }
 
   /**
    * Default HTTP tool instance, returning a Result for safe error handling.

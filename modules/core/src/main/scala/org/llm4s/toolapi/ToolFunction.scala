@@ -58,13 +58,21 @@ case class ToolFunction[T, R: ReadWriter](
   /**
    * Executes the tool with the given arguments
    */
-  def execute(args: ujson.Value): Either[ToolCallError, ujson.Value] =
+  def execute(args: ujson.Value): Either[ToolCallError, ujson.Value] = run(args, None)
+
+  /**
+   * Executes the tool as the call `call`: the handler reads it as [[SafeParameterExtractor.call]], so a tool with an
+   * external side effect can pass `call.idempotencyKey` on. An agent runs every `ToolFunction` this way.
+   */
+  def execute(args: ujson.Value, call: ToolCallInfo): Either[ToolCallError, ujson.Value] = run(args, Some(call))
+
+  private def run(args: ujson.Value, call: Option[ToolCallInfo]): Either[ToolCallError, ujson.Value] =
     // Check for null arguments first
     args match {
       case ujson.Null =>
         // For zero-parameter tools, treat null as empty object
         if (!hasRequiredParameters) {
-          val extractor = SafeParameterExtractor(ujson.Obj())
+          val extractor = SafeParameterExtractor(ujson.Obj(), call)
           handler(extractor) match {
             case Right(result) => Right(writeJs(result))
             case Left(error)   => Left(ToolCallError.HandlerError(name, error))
@@ -73,7 +81,7 @@ case class ToolFunction[T, R: ReadWriter](
           Left(ToolCallError.NullArguments(name))
         }
       case _ =>
-        val extractor = SafeParameterExtractor(args)
+        val extractor = SafeParameterExtractor(args, call)
         handler(extractor) match {
           case Right(result) => Right(writeJs(result))
           case Left(error)   => Left(ToolCallError.HandlerError(name, error))

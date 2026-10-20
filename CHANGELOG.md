@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
+- **Added** the call's id and idempotency key for `ToolFunction` tools run by an agent: `SafeParameterExtractor.call`
+  (a `ToolCallInfo`, `None` outside an agent) and `ToolFunction.execute(args, call)`; `HTTPTool` sends it as
+  `Idempotency-Key` on writes, and MCP tools forward it in `tools/call` `_meta` (`llm4s.org/idempotencyKey`), which an
+  llm4s `MCPServer` reads back [#1740](https://github.com/llm4s/llm4s/issues/1740).
 - **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
   thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
 - **Fixed** `RunContext.progress` from a node that keeps its context past its run reaching a later run's subscribers:
