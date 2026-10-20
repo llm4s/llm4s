@@ -83,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** agent tools defined from Java: `@Tool`/`@Param` methods (`JTool.fromAnnotated`) and lambdas
+  (`JTool.builder(...).param(...).handler(...)`), given to `Llm4s.createAgentWithTools`; arguments are read into Java
+  values without a JSON library, and a handler's exception is a tool error the model sees [#1484](https://github.com/llm4s/llm4s/issues/1484).
 - **Added** `Llm4s.createEmbeddingClient("provider/model")`, a Java embedding client for a model you name; `llm4s.embeddings.model`
   need not be set [#1781](https://github.com/llm4s/llm4s/issues/1781); see the [Java guide](docs/guide/java.md#embeddings).
 - **Changed** a Java embedding client to accept a model its provider module does not list (Ollama's `bge-m3`): BREAKING,
