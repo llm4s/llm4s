@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentStatus, CompletionFixture }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentResult, AgentStatus, CompletionFixture }
 import org.llm4s.agent.{ ScriptedLLMClient, SpecTools }
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.delegation.{ ChildEnd, ChildRunner, DelegationKeys, PriorUsage }
@@ -719,6 +719,41 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     unsettled(open(), childId)
     parent.resume(thread, Map(parked.approve(id))).ok.answer shouldBe Some("moved on")
     settledTimedOut(open(), childId)
+  }
+
+  Seq[(String, (AgentResult, InterruptId) => (InterruptId, ujson.Value))](
+    "rejected"                       -> ((parked, id) => parked.reject(id, "no")),
+    "edited to arguments that fail" -> ((parked, id) => parked.edit(id, ujson.Obj("text" -> 5)))
+  ).foreach { case (how, decide) =>
+    it should s"settle the child of a suspended timed-out call $how, and clear its record (#2105)" in {
+      val open     = storage()
+      val blocking = new AtomicBoolean(true)
+      val setup = new Setup(
+        ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+        ScriptedLLMClient.of(calling(call("k1", "hang"))),
+        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        delegateTimeout = Some(300.millis),
+        parentMiddleware = Seq(approvingRetry(rerun = true, blocking))
+      )
+      val runtime = new GraphRuntime(open())
+      val parent  = family(runtime, setup)._1
+      val thread  = ThreadId(s"timed-out-refused-on-resume-${how.takeWhile(_ != ' ')}")
+      def recorded: Set[String] =
+        runtime.childAtRest(thread, parent.loop.graph, RunConfig()).ok.get._2.state.get(DelegationKeys.timedOut).ok.keySet
+      val parked = parent.run(thread, "go").ok
+      val id = parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+        case other                                        => fail(s"unexpected $other")
+      }
+      val childId = onlyChild(runtime, thread).threadId
+      unsettled(open(), childId)
+      recorded shouldBe Set("c1")
+
+      // the call is refused before it runs, and never runs again
+      parent.resume(thread, Map(decide(parked, id))).ok.answer shouldBe Some("moved on")
+      settledTimedOut(open(), childId)
+      recorded shouldBe empty
+    }
   }
 
   it should "settle the child when a middleware asks while a tool question's resume timed out, committed as its error (#2098)" in {

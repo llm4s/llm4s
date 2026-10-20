@@ -1197,8 +1197,11 @@ object ToolLoop:
           case MiddlewareHook.WrapToolCall =>
             request.call.fold(missing("tool call")) { task =>
               // a tool call again: the usage its task records commits with its result, as the call-tool node's does
+              val pipeline = steps(owner.agent.id).pipeline
               withUsage(context)(
-                steps(owner.agent.id).pipeline.reasked(task, request.approved, state, context, answers)
+                pipeline.resumed(state, task.call, context)(
+                  pipeline.reasked(task, request.approved, state, context, answers)
+                )
               )
             }
           // the answer is the active agent's: a root middleware asks about a handoff target's answer too
@@ -1298,7 +1301,7 @@ object ToolLoop:
     }
 
     b.implement(nodes.approval.node, writes = callWrites) { (resumed, state, context) =>
-      withUsage(context)(approval(resumed, state, context))
+      withUsage(context)(pipeline.resumed(state, resumed.question.call, context)(approval(resumed, state, context)))
     }
 
     def approval(resumed: Resumed[ApprovalRequest, ApprovalDecision], state: ThreadState, context: RunContext) =
@@ -1326,7 +1329,11 @@ object ToolLoop:
 
     nodes.asking.foreach { tool =>
       b.implement(nodes.askRefs(tool.spec.name).node, writes = callWrites) { (resumed, state, context) =>
-        withUsage(context)(pipeline.answered(tool, resumed.question, resumed.answer, state, context))
+        withUsage(context)(
+          pipeline.resumed(state, resumed.question.call, context)(
+            pipeline.answered(tool, resumed.question, resumed.answer, state, context)
+          )
+        )
       }
     }
 
@@ -2251,6 +2258,20 @@ object ToolLoop:
               NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(callId), error))
         case NodeResult.Suspend(update, question, resumeAt) =>
           NodeResult.Suspend(update.combine(record(pending)), question, resumeAt)
+        case other => other
+
+    /**
+     * A resumed call's task `result` (#2105): one that commits without a run of the call deciding its recorded child -
+     * a rejection, or an approved, edited or answered call refused before it runs - settles the child the call's
+     * suspension recorded (`DelegationKeys.timedOut`) and clears the record, as [[afterTimeout]] does for a call that
+     * ran, since the call never runs again. A result whose run already settled, cleared or recorded the child, and one
+     * that commits nothing, are returned as they are.
+     */
+    def resumed(state: ThreadState, call: ToolCall, context: RunContext)(result: NodeResult): NodeResult =
+      result match
+        case NodeResult.Continue(command)
+            if !command.update.operations.exists(_.key.id == DelegationKeys.timedOut.id) =>
+          afterTimeout(new CallTimeout, state, call.name, call.id, context)(result)
         case other => other
 
     /** Settles `child`, which the call's own timeout left `Running` ([[afterTimeout]]), and announces the run that did. */
