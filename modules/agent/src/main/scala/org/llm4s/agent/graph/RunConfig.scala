@@ -375,6 +375,14 @@ final class RunContext private[graph] (
   private[agent] def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
     sink.childStarted(child, name, version, payload)
 
+  /**
+   * Settles `child`, a child thread of this task's thread that no call will reattach, as `outcome`, under its own
+   * claim and fenced by the run's (#2098): the run that settled it, `None` for a child with no checkpoint and outside a
+   * runtime. A busy child is `GraphError.ThreadBusy`.
+   */
+  private[agent] def settleChild(child: ThreadId, outcome: RunOutcome, message: String): Result[Option[RunId]] =
+    sink.settleChild(child, outcome, message)
+
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
 

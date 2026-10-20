@@ -1,7 +1,14 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.{ AgentId, AgentNode }
-import org.llm4s.agent.delegation.{ CountedUpdate, DelegatedQuestion, DelegationKeys }
+import org.llm4s.agent.delegation.{
+  ChildRef,
+  CountedUpdate,
+  DelegatedQuestion,
+  DelegationKeys,
+  TimedOutChild,
+  TimedOutUpdate
+}
 import org.llm4s.agent.events
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
@@ -723,6 +730,7 @@ object ToolLoop:
         DelegationKeys.priorUsage.id,
         DelegationKeys.input.id,
         DelegationKeys.counted.id,
+        DelegationKeys.timedOut.id,
         DelegationKeys.grant.id
       )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
@@ -780,7 +788,8 @@ object ToolLoop:
         results,
         Messages.key,
         LoopKeys.usage,
-        DelegationKeys.counted
+        DelegationKeys.counted,
+        DelegationKeys.timedOut
       )
 
     /** The keys this agent's tools and middleware may write: what an output Block may have to restore. */
@@ -1098,6 +1107,7 @@ object ToolLoop:
     // the runtime's key on a child thread (design 4.42): written only by the child runner, never by a node
     b.stateKey(DelegationKeys.priorUsage)
     b.stateKey(DelegationKeys.input)
+    b.stateKey(DelegationKeys.timedOut)
     b.stateKey(DelegationKeys.grant)
     val locking = prepared.exists(_.tools.tools.exists(_.spec.locksOf.isDefined))
     val agents  = prepared.map(p => p.agent.id -> declare(b, p, locking)).toMap
@@ -1982,18 +1992,20 @@ object ToolLoop:
                         AgentTool.resumeWith(tool, args, question, reply, toolContext)
                       )
                     )
-                    val chain = afterTimeout(ran, toolContext.timeout)
-                    outcome(
-                      tool,
-                      task,
-                      request.call,
-                      request.approved,
-                      chain,
-                      context,
-                      took,
-                      request.answered,
-                      resumed = true,
-                      phase = Some(phase)
+                    val (chain, pending) = afterTimeout(ran, toolContext.timeout, state, request.call.id, context)
+                    withUpdate(pending)(
+                      outcome(
+                        tool,
+                        task,
+                        request.call,
+                        request.approved,
+                        chain,
+                        context,
+                        took,
+                        request.answered,
+                        resumed = true,
+                        phase = Some(phase)
+                      )
                     )
                   }
         case _ => error(task, s"Tool '$name' does not take answers", context)
@@ -2201,25 +2213,71 @@ object ToolLoop:
           timed(tool, call, resources, toolContext, context)(
             innermost(tool.spec, toolContext.timeout)(tool.execute(args, toolContext))
           )
-        outcome(tool, task, call, approved, afterTimeout(ran, toolContext.timeout), context, took, answers)
+        val (chain, pending) = afterTimeout(ran, toolContext.timeout, state, call.id, context)
+        withUpdate(pending)(outcome(tool, task, call, approved, chain, context, took, answers))
       }
 
     /**
-     * The call's final outcome, after every wrapper, with what a timed-out run of its tool left pending settled first
-     * ([[CallTimeout]], #2098): only for an outcome that commits - a success or an error - since the call then never
-     * runs again. A settlement that fails (a child still busy) makes the call `Fatal` with its error, committing nothing,
-     * so the run fails and `recover` runs the call again.
+     * The call's final outcome, after every wrapper, and its update to `DelegationKeys.timedOut` (#2098). The child a
+     * timed-out run of the call left `Running` - this run's ([[CallTimeout.reached]]), or, when no run here reached a
+     * child, the one its suspension recorded - is settled `Failed("timed-out")` if the outcome commits (a success or an
+     * error), since the call then never runs again, and the run that settled it announced to nested subscribers; a
+     * suspension records it for the resumed call instead. A settlement that fails (a child still busy) makes the call
+     * `Fatal` with its error, committing nothing, so the run fails and `recover` runs the call again. A run that
+     * reached its child again clears the record, so the child is reattached, not settled.
      */
     private def afterTimeout(
       chain: MiddlewareStack.ToolChainResult,
-      timeout: CallTimeout
-    ): MiddlewareStack.ToolChainResult =
+      timeout: CallTimeout,
+      state: ThreadState,
+      callId: String,
+      context: RunContext
+    ): (MiddlewareStack.ToolChainResult, StateUpdate) =
+      val recorded = state.get(DelegationKeys.timedOut).toOption.flatMap(_.get(callId))
+      val pending  = timeout.reached.getOrElse(recorded)
+      def record(next: Option[TimedOutChild]): StateUpdate =
+        if next == recorded then StateUpdate.empty
+        else
+          StateUpdate.update(
+            DelegationKeys.timedOut,
+            next.fold(TimedOutUpdate.Cleared(callId))(TimedOutUpdate.Pending(callId, _))
+          )
       chain.outcome match
         case ToolOutcome.Success(_, _) | ToolOutcome.Error(_) =>
-          timeout.settle() match
-            case Some(Left(error)) => chain.copy(outcome = ToolOutcome.Fatal(error))
-            case _                 => chain
-        case _ => chain
+          pending.fold(Right(()))(settleTimedOut(_, callId, context)) match
+            case Right(_)    => (chain, record(None))
+            case Left(error) => (chain.copy(outcome = ToolOutcome.Fatal(error)), StateUpdate.empty)
+        case ToolOutcome.NeedsApproval(_) | ToolOutcome.Ask(_) => (chain, record(pending))
+        case _                                                 => (chain, StateUpdate.empty)
+
+    /** Settles `child`, which the call's own timeout left `Running` ([[afterTimeout]]), and announces the run that did. */
+    private def settleTimedOut(child: TimedOutChild, callId: String, context: RunContext): Result[Unit] =
+      val message = s"timed-out: its call '$callId' timed out, and never runs again"
+      def announce(runId: RunId): Unit =
+        val ref =
+          ChildRef(ThreadId(child.thread), runId, AgentId.unsafe(child.agent), Some(ToolCallId(callId)), child.depth)
+        val started = events.SubagentEvents.TaskStarted
+        context.childStarted(ref, started.name, started.version, started.encode(events.TaskStarted(ref)))
+        context.nested(StreamEvent.Nested(ref, StreamEvent.LiveGap(0)))
+      context.settleChild(ThreadId(child.thread), RunOutcome.Failed("timed-out", message), message) match
+        case Right(settledBy) => Right(settledBy.foreach(announce))
+        case Left(busy: GraphError.ThreadBusy) =>
+          busy.holder match
+            case GraphError.BusyHolder.Run(holder) => announce(holder)
+            case _                                 => ()
+          Left(busy)
+        case Left(other) => Left(other)
+
+    /** `result` with `update` committed with it: a continuation's or a suspension's; nothing else commits. */
+    private def withUpdate(update: StateUpdate)(result: NodeResult): NodeResult =
+      if update == StateUpdate.empty then result
+      else
+        result match
+          case NodeResult.Continue(command) =>
+            NodeResult.Continue(command.copy(update = command.update.combine(update)))
+          case NodeResult.Suspend(pending, question, resumeAt) =>
+            NodeResult.Suspend(pending.combine(update), question, resumeAt)
+          case other => other
 
     /**
      * The chain's innermost function, for one chain invocation: the tool's `execute` or `resume`,

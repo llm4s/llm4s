@@ -1269,19 +1269,43 @@ final class GraphRuntime(
    * for the parent's claim - is not.
    */
   private def abandonChild(child: ThreadId, parent: ThreadId, token: FencingToken, config: RunConfig): Boolean =
+    val message = s"abandoned: the run of parent thread '${parent.value}' that started it ended without it"
+    val outcome = settleUnreachable(child, parent, token, RunOutcome.Failed("abandoned", message), message, config)
+    outcome.left.foreach(error =>
+      GraphRuntime.logger.debug(
+        s"Settling the abandoned child ${child.value} of ${parent.value} skipped: ${error.message}"
+      )
+    )
+    outcome.toOption.flatten.isDefined
+
+  /**
+   * Settles `child`, a `Running` or `Suspended` child of `parent` that no call will reattach, as `outcome`, a
+   * `RunOutcome.Failed`: a `Failed` checkpoint over its latest, with the same snapshot and a [[RunEvent.RunFailed]]
+   * carrying `message`, under the child's own claim, fenced by the parent's, whose token is `token` (#2071). Needs no
+   * graph. The run that settled it: this settlement's, or the one that settled it first; `None` for a child with no
+   * checkpoint. A busy child is [[GraphError.ThreadBusy]]; a parent claim lost meanwhile writes nothing. For retention's
+   * abandon ([[abandonChild]]) and a timed-out delegating call's child (#2098).
+   */
+  private[graph] def settleUnreachable(
+    child: ThreadId,
+    parent: ThreadId,
+    token: FencingToken,
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig
+  ): Result[Option[RunId]] =
     def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(child)
-    val outcome = Try(
+    Try(
       holding(child, config)(latest.flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(child, _, config)))) { held =>
         latest.flatMap {
-          case None => Right(false)
+          case None => Right(None)
           case Some(stored)
               if stored.checkpoint.status == CheckpointStatus.Completed ||
                 stored.checkpoint.status == CheckpointStatus.Failed =>
-            Right(true)
+            Right(Some(RunId(stored.checkpoint.runId)))
           case Some(stored) =>
-            val open    = stored.checkpoint
-            val now     = clock.instant()
-            val message = s"abandoned: the run of parent thread '${parent.value}' that started it ended without it"
+            val open = stored.checkpoint
+            val now  = clock.instant()
             val saved = Checkpoint(
               Checkpoint.CurrentFormat,
               GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(open.id)), 1L),
@@ -1294,22 +1318,18 @@ final class GraphRuntime(
               open.tenantId,
               Some(held.claim.token),
               open.origin,
-              Some(RunOutcome.Failed("abandoned", message))
+              Some(outcome)
             )
             val event =
               EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             val fence  = Some(parent -> token)
             val commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
-            held.committing(commit)(commitAndDeliver(child, commit).left.map(fenceRefused(child, fence))).map(_ => true)
+            held
+              .committing(commit)(commitAndDeliver(child, commit).left.map(fenceRefused(child, fence)))
+              .map(_ => Some(config.runId))
         }
       }
     ).toResult.flatten
-    outcome.left.foreach(error =>
-      GraphRuntime.logger.debug(
-        s"Settling the abandoned child ${child.value} of ${parent.value} skipped: ${error.message}"
-      )
-    )
-    outcome.getOrElse(false)
 
   /**
    * The parent's fence for a retention pass ([[keepChildren]]): its claim, whose token is `token`, is not found lost
@@ -3649,3 +3669,6 @@ final class GraphRuntime(
       // nothing into a later run's subscriptions
       override def nested(event: StreamEvent.Nested): Unit =
         hub.nested(threadId, event, token, () => !claimWasLost && !claimReleased.get)
+      // a timed-out delegating call's child (#2098), under its own claim, fenced by this run's
+      override def settleChild(child: ThreadId, outcome: RunOutcome, message: String): Result[Option[RunId]] =
+        settleUnreachable(child, threadId, token, outcome, message, config.withRunId(RunId.random()))

@@ -620,6 +620,62 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     onlyChild(runtime, thread).status shouldBe CheckpointStatus.Completed
   }
 
+  /** A wrapper that asks for approval when the call timed out; approved, it runs the call again or gives up. */
+  private def approvingRetry(rerun: Boolean, blocking: AtomicBoolean): AgentMiddleware = new AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("approve-retry")
+    override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+      next: () => ToolOutcome
+    ): ToolOutcome =
+      if (!context.approved)
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") => ToolOutcome.NeedsApproval("retry?")
+          case other                                                       => other
+        }
+      else if (rerun) {
+        blocking.set(false)
+        next()
+      } else ToolOutcome.Error("gave up after the timeout")
+  }
+
+  Seq(false -> "gives up without running it", true -> "runs it again").foreach { case (rerun, how) =>
+    it should s"settle or reattach the child of a timed-out call a wrapper suspended, when approved it $how (#2098)" in {
+      val open     = storage()
+      val blocking = new AtomicBoolean(true)
+      val setup = new Setup(
+        ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+        ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
+        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        delegateTimeout = Some(300.millis),
+        parentMiddleware = Seq(approvingRetry(rerun, blocking))
+      )
+      val runtime = new GraphRuntime(open())
+      val parent  = family(runtime, setup)._1
+      val thread  = ThreadId(s"timed-out-suspended-$rerun")
+      val parked  = parent.run(thread, "go").ok
+      val id = parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+        case other                                        => fail(s"unexpected $other")
+      }
+      val childId = onlyChild(runtime, thread).threadId
+      // suspended: the call may run again, so its child is not settled yet
+      open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+      parent.resume(thread, Map(parked.approve(id))).ok.answer shouldBe Some("moved on")
+      val latest = open().latest(childId).ok.get.checkpoint
+      if (rerun) {
+        latest.status shouldBe CheckpointStatus.Completed
+        setup.allEnds.last.ok match {
+          case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.Completed("report")
+          case other                => fail(s"unexpected $other")
+        }
+      } else
+        latest.outcome match {
+          case Some(RunOutcome.Failed("timed-out", _)) => ()
+          case other                                   => fail(s"expected the child settled timed-out, got $other")
+        }
+    }
+  }
+
   it should "fail the parent run when the child is still busy after the drain, and settle it on recover (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)

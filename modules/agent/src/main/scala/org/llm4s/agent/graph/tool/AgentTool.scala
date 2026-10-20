@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.agent.delegation.TimedOutChild
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.ContentPart
@@ -157,15 +158,15 @@ object AgentToolSpec:
  * tool it stops [[timedOut]] before it interrupts it, so the tool can tell that timeout from a cancel of its task (the
  * run's cancel, its lost claim), which never marks it; each run of the tool (a wrapper's retry) starts unmarked.
  *
- * A tool whose timed-out run left something only a later run of the call could finish - a delegating tool's child -
- * leaves the loop a [[pending]] settlement. The loop runs it once the call's final outcome is known, after every
- * wrapper, and only for one that commits (a success or an error): a retry that ran the call again cleared it first. A
- * settlement that fails (the child still busy) makes the call `Fatal` with its error, so it commits nothing. Equal to
- * every other, so it never changes a context's equality.
+ * A delegating tool tells the loop which child its latest run of the call left ([[left]]): `None` once it reached its
+ * child, the child itself when the call's timeout stopped it with the child left `Running`, so that a wrapper's retry
+ * still reattaches it. The loop settles that child once the call commits, and records it with a suspension
+ * (`DelegationKeys.timedOut`) for the call's resumed run. Equal to every other, so it never changes a context's
+ * equality.
  */
 final private[agent] class CallTimeout:
-  private val marked  = new java.util.concurrent.atomic.AtomicBoolean(false)
-  private val settler = new java.util.concurrent.atomic.AtomicReference[Option[() => Result[Unit]]](None)
+  private val marked = new java.util.concurrent.atomic.AtomicBoolean(false)
+  private val child  = new java.util.concurrent.atomic.AtomicReference[Option[Option[TimedOutChild]]](None)
 
   /** Starts a run of the tool unmarked: done by the loop's per-call timeout. */
   def reset(): Unit = marked.set(false)
@@ -176,11 +177,11 @@ final private[agent] class CallTimeout:
   /** Whether the call's own timeout stopped the latest run of the tool. */
   def timedOut: Boolean = marked.get
 
-  /** Leaves `settle` for the loop to run if the call commits; `None` withdraws one left before. */
-  def pending(settle: Option[() => Result[Unit]]): Unit = settler.set(settle)
+  /** Records what the latest run of the call left: `None` when it reached its child, else the child timed out. */
+  def left(timedOut: Option[TimedOutChild]): Unit = child.set(Some(timedOut))
 
-  /** Runs the settlement left, once: `None` when none is. */
-  def settle(): Option[Result[Unit]] = settler.getAndSet(None).map(_())
+  /** What a run of the call in this context left ([[left]]); `None` when none reached a child. */
+  def reached: Option[Option[TimedOutChild]] = child.get
 
   override def equals(other: Any): Boolean = other.isInstanceOf[CallTimeout]
   override def hashCode: Int               = 0
