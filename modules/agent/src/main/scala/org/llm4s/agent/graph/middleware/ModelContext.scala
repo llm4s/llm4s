@@ -74,7 +74,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       completion.usage,
       completion.estimatedCost,
       attempt,
-      completion.message.toolCalls.size,
+      Option(completion.message.toolCalls).fold(0)(_.size),
       completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions))
     )
 
@@ -135,32 +135,48 @@ object ModelContext:
    * token each way, so a call is never free. Tool calls only on `Completion.toolCalls` count too.
    */
   private[agent] def estimated(completion: Completion, request: Seq[Message], definitions: Seq[String]): TokenUsage =
-    val answer =
-      if completion.message.toolCalls.isEmpty && completion.toolCalls.nonEmpty then
-        completion.message.withToolCalls(completion.toolCalls)
-      else completion.message
-    val in    = math.max(1, request.map(tokens).sum + definitions.map(d => tokens(UserMessage(d))).sum)
-    val out   = math.max(1, tokens(answer))
-    val usage = TokenUsage(in, out, in + out)
-    logger.debug(s"model '${completion.model}' reported no usage: charged an estimated $in in, $out out")
+    // an estimate never fails the call it charges: whatever a field holds (a custom client may leave one null), each
+    // part falls back, and the whole to the one-token minimum
+    val usage = Try {
+      val answer = Try {
+        if completion.message.toolCalls.isEmpty && completion.toolCalls.nonEmpty then
+          completion.message.withToolCalls(completion.toolCalls)
+        else completion.message
+      }.getOrElse(completion.message)
+      val in = math.max(1, nonNull(request).map(tokens).sum + nonNull(definitions).map(d => tokens(UserMessage(d))).sum)
+      val out = math.max(1, tokens(answer))
+      TokenUsage(in, out, in + out)
+    }.getOrElse(TokenUsage(1, 1, 2))
+    logger.debug(
+      s"model '${completion.model}' reported no usage: charged an estimated ${usage.promptTokens} in, " +
+        s"${usage.completionTokens} out"
+    )
     usage
 
-  /** `message`'s tokens by the estimate's tokenizer, else its whole text - tool calls and thinking too - at four characters a token. */
+  /**
+   * `message`'s tokens by the estimate's tokenizer, else its whole text - tool calls and thinking too - at four
+   * characters a token, else one.
+   */
   private def tokens(message: Message): Int =
-    // an estimate never fails the call it charges: a message the tokenizer cannot read (a null field) falls back
     counter
       .flatMap(c => Try(c.countMessage(message)).toOption)
-      .getOrElse(ConversationTokenCounter.estimateOpaqueTokens(text(message)))
+      .orElse(Try(ConversationTokenCounter.estimateOpaqueTokens(text(message))).toOption)
+      .getOrElse(1)
 
-  private def text(message: Message): String = message match
-    case a: AssistantMessage =>
-      (Seq(a.content) ++ a.toolCalls.flatMap(c => Seq(c.name, Option(c.arguments).fold("")(_.render()))) ++
-        a.thinking.map {
-          case ThinkingBlock.Text(thought, _) => thought
-          case ThinkingBlock.Redacted(data)   => data
-          case ThinkingBlock.Opaque(_, data)  => data
-        }).mkString
-    case other => other.content
+  private def nonNull[A](items: Seq[A]): Seq[A] = Option(items).getOrElse(Nil).filter(_ != null)
+
+  private def text(message: Message): String =
+    def str(s: String): String = Option(s).getOrElse("")
+    message match
+      case a: AssistantMessage =>
+        val calls = nonNull(a.toolCalls).flatMap(c => Seq(str(c.name), Option(c.arguments).fold("")(_.render())))
+        val thoughts = nonNull(a.thinking).map {
+          case ThinkingBlock.Text(thought, _) => str(thought)
+          case ThinkingBlock.Redacted(data)   => str(data)
+          case ThinkingBlock.Opaque(_, data)  => str(data)
+        }
+        (str(a.content) +: (calls ++ thoughts)).mkString
+      case other => str(other.content)
 
   /** The schemas a request is sent with, rendered for the usage estimate: each tool's definition and a JSON schema. */
   private[agent] def definitions(tools: Seq[ToolFunction[?, ?]], format: Option[ResponseFormat]): Seq[String] =

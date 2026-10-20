@@ -241,4 +241,29 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
 
     agent.run(thread, "go", limited(5000)).value.usage.inputTokens should be > 1000L
   }
+
+  it should "never fail a call it estimates, whatever a custom client leaves null" in {
+    val malformed = CompletionFixture
+      .simple("ok")
+      .withMessage(AssistantMessage(Some("ok"), null))
+      .withUsage(None)
+    val judge   = ScriptedLLMClient.of(malformed)
+    val outcome = new java.util.concurrent.atomic.AtomicReference[Option[Boolean]](None)
+    val judging = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("judge")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        outcome.set(Some(context.accounted(judge).complete(Conversation(Seq(UserMessage("judge")))).isRight))
+        next(request)
+    }
+    val agent =
+      built(Agent.builder("assistant", ScriptedLLMClient.of(CompletionFixture.simple("done"))).withMiddleware(judging))
+
+    val result = agent.run(thread, "go", limited(100000)).value
+
+    outcome.get shouldBe Some(true)
+    result.answer shouldBe Some("done")
+    result.usage.requestCount shouldBe 2
+  }
 }
