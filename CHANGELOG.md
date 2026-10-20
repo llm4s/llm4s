@@ -107,6 +107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `autoExtractEntities` swallowing a cancellation: `recordMessage` returns the `CancelledError` (also a failure ending
   while the thread is interrupted, or a thrown `InterruptedException`) and the interrupt flag stays set [#1847](https://github.com/llm4s/llm4s/issues/1847).
 
+### Security
+
+- **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
+  (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
+  start of a line was read [#1844](https://github.com/llm4s/llm4s/issues/1844).
+
 ### Build & tooling
 
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
