@@ -555,7 +555,9 @@ section listing each subagent's id and description.
     `TurnState` and step count, so a handoff chain cannot multiply the bound), up to this call's position in its own message,
     must be `<= maxTasksPerTurn`, so one call per step over many steps is counted too. This is exact and stable
     under replay (rule 1); tested in one batch and across steps.
-  - Check the depth. `origin.depth + 1 <= maxDepth`, and delegation must be granted (rule 15).
+  - Check the depth. `origin.depth + 1 <= maxDepth`, and delegation must be granted (rule 15). `maxDepth` is the
+    **root's**: a delegating child is built with its parent's `DelegationConfig` (a `TypedAgent` has none of its
+    own), so every level checks the same absolute cap and no descendant can raise an ancestor's bound.
   - Acquire a slot from the parent run's semaphore of `maxConcurrentChildren` permits. It is keyed by
     `RunContext.incarnation` and acquired interruptibly. A call over the bound waits; it is not refused.
   - Run `ChildRunner`.
