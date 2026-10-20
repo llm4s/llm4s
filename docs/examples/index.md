@@ -521,6 +521,33 @@ sbt "samples/runMain org.llm4s.samples.harness.CodingWorkspaceExample llm4s/work
 
 ---
 
+### ParallelDeepResearchExample {#parallel-deep-research}
+
+**File:** [`ParallelDeepResearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/harness/ParallelDeepResearchExample.scala)
+
+The subagents exit example ([design §4.49](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md)):
+deep research ported to parallel specialists. A lead on `HarnessProfile.deepAgents` gives each question to a typed
+`researcher` subagent (granted the lead's `fetch_page`), all in one message, at most two at once, and has a `critic`
+subagent review the draft before it answers with a typed brief. Its first "process" stops once the first child's
+report is committed; the second `recover`s the lead from the same SQLite file without running the finished child
+again, and asks you about any fetch outside the allowed site.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.harness.ParallelDeepResearchExample"
+```
+
+**What it demonstrates:**
+- `TypedAgent[I, O]` specialists through `task_<id>` tools: typed input and typed reports, nothing else crosses
+- `DelegationConfig(maxConcurrentChildren = 2)` bounding a batch of three
+- A child's approval suspending the lead, answered through `Agent.resume`; a child's failure as a tool error
+- The merged stream (`nested = true`): `TaskStarted`, each child's text, `TaskEnded`
+- `recover` in a fresh runtime that reuses finished children, and `forget` deleting every child thread
+
+`ParallelDeepResearchAcceptanceSpec` runs the same agent on a scripted model: parallel, crash, failure, approval,
+cancel, streams and cleanup.
+
+---
+
 ## Tool Examples
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/toolapi/`

@@ -257,6 +257,15 @@ a run that came back `Suspended`, taking the same answers as `Agent.resume`, and
 came back `Refused(TaskRefusal.Failed(_))`; both return a `TaskOutcome` too. Only a standalone run's ref is accepted: a
 delegated child is continued through its parent.
 
+## A worked example
+
+[`ParallelDeepResearchExample`](/examples/#parallel-deep-research) puts these together: a lead on
+`HarnessProfile.deepAgents` with the general-purpose subagent off, a typed `researcher` granted the lead's
+`fetch_page` and a tool-less `critic`, `maxConcurrentChildren = 2`, and permission rules that ask before a fetch from
+an unknown site, wherever in the tree it is made. Its acceptance suite, `ParallelDeepResearchAcceptanceSpec`, runs it
+on a scripted model through a parallel batch, a crash and `recover`, a child's failure, a child's approval, a cancel,
+the merged stream and `forget` ([design §4.49](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md)).
+
 ## Delegation or handoffs
 
 A [handoff](handoffs) moves the conversation to another agent of the same family, which then owns it. Delegation

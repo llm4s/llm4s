@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SubagentEvents.TaskStarted` / `TaskEnded` (the child-task metric) and parent ids in tracing [#2051](https://github.com/llm4s/llm4s/issues/2051); [design §4.47](docs/design/typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md).
 - **Added** subagents in `HarnessProfile` (`withSubagents(SubagentConfig)`): `deepAgents` offers the general-purpose subagent
   through `task`, plus specialists and `llm4s.agent.harness.subagents` config [#2052](https://github.com/llm4s/llm4s/issues/2052); [design §4.48](docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md).
+- **Added** the exit example, `ParallelDeepResearchExample`: typed specialists in parallel under bounds, a crash, a child's failure,
+  approval and cancel, nested streams, with an acceptance suite on a scripted model [#2053](https://github.com/llm4s/llm4s/issues/2053); [design §4.49](docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md).
 
 ### Agent harness (Phase 3)
 

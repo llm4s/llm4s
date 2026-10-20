@@ -1021,6 +1021,7 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 | [BuiltinToolsAgentExample](/examples/#agent-examples) | Built-in tools |
 | [DeepResearchExample](/examples/#deep-research) | The harness on state files: plan, offload, summary, memory, recover after a stop |
 | [CodingWorkspaceExample](/examples/#coding-workspace) | The harness in a workspace: permissions, approval of `execute`, resume |
+| [ParallelDeepResearchExample](/examples/#parallel-deep-research) | Typed subagents in parallel: bounds, a child's approval through the lead, nested streams, recover after a stop |
 
 [Browse all examples →](/examples/)
 
