@@ -722,7 +722,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
   }
 
   Seq[(String, (AgentResult, InterruptId) => (InterruptId, ujson.Value))](
-    "rejected"                       -> ((parked, id) => parked.reject(id, "no")),
+    "rejected"                      -> ((parked, id) => parked.reject(id, "no")),
     "edited to arguments that fail" -> ((parked, id) => parked.edit(id, ujson.Obj("text" -> 5)))
   ).foreach { case (how, decide) =>
     it should s"settle the child of a suspended timed-out call $how, and clear its record (#2105)" in {
@@ -739,7 +739,15 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val parent  = family(runtime, setup)._1
       val thread  = ThreadId(s"timed-out-refused-on-resume-${how.takeWhile(_ != ' ')}")
       def recorded: Set[String] =
-        runtime.childAtRest(thread, parent.loop.graph, RunConfig()).ok.get._2.state.get(DelegationKeys.timedOut).ok.keySet
+        runtime
+          .childAtRest(thread, parent.loop.graph, RunConfig())
+          .ok
+          .get
+          ._2
+          .state
+          .get(DelegationKeys.timedOut)
+          .ok
+          .keySet
       val parked = parent.run(thread, "go").ok
       val id = parked.status match {
         case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
