@@ -355,7 +355,9 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - **`Running`:** `recoverChild`.
     - A `ThreadBusy` is waited on interruptibly, with backoff, until the claim frees or
       `min(2 × ClaimPolicy.ttl, parent's remaining deadline, the child's stored effective deadline)` passes; when
-      the child's own deadline is what passed, the child is settled `Failed` as D2 does, not waited on further. The holder is a lapsed run, or one draining
+      the child's own deadline is what passed, the wait stops there: the call returns `ToolOutcome.Fatal(ThreadBusy)`
+      (settling needs the child's claim, which the holder still has), and the next admission that holds the claim
+      settles the child `Failed` per D2's expired-deadline rule. The holder is a lapsed run, or one draining
       after a cancel.
     - After that the call returns `ToolOutcome.Fatal(ThreadBusy)`. The parent run then fails, and `recover` later
       reattaches.
@@ -456,7 +458,8 @@ D2 grants children a token budget and a deadline. Neither exists as a run limit 
   - A call in flight is not interrupted, so a run can overshoot by one call. The docs say so.
   - **A completion without usage is estimated, never counted as zero.** When an `LLMClient` returns
     `usage = None`, the call is charged a conservative estimate from core's `ConversationTokenCounter` (the
-    request's messages as input, the completion's content as output), recorded as estimated, so `maxTokens` and
+    request's messages as input, the **complete assistant message** as output: text, tool-call names and arguments,
+    and thinking blocks, so a tool-only response is not charged near zero), recorded as estimated, so `maxTokens` and
     every inherited child grant still advance. Tested with a client that reports no usage.
 - **`RunContext.deadline: Option[Instant]`**: when the run's `timeout` expires, from the clock the runtime uses.
   `None` without a timeout. It is set by `GraphRuntime` at admission and read by K2 and D2.
@@ -655,7 +658,7 @@ Tests:
     `resumeChild` alike: a child suspended past its deadline, or near its token or step grant, is resumed with the
     same deductions, and settled the same way when nothing is left. **Every effective grant is fixed at first
     admission and stored on the child thread** (runtime-owned `DelegationKeys` keys, beside the deadline): the
-    step and token grants as computed then, from the grant and the parent's remainder at that time. A
+    step, token and concurrency grants as computed then, from the grant and the parent's remainder at that time. A
     continuation deducts from those stored values, never from a grant recomputed against a recovered parent's
     fresh or larger budget. A recovered or resumed child's limits are its stored grant less what its earlier attempts
     used: its `usage` key plus `priorUsage.total` (K2) for tokens; for steps its committed model steps **plus the
