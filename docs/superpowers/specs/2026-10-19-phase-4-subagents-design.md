@@ -403,6 +403,13 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - The runner awaits the child with `Agent.blocking`'s semantics. When the calling thread is interrupted (parent
     cancel, parent `ClaimLost`, a C2 timeout on the `task` call), it cancels the child and waits up to
     `AgentRun.Drain` for it to end. It then returns `Left(CancelledError)` with the flag kept.
+  - **A timeout on the `task` call itself settles the child.** That call commits its error and never runs again,
+    so its child can never be reattached: once the cancellation drains, the runner settles the child
+    `Failed(kind = "timed-out", ...)` under its own claim with the parent fence (#2071) before the call commits,
+    so it is prunable. If the child's claim is still busy after the drain (a provider ignoring the interrupt), the
+    call commits anyway and the next admission's retention pass, which abandons the run's unsettled children of
+    calls that committed, settles it. A parent cancel or lost claim is different: the call does not commit and
+    `recover` reattaches, so the child is left `Running`.
   - A child whose provider ignores its interrupt for longer is logged at WARN. Its thread is `ThreadBusy` until it
     ends, which the reattach above waits on.
   - Children of children are cancelled by the same mechanism, one level at a time.
@@ -510,6 +517,7 @@ final class TypedAgent[I, O] private (...):
   def withInputText(render: I => String): TypedAgent[I, O]         // the child's first user message
   def withFailure(policy: ChildFailure): TypedAgent[I, O]
   def withInheritance(inheritance: Inheritance): TypedAgent[I, O]  // D2; Inheritance.none until then
+  def withSubagents(subagents: TypedAgent[?, ?]*): TypedAgent[I, O] // D2: the child's own subagents, offered only under `delegate` and maxDepth
   def bind(client: LLMClient, runtime: GraphRuntime, options: CompletionOptions = CompletionOptions(),
            tracing: Option[Tracing] = None): Result[BoundAgent[I, O]]   // standalone: the given client and options unless withModel
 
