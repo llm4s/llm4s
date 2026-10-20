@@ -456,9 +456,16 @@ D2 grants children a token budget and a deadline. Neither exists as a run limit 
     calls the model several times within one step (`ModelContext.accounted`, e.g. a summariser over chunks) is
     checked before each call and refused at the limit, ending the turn the same way.
   - A call in flight is not interrupted, so a run can overshoot by one call. The docs say so.
+  - **The unit is one `LLMClient` call.** The budget counts the usage a call's completion reports (or its
+    estimate). A client that retries internally (`ReliableClient`) is one call: its failed attempts return no
+    completion, so they carry no usage the runtime can see and are not counted. This is a documented limit, not a
+    gap to close in Stage 4: the retry layer is in core and reports no per-attempt usage, and the guide says to
+    set `maxTokens` with retries in mind. Exposing attempts from the retry layer is a core change for a later
+    stage.
   - **A completion without usage is estimated, never counted as zero.** When an `LLMClient` returns
     `usage = None`, the call is charged a conservative estimate from core's `ConversationTokenCounter` (the
-    request's messages as input, the **complete assistant message** as output: text, tool-call names and arguments,
+    **complete request** as input (messages, tool definitions and any `responseFormat` schema, which providers
+    count on every call), the **complete assistant message** as output: text, tool-call names and arguments,
     and thinking blocks, so a tool-only response is not charged near zero), recorded as estimated, so `maxTokens` and
     every inherited child grant still advance. Tested with a client that reports no usage.
 - **`RunContext.deadline: Option[Instant]`**: when the run's `timeout` expires, from the clock the runtime uses.
