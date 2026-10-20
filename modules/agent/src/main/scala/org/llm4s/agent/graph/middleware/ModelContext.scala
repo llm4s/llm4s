@@ -134,7 +134,7 @@ object ModelContext:
    * whole assistant message out - its text, every tool call's name and arguments, and its thinking - at least one
    * token each way, so a call is never free. Tool calls only on `Completion.toolCalls` count too.
    */
-  private[agent] def estimated(completion: Completion, request: Seq[Message], definitions: Seq[String]): TokenUsage =
+  private[agent] def estimated(completion: Completion, request: Seq[Message], definitions: => Seq[String]): TokenUsage =
     // an estimate never fails the call it charges: whatever a field holds (a custom client may leave one null), each
     // part falls back, and the whole to the one-token minimum
     val usage = Try {
@@ -181,8 +181,12 @@ object ModelContext:
 
   /** The schemas a request is sent with, rendered for the usage estimate: each tool's definition and a JSON schema. */
   private[agent] def definitions(tools: Seq[ToolFunction[?, ?]], format: Option[ResponseFormat]): Seq[String] =
-    tools.flatMap(t => Try(t.toOpenAITool(strict = false).render()).toOption) ++
-      format.collect { case ResponseFormat.JsonSchema(schema, name, _) => name + Option(schema).fold("")(_.render()) }
+    // total, as the estimate is: a null field contributes nothing
+    val defined = nonNull(tools).flatMap(t => Try(t.toOpenAITool(strict = false).render()).toOption)
+    val schema = Try(Option(format).flatten.collect { case ResponseFormat.JsonSchema(schema, name, _) =>
+      Option(name).getOrElse("") + Option(schema).fold("")(_.render())
+    }).toOption.flatten
+    defined ++ schema
 
   /** An accounted call refused at the run's token budget (#2084): the model step ends the turn `TokenLimitReached`. */
   final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:
