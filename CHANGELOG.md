@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
+  `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
+  recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
 - **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
   thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
 

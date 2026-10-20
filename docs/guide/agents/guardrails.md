@@ -63,8 +63,11 @@ middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned 
 A list of guardrails runs completely: each guardrail, in order, on the value the previous one
 returned, **even after one has failed**. That is why the block carries every failure's error, and why a
 guardrail that costs a call - an LLM judge - runs on every turn that reaches its list. To stop at the first
-failure, use [`CompositeGuardrail.sequential`](#sequential-short-circuit); the block then names the composite
-as the guardrail.
+failure, use [`CompositeGuardrail.sequential`](#sequential-short-circuit) (adapted with `InputGuardrail.from`,
+see [Using a composite in an agent](#using-a-composite-in-an-agent)); the block then names the composite as the
+guardrail. Running the whole list is the settled default ([#1521](https://github.com/llm4s/llm4s/issues/1521)): it
+reports every reason a value was refused in one block, and an early stop is one composite away, while the opposite
+default would hide the other failures with no way to ask for them.
 
 A block sends one durable `agent.guardrail_blocked` event, naming the first failing guardrail and its phase
 (`Input` or `Output`), and no event comes from a guardrail that passed or that ran after the first failure.
@@ -292,23 +295,22 @@ val sequentialValidation = CompositeGuardrail.sequential(Seq(
 ### Using a composite in an agent
 
 A composite is a `Guardrail[String]`, while `GuardrailMiddleware` takes `InputGuardrail`s and
-`OutputGuardrail`s, so wrap it. A cast does not work: it throws a `ClassCastException`.
+`OutputGuardrail`s, so adapt it with `InputGuardrail.from` or `OutputGuardrail.from`. A cast does not work: it
+throws a `ClassCastException`.
 
 ```scala
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail }
-import org.llm4s.types.Result
-
-def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail {
-  val name: String                            = guardrail.name
-  def validate(value: String): Result[String] = guardrail.validate(value)
-}
+import org.llm4s.agent.guardrails.InputGuardrail
 
 val agent = Agent
   .builder("assistant", client)
-  .withMiddleware(GuardrailMiddleware(Seq(asInput(sequentialValidation)), Seq.empty))
+  .withMiddleware(GuardrailMiddleware(Seq(InputGuardrail.from(sequentialValidation)), Seq.empty))
   .build()
 ```
+
+`from` keeps the guardrail's name and description and passes the hook's context on, so an LLM judge inside the
+composite has its model calls counted in the thread's usage (a hand-written wrapper that overrides only
+`validate(value)` loses that). An `InputGuardrail` passed to `InputGuardrail.from` comes back unchanged.
 
 `all` runs every guardrail and reports every failure; `any` stops at the first guardrail that passes, so
 those after it do not run; `sequential` stops at the first failure.

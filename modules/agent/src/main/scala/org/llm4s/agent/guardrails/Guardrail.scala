@@ -77,6 +77,26 @@ trait InputGuardrail extends Guardrail[String] {
   def transform(input: String): String = input
 }
 
+object InputGuardrail {
+
+  /**
+   * `guardrail` as an input guardrail, for `GuardrailMiddleware`: a [[CompositeGuardrail]] or any other
+   * `Guardrail[String]` (a cast throws a `ClassCastException`). Both `validate` forms delegate, so a guardrail that
+   * calls a model through the hook's `context` keeps doing so, and the name and description are the guardrail's.
+   * One that already is an [[InputGuardrail]] is returned unchanged.
+   */
+  def from(guardrail: Guardrail[String]): InputGuardrail = guardrail match {
+    case input: InputGuardrail => input
+    case other =>
+      new InputGuardrail {
+        def validate(value: String): Result[String]                                 = other.validate(value)
+        override def validate(value: String, context: ModelContext): Result[String] = other.validate(value, context)
+        val name: String                                                            = other.name
+        override def description: Option[String]                                    = other.description
+      }
+  }
+}
+
 /**
  * Validates agent output before returning to user.
  *
@@ -95,4 +115,22 @@ trait OutputGuardrail extends Guardrail[String] {
    * @return The transformed output
    */
   def transform(output: String): String = output
+}
+
+object OutputGuardrail {
+
+  /**
+   * `guardrail` as an output guardrail, for `GuardrailMiddleware`; see [[InputGuardrail.from]]. One that already is
+   * an [[OutputGuardrail]] is returned unchanged.
+   */
+  def from(guardrail: Guardrail[String]): OutputGuardrail = guardrail match {
+    case output: OutputGuardrail => output
+    case other =>
+      new OutputGuardrail {
+        def validate(value: String): Result[String]                                 = other.validate(value)
+        override def validate(value: String, context: ModelContext): Result[String] = other.validate(value, context)
+        val name: String                                                            = other.name
+        override def description: Option[String]                                    = other.description
+      }
+  }
 }

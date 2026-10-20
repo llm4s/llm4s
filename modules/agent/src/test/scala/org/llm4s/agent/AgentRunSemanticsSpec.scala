@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
-import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail, OutputGuardrail }
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -148,11 +148,8 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
     val ran = new CopyOnWriteArrayList[String]()
     val composite =
       CompositeGuardrail.sequential[String](Seq(new Recording("RuleA", false, ran), new Recording("RuleB", false, ran)))
-    // the wrapper of docs/guide/agents/guardrails.md: a composite is a Guardrail[String], not an InputGuardrail
-    def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail:
-      val name: String                            = guardrail.name
-      def validate(value: String): Result[String] = guardrail.validate(value)
-    val wrapped = asInput(composite)
+    // as docs/guide/agents/guardrails.md shows: a composite is a Guardrail[String], adapted with InputGuardrail.from
+    val wrapped = InputGuardrail.from(composite)
 
     val status = built(
       Agent
