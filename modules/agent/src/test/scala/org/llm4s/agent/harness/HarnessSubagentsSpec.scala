@@ -210,6 +210,26 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
       .message should include("SubagentConfig.withDelegation")
   }
 
+  "A harness's SubagentConfig.delegation" should "be its agent's bounds in the handoff family's one DelegationConfig (#2089)" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val profile =
+      HarnessProfile.deepAgents.withSubagents(SubagentConfig.deepAgents.withDelegation(DelegationConfig(maxDepth = 1)))
+    val wider = Agent.builder("specialist", client).withDelegation(DelegationConfig(maxDepth = 3))
+    assistant(client, profile)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", wider, "s"))
+      .build()
+      .left
+      .value
+      .message should include("maxDepth (1 vs 3)")
+    // a target that sets none takes the harness's
+    val plain = Agent.builder("specialist", client).withSubagents(researcher)
+    assistant(client, profile)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", plain, "s"))
+      .build()
+      .isRight shouldBe
+      true
+  }
+
   "A harness's delegation bound that is not positive" should "be refused by build(), naming the profile field" in {
     val client = RoutingClient(PartialFunction.empty)
     val error = assistant(

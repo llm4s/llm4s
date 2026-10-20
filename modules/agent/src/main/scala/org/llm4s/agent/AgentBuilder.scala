@@ -240,7 +240,9 @@ final class AgentBuilder private (
    * invalid id, a `maxSteps` below 1, a handoff whose id is invalid or differs from its target's,
    * an id-only handoff ([[Handoff.toId]]) to an id no builder of the family defines, one id
    * defined by two builders with different settings - their handoff targets and subagents compared too - a tool named
-   * like a task tool of any agent of the family (task calls are counted by name across handoffs), and whatever
+   * like a task tool of any agent of the family (task calls are counted by name across handoffs), two agents of the
+   * family setting different `DelegationConfig`s (one turn runs under one set of bounds; an agent that sets none takes
+   * the family's), and whatever
    * [[org.llm4s.agent.graph.toolloop.ToolLoop.build]] refuses: tool name clashes, invalid tool
    * schemas, keys the loop owns, handoffs to self or twice to one target.
    */
@@ -255,9 +257,12 @@ final class AgentBuilder private (
       // a handoff stays in the turn, so each agent counts the whole family's task calls in it (#2067)
       taskNames = installs.flatMap(e => TaskTools.names(e.subagents)).toSet
       _ <- AgentBuilder.taskNamesUnshared(family, taskNames)
+      // a handoff stays in the turn, so the whole turn runs under one depth cap and one task cap (#2089)
+      bounds <- AgentBuilder.familyDelegation(family)
       compiled <- family.foldLeft[Result[Vector[(LoopAgent, Vector[SubagentPlan])]]](Right(Vector.empty)) {
         // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
-        (acc, builder) => acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames).map(done :+ _))
+        (acc, builder) =>
+          acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames, bounds).map(done :+ _))
       }
       agents = compiled.map(_._1)
       root      <- AgentId.of(id)
@@ -271,8 +276,8 @@ final class AgentBuilder private (
       family.flatMap(b => b.held(loop, b.interruptBefore, BreakpointPhase.Before)).toSet,
       family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
       installed.retention,
-      // children are made on the family's thread by whichever agent is active: keep the tightest bound any sets
-      installs.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption,
+      // children are made on the family's thread by whichever agent is active, under the family's one bound
+      Option.when(installs.exists(_.subagents.nonEmpty))(bounds.childRetention),
       DelegationPlan(compiled.flatMap(_._2))
     )
 
@@ -284,25 +289,27 @@ final class AgentBuilder private (
   private def delegating(
     graphRuntime: GraphRuntime,
     rootTracing: Option[Tracing],
-    familyTaskNames: Set[String]
+    familyTaskNames: Set[String],
+    bounds: DelegationConfig
   ): Result[(Option[DelegationMiddleware], Vector[SubagentPlan])] =
     effective.flatMap { installed =>
       // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
-      if installed.subagents.isEmpty then installed.delegation.validated.map(_ => (None, Vector.empty))
-      else delegatingWith(installed, graphRuntime, rootTracing, familyTaskNames)
+      if installed.subagents.isEmpty then bounds.validated.map(_ => (None, Vector.empty))
+      else delegatingWith(installed, graphRuntime, rootTracing, familyTaskNames, bounds)
     }
 
   private def delegatingWith(
     installed: AgentBuilder.Effective,
     graphRuntime: GraphRuntime,
     rootTracing: Option[Tracing],
-    familyTaskNames: Set[String]
+    familyTaskNames: Set[String],
+    bounds: DelegationConfig
   ): Result[(Option[DelegationMiddleware], Vector[SubagentPlan])] =
     val subagents  = installed.subagents
     val ids        = subagents.map(_.id.value)
     val duplicated = ids.diff(ids.distinct).distinct
     for
-      config <- installed.delegation.validated
+      config <- bounds.validated
       _ <- Either.cond(
         duplicated.isEmpty,
         (),
@@ -376,7 +383,6 @@ final class AgentBuilder private (
             systemPrompt,
             None,
             subagents,
-            delegation.getOrElse(DelegationConfig.default),
             // innermost, so every middleware's wrapToolCall wraps each task call
             stack.size
           )
@@ -409,7 +415,6 @@ final class AgentBuilder private (
               Some(h.retention),
               // the general-purpose subagent's grant is computed from this agent's actual tools
               profile.subagents.agents(allTools.map(_.spec.name).toSet) ++ subagents,
-              profile.subagents.delegation,
               outer.size
             )
           }
@@ -417,7 +422,8 @@ final class AgentBuilder private (
   private def loopAgent(
     graphRuntime: GraphRuntime,
     rootTracing: Option[Tracing],
-    familyTaskNames: Set[String]
+    familyTaskNames: Set[String],
+    bounds: DelegationConfig
   ): Result[(LoopAgent, Vector[SubagentPlan])] =
     for
       agentId <- AgentId.of(id)
@@ -427,7 +433,7 @@ final class AgentBuilder private (
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
       installed <- effective
-      delegated <- delegating(graphRuntime, rootTracing, familyTaskNames)
+      delegated <- delegating(graphRuntime, rootTracing, familyTaskNames, bounds)
       toolSet   <- ToolSet.of(validator, inherited.validators, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
@@ -465,6 +471,9 @@ final class AgentBuilder private (
    * tools' specs, so two builders whose subagents differ behind the same specs (prompts, tools, output, failure policy)
    * would otherwise pass as one agent.
    */
+  /** The bounds this builder sets: its harness's `SubagentConfig.delegation`, else its own `withDelegation`, else none. */
+  private def ownDelegation: Option[DelegationConfig] = harness.map(_.subagents.delegation).orElse(delegation)
+
   private def delegatesAs(other: AgentBuilder): Boolean =
     subagents.size == other.subagents.size &&
       subagents.lazyZip(other.subagents).forall(_ eq _) &&
@@ -479,7 +488,6 @@ final class AgentBuilder private (
         systemPrompt,
         None,
         subagents,
-        DelegationConfig.default,
         middleware.size
       )
     )
@@ -569,7 +577,7 @@ object AgentBuilder:
 
   /**
    * What an agent runs with once its harness is installed; `retention` only with a harness. `subagents` are its
-   * harness's then its own, bounded by `delegation`, and their `delegation` middleware goes at `delegationAt` in
+   * harness's then its own, bounded by the family's `DelegationConfig`, and their `delegation` middleware goes at `delegationAt` in
    * `middleware`.
    */
   final private case class Effective(
@@ -578,7 +586,6 @@ object AgentBuilder:
     systemPrompt: Option[String],
     retention: Option[RetentionPolicy],
     subagents: Vector[TypedAgent[?, ?]],
-    delegation: DelegationConfig,
     delegationAt: Int
   ):
     /** `middleware` with `delegating`, when there is one, at `delegationAt`. */
@@ -641,6 +648,30 @@ object AgentBuilder:
             )
           )
       }
+
+  /**
+   * The one `DelegationConfig` a handoff family runs under (#2089): a handoff stays in the turn, so a target with its
+   * own bounds would raise `maxDepth` or `maxTasksPerTurn` mid-turn. Every agent that sets bounds must set the same;
+   * an agent that sets none takes them, and a family where none does takes the default.
+   */
+  private def familyDelegation(family: Vector[AgentBuilder]): Result[DelegationConfig] =
+    family.flatMap(b => b.ownDelegation.map(b.id -> _)) match
+      case (firstId, first) +: rest =>
+        rest.find(_._2 != first) match
+          case None => Right(first)
+          case Some((otherId, other)) =>
+            val fields = first.productElementNames
+              .zip(first.productIterator.zip(other.productIterator))
+              .collect { case (name, (a, b)) if a != b => s"$name ($a vs $b)" }
+              .mkString(", ")
+            Left(
+              ValidationError(
+                "delegation",
+                s"agents '$firstId' and '$otherId' of one handoff family set different delegation bounds: $fields; " +
+                  "a handoff stays in the turn, so the family shares one DelegationConfig"
+              )
+            )
+      case _ => Right(DelegationConfig.default)
 
   private def idTargetsDefined(family: Vector[AgentBuilder]): Result[Unit] =
     val ids = family.map(_.id).toSet

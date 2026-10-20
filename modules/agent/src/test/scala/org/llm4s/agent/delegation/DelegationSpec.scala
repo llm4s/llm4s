@@ -250,6 +250,61 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
   }
 
+  it should "refuse a family whose handoff target raises the root's maxDepth (#2089)" in {
+    val client     = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent.builder("specialist", client).withDelegation(DelegationConfig().withMaxDepth(3))
+    val refused = lead(client)
+      .withDelegation(DelegationConfig().withMaxDepth(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("agents 'lead' and 'specialist'")
+    refused.message should include("maxDepth (1 vs 3)")
+  }
+
+  it should "refuse a family whose handoff target raises the root's maxTasksPerTurn (#2089)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(16))
+    val refused = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("maxTasksPerTurn (1 vs 16)")
+  }
+
+  it should "run a handoff target that sets no bounds under the root's (#2089)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+          Right(CompletionFixture.simple(toolResults(messages).last))
+        else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("general", _)    => Right(CompletionFixture.simple("report"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    // the specialist sets none, so it takes the family's cap of one: its task is the turn's second
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST").withSubagents(researcher)
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 1")
+    agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
+  }
+
   it should "refuse a family where an agent's ordinary tool is named like a family task tool (#2067)" in {
     val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
     val specialist = Agent
@@ -785,7 +840,7 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case other => fail(s"expected ToolFailed, got $other")
   }
 
-  "DelegationConfig.childRetention" should "apply when only a handoff target delegates, the tightest bound in the family" in {
+  "DelegationConfig.childRetention" should "apply when only a handoff target delegates, as the family's bound" in {
     val client = RoutingClient {
       case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
       case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
