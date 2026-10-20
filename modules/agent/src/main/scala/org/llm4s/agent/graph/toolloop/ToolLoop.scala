@@ -1459,10 +1459,15 @@ object ToolLoop:
         // one request through every wrapper; each provider call is counted in the task's usage as it returns
         def call(req: ModelRequest): Result[ModelResponse] =
           val result = stack.wrapModelCall(req, hooks, check) { r =>
-            callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
-              hooks.recordCall(completion, attempt)
-              ModelResponse(completion)
-            }
+            // every call is checked against the token budget, also a wrapper's second one (#2084)
+            hooks
+              .admitCall()
+              .flatMap(_ =>
+                callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
+                  hooks.recordCall(completion, attempt, r.messages)
+                  ModelResponse(completion)
+                }
+              )
           }
           // an undeclared write fails the step whatever the wrappers returned
           check.failure.fold(result)(Left(_))
@@ -1490,6 +1495,16 @@ object ToolLoop:
           )
         def answered(result: Result[ModelResponse])(invalid: (ModelResponse, Vector[String]) => NodeResult) =
           result match
+            // a call refused at the token budget ends the turn as the step check does, whatever the wrappers
+            // returned; the calls made before it are counted (#2084)
+            case _ if context.usage.refused =>
+              NodeResult.Continue(
+                Command(usageOf(context), Nil)
+                  .update(
+                    LoopKeys.turn,
+                    turn.copy(outcome = Some(TurnOutcome.TokenLimitReached), priorValues = Map.empty)
+                  )
+              )
             // nothing of the step is stored while the question waits - it runs again once answered - but
             // the model calls a wrapper made before asking were made, and are counted
             case Left(asked: MiddlewareAsked) =>

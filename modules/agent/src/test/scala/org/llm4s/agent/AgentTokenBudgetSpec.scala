@@ -3,9 +3,11 @@ package org.llm4s.agent
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, ThreadId }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, ModelRequest, ModelResponse }
 import org.llm4s.agent.graph.tool.{ ToolContent, ToolOutcome }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -115,5 +117,49 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
 
     agent.run(thread, "go").value.answer shouldBe Some("unlimited")
+  }
+
+  it should "check every accounted call a middleware makes within one step, not only the step" in {
+    // a summariser over three chunks, each call 30 tokens; it ignores a failed call, as a best-effort one would
+    val summariser = ScriptedLLMClient.of(
+      CompletionFixture.withUsage("s1", 10, 20),
+      CompletionFixture.withUsage("s2", 10, 20),
+      CompletionFixture.withUsage("s3", 10, 20)
+    )
+    val summarising = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("summariser")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        val client = context.accounted(summariser)
+        (1 to 3).foreach(i => client.complete(Conversation(Seq(UserMessage(s"chunk $i")))): Unit)
+        next(request)
+    }
+    val model = ScriptedLLMClient.of(CompletionFixture.simple("never sent"))
+    val agent = built(Agent.builder("assistant", model).withMiddleware(summarising))
+
+    val result = agent.run(thread, "go", limited(50)).value
+
+    // the first two calls are admitted under the budget (0, then 30); the third, at 60, is refused, and so is the step
+    result.status shouldBe AgentStatus.TokenLimitReached
+    summariser.callCount shouldBe 2
+    model.callCount shouldBe 0
+    tokens(result.usage) shouldBe 60L
+  }
+
+  it should "charge an estimate for a completion that reports no usage, so the budget still advances" in {
+    val client = ScriptedLLMClient.of(
+      calling(call("c1", "echo")).withUsage(None),
+      calling(call("c2", "echo")).withUsage(None),
+      CompletionFixture.simple("never sent").withUsage(None)
+    )
+    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+
+    val result = agent.run(thread, "go", limited(1)).value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    client.callCount shouldBe 1
+    result.usage.inputTokens should be > 0L
+    result.usage.outputTokens should be > 0L
   }
 }

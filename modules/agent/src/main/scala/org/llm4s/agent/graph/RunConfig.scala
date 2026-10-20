@@ -401,6 +401,15 @@ final private[agent] class TaskUsage:
   /** The agent model steps a failed task loses: one for a model step that called the model, else none. */
   def lostSteps: Long = if stepped.get then 1L else 0L
 
+  /** Whether an accounted call was refused at the run's token budget (#2084): the model step then ends the turn. */
+  private val refusedAtLimit = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Marks the task as having refused a model call at `RunBudgets.maxTokens`. */
+  def refuse(): Unit = refusedAtLimit.set(true)
+
+  /** Whether the task refused a model call at `RunBudgets.maxTokens`. */
+  def refused: Boolean = refusedAtLimit.get
+
   /**
    * Adds a child run's roll-up (design 4.42). It commits with the task's result, as the rest does; a task that fails
    * drops it rather than reporting it as the run's lost usage, because the child thread keeps that usage itself and the
