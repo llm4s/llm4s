@@ -1,10 +1,9 @@
 package org.llm4s.samples.docs
 
 import org.llm4s.agent.Agent
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
-import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,12 +24,13 @@ class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
       finally src.close()
     }
     Seq(
-      "conversation.messages.exists(_.isInstanceOf[ToolMessage])",
-      """AssistantMessage("Weather in London: 20°C")""",
-      """toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))""",
-      "toolCalls = message.toolCalls.toList",
+      """Reply.toolCall("get_weather", """ + "\"\"\"" + """{"city": "London"}""" + "\"\"\"" + """),""",
+      """Reply.text("It is 20°C in London.")""",
+      "agent <- Agent.builder(\"test-agent\", client).withTools(new ToolRegistry(Seq(tool))).build()",
       "outcome.isRight shouldBe true",
-      """capturedCity shouldBe Some("London")"""
+      """capturedCity shouldBe Some("London")""",
+      "client.callCount shouldBe 2",
+      """client.calls(1).messages.collect { case t: ToolMessage => t.content } shouldBe Seq("Weather in London: 20°C")"""
     ).foreach(line => withClue(s"the guide no longer shows: $line -- ")(page should include(line)))
   }
 
@@ -53,50 +53,22 @@ class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
       }
     }.buildSafe()
 
-    // Mock client that calls the tool
-    class ToolCallingMock extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        val message = if (conversation.messages.exists(_.isInstanceOf[ToolMessage])) {
-          AssistantMessage("Weather in London: 20°C")
-        } else {
-          AssistantMessage(
-            contentOpt = None,
-            toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))
-          )
-        }
-        Right(
-          Completion(
-            id = "mock-1",
-            created = System.currentTimeMillis(),
-            content = message.content,
-            model = "mock-model",
-            message = message,
-            toolCalls = message.toolCalls.toList
-          )
-        )
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] =
-        complete(conversation, options)
-    }
+    val client = ScriptedLLMClient.sequence(
+      Reply.toolCall("get_weather", """{"city": "London"}"""),
+      Reply.text("It is 20°C in London.")
+    )
 
     val outcome = for {
       tool  <- weatherTool
-      agent <- Agent.builder("test-agent", new ToolCallingMock).withTools(new ToolRegistry(Seq(tool))).build()
+      agent <- Agent.builder("test-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
       _     <- agent.run("What's the weather in London?")
     } yield ()
 
     outcome.isRight shouldBe true
     toolWasCalled shouldBe true
     capturedCity shouldBe Some("London")
+    client.callCount shouldBe 2
+    // the second request carries the tool's result back to the model
+    client.calls(1).messages.collect { case t: ToolMessage => t.content } shouldBe Seq("Weather in London: 20°C")
   }
 }
