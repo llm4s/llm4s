@@ -170,6 +170,17 @@ yield (files, ExecuteTool(sandbox))
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
 
+### `LLMClientPekko.streamComplete` materializes `Future[Done]` (#1848)
+
+`streamComplete` is now a `Source[StreamedChunk, Future[Done]]`, like every `AgentPekko` stream
+([#1848](https://github.com/llm4s/llm4s/issues/1848)). The future completes once the provider call has returned, after a
+cancellation too, so a caller can wait until nothing is left running. Code that only runs the stream is unchanged; code
+that names the type changes it, and code that wanted the old value drops it:
+
+```scala
+val chunks: Source[StreamedChunk, NotUsed] = client.streamComplete(conversation).mapMaterializedValue(_ => NotUsed)
+```
+
 ### `MemoryManagerConfig` is growth-safe (#1847)
 
 `MemoryManagerConfig` follows the growth-prone pattern ([#1847](https://github.com/llm4s/llm4s/issues/1847)): build

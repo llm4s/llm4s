@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `execute_tool <tool>`: exhaustive matches, positional patterns and dashboards break; [migration](docs/reference/migration.md#nested-streams-and-tracing-2051).
 - `HarnessProfile.deepAgents` offers a `task` tool (a tool named `task` clashes; permission rules need an `Invoke` rule for it),
   and `withDelegation` beside a harness is refused; [migration](docs/reference/migration.md#subagents-in-the-harness-profile-2052).
+- `LLMClientPekko.streamComplete` materializes `Future[Done]` instead of `NotUsed`: code that names the type, or keeps
+  the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
 
 ### Agent subagents (Phase 4)
 
@@ -64,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** a `llm4s-pekko` stream leaking its producer thread when provider code swallows the interrupt: once the
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
+- **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
+  returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
 
 ### Agent runtime
 

@@ -7,7 +7,7 @@ backpressure and cancellation. It is the Pekko counterpart of `llm4s-effect` (fs
 libraryDependencies += "org.llm4s" %% "llm4s-pekko" % llm4sVersion
 ```
 
- - `LLMClientPekko(client)`: `streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]`, `complete` a `Future`,
+ - `LLMClientPekko(client)`: `streamComplete(conversation)` is a `Source[StreamedChunk, Future[Done]]`, `complete` a `Future`,
    `agent(id)(configure)` an `AgentPekko`.
  - `AgentPekko(agent)`: `stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, Future[Done]]` (each event
    of the turn, then its result; the `Future[Done]` completes once the turn has ended and its thread is free, cancelled

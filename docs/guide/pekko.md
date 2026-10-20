@@ -36,7 +36,7 @@ def wrap(client: LLMClient): LLMClientPekko = LLMClientPekko(client)
 
 ### Streaming
 
-`streamComplete` returns a `Source[StreamedChunk, NotUsed]` of the provider's chunks, as they arrive:
+`streamComplete` returns a `Source[StreamedChunk, Future[Done]]` of the provider's chunks, as they arrive:
 
 ```scala
 import org.apache.pekko.actor.ActorSystem
