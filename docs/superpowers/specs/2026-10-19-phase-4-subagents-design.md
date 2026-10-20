@@ -733,6 +733,12 @@ Tests:
   - **`StreamEvent.Nested(child: ChildRef, event: StreamEvent)`**, live-only, never persisted in the parent's log.
     A parent subscription made with `nested = true` (`stream`, `subscribe`) receives every child event as `Nested`,
     from `TaskStarted` to the child's terminal event, recursively for grandchildren.
+  - **Same runtime only.** `Nested` and `TaskStarted` are live-only, and live events reach only subscriptions on
+    the runtime driving the run (`GraphRuntime`'s cross-runtime subscriptions carry durable events alone). A
+    `nested = true` subscription through another runtime sharing the checkpointer gets the parent's durable
+    events, including `TaskEnded`, and one `LiveGap` at attach saying live and nested events are not carried; it
+    follows a child's durable events with `subscribeChild`. Every guarantee below is for a subscription on the
+    driving runtime.
   - `EventHandlers.onChild[A](eventType)((ChildRef, A) => R)` matches nested events.
   - `AgentIO`, `AgentZ` and `AgentPekko` gain `nestedEvents(run, handlers)`.
   - Overflow is `LiveGap` on the parent subscription (rule 12).
