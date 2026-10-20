@@ -15,10 +15,13 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
   Message,
+  ResponseFormat,
   StreamedChunk,
   ThinkingBlock,
-  TokenUsage
+  TokenUsage,
+  UserMessage
 }
+import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -54,17 +57,23 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage)
 
   /**
-   * Records a completed model call of `request`: attempt `attempt` of the agent's model step, or 0 for a hook's own
+   * Records a completed model call of `request`, sent with `definitions` (its tool and response-format schemas, as
+   * [[ModelContext.definitions]] renders them): attempt `attempt` of the agent's model step, or 0 for a hook's own
    * call. A completion without usage is charged an estimate (#2084).
    */
-  private[agent] def recordCall(completion: Completion, attempt: Int, request: Seq[Message]): Unit =
+  private[agent] def recordCall(
+    completion: Completion,
+    attempt: Int,
+    request: Seq[Message],
+    definitions: => Seq[String]
+  ): Unit =
     record(
       completion.model,
       completion.usage,
       completion.estimatedCost,
       attempt,
       completion.message.toolCalls.size,
-      completion.usage.getOrElse(ModelContext.estimated(completion, request))
+      completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions))
     )
 
   /**
@@ -118,16 +127,17 @@ object ModelContext:
   private lazy val counter: Option[ConversationTokenCounter] = ConversationTokenCounter.openAI().toOption
 
   /**
-   * A conservative estimate of a call's usage, for a completion that reports none (#2084): `request`'s messages in,
-   * the whole assistant message out - its text, every tool call's name and arguments, and its thinking - at least one
+   * A conservative estimate of a call's usage, for a completion that reports none (#2084): the whole request in -
+   * its messages and `definitions`, the tool and response-format schemas providers count on every call - and the
+   * whole assistant message out - its text, every tool call's name and arguments, and its thinking - at least one
    * token each way, so a call is never free. Tool calls only on `Completion.toolCalls` count too.
    */
-  private[agent] def estimated(completion: Completion, request: Seq[Message]): TokenUsage =
+  private[agent] def estimated(completion: Completion, request: Seq[Message], definitions: Seq[String]): TokenUsage =
     val answer =
       if completion.message.toolCalls.isEmpty && completion.toolCalls.nonEmpty then
         completion.message.withToolCalls(completion.toolCalls)
       else completion.message
-    val in    = math.max(1, request.map(tokens).sum)
+    val in    = math.max(1, request.map(tokens).sum + definitions.map(d => tokens(UserMessage(d))).sum)
     val out   = math.max(1, tokens(answer))
     val usage = TokenUsage(in, out, in + out)
     logger.debug(s"model '${completion.model}' reported no usage: charged an estimated $in in, $out out")
@@ -149,25 +159,36 @@ object ModelContext:
         }).mkString
     case other => other.content
 
+  /** The schemas a request is sent with, rendered for the usage estimate: each tool's definition and a JSON schema. */
+  private[agent] def definitions(tools: Seq[ToolFunction[?, ?]], format: Option[ResponseFormat]): Seq[String] =
+    tools.map(_.toOpenAITool(strict = false).render()) ++
+      format.collect { case ResponseFormat.JsonSchema(schema, name, _) => name + schema.render() }
+
   /** An accounted call refused at the run's token budget (#2084): the model step ends the turn `TokenLimitReached`. */
   final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:
     def message: String = s"model call refused: the run has used $used tokens of its budget of $budget"
 
   final private class Accounted(client: LLMClient, context: ModelContext) extends LLMClient:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      context.admitted(recorded(conversation, client.complete(conversation, options)))
+      context.admitted(recorded(conversation, options, client.complete(conversation, options)))
 
     def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      context.admitted(recorded(conversation, client.streamComplete(conversation, options, onChunk)))
+      context.admitted(recorded(conversation, options, client.streamComplete(conversation, options, onChunk)))
 
     def getContextWindow(): Int           = client.getContextWindow()
     def getReserveCompletion(): Int       = client.getReserveCompletion()
     override def validate(): Result[Unit] = client.validate()
 
-    private def recorded(conversation: Conversation, result: Result[Completion]): Result[Completion] =
-      result.foreach(context.recordCall(_, attempt = 0, conversation.messages))
+    private def recorded(
+      conversation: Conversation,
+      options: CompletionOptions,
+      result: Result[Completion]
+    ): Result[Completion] =
+      result.foreach(
+        context.recordCall(_, attempt = 0, conversation.messages, definitions(options.tools, options.responseFormat))
+      )
       result

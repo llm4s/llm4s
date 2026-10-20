@@ -213,4 +213,22 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 1
     result.usage.outputTokens should be > 500L
   }
+
+  it should "estimate a usage-less call's input from the whole request, its tool definitions included" in {
+    import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec }
+    // a tool whose definition alone is about 2000 tokens, sent on every call
+    val schema = SpecTools.spec("big")
+    val big = AgentTool(AgentToolSpec[SpecTools.Text]("big", "word " * 2000, schema.schema))((a, _) =>
+      ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text)))
+    )
+    val client =
+      ScriptedLLMClient.of(calling(call("c1", "big")).withUsage(None), CompletionFixture.simple("never sent"))
+    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(big)))
+
+    val result = agent.run(thread, "go", limited(1000)).value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    client.callCount shouldBe 1
+    result.usage.inputTokens should be > 1000L
+  }
 }

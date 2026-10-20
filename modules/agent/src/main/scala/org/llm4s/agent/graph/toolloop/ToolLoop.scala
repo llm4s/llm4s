@@ -1462,7 +1462,16 @@ object ToolLoop:
             // every call is checked against the token budget, also a wrapper's second one (#2084)
             hooks.admitted(
               callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
-                hooks.recordCall(completion, attempt, r.messages)
+                hooks.recordCall(
+                  completion,
+                  attempt,
+                  r.messages,
+                  // the format is sent only on a request that offers no tools (ModelStep.fromClient)
+                  ModelContext.definitions(
+                    r.tools.toolFunctions,
+                    agent.output.filter(_ => r.tools.toolFunctions.isEmpty).map(_.responseFormat)
+                  )
+                )
                 ModelResponse(completion)
               }
             )
