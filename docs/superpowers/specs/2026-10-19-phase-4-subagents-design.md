@@ -372,7 +372,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     that thread is run or reported. It also checks the **admitted input**: the child's first claim stores a
     digest of the call's canonical input (`DelegationKeys.input`), and a reattach whose input digest differs
     (an approval that edited the arguments after a first attempt started the child) is refused the same way, so a
-    child started for one input is never returned for another.
+    child started for one input is never returned for another. Before that refusal is returned, the original
+    child, if still `Running` or `Suspended`, is settled `Failed(kind = "abandoned", ...)` under its own claim with
+    the parent fence (#2071), so it never lingers past retention; if its claim is busy the call returns
+    `ToolOutcome.Fatal(ThreadBusy)` instead, and the next admission settles it.
   - **`Suspended`:** returned as `Ended` with the `Suspended` status. D3 surfaces it.
   - **`Completed` or `Failed`:** the stored outcome, rebuilt from the child's latest checkpoint's `outcome` (K1)
     and, for `Answered`, `decodeOutput`, with no run. A settled child checkpoint without an `outcome` is corrupt
