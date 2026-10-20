@@ -957,6 +957,41 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId } should contain(settlement)
   }
 
+  it should "announce the run that settled the child first when another settles it before its abandon (#2096)" in {
+    val open                                   = storage()
+    val (setup, _, _, thread, edited, childId) = parkedOverRunningChild("edited-raced", open)
+    val racing                                 = new AtomicBoolean(false)
+    val other                                  = new GraphRuntime(open())
+    val otherGraph                             = family(other, setup)._2.loop.graph
+    val otherRun                               = RunId("settled-elsewhere")
+    // between the runner's read and its abandon's claim, another runtime settles the child
+    val store = new ForwardingCheckpointer(open()) {
+      override def claim(threadId: ThreadId, request: ClaimRequest) = {
+        if (threadId == childId && racing.getAndSet(false))
+          other
+            .settleChild(
+              childId,
+              otherGraph,
+              RunOutcome.Failed("elsewhere", "raced"),
+              "raced",
+              RunConfig().withRunId(otherRun)
+            )
+            .ok
+        super.claim(threadId, request)
+      }
+    }
+    val parent = family(new GraphRuntime(store), setup)._1
+    racing.set(true)
+    val seen = new CopyOnWriteArrayList[StreamEvent]()
+    parent.streamResume(thread, Map(edited), nested = true)(seen.add(_): Unit).ok.await().isLeft shouldBe true
+    racing.get shouldBe false
+    setup.allEnds.last.left.toOption.get.message should include("started with other input")
+    open().latest(childId).ok.map(_.checkpoint.runId) shouldBe Some(otherRun.value)
+    val events = seen.asScala.toVector
+    events.flatMap(SubagentEvents.TaskStarted.unapply).map(_.child.runId) shouldBe Vector(otherRun)
+    events.collect { case StreamEvent.Nested(child, StreamEvent.LiveGap(0)) => child.runId } shouldBe Vector(otherRun)
+  }
+
   it should "return ThreadBusy for an edited call over a busy child, and settle it on a later recover (#2096)" in {
     val open                                        = storage()
     val (setup, _, parent, thread, edited, childId) = parkedOverRunningChild("edited-over-busy", open)

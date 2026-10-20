@@ -398,25 +398,25 @@ private[agent] object ChildRunner:
           checkpoint.status match
             // no call will reattach the original child, so it is settled before the refusal, never left open (#2096)
             case CheckpointStatus.Running | CheckpointStatus.Suspended =>
-              val message    = s"abandoned: its call on '${origin.parent.value}' was run again with other input"
-              val settlement = base.withRunId(RunId.random())
+              val message = s"abandoned: its call on '${origin.parent.value}' was run again with other input"
               runtime.settleChild(
                 childId,
                 graph,
                 RunOutcome.Failed("abandoned", message),
                 message,
-                settlement,
+                base.withRunId(RunId.random()),
                 foldLostUsage,
                 ours,
                 parentClaim
               ) match
-                case Right(_) =>
-                  // the settlement run names the child's latest checkpoint, and no event of it was forwarded
-                  gap(settlement.runId)
-                  Step.Done(Left(refusal))
+                // read again: the run that settled it - this one, or another that got there first - is announced below
+                case Right(_) => Step.Again
                 // the next admission of the call settles it
                 case Left(error) => Step.Done(Left(error))
-            case _ => Step.Done(Left(refusal))
+            case _ =>
+              // the run that settled it names the child's latest checkpoint, and no event of it was forwarded here
+              gap(RunId(checkpoint.runId))
+              Step.Done(Left(refusal))
         case Right(Some((checkpoint, exec))) =>
           checkpoint.status match
             case CheckpointStatus.Running =>
