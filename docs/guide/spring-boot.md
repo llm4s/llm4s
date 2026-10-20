@@ -116,6 +116,11 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | `llm4s.health.probe-ttl` | `60s` | how long a probe result is reused |
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports `DOWN` |
 
+The starter ships Spring Boot configuration metadata (`META-INF/spring-configuration-metadata.json`), so IntelliJ
+IDEA and the Spring tools for VS Code and Eclipse complete these keys, show their defaults and flag a misspelt one in
+`application.properties` and `application.yml`. Inside a `llm4s.providers.<name>` section they complete nothing: its keys
+depend on the provider, and are listed under [Any provider](#any-provider).
+
 ### Which providers
 
 The flat `llm4s.provider` key supports three providers:
