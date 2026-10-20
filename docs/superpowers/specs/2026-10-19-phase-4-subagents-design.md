@@ -736,8 +736,9 @@ Tests:
   - **Same runtime only.** `Nested` and `TaskStarted` are live-only, and live events reach only subscriptions on
     the runtime driving the run (`GraphRuntime`'s cross-runtime subscriptions carry durable events alone). A
     `nested = true` subscription through another runtime sharing the checkpointer gets the parent's durable
-    events, including `TaskEnded`, and one `LiveGap` at attach saying live and nested events are not carried; it
-    follows a child's durable events with `subscribeChild`. Every guarantee below is for a subscription on the
+    events, including `TaskEnded`, exactly as such a subscription already gets no `TextDelta` (the existing
+    cross-runtime contract, which the Scaladoc of `nested` states); it follows a child's durable events with
+    `subscribeChild`. Every guarantee below is for a subscription on the
     driving runtime.
   - `EventHandlers.onChild[A](eventType)((ChildRef, A) => R)` matches nested events.
   - `AgentIO`, `AgentZ` and `AgentPekko` gain `nestedEvents(run, handlers)`.
