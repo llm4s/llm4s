@@ -496,7 +496,10 @@ and has 8 to 15 digits, with spaces, dashes, dots or parentheses between them. D
 as an international number. A card number is recognised by its shape (a Visa, MasterCard, Amex or Discover prefix and
 the right number of digits); the check digit is not validated. When two types match overlapping text (a plain card
 number is also account-shaped, and a phone number can run into the email address after it), the overlapping text is
-masked once, under the type whose match starts first.
+masked once, under the type whose match starts first. Detection does not merge them: `detect` returns one match per
+type, so `summarize` counts that text once for each type (`123456789` gives `SSN -> 1, Passport -> 1` with
+`PIIType.all`), and `PIIDetector`'s block message lists both types. A finding is one match of one type, so the sum of
+the counts is how often the patterns fired, not how many stretches of PII the text holds.
 
 ---
 
