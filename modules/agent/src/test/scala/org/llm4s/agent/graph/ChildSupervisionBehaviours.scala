@@ -311,6 +311,73 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     }
   }
 
+  /**
+   * A store whose first child commit closing a turn as output-invalid lands unsettled - `Running`, with no outcome -
+   * so the child's run ends `OutputInvalid` with no recorded outcome to rebuild it from (#2079).
+   */
+  private def unsettlingOutputInvalid(open: () => Checkpointer): () => Checkpointer = {
+    val dropped = new AtomicBoolean(false)
+    () =>
+      new ForwardingCheckpointer(open()) {
+        override def commit(threadId: ThreadId, commit: Commit) = {
+          val blocked = commit.checkpoint.filter(c =>
+            c.origin.isDefined && c.outcome.exists(_.isInstanceOf[RunOutcome.OutputInvalid])
+          )
+          blocked match {
+            case Some(c) if !dropped.getAndSet(true) =>
+              super.commit(threadId, commit.withCheckpoint(c.withStatus(CheckpointStatus.Running).withOutcome(None)))
+            case _ => super.commit(threadId, commit)
+          }
+        }
+      }
+  }
+
+  private def invalidTypedChild(settle: Boolean): Setup =
+    new Setup(
+      delegating(),
+      answers("""{"customer":"Acme","total":"lots"}""", "not json"),
+      settle = settle,
+      child = _.withOutput(AgentOutputSpec.invoiceSchema)
+    )
+
+  it should "settle an output-invalid child left unsettled, and replay its refusal with no model call (#2079)" in {
+    val open  = unsettlingOutputInvalid(storage())
+    val setup = invalidTypedChild(settle = true)
+    setup.crashAfterChild.set(true)
+    val thread = ThreadId("report-output-invalid")
+    family(new GraphRuntime(open()), setup)._1.run(thread, "go").isLeft shouldBe true
+
+    val runtime = new GraphRuntime(open())
+    val child   = onlyChild(runtime, thread)
+    child.status shouldBe CheckpointStatus.Failed
+    open().latest(child.threadId).ok.map(_.checkpoint.outcome) match {
+      case Some(Some(RunOutcome.OutputInvalid(errors))) => errors should not be empty
+      case other                                        => fail(s"expected an OutputInvalid outcome, got $other")
+    }
+
+    family(runtime, setup)._1.recover(thread).ok.answer shouldBe Some("composed")
+    setup.childClient.callCount shouldBe 2
+    setup.allEnds should have size 2
+    setup.allEnds(1) shouldBe setup.allEnds(0)
+    setup.allEnds(0).ok match {
+      case ChildEnd.Failed(e: GraphError.OutputInvalid, _) => e.errors should not be empty
+      case other                                           => fail(s"unexpected $other")
+    }
+  }
+
+  behavior.of("ChildFailure.Fail")
+
+  it should "leave an output-invalid child it did not settle Running (#2079)" in {
+    val open   = unsettlingOutputInvalid(storage())
+    val setup  = invalidTypedChild(settle = false)
+    val thread = ThreadId("fail-output-invalid")
+    family(new GraphRuntime(open()), setup)._1.run(thread, "go").isLeft shouldBe true
+
+    onlyChild(new GraphRuntime(open()), thread).status shouldBe CheckpointStatus.Running
+    setup.allEnds should have size 1
+    setup.allEnds.head.ok shouldBe a[ChildEnd.Failed]
+  }
+
   behavior.of("A parent taken over before its child's first commit")
 
   it should "register no child, so a successor's cascade delete cannot leave one behind (#2071)" in {

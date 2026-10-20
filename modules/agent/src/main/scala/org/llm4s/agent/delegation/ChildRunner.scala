@@ -508,16 +508,19 @@ private[agent] object ChildRunner:
         case Left(error) => Step.Done(Left(error))
         case Right((_, _, Some(limitHit))) =>
           val what = if limitHit == RunOutcome.TokenLimitReached then "token" else "step"
-          settleSpent(limitHit, s"the child's $what grant is spent")
+          settleWith(limitHit, s"the child's $what grant is spent")
         case Right((grant, _, _)) if grantExpired(grant) =>
           // its stored deadline - from its grant or its first parent's cap - has passed, whatever deadline a recovered
           // parent has now: settled failed as a child timing out mid-run records it, never admitted with no time left
           val late = GraphError.DeadlineExceeded(childId.value, Some(checkpoint.id))
-          settleSpent(RunOutcome.failed(late), s"the child's granted time is spent: ${late.message}")
+          settleWith(RunOutcome.failed(late), s"the child's granted time is spent: ${late.message}")
         case Right((grant, consumed, None)) => admit(grant, consumed)
 
-    /** Settles a child whose grant is spent with `outcome`, then reads it again: its refusal, with no run. */
-    private def settleSpent(outcome: RunOutcome, message: String): Step =
+    /**
+     * Settles the child with `outcome` - a spent grant, an unrecorded output-invalid end or any other failure - then
+     * reads it again: what it returns is what its checkpoint records, with no run.
+     */
+    private def settleWith(outcome: RunOutcome, message: String): Step =
       runtime.settleChild(
         childId,
         graph,
@@ -594,29 +597,18 @@ private[agent] object ChildRunner:
       // the parent's own deadline stopped the child: the parent is stopping too, and its recover reattaches
       // (decided after the run as well as before it: a slow admission can make the parent's the sooner one)
       case Left(late: GraphError.DeadlineExceeded) if parentsDeadline || parentDeadlinePassed => Step.Done(Left(late))
-      // a Block: the child's run settled it with its outcome, which is rebuilt as replay rebuilds it
+      // a Block: the child's run settled it with its outcome, which is rebuilt as replay rebuilds it; one that records
+      // none is settled with it under settleOnFailure, as any other failure is (#2079), so replay returns the same refusal
       case Left(invalid: GraphError.OutputInvalid) =>
         runtime.childAtRest(childId, graph, base) match
           case Right(Some((checkpoint, exec))) if checkpoint.outcome.isDefined => Step.Done(settled(checkpoint, exec))
-          case _ => Step.Done(usage().map(total => counted(ChildEnd.Failed(invalid, total))))
+          case _ if settleOnFailure => settleWith(RunOutcome.OutputInvalid(invalid.errors), invalid.message)
+          case _                    => Step.Done(usage().map(total => counted(ChildEnd.Failed(invalid, total))))
       case Left(error) if settleOnFailure => settle(error)
       case Left(error)                    => Step.Done(usage().map(total => counted(ChildEnd.Failed(error, total))))
 
     /** Settles the failed child, then reads it again: the failure returned is the one its checkpoint records. */
-    private def settle(error: LLMError): Step =
-      runtime.settleChild(
-        childId,
-        graph,
-        RunOutcome.failed(error),
-        error.message,
-        base.withRunId(RunId.random()),
-        foldLostUsage,
-        ours,
-        parentClaim
-      ) match
-        case Right(_)                          => Step.Again
-        case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)
-        case Left(other)                       => Step.Done(Left(other))
+    private def settle(error: LLMError): Step = settleWith(RunOutcome.failed(error), error.message)
 
     /** A settled child's outcome, rebuilt from its terminal checkpoint, with no run (rule 14). */
     private def settled(checkpoint: Checkpoint, exec: Execution): Result[ChildEnd] =
