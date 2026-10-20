@@ -193,6 +193,13 @@ jobs:
           scripts/test-check-tier-drift.sh
           scripts/check-tier-drift.sh
 
+      # The Scala CLI quick start pins a published llm4s version, which must be docs/_data/project.yml's
+      # latest_release (#1456). The offline check runs here; scala-cli-quickstart.yml adds Maven Central and a compile.
+      - name: Check the Scala CLI quick start pins the latest release
+        run: |
+          scripts/test-check-scala-cli-quickstart.sh
+          scripts/check-scala-cli-quickstart.sh
+
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
       # script's checks stay able to fail between releases.
