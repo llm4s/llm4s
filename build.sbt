@@ -1168,8 +1168,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
 // `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
 // agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
+// `llm4s-agent-tools` is test-only too (#1473): `TypedToolSpec` compares a typed tool's schema and argument errors
+// with the hand-built calculator's.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test", agent % Test)
+  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,

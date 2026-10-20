@@ -1,7 +1,15 @@
 package org.llm4s.schema
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.toolapi.{ ArraySchema, NullableSchema, ObjectSchema, PropertyDefinition, Schema, SchemaDefinition }
+import org.llm4s.toolapi.{
+  ArraySchema,
+  NullableSchema,
+  NumberSchema,
+  ObjectSchema,
+  PropertyDefinition,
+  Schema,
+  SchemaDefinition
+}
 
 import scala.annotation.implicitNotFound
 import scala.compiletime.{ constValue, erasedValue, summonInline }
@@ -131,9 +139,11 @@ object SchemaOf {
     def schema(d: String): SchemaDefinition[A] = build(d).asInstanceOf[SchemaDefinition[A]]
   }
 
-  given SchemaOf[String]  = leaf("string")(Schema.string(_))
-  given SchemaOf[Int]     = leaf("integer")(Schema.integer(_))
-  given SchemaOf[Long]    = leaf("integer")(Schema.integer(_))
+  given SchemaOf[String] = leaf("string")(Schema.string(_))
+  given SchemaOf[Int]    = leaf("integer")(Schema.integer(_))
+  // `NumberSchema(isInteger = true)` writes the same `{"type": "integer"}` as `IntegerSchema`, but tells a typed
+  // tool's argument check (`Tool`) that the field is a `Long`, so it accepts whole numbers beyond the `Int` range.
+  given SchemaOf[Long]    = leaf("integer")(NumberSchema(_, isInteger = true))
   given SchemaOf[Double]  = leaf("number")(Schema.number(_))
   given SchemaOf[Float]   = leaf("number")(Schema.number(_))
   given SchemaOf[Boolean] = leaf("boolean")(Schema.boolean(_))

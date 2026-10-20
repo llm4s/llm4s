@@ -90,6 +90,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `Llm4s.wrapClient(JLlmClient)` to `llm4s-kotlin-api`: a client built in code with the Java builders
   (`ollama()`, `openAi()`, ...) becomes an `LLMClientKt` [#1850](https://github.com/llm4s/llm4s/issues/1850); see the [Java guide](docs/guide/java.md#configure-in-code).
 
+### Tools
+
+- **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
+  Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
+  derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
+  core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
+  `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
+  sample `TypedCalculatorExample`.
+
 ### MCP
 
 - **Fixed** the Streamable HTTP client taking the first SSE event that parsed as a response as the reply: it now
