@@ -317,6 +317,7 @@ lazy val llm4s = (project in file("."))
     llm4sZio,
     llm4sPekko,
     javaApi,
+    javaRag,
     springBootStarter,
     samples,
     configPolicy,
@@ -1399,6 +1400,8 @@ lazy val samples = (project in file("modules//samples"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
+    javaRag,
     // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
     // examples' acceptance suites script their model with it.
     testkit      % Test,
@@ -1879,6 +1882,7 @@ lazy val docs = (project in file("modules/docs"))
     llm4sZio,
     llm4sPekko,
     javaApi,
+    javaRag,
     springBootStarter
   )
   .settings(
@@ -1929,6 +1933,7 @@ lazy val docs = (project in file("modules/docs"))
         (llm4sZio / Compile / sources).value ++
         (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
+        (javaRag / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
@@ -1952,6 +1957,26 @@ lazy val javaApi = (project in file("modules/java-api"))
     // Measured 100.00% statement coverage (with the integration spec) (`sbt coverage javaApi/test javaApi/coverageReport`);
     // floor is the measured value rounded down to the nearest 5.
     coverageFloor(100),
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+// The Java facade for RAG (#1491): `JRag` over `llm4s-rag`'s pipeline. A module of its own, not part of
+// `llm4s-java-api`, so a Java caller who only wants chat does not receive Tika, POI, PDFBox, the AWS SDKs and the
+// JDBC drivers `llm4s-rag` brings. Experimental, like any new module until it has users.
+lazy val javaRag = (project in file("modules/java-rag"))
+  // java-api's test classes: `GuideDocs`, which reads docs/guide/java-rag.md for `JavaRagGuideSpec`, and its test
+  // `application.conf`, whose canned providers let the guide's first snippet build from configuration.
+  .dependsOn(javaApi % "compile->compile;test->test", rag)
+  .settings(
+    name := "llm4s-java-rag",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage javaRag/test javaRag/coverageReport`); floor is the measured
+    // value rounded down to the nearest 5.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )

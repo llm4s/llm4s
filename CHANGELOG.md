@@ -83,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
+  files or text, `ask` for an answer with its sources [#1491](https://github.com/llm4s/llm4s/issues/1491); see [Java RAG](docs/guide/java-rag.md).
 - **Added** `Llm4s.createEmbeddingClient("provider/model")`, a Java embedding client for a model you name; `llm4s.embeddings.model`
   need not be set [#1781](https://github.com/llm4s/llm4s/issues/1781); see the [Java guide](docs/guide/java.md#embeddings).
 - **Changed** a Java embedding client to accept a model its provider module does not list (Ollama's `bge-m3`): BREAKING,

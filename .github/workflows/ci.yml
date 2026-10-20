@@ -361,7 +361,7 @@ jobs:
             modules: [rag, knowledgegraph, mcp, media, image, speech, observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      providerTestkit, javaApi, springBootStarter, deployService]
+                      providerTestkit, javaApi, javaRag, springBootStarter, deployService]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentMemory, llm4sEffect, llm4sZio, llm4sPekko]
 
@@ -738,6 +738,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/java-api/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: java-api
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload java-rag coverage to Codecov
+        if: contains(matrix.modules, 'javaRag')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/java-rag/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: java-rag
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

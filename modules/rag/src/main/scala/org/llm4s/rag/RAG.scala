@@ -1494,10 +1494,32 @@ object RAG {
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]],
     existingSearcher: Option[HybridSearcher]
   )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
+    createEmbeddings(config, existingClient, resolveEmbeddingProvider).flatMap { (embeddingClient, model) =>
+      assemble(config, embeddingClient, model, resolveRerankerConfig, existingSearcher)
+    }
+
+  /**
+   * Not part of the API: a pipeline over an embedding client and model the caller already has, resolving no provider
+   * through a registry. `llm4s-java-rag` builds its pipelines with it, since a Java caller hands it a client of any
+   * provider rather than a provider id. Every other setting comes from `config`, as for [[build]];
+   * `config.embeddingProvider`, `embeddingModel` and `embeddingDimensions` are not read.
+   */
+  private[llm4s] def buildWithEmbeddings(
+    config: RAGConfig,
+    embeddingClient: EmbeddingClient,
+    embeddingModel: EmbeddingModelConfig
+  ): Result[RAG] =
+    assemble(config, embeddingClient, embeddingModel, () => Right(None), None)
+
+  private def assemble(
+    config: RAGConfig,
+    embeddingClient: EmbeddingClient,
+    embeddingModelConfig: EmbeddingModelConfig,
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]],
+    existingSearcher: Option[HybridSearcher]
+  ): Result[RAG] = {
+    val chunker = createChunker(config, embeddingClient, embeddingModelConfig)
     for {
-      embeddings <- createEmbeddings(config, existingClient, resolveEmbeddingProvider)
-      (embeddingClient, embeddingModelConfig) = embeddings
-      chunker                                 = createChunker(config, embeddingClient, embeddingModelConfig)
       hybridSearcher <- existingSearcher.fold(createHybridSearcher(config))(Right(_))
       reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
@@ -1524,6 +1546,7 @@ object RAG {
           Right(())
         }
     } yield rag
+  }
 
   private def createRegistry(@scala.annotation.unused config: RAGConfig): Result[DocumentRegistry] =
     // For now, use in-memory registry

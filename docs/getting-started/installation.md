@@ -505,6 +505,7 @@ The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency 
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersion  // Java facade
+libraryDependencies += "org.llm4s" %% "llm4s-java-rag"             % llm4sVersion  // Java facade for RAG (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
@@ -513,7 +514,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
 [`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
-`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect`,
+`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-java-rag` puts `llm4s-rag`'s
+pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a separate artifact so that a Java
+facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-effect`,
 `llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
 
 ### For Kotlin (coroutines and Flow)
