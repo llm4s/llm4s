@@ -540,6 +540,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
     val child = onlyChild(runtime, thread)
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
+    // a parent cancel is no timeout of the call: the child stays Running, for recover to reattach (#2098)
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Running
+    open().latest(child.threadId).ok.flatMap(_.checkpoint.outcome) shouldBe None
     blocking.set(false)
     val recovered = new AtomicReference[Option[org.llm4s.agent.AgentResult]](None)
     eventually("the parent recovers") {
@@ -553,7 +556,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
   behavior.of("A timeout on the delegating call")
 
-  it should "cancel the child" in {
+  it should "cancel the child and settle it timed-out before the call commits, announcing the settlement (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)
     val setup = new Setup(
@@ -564,13 +567,62 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     )
     val runtime = new GraphRuntime(open())
     val thread  = ThreadId("timed-out-call")
-    val result  = family(runtime, setup)._1.run(thread, "go").ok
+    val seen    = new CopyOnWriteArrayList[StreamEvent]()
+    val result  = family(runtime, setup)._1.stream(thread, "go", nested = true)(seen.add(_): Unit).ok.await().ok
     result.answer shouldBe Some("moved on")
     val child = onlyChild(runtime, thread)
-    eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
-    child.status shouldBe CheckpointStatus.Running
+    events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]) shouldBe true
+    // settled, so prunable: the call that started it committed and never runs again
+    child.status shouldBe CheckpointStatus.Failed
+    val settled = open().latest(child.threadId).ok.get.checkpoint
+    settled.outcome match {
+      case Some(RunOutcome.Failed("timed-out", _)) => ()
+      case other                                   => fail(s"expected the child settled timed-out, got $other")
+    }
+    val (started, gaps) = announced(seen.asScala.toVector)
+    started should contain(RunId(settled.runId))
+    gaps shouldBe Vector(RunId(settled.runId))
     // the timed-out call committed the child's call with its error: the parent's two calls and the child's one
     tokens(result.usage) shouldBe ((3L, 30L, 60L))
+  }
+
+  it should "fail the parent run when the child is still busy after the drain, and settle it on recover (#2098)" in {
+    val open    = storage()
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val calls   = new AtomicInteger(0)
+    // ignores its interrupt until released, holding the child's claim past AgentRun.Drain
+    val stubborn = SpecTools.tool("stubborn") { (_, _) =>
+      if (calls.getAndIncrement() == 0) {
+        entered.countDown()
+        var waiting = true
+        while (waiting)
+          try waiting = !release.await(30, TimeUnit.SECONDS)
+          catch { case _: InterruptedException => () }
+      }
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+    }
+    val setup = new Setup(
+      ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+      ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")),
+      childTools = Seq(stubborn),
+      delegateTimeout = Some(300.millis)
+    )
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId("timed-out-busy")
+    val run     = parent.start(thread, "go").ok
+    entered.await(10, TimeUnit.SECONDS) shouldBe true
+    val failed = run.await()
+    release.countDown()
+    // the timed-out call committed nothing: its child is still unsettled, for recover to reattach
+    failed.isLeft shouldBe true
+    failed.left.toOption.get.message should include("busy")
+    val childId = onlyChild(runtime, thread).threadId
+    open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+    eventually("the parent recovers")(parent.recover(thread).toOption.flatMap(_.answer).contains("moved on"))
+    onlyChild(runtime, thread).status should (be(CheckpointStatus.Completed).or(be(CheckpointStatus.Failed)))
   }
 
   behavior.of("A parent that loses its claim during a child")
@@ -599,6 +651,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
     eventually("the child's end is recorded")(!setup.ends.isEmpty)
     setup.allEnds.head.left.toOption.get shouldBe a[CancelledError]
+    // a lost claim is no timeout of the call: the child stays Running (#2098)
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Running
+    open().latest(child.threadId).ok.flatMap(_.checkpoint.outcome) shouldBe None
   }
 
   behavior.of("A child's deadline")

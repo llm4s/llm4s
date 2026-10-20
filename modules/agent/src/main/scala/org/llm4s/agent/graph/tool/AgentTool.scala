@@ -152,6 +152,32 @@ object AgentToolSpec:
       None
     )
 
+/**
+ * A tool call's own timeout, between the loop and the tool (#2098). The loop's per-call timeout marks it [[timedOut]]
+ * before it interrupts the tool, so a tool interrupted can tell that timeout from a cancel of its task (the run's
+ * cancel, its lost claim), which never marks it. A tool that must not have its timeout committed as the call's error
+ * [[escalate]]s it: the loop then returns `ToolOutcome.Fatal(error)` for the timed-out call, which fails the run with
+ * nothing committed, instead of the timeout's error. Equal to every other, so it never changes a context's equality.
+ */
+final private[agent] class CallTimeout:
+  private val marked    = new java.util.concurrent.atomic.AtomicBoolean(false)
+  private val escalated = new java.util.concurrent.atomic.AtomicReference[Option[LLMError]](None)
+
+  /** Marks the call timed out: done by the loop before it interrupts the tool. */
+  def markTimedOut(): Unit = marked.set(true)
+
+  /** Whether the call's own timeout fired. */
+  def timedOut: Boolean = marked.get
+
+  /** Asks the loop to fail the run with `error` rather than commit the timed-out call's error. */
+  def escalate(error: LLMError): Unit = escalated.set(Some(error))
+
+  /** The error the tool escalated its timeout to, if any. */
+  def escalation: Option[LLMError] = escalated.get
+
+  override def equals(other: Any): Boolean = other.isInstanceOf[CallTimeout]
+  override def hashCode: Int               = 0
+
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
@@ -179,7 +205,9 @@ final case class ToolContext private (
    * The phase of the call this context runs: `None` for `execute` (also when an approval or a
    * wrapper runs it again), or the key of one answered resume (design §4.24). Set by the loop only.
    */
-  private[graph] val phase: Option[IdempotencyKey]
+  private[graph] val phase: Option[IdempotencyKey],
+  /** The call's own timeout, as the loop's per-call timeout signals it (#2098). Shared by every copy of the context. */
+  private[agent] val timeout: CallTimeout
 ):
   def withRun(r: RunContext): ToolContext                  = copy(run = r)
   def withToolCallId(id: ToolCallId): ToolContext          = copy(toolCallId = id)
@@ -207,7 +235,7 @@ object ToolContext:
     state: ThreadState,
     approved: Boolean = false
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None)
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None, new CallTimeout)
 
   /** The context of an answered resume of the call, whose effect keys are its phase's (see `effectKey`). */
   private[graph] def resuming(
@@ -218,7 +246,7 @@ object ToolContext:
     approved: Boolean,
     phase: IdempotencyKey
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase))
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase), new CallTimeout)
 
 /**
  * A successful call's result for the model: JSON, or content parts - text, images and documents.

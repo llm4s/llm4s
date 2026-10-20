@@ -20,6 +20,7 @@ import org.llm4s.agent.graph.middleware.{
 import org.llm4s.agent.graph.tool.{
   AgentTool,
   AgentToolSpec,
+  CallTimeout,
   LockKey,
   ToolArgumentValidator,
   ToolContent,
@@ -1977,7 +1978,9 @@ object ToolLoop:
                       phase
                     )
                     val (chain, took) = timed(tool, request.call, resources, toolContext, context)(
-                      innermost(tool.spec)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
+                      innermost(tool.spec, toolContext.timeout)(
+                        AgentTool.resumeWith(tool, args, question, reply, toolContext)
+                      )
                     )
                     outcome(
                       tool,
@@ -2194,7 +2197,9 @@ object ToolLoop:
             approved
           )
         val (chain, took) =
-          timed(tool, call, resources, toolContext, context)(innermost(tool.spec)(tool.execute(args, toolContext)))
+          timed(tool, call, resources, toolContext, context)(
+            innermost(tool.spec, toolContext.timeout)(tool.execute(args, toolContext))
+          )
         outcome(tool, task, call, approved, chain, context, took, answers)
       }
 
@@ -2206,14 +2211,14 @@ object ToolLoop:
      * call - a wrapper retrying - returns that same outcome without running the tool again. A tool
      * with a timeout runs [[bounded]].
      */
-    private def innermost(spec: AgentToolSpec[?])(run: => ToolOutcome): () => ToolOutcome =
+    private def innermost(spec: AgentToolSpec[?], timeout: CallTimeout)(run: => ToolOutcome): () => ToolOutcome =
       val name          = spec.name
       val cancelledWith = new AtomicReference[Option[ToolOutcome]](None)
       () =>
         cancelledWith.get.getOrElse {
           val result =
             if Thread.currentThread().isInterrupted then ToolOutcome.Fatal(CancelledError(s"tool $name"))
-            else spec.timeout.fold(guarded(name)(run))(bounded(name, _)(run))
+            else spec.timeout.fold(guarded(name)(run))(bounded(name, _, timeout)(run))
           result match
             case ToolOutcome.Fatal(_: CancelledError) => cancelledWith.set(Some(result))
             case _                                    => ()
@@ -2227,11 +2232,24 @@ object ToolLoop:
      * nothing; the call's outcome is an error the model sees. A cancellation of the task while it
      * waits interrupts and joins the fork too, and is `Fatal(CancelledError)` with the flag restored,
      * as for an untimed tool.
+     *
+     * Past the limit the call's [[CallTimeout]] is marked timed out before the fork is interrupted, so the tool can tell
+     * its own timeout from a cancel of its task (#2098); a tool that escalated it makes the call `Fatal` with its error,
+     * committing nothing, instead of the timeout's error.
      */
-    private def bounded(name: String, limit: FiniteDuration)(run: => ToolOutcome): ToolOutcome =
+    private def bounded(name: String, limit: FiniteDuration, timeout: CallTimeout)(run: => ToolOutcome): ToolOutcome =
       guarded(name)(
-        ox.timeoutOption(limit)(guarded(name)(run))
-          .getOrElse(ToolOutcome.Error(s"Tool '$name' timed out after ${limit.toMillis} ms"))
+        ox.supervised {
+          val fork = ox.forkCancellable(guarded(name)(run))
+          ox.timeoutOption(limit)(fork.join()).getOrElse {
+            // marked before the fork is interrupted, then the fork is joined: its tool reads the mark as it stops
+            timeout.markTimedOut()
+            fork.cancel(): Unit
+            timeout.escalation.fold(ToolOutcome.Error(s"Tool '$name' timed out after ${limit.toMillis} ms"))(
+              ToolOutcome.Fatal(_)
+            )
+          }
+        }
       )
 
     /**
