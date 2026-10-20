@@ -14,9 +14,9 @@ nav_order: 1
 
 ## Summary
 
-[1.0 Scope](../reference/v1-scope.md) puts `org.llm4s.agent` (`llm4s-agent`) in the Frozen-at-1.0 tier, and
+[1.0 Scope](../reference/v1-scope) puts `org.llm4s.agent` (`llm4s-agent`) in the Frozen-at-1.0 tier, and
 `modules/agent` already calls `mimaFrozen("llm4s-agent")`. The typed graph runtime (#1266) is still replacing the
-agent's execution model, and [API Stability](../reference/api-stability.md#setting-and-bumping-the-baseline) leaves
+agent's execution model, and [API Stability](../reference/api-stability#setting-and-bumping-the-baseline) leaves
 open whether `llm4s-agent` takes the pre-1.0 baseline with the other frozen modules or waits for the runtime. This
 RFC proposes that it **waits**: the other six frozen modules take the baseline when it is set, and `llm4s-agent` takes
 its own once the runtime's public API is declared final.
@@ -36,8 +36,8 @@ its own once the runtime's public API is declared final.
 ## Detailed design
 
 1. When `mimaBaselineVersion` is set, `mimaFrozen("llm4s-agent")` is removed from `modules/agent` first, as
-   [API Stability](../reference/api-stability.md#setting-and-bumping-the-baseline) already allows. The module stays in
-   the Frozen-at-1.0 tier in [1.0 Scope](../reference/v1-scope.md) with a note that its baseline is pending.
+   [API Stability](../reference/api-stability#setting-and-bumping-the-baseline) already allows. The module stays in
+   the Frozen-at-1.0 tier in [1.0 Scope](../reference/v1-scope) with a note that its baseline is pending.
 2. The runtime's maintainers declare its public API final in #1266. A later release, still before 1.0, then becomes
    `llm4s-agent`'s baseline: `mimaFrozen("llm4s-agent")` returns with a per-module baseline version, so the other
    modules' baseline does not move.
