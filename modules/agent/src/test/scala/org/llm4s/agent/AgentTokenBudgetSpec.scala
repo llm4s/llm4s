@@ -231,4 +231,14 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 1
     result.usage.inputTokens should be > 1000L
   }
+
+  it should "count a response schema set through the completion options in a usage-less call's input" in {
+    // about 2000 tokens of schema, sent with the request though the agent declares no output format
+    val schema  = ujson.Obj("type" -> "object", "description" -> ("word " * 2000))
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+    val client  = ScriptedLLMClient.of(CompletionFixture.simple("done").withUsage(None))
+    val agent   = built(Agent.builder("assistant", client).withCompletionOptions(options))
+
+    agent.run(thread, "go", limited(5000)).value.usage.inputTokens should be > 1000L
+  }
 }

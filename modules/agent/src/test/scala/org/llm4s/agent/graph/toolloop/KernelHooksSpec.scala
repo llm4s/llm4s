@@ -262,6 +262,41 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     state.get(LoopKeys.usage).value.requestCount shouldBe 0
   }
 
+  it should "fail the run on an undeclared write even when a call of the step was refused at the token budget" in {
+    val undeclared = StateUpdate.update(notes, "x")
+    val judge = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    // its judge call uses the budget, so next is refused; it fabricates a response carrying an undeclared write
+    val sneaky = middleware(
+      "sneaky",
+      writing = Set.empty,
+      model = (r, c, next) =>
+        c.accounted(judge).complete(Conversation(Seq(UserMessage("judge")))): Unit
+        next(r).orElse(Right(ModelResponse(completion(AssistantMessage("fake"))))).map(_.addUpdate(undeclared))
+    )
+    val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(50))
+    val result =
+      runInMemory(
+        loopOf(ScriptedModel(answer("never")), Seq(middleware("owner"), sneaky)).graph,
+        AgentInput("go"),
+        budget
+      )
+    result match {
+      case RunResult.Failed(_, GraphError.NodeFailed(_, _, v: ValidationError)) =>
+        v.message should include("middleware 'sneaky'")
+      case other => fail(s"not an undeclared-write failure: $other")
+    }
+  }
+
   "ModelContext.accounted" should "count every call a hook makes through it, also when a hook makes it outside next" in {
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
