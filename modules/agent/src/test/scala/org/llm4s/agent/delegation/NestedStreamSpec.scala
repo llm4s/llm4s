@@ -391,9 +391,17 @@ class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with 
       chunks = 4
     )
     val agent = lead(client).withSubagents(general.withStreaming()).build().value
-    val run   = agent.start(ThreadId("t1"), "go").value
+    // the child's run is forwarded from its own dispatcher, so its model call can begin before the parent announces it:
+    // a stream in place from the start sees the announcement, and the late subscription waits for it as well
+    val announced = new CountDownLatch(1)
+    val run = agent
+      .stream(ThreadId("t1"), "go") { event =>
+        if SubagentEvents.TaskStarted.unapply(event).isDefined then announced.countDown()
+      }
+      .value
     entered.await(10, TimeUnit.SECONDS) shouldBe true
-    // the child is running, blocked in its model call: its earlier live events are gone
+    announced.await(10, TimeUnit.SECONDS) shouldBe true
+    // the child is running, announced and blocked in its model call: its earlier live events are gone
     val seen = new CopyOnWriteArrayList[StreamEvent]()
     run.subscribe(nested = true)(seen.add(_): Unit).value
     release.countDown()
