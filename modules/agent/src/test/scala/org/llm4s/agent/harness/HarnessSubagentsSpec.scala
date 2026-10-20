@@ -172,6 +172,34 @@ class HarnessSubagentsSpec extends AnyFlatSpec with Matchers with EitherValues w
     agent.delegation.subagents.map(_.id.value) shouldBe Vector(GeneralPurposeConfig.Id, "researcher")
   }
 
+  "Two builders of one agent" should "agree when one sets the default bounds explicitly and the other leaves them unset" in {
+    val client    = RoutingClient(PartialFunction.empty)
+    val implicit1 = Agent.builder("worker", client).withSubagents(researcher)
+    val explicit1 = Agent.builder("worker", client).withSubagents(researcher).withDelegation(DelegationConfig.default)
+    val other     = Agent.builder("other", client).withHandoffs(org.llm4s.agent.Handoff.to("worker", explicit1, "w"))
+    Agent
+      .builder("lead", client)
+      .withHandoffs(
+        org.llm4s.agent.Handoff.to("worker", implicit1, "w"),
+        org.llm4s.agent.Handoff.to("other", other, "o")
+      )
+      .build()
+      .isRight shouldBe true
+    // different bounds are still two different builders
+    val wider = Agent.builder("worker", client).withSubagents(researcher).withDelegation(DelegationConfig(maxDepth = 2))
+    val other2 = Agent.builder("other", client).withHandoffs(org.llm4s.agent.Handoff.to("worker", wider, "w"))
+    Agent
+      .builder("lead", client)
+      .withHandoffs(
+        org.llm4s.agent.Handoff.to("worker", implicit1, "w"),
+        org.llm4s.agent.Handoff.to("other", other2, "o")
+      )
+      .build()
+      .left
+      .value
+      .message should include("two different builders")
+  }
+
   "withDelegation beside a harness" should "be refused: the profile's SubagentConfig sets the bounds" in {
     val client = RoutingClient(PartialFunction.empty)
     assistant(client, HarnessProfile.deepAgents)

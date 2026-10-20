@@ -461,13 +461,14 @@ final class AgentBuilder private (
    */
   /**
    * Whether `other` delegates as this builder does: the same subagent definitions, as instances, in order, the same
-   * bounds, and the same harness subagents. The graph version covers only the task tools' specs, so two builders whose subagents differ behind the same
-   * specs (prompts, tools, output, failure policy) would otherwise pass as one agent.
+   * bounds (an unset bound is the default), and the same harness subagents. The graph version covers only the task
+   * tools' specs, so two builders whose subagents differ behind the same specs (prompts, tools, output, failure policy)
+   * would otherwise pass as one agent.
    */
   private def delegatesAs(other: AgentBuilder): Boolean =
     subagents.size == other.subagents.size &&
       subagents.lazyZip(other.subagents).forall(_ eq _) &&
-      delegation == other.delegation &&
+      delegation.getOrElse(DelegationConfig.default) == other.delegation.getOrElse(DelegationConfig.default) &&
       harness.map(_.subagents) == other.harness.map(_.subagents)
 
   private def canonical: ujson.Obj =
