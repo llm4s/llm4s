@@ -449,7 +449,14 @@ D2 grants children a token budget and a deadline. Neither exists as a run limit 
     accumulator.
   - Before each model call, at `maxTokens` or above, it ends the turn **`TurnOutcome.TokenLimitReached`** without
     calling the model, as `StepLimitReached` does. That gives the new **`AgentStatus.TokenLimitReached`**.
+  - The check applies to **every accounted provider call**, not once per model step: a middleware or wrapper that
+    calls the model several times within one step (`ModelContext.accounted`, e.g. a summariser over chunks) is
+    checked before each call and refused at the limit, ending the turn the same way.
   - A call in flight is not interrupted, so a run can overshoot by one call. The docs say so.
+  - **A completion without usage is estimated, never counted as zero.** When an `LLMClient` returns
+    `usage = None`, the call is charged a conservative estimate from core's `ConversationTokenCounter` (the
+    request's messages as input, the completion's content as output), recorded as estimated, so `maxTokens` and
+    every inherited child grant still advance. Tested with a client that reports no usage.
 - **`RunContext.deadline: Option[Instant]`**: when the run's `timeout` expires, from the clock the runtime uses.
   `None` without a timeout. It is set by `GraphRuntime` at admission and read by K2 and D2.
 - `java-api` maps `TokenLimitReached`.
