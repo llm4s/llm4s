@@ -293,7 +293,9 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
     it.
   - `deleteThread` on a child thread directly is refused (rule 19).
 - **Child retention (rule 12).** The runtime keeps the newest `childRetention` *prunable* children of a parent
-  (default 64, set per agent by `RunConfig.withChildRetention`, and by `DelegationConfig`, D1) and cascade-deletes
+  (`RunConfig.childRetention: Int`, default 64, set per run by `RunConfig.withChildRetention`; and
+  `DelegationConfig.childRetention`, D1, default 64, per agent). When both are set the **smaller** governs: a
+  `RunConfig` cannot tell an explicit 64 from its default, so neither can override the other upward. It cascade-deletes
   older prunable ones. A prunable child is never read again by rule 14, so deleting it is safe whatever happens to
   the parent afterwards. Prunability is decided from run boundaries, never by matching keys: a parent checkpoint
   does not keep a call's `IdempotencyKey` (`ToolResult` and `ToolMessage` carry none). The pass runs at two points:
