@@ -89,6 +89,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `JEmbeddingClient.dimensions()` is an `OptionalInt`, empty for such a model [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Added** `Llm4s.wrapClient(JLlmClient)` to `llm4s-kotlin-api`: a client built in code with the Java builders
   (`ollama()`, `openAi()`, ...) becomes an `LLMClientKt` [#1850](https://github.com/llm4s/llm4s/issues/1850); see the [Java guide](docs/guide/java.md#configure-in-code).
+- **Added** Spring Boot 4 support to `llm4s-spring-boot-starter`, in the same artifact: on Boot 4, where `HealthIndicator`
+  moved to `org.springframework.boot.health.contributor`, the `llmHealthIndicator` bean is an `LlmBoot4HealthIndicator`
+  reporting what `LlmHealthIndicator` does on 3.x. CI runs the starter's specs on Spring Boot 4.0.8 and 4.1.1 as well as
+  3.3.6 and 3.5.16 [#1467](https://github.com/llm4s/llm4s/issues/1467); see the [Spring Boot guide](docs/guide/spring-boot.md#what-the-starter-gives-you).
 
 ### MCP
 

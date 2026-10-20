@@ -1233,13 +1233,39 @@ jobs:
       - name: Test the starter against the latest Spring Boot 3.x
         run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
 
+  # The same artifact supports Spring Boot 4 (#1467): springBootStarterBoot4 runs the starter's specs on a Boot 4
+  # classpath, against the starter's classes as published (compiled against Boot 3). It runs on the 4.0 line
+  # (Versions.springBoot4Baseline in project/Dependencies.scala) and on the latest 4.x, as docs/guide/spring-boot.md says.
+  spring-boot-4:
+    name: Spring Boot 4.x
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Test the starter against Spring Boot 4.0
+        run: sbt springBootStarterBoot4/test
+
+      - name: Test the starter against the latest Spring Boot 4.x
+        run: sbt -Dllm4s.springBoot4Version=4.1.1 springBootStarterBoot4/test
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
     # workspace-changes and workspace-integration run only where they apply (#1982): skipped is a pass for them, failed
     # is not, so a PR that changes the workspace cannot merge with the live suites red.
-    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest, workspace-changes, workspace-integration]
+    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest, spring-boot-4, workspace-changes, workspace-integration]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1285,6 +1311,10 @@ jobs:
           fi
           if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then
             echo "Spring Boot 3.x (latest) tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.spring-boot-4.result }}" != "success" ]]; then
+            echo "Spring Boot 4.x tests failed"
             exit 1
           fi
           if [[ "${{ needs.workspace-changes.result }}" != "success" && "${{ needs.workspace-changes.result }}" != "skipped" ]]; then

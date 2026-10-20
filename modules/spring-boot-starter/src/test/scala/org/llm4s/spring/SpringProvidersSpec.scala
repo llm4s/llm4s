@@ -8,7 +8,7 @@ import org.llm4s.testutil.FixtureChatClient
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.HealthIndicator
+import BootLine.HealthIndicator
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -31,7 +31,7 @@ import scala.jdk.CollectionConverters._
 class SpringProvidersSpec extends AnyFlatSpec with Matchers {
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[ActuatorAutoConfiguration]))
 
   private def failureText(ctx: AssertableApplicationContext): String = {
     ctx.getStartupFailure should not be null
@@ -607,7 +607,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .from(new Llm4sProperties, env("llm4s.providers.provider" -> "conf-fixture"))
       .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
     val error =
-      new LlmHealthIndicator(provider.client, settings, StarterTestSupport.pool)
+      new LlmIndicator(provider.client, settings, StarterTestSupport.pool)
         .health()
         .getDetails
         .get("error")
@@ -726,7 +726,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
         .from(new Llm4sProperties, env("llm4s.providers.provider" -> section))
         .copy(probe = true, ttl = Duration.ofSeconds(60), timeout = Duration.ofSeconds(5))
       val error =
-        new LlmHealthIndicator(provider.client, settings, StarterTestSupport.pool)
+        new LlmIndicator(provider.client, settings, StarterTestSupport.pool)
           .health()
           .getDetails
           .get("error")

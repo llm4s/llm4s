@@ -30,7 +30,7 @@ object LlmActuatorAutoConfigurationSpec {
   @Configuration
   class CustomIndicatorConfig {
     @Bean
-    def llmHealthIndicator(client: JLlmClient): LlmHealthIndicator =
+    def llmHealthIndicator(client: JLlmClient): LlmIndicator =
       StarterTestSupport.indicator(client)
   }
 }
@@ -39,19 +39,19 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
   import LlmActuatorAutoConfigurationSpec._
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[ActuatorAutoConfiguration]))
 
   "LlmActuatorAutoConfiguration" should "register LlmHealthIndicator when actuator is on the classpath" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig])
-      .run(ctx => ctx.getBean(classOf[LlmHealthIndicator]) should not be null)
+      .run(ctx => ctx.getBean(classOf[LlmIndicator]) should not be null)
   }
 
   it should "pass the JLlmClient to the health indicator" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig])
       .run { ctx =>
-        val indicator = ctx.getBean(classOf[LlmHealthIndicator])
+        val indicator = ctx.getBean(classOf[LlmIndicator])
         indicator.health().getStatus.getCode shouldBe "UP"
       }
   }
@@ -66,7 +66,7 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       .withPropertyValues("llm4s.enabled=false")
       .run { ctx =>
         ctx.getStartupFailure shouldBe null
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[LlmIndicator]).size() shouldBe 0
       }
   }
 
@@ -80,7 +80,7 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       .withPropertyValues("llm4s.enabled=true")
       .run { ctx =>
         ctx.getStartupFailure shouldBe null
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).keySet().toArray.toSeq shouldBe Seq("llmHealthIndicator")
+        ctx.getBeansOfType(classOf[LlmIndicator]).keySet().toArray.toSeq shouldBe Seq("llmHealthIndicator")
       }
   }
 
@@ -90,13 +90,13 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       .withPropertyValues("llm4s.enabled=TRUE")
       .run { ctx =>
         ctx.getStartupFailure shouldBe null
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 1
+        ctx.getBeansOfType(classOf[LlmIndicator]).size() shouldBe 1
       }
   }
 
   it should "allow the LlmHealthIndicator bean to be overridden" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig], classOf[CustomIndicatorConfig])
-      .run(ctx => ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 1)
+      .run(ctx => ctx.getBeansOfType(classOf[LlmIndicator]).size() shouldBe 1)
   }
 }

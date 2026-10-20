@@ -318,6 +318,7 @@ lazy val llm4s = (project in file("."))
     llm4sPekko,
     javaApi,
     springBootStarter,
+    springBootStarterBoot4,
     samples,
     configPolicy,
     workspaceShared,
@@ -1886,7 +1887,7 @@ lazy val docs = (project in file("modules/docs"))
     commonSettings,
     publish / skip := true,
     // Provided-scope in spring-boot-starter, so not on the classpath it exports.
-    libraryDependencies += Deps.springBootActuator,
+    libraryDependencies ++= Seq(Deps.springBootActuator, Deps.springBoot4HealthApi),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
@@ -1986,8 +1987,37 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       Deps.springBootTestAutoConfigure % Test,
       Deps.springBootActuator          % Test,
       // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
-      Deps.springBootActuatorAutoConfigure % Test
-    )
+      Deps.springBootActuatorAutoConfigure % Test,
+      // Spring Boot 4's HealthIndicator, for LlmBoot4HealthIndicator; Boot 4 applications have it (#1467).
+      Deps.springBoot4HealthApi % Provided
+    ),
+    // The specs name the health and metrics types Spring Boot 4 moved through BootLine; this is its Boot 3 one.
+    Test / unmanagedSourceDirectories += (Test / sourceDirectory).value / "scala-boot3"
+  )
+
+// The starter's specs on Spring Boot 4 (#1467). It tests the starter's classes as published, compiled against Boot 3,
+// on a Boot 4 classpath: the specs are the starter's own, recompiled here with boot4/src/test's BootLine. The Boot
+// release is `Versions.springBoot4`; CI's "Spring Boot 4.x" job runs this on the 4.0 line and on the latest 4.x.
+lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/boot4"))
+  .dependsOn(
+    springBootStarter,
+    observabilityMicrometer,
+    core            % "test->test",
+    providerTestkit % Test,
+    bedrock         % Test
+  )
+  .settings(
+    name := "llm4s-spring-boot-starter-boot4-tests",
+    commonSettings,
+    publish / skip := true,
+    // Coverage of the starter is measured on its own specs (springBootStarter's floor); these run the same specs.
+    coverageDisabled,
+    libraryDependencies ++= Seq(Deps.scalatest % Test) ++ Deps.springBoot4.map(_ % Test),
+    Test / unmanagedSourceDirectories ++= {
+      val starterTest = (springBootStarter / Test / sourceDirectory).value
+      Seq(starterTest / "scala", starterTest / "java")
+    },
+    Test / unmanagedResourceDirectories += (springBootStarter / Test / resourceDirectory).value
   )
 
 lazy val benchmarks = (project in file("modules/benchmarks"))
