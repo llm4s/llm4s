@@ -153,6 +153,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   /** The facade's Java-visible classes: every one a Java caller calls or implements. */
   private def facade: List[Class[_]] = List(
     classOf[LlmResult[_]],
+    classOf[FakeLlmClient],
+    classOf[FakeLlmClient.Builder],
     classOf[JLlmClient],
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
@@ -380,6 +382,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   /** Every public static method the facade means Java callers to call, by class. Nothing else may be one. */
   private def intendedStatics: Map[Class[_], Set[String]] = Map(
+    // a test double's entry points: a script of replies, or a builder that mixes in failures (#1497)
+    classOf[FakeLlmClient] -> Set("replying(String[])", "builder()"),
     Class.forName("org.llm4s.javaapi.Llm4s") -> Set(
       "createDefaultClient()",
       "createClient(ProviderConfig)",
@@ -536,6 +540,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    */
   private def internalClasses: Set[String] = Set(
     "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
+    "org.llm4s.javaapi.FakeLlmClients",  // FakeLlmClient's script entries and scripted LLMClient (#1497)
     "org.llm4s.javaapi.LlmErrorKinds",   // how LlmException reads an LLMError: its kind, status and retry delay
     "org.llm4s.javaapi.ClientBuilds"     // what the client builders' build() does with their settings
   )

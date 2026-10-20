@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JEmbeddingClient;
@@ -16,6 +17,7 @@ import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
+import org.llm4s.javaapi.LlmErrorKind;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
 import org.llm4s.llmconnect.config.AnthropicConfig;
@@ -23,6 +25,10 @@ import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The fragments of {@code docs/guide/java.md}, compiled, and run by {@code JavaGuideSpec} against a client the
@@ -117,6 +123,45 @@ final class GuideSnippets {
         }
 
         return reply;
+    }
+
+    /** Code under test in the "Testing your code" block: anything that takes a {@code JLlmClient}. */
+    static final class Calculator {
+        private final JLlmClient client;
+
+        Calculator(JLlmClient client) {
+            this.client = client;
+        }
+
+        String ask(String question) {
+            return client.complete(question).getOrNull();
+        }
+    }
+
+    /** The "Testing your code" block (#1497): a JUnit 5 test of code that calls llm4s, with a fake model. */
+    static final class CalculatorTest {
+
+        @Test
+        void answersFromTheModel() {
+            FakeLlmClient fake = FakeLlmClient.replying("4");
+
+            String answer = new Calculator(fake.client()).ask("What is 2+2?");
+
+            assertEquals("4", answer);
+            assertEquals(List.of("What is 2+2?"), fake.prompts());
+        }
+
+        @Test
+        void reportsAProviderFailure() {
+            FakeLlmClient fake = FakeLlmClient.builder()
+                .failWith(LlmErrorKind.RATE_LIMIT, "slow down")
+                .build();
+
+            LlmResult<String> result = fake.client().complete("What is 2+2?");
+
+            assertTrue(result.isFailure());
+            assertEquals(LlmErrorKind.RATE_LIMIT, result.getError().getKind());
+        }
     }
 
     /** The "Handling a failure" block. */

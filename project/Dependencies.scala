@@ -14,6 +14,7 @@ object Versions {
   val scalatest               = "3.2.20"
   val scalamock               = "7.5.5"
   val scalatestplusScalacheck = "3.2.19.0"
+  val junitJupiter            = "5.12.2"
   val fansi                   = "0.5.1"
   val ox                      = "1.0.9"
   val postgres                = "42.7.11"
@@ -92,6 +93,8 @@ object Deps {
   val scalatest               = "org.scalatest"           %% "scalatest"       % Versions.scalatest
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
+  // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
+  val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter
   val fansi                   = "com.lihaoyi"             %% "fansi"           % Versions.fansi
   val ox                      = "com.softwaremill.ox"     %% "core"            % Versions.ox
   val postgres                = "org.postgresql"           % "postgresql"      % Versions.postgres

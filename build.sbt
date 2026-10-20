@@ -1953,7 +1953,8 @@ lazy val javaApi = (project in file("modules/java-api"))
     // floor is the measured value rounded down to the nearest 5.
     coverageFloor(100),
     libraryDependencies ++= Seq(
-      Deps.scalatest % Test
+      Deps.scalatest       % Test,
+      Deps.junitJupiterApi % Test
     )
   )
 

@@ -83,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
+  `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
+  "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
 - **Added** `Llm4s.createEmbeddingClient("provider/model")`, a Java embedding client for a model you name; `llm4s.embeddings.model`
   need not be set [#1781](https://github.com/llm4s/llm4s/issues/1781); see the [Java guide](docs/guide/java.md#embeddings).
 - **Changed** a Java embedding client to accept a model its provider module does not list (Ollama's `bge-m3`): BREAKING,
