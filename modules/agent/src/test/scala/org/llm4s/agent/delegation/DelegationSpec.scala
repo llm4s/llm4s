@@ -492,6 +492,26 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     client.calls shouldBe empty
   }
 
+  it should "return a renderer's failure as is on reattach, rendering once (#2086)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val renders = new AtomicInteger(0)
+    val flaky = researcher.withInputText { q =>
+      if (renders.incrementAndGet() > 1) throw new IllegalStateException("bad renderer") else q.topic
+    }
+    val bound = flaky.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-render")
+    bound.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+    renders.get shouldBe 1
+
+    val failed = bound.run(node, Question("tides")).left.value
+    failed shouldBe a[ValidationError]
+    failed.message should include("bad renderer")
+    renders.get shouldBe 2
+    client.calls should have size 1
+  }
+
   it should "return an interrupt while rendering as a cancellation, the flag kept" in {
     val client = RoutingClient(PartialFunction.empty)
     val blocking = researcher.withInputText { _ =>

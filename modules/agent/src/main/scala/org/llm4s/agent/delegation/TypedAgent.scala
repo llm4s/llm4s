@@ -370,19 +370,23 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
    */
   def run(threadId: ThreadId, input: I, config: RunConfig): Result[TaskOutcome[O]] =
     val ref = ChildRef(threadId, config.runId, agent.id, None, 0)
-    @scala.annotation.tailrec
-    def loop(cutoff: Option[Long], waits: Int): Result[TaskOutcome[O]] =
-      if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
-      else
-        attach(ref, input, config) match
-          case BoundAgent.Step.Done(result) => result
-          case BoundAgent.Step.Again        => loop(cutoff, waits)
-          case BoundAgent.Step.Busy(busy) =>
-            val until = cutoff.getOrElse(System.nanoTime() + (agent.runtime.claimTtl * 2).toNanos)
-            ChildRunner.pause(until, waits, busy) match
-              case Left(stop) => Left(stop)
-              case Right(_)   => loop(Some(until), waits + 1)
-    loop(None, 0)
+    // rendered once: a new thread starts with it, and an existing one is matched against its digest (#2086)
+    def loop(query: String): Result[TaskOutcome[O]] =
+      val digest = DelegationKeys.digest(AgentInput(query))
+      @scala.annotation.tailrec
+      def attempt(cutoff: Option[Long], waits: Int): Result[TaskOutcome[O]] =
+        if Thread.currentThread().isInterrupted then Left(CancelledError(s"subagent ${agent.id.value}"))
+        else
+          attach(ref, query, digest, config) match
+            case BoundAgent.Step.Done(result) => result
+            case BoundAgent.Step.Again        => attempt(cutoff, waits)
+            case BoundAgent.Step.Busy(busy) =>
+              val until = cutoff.getOrElse(System.nanoTime() + (agent.runtime.claimTtl * 2).toNanos)
+              ChildRunner.pause(until, waits, busy) match
+                case Left(stop) => Left(stop)
+                case Right(_)   => attempt(Some(until), waits + 1)
+      attempt(None, 0)
+    rendered(input).flatMap(loop)
 
   /** [[run]] on the caller-chosen thread `threadId`, with the default config. */
   def run(threadId: ThreadId, input: I): Result[TaskOutcome[O]] = run(threadId, input, RunConfig())
@@ -399,7 +403,7 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     )
 
   /** One read of the caller-chosen thread `ref` names, and what it calls for (see the thread-id [[run]]). */
-  private def attach(ref: ChildRef, input: I, config: RunConfig): BoundAgent.Step[O] =
+  private def attach(ref: ChildRef, query: String, digest: String, config: RunConfig): BoundAgent.Step[O] =
     val graph = agent.loop.graph
     def refused(field: String, why: String) =
       BoundAgent.Step.Done(Left(ValidationError(field, s"subagent '${agent.id.value}': ${ref.threadId.value} $why")))
@@ -412,23 +416,15 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
           case Right(_)                                => BoundAgent.Step.Done(Left(rejected))
       case Left(error) => BoundAgent.Step.Done(Left(error))
       case Right(None) =>
-        rendered(input).fold(
-          failed => BoundAgent.Step.Done(Left(failed)),
-          // only a new thread is started: one another caller created since the read is read again, never given a turn;
-          // its first checkpoint records the input, so a later call with other input is refused (#2086)
-          query =>
-            val record = StateUpdate.update(DelegationKeys.input, Some(DelegationKeys.digest(AgentInput(query))))
-            admitted(ref, config)(agent.startNew(ref.threadId, query, config, record))
-        )
+        // only a new thread is started: one another caller created since the read is read again, never given a turn;
+        // its first checkpoint records the input, so a later call with other input is refused (#2086)
+        val record = StateUpdate.update(DelegationKeys.input, Some(digest))
+        admitted(ref, config)(agent.startNew(ref.threadId, query, config, record))
       case Right(Some((checkpoint, _))) if checkpoint.origin.isDefined =>
         refused("threadId", "is a delegated child; continue it through its parent")
-      case Right(Some((_, exec))) if !sameInput(exec, input) =>
+      case Right(Some((_, exec))) if !exec.state.get(DelegationKeys.input).toOption.flatten.contains(digest) =>
         // a thread this overload did not start records no input: it is never taken as this call's (#2086)
-        rendered(input).fold(
-          failed => BoundAgent.Step.Done(Left(failed)),
-          _ =>
-            refused("input", "was not started by this call's input; a caller-chosen thread id must identify its input")
-        )
+        refused("input", "was not started by this call's input; a caller-chosen thread id must identify its input")
       case Right(Some((checkpoint, exec))) =>
         val at = ref.copy(runId = RunId(checkpoint.runId))
         checkpoint.status match
@@ -442,11 +438,6 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
             )
           case CheckpointStatus.Completed | CheckpointStatus.Failed =>
             BoundAgent.Step.Done(settled(at, checkpoint, exec))
-
-  /** Whether the caller-chosen thread `exec` rests at was started with `input`, as its recorded digest says. */
-  private def sameInput(exec: Execution, input: I): Boolean =
-    val recorded = exec.state.get(DelegationKeys.input).toOption.flatten
-    recorded.isDefined && rendered(input).toOption.map(q => DelegationKeys.digest(AgentInput(q))) == recorded
 
   /**
    * What an admission on the caller-chosen thread calls for: its run's outcome, mapped as [[continued]] maps it; a read
