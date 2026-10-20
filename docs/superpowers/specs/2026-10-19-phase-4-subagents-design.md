@@ -407,8 +407,9 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     so its child can never be reattached: once the cancellation drains, the runner settles the child
     `Failed(kind = "timed-out", ...)` under its own claim with the parent fence (#2071) before the call commits,
     so it is prunable. If the child's claim is still busy after the drain (a provider ignoring the interrupt), the
-    call commits anyway and the next admission's retention pass, which abandons the run's unsettled children of
-    calls that committed, settles it. A parent cancel or lost claim is different: the call does not commit and
+    call does **not** commit its timeout error: it returns `ToolOutcome.Fatal(ThreadBusy)`, the parent run fails,
+    and `recover` reattaches the child (rule 14) and settles it once its claim frees. No committed call ever leaves
+    an unsettled child behind. A parent cancel or lost claim is different: the call does not commit and
     `recover` reattaches, so the child is left `Running`.
   - A child whose provider ignores its interrupt for longer is logged at WARN. Its thread is `ThreadBusy` until it
     ends, which the reattach above waits on.
