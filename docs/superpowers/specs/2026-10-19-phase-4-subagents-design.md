@@ -403,7 +403,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
   - The runner awaits the child with `Agent.blocking`'s semantics. When the calling thread is interrupted (parent
     cancel, parent `ClaimLost`, a C2 timeout on the `task` call), it cancels the child and waits up to
     `AgentRun.Drain` for it to end. It then returns `Left(CancelledError)` with the flag kept.
-  - **A timeout on the `task` call itself settles the child.** That call commits its error and never runs again,
+  - **A timeout on the `task` call itself settles the child.** The runner tells it from a parent cancel or lost
+    claim by an explicit signal, never by the shape of the interrupt: `ToolLoop.bounded` (C2's per-call timeout)
+    marks the call's tool context timed out (a `private[agent]` flag on it) **before** it interrupts the tool, and
+    the runner reads that flag after the drain; a parent cancel or lost claim never sets it. That call commits its error and never runs again,
     so its child can never be reattached: once the cancellation drains, the runner settles the child
     `Failed(kind = "timed-out", ...)` under its own claim with the parent fence (#2071) before the call commits,
     so it is prunable. If the child's claim is still busy after the drain (a provider ignoring the interrupt), the
