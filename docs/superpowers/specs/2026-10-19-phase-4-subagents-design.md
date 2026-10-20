@@ -169,7 +169,12 @@ applies. This is how delegation meets the thirteen:
     - child threads kept per parent (`childRetention`). A pruned child leaves the store's ordinary tombstone (its
       next event number, a few bytes), kept for good as every deleted thread's is (`Checkpointer.deleteThread`);
       bounding tombstones is a store-wide retention question for Stage 5 (#2059), not a delegation rule
-    - each child's steps, time and tokens (D2)
+    - each child's steps, always (the grant, else the child's own or the parent's `maxSteps`, capped by the turn's
+      remainder); and its time and tokens **never more than its parent's** (D2). Time and tokens are opt-in limits
+      in llm4s, as for a top-level run: a parent with no `timeout` or `maxTokens` and a child with no
+      `TaskBudget` for them leave the child as unlimited in those as its parent. Delegation never invents a
+      finite default, which would silently change every agent that sets none; the guide recommends setting both
+      on any agent that delegates.
     - nested live events per subscription (the subscription's own queue, `LiveGap` on overflow)
 13. **Every named type exists or is defined where it is introduced.** As before.
 
