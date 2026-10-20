@@ -366,7 +366,10 @@ Closes the §4.9 row "cancelling a run cancels the child runs it started" (#1277
     stored state: `ToolOutcome.Fatal`, never a guess from `status`.
   - `GraphError.OutputInvalid` (a typed child exhausted its corrective retry) is a refusal, mapped before the
     generic branch to `TaskRefusal.OutputInvalid(errors)` with the full vector, the same refusal replay rebuilds
-    from `RunOutcome.OutputInvalid`. A Block and the step and token limits are statuses, not `Left`s.
+    from `RunOutcome.OutputInvalid`. Under `Report` the child is first settled with `RunOutcome.OutputInvalid`
+    (`settleChild`) unless its checkpoint already records that outcome, exactly as the generic branch settles a
+    failure, so the refusal the parent commits is the one a replay reads and the child is prunable. Under `Fail`
+    it stays `Running`, as below. A Block and the step and token limits are statuses, not `Left`s.
   - Any other `Left` (provider error, tool `Fatal`, `DeadlineExceeded`) is `Failed`.
     - Under `ChildFailure.Fail` the child thread stays `Running`, the parent run fails, and the parent's `recover`
       replays the call, which recovers the child.
