@@ -118,6 +118,42 @@ with `toString`.
 Task calls in one model message run in parallel, as any tool calls do, bounded by the run's `maxConcurrency` and then
 by `maxConcurrentChildren`.
 
+## Subagents in a harness
+
+A `HarnessProfile` carries subagents too, as `subagents: SubagentConfig` ([design §4.48](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md)).
+`HarnessProfile()` has `SubagentConfig.none`: no subagents, because delegation is never granted silently.
+`HarnessProfile.deepAgents` turns on the **general-purpose subagent**, `general-purpose`, which the model calls through
+`task` like any `TypedAgent.text` subagent:
+
+- Its own harness is the minimal profile: the file tools over its own `StateFileBackend`. Its files are its own; only
+  its report comes back.
+- Its grant is every tool of the parent except the file tools and `execute`, and no delegation. The preset computes it
+  from the parent's actual tools when the agent is built, so a `deepAgents` agent with or without a sandbox builds.
+  `Agent.delegation` shows it.
+
+```scala
+import org.llm4s.agent.harness.{GeneralPurposeConfig, HarnessProfile, SubagentConfig}
+
+val profile = HarnessProfile.deepAgents
+// specialists only, no general-purpose subagent
+val specialists = profile.withSubagents(SubagentConfig.none.withSpecialists(researcher, critic))
+// change the general-purpose subagent: its model, description, prompt or grant
+val cheaper = profile.withSubagents(
+  profile.subagents.withGeneralPurpose(GeneralPurposeConfig().withModel(smallClient, CompletionOptions()))
+)
+// the bounds
+val wider = profile.withSubagents(profile.subagents.withDelegation(DelegationConfig().withMaxConcurrentChildren(8)))
+```
+
+- The profile's subagents come first, then any added with `AgentBuilder.withSubagents`. `SubagentConfig.delegation`
+  bounds them all; `withDelegation` beside a harness is refused.
+- The `delegation` middleware runs inside the harness's permissions, so with permission rules `task` needs an
+  `Invoke` rule (`task:general-purpose`).
+- The `deepAgents` prompt gains a part on delegating: independent, bounded work, a self-contained description, parallel
+  tasks in one message, and checking a report before relying on it.
+- `llm4s.agent.harness.subagents` in `reference.conf` holds `generalPurpose.enabled` and the `DelegationConfig` bounds,
+  which `HarnessConfigLoader` reads. Specialists and models are code.
+
 ## When a child does not report
 
 A child that is blocked by a guardrail, reaches its step limit, gives a typed answer that fails its schema twice, or

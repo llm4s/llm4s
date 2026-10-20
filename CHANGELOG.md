@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AgentStatus.Suspended` gains a fifth field, `delegated`: positional patterns need another binder; [migration](docs/reference/migration.md#child-suspension-through-the-parent-2050).
 - `StreamEvent.Nested`, two fields on `TraceEvent.AgentRunEnded`, and OpenTelemetry span names `invoke_agent <agent>` /
   `execute_tool <tool>`: exhaustive matches, positional patterns and dashboards break; [migration](docs/reference/migration.md#nested-streams-and-tracing-2051).
+- `HarnessProfile.deepAgents` offers a `task` tool (a tool named `task` clashes; permission rules need an `Invoke` rule for it),
+  and `withDelegation` beside a harness is refused; [migration](docs/reference/migration.md#subagents-in-the-harness-profile-2052).
 
 ### Agent subagents (Phase 4)
 
@@ -44,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AgentStatus.Suspended.delegated` under composite ids that the answer helpers and `Agent.resume` take [#2050](https://github.com/llm4s/llm4s/issues/2050); [design §4.46](docs/design/typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md).
 - **Added** nested streams (`nested = true`, `StreamEvent.Nested`, `EventHandlers.onChild`, `nestedEvents`), `Agent.subscribeChild`,
   `SubagentEvents.TaskStarted` / `TaskEnded` (the child-task metric) and parent ids in tracing [#2051](https://github.com/llm4s/llm4s/issues/2051); [design §4.47](docs/design/typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md).
+- **Added** subagents in `HarnessProfile` (`withSubagents(SubagentConfig)`): `deepAgents` offers the general-purpose subagent
+  through `task`, plus specialists and `llm4s.agent.harness.subagents` config [#2052](https://github.com/llm4s/llm4s/issues/2052); [design §4.48](docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md).
 
 ### Agent harness (Phase 3)
 

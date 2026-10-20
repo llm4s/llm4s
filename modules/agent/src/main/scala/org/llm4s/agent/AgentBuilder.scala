@@ -55,9 +55,9 @@ final class AgentBuilder private (
   private val interruptAfter: Vector[AgentNode],
   maxPromptSectionTokens: Int,
   output: Option[OutputFormat],
-  harness: Option[HarnessProfile],
+  private val harness: Option[HarnessProfile],
   private val subagents: Vector[TypedAgent[?, ?]],
-  private val delegation: DelegationConfig,
+  private val delegation: Option[DelegationConfig],
   private val inherited: AgentBuilder.Inherited
 ):
 
@@ -78,7 +78,7 @@ final class AgentBuilder private (
     output: Option[OutputFormat] = output,
     harness: Option[HarnessProfile] = harness,
     subagents: Vector[TypedAgent[?, ?]] = subagents,
-    delegation: DelegationConfig = delegation,
+    delegation: Option[DelegationConfig] = delegation,
     inherited: AgentBuilder.Inherited = inherited
   ): AgentBuilder =
     new AgentBuilder(
@@ -167,12 +167,17 @@ final class AgentBuilder private (
    * `task` tool for every subagent taking a `TaskRequest`, a `task_<id>` tool for each other one, and a cacheable
    * prompt section listing each subagent's id and description. A call runs the subagent on a child thread of the
    * calling thread and returns only its typed report. [[build]] refuses two subagents with one id, a subagent that does
-   * not bind, and a task tool whose name clashes with another tool. Bounded by [[withDelegation]].
+   * not bind, and a task tool whose name clashes with another tool. Bounded by [[withDelegation]]. Beside a harness
+   * (design 4.48) they follow the profile's own subagents, the middleware runs inside the harness's permissions and
+   * outside its other middleware, and the profile's `SubagentConfig.delegation` bounds them.
    */
   def withSubagents(agents: TypedAgent[?, ?]*): AgentBuilder = copy(subagents = subagents ++ agents)
 
-  /** The bounds on this agent's delegated tasks, replacing the defaults; [[build]] refuses a bound that is not positive. */
-  def withDelegation(config: DelegationConfig): AgentBuilder = copy(delegation = config)
+  /**
+   * The bounds on this agent's delegated tasks, replacing the defaults; [[build]] refuses a bound that is not positive,
+   * and this beside a harness, whose `SubagentConfig.delegation` sets them.
+   */
+  def withDelegation(config: DelegationConfig): AgentBuilder = copy(delegation = Some(config))
 
   /** This builder as a subagent's (design 4.45): its depth, its ancestors' permission rules and its granted tools. */
   private[agent] def inheriting(from: AgentBuilder.Inherited): AgentBuilder = copy(inherited = from)
@@ -244,8 +249,11 @@ final class AgentBuilder private (
     for
       family <- AgentBuilder.family(this)
       _      <- AgentBuilder.idTargetsDefined(family)
+      installs <- family.foldLeft[Result[Vector[AgentBuilder.Effective]]](Right(Vector.empty)) { (acc, b) =>
+        acc.flatMap(done => b.effective.map(done :+ _))
+      }
       // a handoff stays in the turn, so each agent counts the whole family's task calls in it (#2067)
-      taskNames = family.flatMap(b => TaskTools.names(b.subagents)).toSet
+      taskNames = installs.flatMap(e => TaskTools.names(e.subagents)).toSet
       _ <- AgentBuilder.taskNamesUnshared(family, taskNames)
       compiled <- family.foldLeft[Result[Vector[(LoopAgent, Vector[SubagentPlan])]]](Right(Vector.empty)) {
         // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
@@ -264,7 +272,7 @@ final class AgentBuilder private (
       family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
       installed.retention,
       // children are made on the family's thread by whichever agent is active: keep the tightest bound any sets
-      family.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption,
+      installs.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption,
       DelegationPlan(compiled.flatMap(_._2))
     )
 
@@ -278,44 +286,53 @@ final class AgentBuilder private (
     rootTracing: Option[Tracing],
     familyTaskNames: Set[String]
   ): Result[(Option[DelegationMiddleware], Vector[SubagentPlan])] =
-    // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
-    if subagents.isEmpty then delegation.validated.map(_ => (None, Vector.empty))
-    else
-      val ids        = subagents.map(_.id.value)
-      val duplicated = ids.diff(ids.distinct).distinct
-      for
-        config <- delegation.validated
-        _ <- Either.cond(
-          duplicated.isEmpty,
-          (),
-          ValidationError("subagents", s"agent '$id': subagent ids defined twice: ${duplicated.mkString(", ")}")
-        )
-        installed <- effective
-        scope = ParentScope(
-          AgentId.unsafe(id),
-          client,
-          options,
-          graphRuntime,
-          rootTracing,
-          installed.tools,
-          installed.middleware,
-          inherited.ancestors ++ installed.middleware.collect { case p: PermissionMiddleware =>
-            AncestorRules(AgentId.unsafe(id), p.orderedRules)
-          },
-          inherited.depth + 1,
-          config,
-          // its tools' and its middleware's, each checked as this agent checks it, to be checked so in a grantee
-          (installed.tools ++ installed.middleware.flatMap(_.tools))
-            .map(t => t.spec.name -> inherited.validators.getOrElse(t.spec.name, validator))
-            .toMap
-        )
-        bound <- subagents.foldLeft[Result[Vector[(BoundAgent[?, ?], SubagentPlan)]]](Right(Vector.empty)) {
-          (acc, definition) => acc.flatMap(done => definition.bindUnder(scope).map(done :+ _))
-        }
-      yield (
-        Some(new DelegationMiddleware(bound.map(_._1), config, inherited.depth, familyTaskNames, maxSteps)),
-        bound.map(_._2)
+    effective.flatMap { installed =>
+      // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
+      if installed.subagents.isEmpty then installed.delegation.validated.map(_ => (None, Vector.empty))
+      else delegatingWith(installed, graphRuntime, rootTracing, familyTaskNames)
+    }
+
+  private def delegatingWith(
+    installed: AgentBuilder.Effective,
+    graphRuntime: GraphRuntime,
+    rootTracing: Option[Tracing],
+    familyTaskNames: Set[String]
+  ): Result[(Option[DelegationMiddleware], Vector[SubagentPlan])] =
+    val subagents  = installed.subagents
+    val ids        = subagents.map(_.id.value)
+    val duplicated = ids.diff(ids.distinct).distinct
+    for
+      config <- installed.delegation.validated
+      _ <- Either.cond(
+        duplicated.isEmpty,
+        (),
+        ValidationError("subagents", s"agent '$id': subagent ids defined twice: ${duplicated.mkString(", ")}")
       )
+      scope = ParentScope(
+        AgentId.unsafe(id),
+        client,
+        options,
+        graphRuntime,
+        rootTracing,
+        installed.tools,
+        installed.middleware,
+        inherited.ancestors ++ installed.middleware.collect { case p: PermissionMiddleware =>
+          AncestorRules(AgentId.unsafe(id), p.orderedRules)
+        },
+        inherited.depth + 1,
+        config,
+        // its tools' and its middleware's, each checked as this agent checks it, to be checked so in a grantee
+        (installed.tools ++ installed.middleware.flatMap(_.tools))
+          .map(t => t.spec.name -> inherited.validators.getOrElse(t.spec.name, validator))
+          .toMap
+      )
+      bound <- subagents.foldLeft[Result[Vector[(BoundAgent[?, ?], SubagentPlan)]]](Right(Vector.empty)) {
+        (acc, definition) => acc.flatMap(done => definition.bindUnder(scope).map(done :+ _))
+      }
+    yield (
+      Some(new DelegationMiddleware(bound.map(_._1), config, inherited.depth, familyTaskNames, maxSteps)),
+      bound.map(_._2)
+    )
 
   /**
    * The tool names this agent's model is offered, and its middleware ids in stack order, `delegation` included when it
@@ -325,14 +342,13 @@ final class AgentBuilder private (
     for
       installed <- effective
       // the order the stack runs them in, `runsBefore` and `runsAfter` applied, as the loop resolves it: with the
-      // delegation middleware appended innermost, as `loopAgent` appends it, so a constraint naming it resolves
-      // delegation middleware (its task tools' specs included) appended innermost, as `loopAgent` appends it, so a
-      // constraint naming it resolves and every middleware's tools are listed in the order the loop offers them
-      delegation = Option.when(subagents.nonEmpty)(new AgentMiddleware {
+      // delegation middleware (its task tools' specs included) where `loopAgent` installs it, so a constraint naming
+      // it resolves and every middleware's tools are listed in the order the loop offers them
+      delegation = Option.when(installed.subagents.nonEmpty)(new AgentMiddleware {
         val id: MiddlewareId                     = DelegationMiddleware.Id
-        override val tools: Vector[AgentTool[?]] = TaskTools.specs(subagents).map(AgentBuilder.planned(_))
+        override val tools: Vector[AgentTool[?]] = TaskTools.specs(installed.subagents).map(AgentBuilder.planned(_))
       })
-      stack <- MiddlewareStack.of((installed.middleware ++ delegation)*)
+      stack <- MiddlewareStack.of(installed.withDelegation(delegation)*)
     yield (installed.tools.map(_.spec.name) ++ stack.tools.map(_.spec.name), stack.ordered.map(_.id))
 
   /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
@@ -352,12 +368,17 @@ final class AgentBuilder private (
       Option.when(inherited.ancestors.nonEmpty)(new AncestorPermissions(inherited.ancestors, ownRules)).toVector
     harness match
       case None =>
+        val stack = ancestors(middleware) ++ inherited.middleware ++ middleware
         Right(
           AgentBuilder.Effective(
             tools ++ inherited.tools,
-            ancestors(middleware) ++ inherited.middleware ++ middleware,
+            stack,
             systemPrompt,
-            None
+            None,
+            subagents,
+            delegation.getOrElse(DelegationConfig.default),
+            // innermost, so every middleware's wrapToolCall wraps each task call
+            stack.size
           )
         )
       case Some(profile) =>
@@ -368,15 +389,30 @@ final class AgentBuilder private (
               s"agent '$id': a harness sets the system prompt; use its PromptMode.Replace or Suffix, not withSystemPrompt"
             )
           )
-        else
-          profile.assembled.map(h =>
-            AgentBuilder.Effective(
-              h.tools ++ tools ++ inherited.tools,
-              ancestors(h.middleware ++ middleware) ++ inherited.middleware ++ h.middleware ++ middleware,
-              Some(h.systemPrompt),
-              Some(h.retention)
+        else if delegation.isDefined then
+          Left(
+            ValidationError(
+              "delegation",
+              s"agent '$id': a harness sets the delegation bounds; use its SubagentConfig.withDelegation, not withDelegation"
             )
           )
+        else
+          profile.assembled.map { h =>
+            val allTools = h.tools ++ tools ++ inherited.tools
+            // inside the harness's permissions and outside its other middleware (design 4.48)
+            val outer = ancestors(h.middleware ++ middleware) ++ inherited.middleware ++
+              h.middleware.takeWhile(_.isInstanceOf[PermissionMiddleware])
+            AgentBuilder.Effective(
+              allTools,
+              ancestors(h.middleware ++ middleware) ++ inherited.middleware ++ h.middleware ++ middleware,
+              Some(h.systemPrompt),
+              Some(h.retention),
+              // the general-purpose subagent's grant is computed from this agent's actual tools
+              profile.subagents.agents(allTools.map(_.spec.name).toSet) ++ subagents,
+              profile.subagents.delegation,
+              outer.size
+            )
+          }
 
   private def loopAgent(
     graphRuntime: GraphRuntime,
@@ -401,7 +437,7 @@ final class AgentBuilder private (
       .withOutput(output)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
-      .withMiddleware(installed.middleware ++ delegated._1)
+      .withMiddleware(installed.withDelegation(delegated._1))
       .withHandoffs(loopHandoffs) -> delegated._2
 
   private def loopHandoff(handoff: Handoff): Result[LoopHandoff] =
@@ -424,17 +460,28 @@ final class AgentBuilder private (
    * presence only, and refused by `build()`.
    */
   /**
-   * Whether `other` delegates as this builder does: the same subagent definitions, as instances, in order, and the same
-   * bounds. The graph version covers only the task tools' specs, so two builders whose subagents differ behind the same
+   * Whether `other` delegates as this builder does: the same subagent definitions, as instances, in order, the same
+   * bounds, and the same harness subagents. The graph version covers only the task tools' specs, so two builders whose subagents differ behind the same
    * specs (prompts, tools, output, failure policy) would otherwise pass as one agent.
    */
   private def delegatesAs(other: AgentBuilder): Boolean =
     subagents.size == other.subagents.size &&
       subagents.lazyZip(other.subagents).forall(_ eq _) &&
-      delegation == other.delegation
+      delegation == other.delegation &&
+      harness.map(_.subagents) == other.harness.map(_.subagents)
 
   private def canonical: ujson.Obj =
-    val installed = effective.getOrElse(AgentBuilder.Effective(tools, middleware, systemPrompt, None))
+    val installed = effective.getOrElse(
+      AgentBuilder.Effective(
+        tools,
+        middleware,
+        systemPrompt,
+        None,
+        subagents,
+        DelegationConfig.default,
+        middleware.size
+      )
+    )
     val settings = ujson.Obj(
       "id"           -> id,
       "systemPrompt" -> installed.systemPrompt.fold[ujson.Value](ujson.Null)(ujson.Str(_)),
@@ -464,9 +511,11 @@ final class AgentBuilder private (
     // only when set, so the version of an agent without a response format is what it was before formats existed
     output.foreach(format => settings("output") = format.schema)
     // only when set, likewise: the task tools the delegation middleware contributes
-    if subagents.nonEmpty then
+    if installed.subagents.nonEmpty then
       settings("subagents") = ujson.Arr.from(
-        TaskTools.specs(subagents).map(s => ujson.Obj("name" -> s.name, "definition" -> s.toolDefinition.render()))
+        TaskTools
+          .specs(installed.subagents)
+          .map(s => ujson.Obj("name" -> s.name, "definition" -> s.toolDefinition.render()))
       )
     if harness.isDefined && effective.isLeft then settings("harness") = "invalid"
     settings
@@ -493,7 +542,7 @@ object AgentBuilder:
       output = None,
       harness = None,
       subagents = Vector.empty,
-      delegation = DelegationConfig.default,
+      delegation = None,
       inherited = Inherited.root
     )
 
@@ -517,13 +566,23 @@ object AgentBuilder:
     /** A top-level agent's: depth 0, no ancestors, nothing granted. */
     val root: Inherited = Inherited(0, Vector.empty, Vector.empty, Vector.empty)
 
-  /** What an agent runs with once its harness is installed; `retention` only with a harness. */
+  /**
+   * What an agent runs with once its harness is installed; `retention` only with a harness. `subagents` are its
+   * harness's then its own, bounded by `delegation`, and their `delegation` middleware goes at `delegationAt` in
+   * `middleware`.
+   */
   final private case class Effective(
     tools: Vector[AgentTool[?]],
     middleware: Vector[AgentMiddleware],
     systemPrompt: Option[String],
-    retention: Option[RetentionPolicy]
-  )
+    retention: Option[RetentionPolicy],
+    subagents: Vector[TypedAgent[?, ?]],
+    delegation: DelegationConfig,
+    delegationAt: Int
+  ):
+    /** `middleware` with `delegating`, when there is one, at `delegationAt`. */
+    def withDelegation(delegating: Option[AgentMiddleware]): Vector[AgentMiddleware] =
+      middleware.patch(delegationAt, delegating.toVector, 0)
 
   /**
    * The root and every builder reachable through handoffs to builders, breadth-first, one per id.

@@ -742,8 +742,10 @@ for {
   results, skills under `/skills` and instructions in `/AGENTS.md`. `HarnessProfile()` is the file
   tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
   `withTools(ToolSelection.Only(...))`, `withTodos(None)`, `withToolTimeout`, `withRetention`, ...
-- **The order is fixed**, outermost first: permissions, summarisation, offload, skills, instructions,
-  todos, then the builder's own middleware. With no permission rules there is no
+- **Subagents.** `deepAgents` also offers the general-purpose subagent through the `task` tool;
+  `HarnessProfile()` offers none. See [Subagents in a harness](delegation#subagents-in-a-harness).
+- **The order is fixed**, outermost first: permissions, subagent delegation, summarisation, offload,
+  skills, instructions, todos, then the builder's own middleware. With no permission rules there is no
   `PermissionMiddleware`; with rules, a call no rule allows is denied.
 - **The prompt** is the profile's (plan, act and verify; context; tool safety), `PromptMode.Replace`
   or `Suffix`. `withSystemPrompt` beside a harness is refused.

@@ -442,6 +442,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.45 | [Stage 4 slice D2: explicit inheritance](typed-agent-runtime/4.45-stage-4-slice-d2-inheritance.md) ([#2049](https://github.com/llm4s/llm4s/issues/2049)) |
 | 4.46 | [Stage 4 slice D3: child suspension through the parent](typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md) ([#2050](https://github.com/llm4s/llm4s/issues/2050)) |
 | 4.47 | [Stage 4 slice D4: nested streams, ids in events and tracing, child-task metrics](typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md) ([#2051](https://github.com/llm4s/llm4s/issues/2051)) |
+| 4.48 | [Stage 4 slice P1: subagents in the harness profile](typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md) ([#2052](https://github.com/llm4s/llm4s/issues/2052)) |
 
 ### 4.9 Stage 0 carry-forward
 

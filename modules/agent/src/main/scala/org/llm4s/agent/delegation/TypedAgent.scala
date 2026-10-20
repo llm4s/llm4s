@@ -17,7 +17,7 @@ import org.llm4s.agent.graph.{
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, PermissionMiddleware }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
-import org.llm4s.agent.harness.HarnessProfile
+import org.llm4s.agent.harness.{ HarnessProfile, SubagentConfig }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -171,7 +171,9 @@ final class TypedAgent[I, O] private (
   private[agent] def bindUnder(scope: ParentScope): Result[(BoundAgent[I, O], SubagentPlan)] =
     val modelInherited    = model.isEmpty
     val (client, options) = model.getOrElse(scope.client -> scope.options)
-    val delegates         = inheritance.delegate && subagents.nonEmpty && scope.childDepth + 1 <= scope.config.maxDepth
+    // its own subagents and its harness's (design 4.48) are offered only when delegation is granted (rule 15)
+    val offers    = subagents.nonEmpty || harness.exists(_.subagents.offersAny)
+    val delegates = inheritance.delegate && offers && scope.childDepth + 1 <= scope.config.maxDepth
     for
       _ <- Either.cond(
         description.trim.nonEmpty,
@@ -203,17 +205,25 @@ final class TypedAgent[I, O] private (
               .toMap
           )
         )
-      prompted  = systemPrompt.fold(traced)(traced.withSystemPrompt)
-      tooled    = tools.fold(prompted)(prompted.withTools)
-      harnessed = harness.fold(tooled)(tooled.withHarness)
+      prompted = systemPrompt.fold(traced)(traced.withSystemPrompt)
+      tooled   = tools.fold(prompted)(prompted.withTools)
+      // a harness's subagents only when the child delegates, then under the tree's bounds
+      harnessed = harness.fold(tooled)(h =>
+        tooled.withHarness(
+          h.withSubagents(if delegates then h.subagents.withDelegation(scope.config) else SubagentConfig.none)
+        )
+      )
       // under a parent, every call grants a step cap (design 4.45), which an unset own limit must not lower to the
       // default: only `withMaxSteps` caps the grant; with no parent the default applies, as for any agent
       limited = maxSteps
         .orElse(Option.when(scope.childDepth > 0)(Int.MaxValue))
         .fold(harnessed)(harnessed.withMaxSteps)
-      outputted  = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
-      typed      = if streaming then outputted.withStreaming() else outputted
-      delegating = if delegates then typed.withSubagents(subagents*).withDelegation(scope.config) else typed
+      outputted = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
+      typed     = if streaming then outputted.withStreaming() else outputted
+      delegating =
+        if !delegates then typed
+        else if harness.isDefined then typed.withSubagents(subagents*)
+        else typed.withSubagents(subagents*).withDelegation(scope.config)
       inventory <- delegating.inventory
       agent     <- delegating.build()
     yield
