@@ -15,7 +15,6 @@ docs/examples/index.md -> embeddings
 docs/examples/index.md -> mcp
 docs/getting-started/first-example.md -> /examples/basic
 docs/getting-started/installation.md -> ../guide/writing-a-provider#testing
-docs/getting-started/testing-guide.md -> ../agents/tools.md
 docs/getting-started/testing-guide.md -> /advanced/ci-cd
 docs/gsoc/resources.md -> /contributing
 docs/guide/agents/index.md -> /design/agent-framework-roadmap
