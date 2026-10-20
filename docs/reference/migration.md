@@ -75,7 +75,7 @@ A thread can now be a child thread: its checkpoints record a `RunOrigin` naming 
 The runner that delegated calls use to run a child is internal ([design 4.42](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md)); two things change for everyone:
 
 - **A tool call's own model usage is counted.** The usage a tool call's task records (a tool that calls a model through its context, or a delegated child's roll-up) now commits to the thread's `usage` with the call's result, so `AgentResult.usage` can be higher than before for agents with such tools.
-- **The state key ids `delegation-prior-usage`, `delegation-input` and `delegation-counted` are reserved.** Every agent graph registers them; a tool or middleware declaring a key with one of these ids is refused at `build()`.
+- **The state key ids `delegation-prior-usage`, `delegation-input`, `delegation-counted` and `delegation-grant` are reserved.** Every agent graph registers them; a tool or middleware declaring a key with one of these ids is refused at `build()`.
 
 ### Child suspension through the parent (#2050)
 
@@ -84,6 +84,14 @@ A child that stops for an approval or a question now suspends its parent ([desig
 - **`AgentStatus.Suspended` has a fifth field, `delegated`** (default empty): a subagent's interrupts, under composite ids `<parent>~<child>`. A positional pattern `case AgentStatus.Suspended(a, q, m, b)` needs a fifth binder, `case AgentStatus.Suspended(a, q, m, b, _)`; one matching by type (`case s: AgentStatus.Suspended`) is unchanged. Answer a delegated interrupt with the usual helpers by its composite id. In Java and Kotlin, `pending` lists each one as its kind in the child, under the composite id.
 - **A suspended child is no longer a tool error.** Code that waited for the parent model to see `subagent '<id>' suspended` now gets the parent `Suspended` instead, and must answer or abandon it.
 - **`ToolLoop.questions` no longer lists a `task` call waiting on its child**; `ToolLoop.delegatedQuestions` does.
+
+### Explicit inheritance (#2049)
+
+- **`RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps: Long`** (default 0): how many of the run's
+  failed attempts were an agent's model step, which a recovered child counts against its step grant ([design 4.45](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.45-stage-4-slice-d2-inheritance.md)).
+  A positional pattern needs another binder: `case RunEvent.RunCancelled(_)` becomes `RunCancelled(_, _)`, and
+  `RunFailed(message, usage)` becomes `RunFailed(message, usage, _)`. Stored events read unchanged (a missing `steps`
+  is 0).
 
 ### Nested streams and tracing (#2051)
 

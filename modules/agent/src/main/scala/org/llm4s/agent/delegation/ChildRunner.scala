@@ -92,9 +92,27 @@ private[agent] object ChildRunner:
   private val EventPage: Int = 256
 
   /**
-   * Runs `agent` on the child thread `origin` names, or reattaches to it, with `input` as its turn's input and
-   * `config`'s budgets (its timeout capped by the parent's deadline), for the tool call `ctx`. See the object's
-   * description.
+   * Runs `agent` on the child thread `origin` names, or reattaches to it, with `input` as its turn's input, for the
+   * tool call `ctx`. See the object's description.
+   *
+   * `config`'s budgets and `stepLimit` are the child's grant for its whole life (design 4.45), not for one admission:
+   *
+   *  - its `maxTokens`, less the tokens the child used before (its roll-up), at each admission, and at most
+   *    `parentTokens`, the tokens the parent's current run has left (one run's allowance, never recorded: at the first
+   *    admission the lower of the two is the whole-life limit);
+   *  - its `timeout`, as a deadline of the child's `RunOrigin.startedAt` (as its first checkpoint recorded it) plus
+   *    the timeout, capped by the parent's deadline;
+   *  - `stepLimit`, the cap on the child's turn steps, which a recovered child keeps counting.
+   *
+   * The first admission records the step cap, the token limit, the granted deadline and the concurrency on the child
+   * ([[DelegationKeys.grant]]); each later one takes the lower of each recorded limit and its own, so a recovery under
+   * a looser budget never widens the grant. The deadline is fixed at the first admission - its start plus the granted
+   * timeout, or the parent's deadline then if sooner - and a later parent run's deadline only caps an admission, never
+   * moves it. The steps a failed attempt's model calls took, which committed no step, count against the step cap.
+   *
+   * A child recovered or resumed whose tokens or steps are already spent is settled `TokenLimitReached` or
+   * `StepLimitReached` without running, and one whose own granted time has passed is settled `Failed` with a
+   * `DeadlineExceeded`, as a child timing out mid-run records it, whatever the failure policy.
    */
   def run(
     agent: Agent,
@@ -102,9 +120,11 @@ private[agent] object ChildRunner:
     input: AgentInput,
     config: RunConfig,
     ctx: ToolContext,
-    settleOnFailure: Boolean = true
+    settleOnFailure: Boolean = true,
+    stepLimit: Option[Int] = None,
+    parentTokens: Option[Long] = None
   ): Result[ChildEnd] =
-    new Attempt(agent, origin, input, config, ctx, settleOnFailure, None).drive()
+    new Attempt(agent, origin, input, config, ctx, settleOnFailure, None, stepLimit, parentTokens).drive()
 
   /**
    * [[run]] for a call resumed with `answers` to its suspended child's interrupts (design 4.46): the child, read first
@@ -119,9 +139,12 @@ private[agent] object ChildRunner:
     answers: DelegatedAnswers,
     config: RunConfig,
     ctx: ToolContext,
-    settleOnFailure: Boolean
+    settleOnFailure: Boolean,
+    stepLimit: Option[Int] = None,
+    parentTokens: Option[Long] = None
   ): Result[ChildEnd] =
-    new Attempt(agent, origin, input, config, ctx, settleOnFailure, Some(answers.answers)).drive()
+    new Attempt(agent, origin, input, config, ctx, settleOnFailure, Some(answers.answers), stepLimit, parentTokens)
+      .drive()
 
   /**
    * The child's timeout: its grant, capped by what is left of the parent's deadline (`deadline`, by the runtime's
@@ -152,7 +175,9 @@ private[agent] object ChildRunner:
     config: RunConfig,
     ctx: ToolContext,
     settleOnFailure: Boolean,
-    answers: Option[Map[InterruptId, ujson.Value]]
+    answers: Option[Map[InterruptId, ujson.Value]],
+    stepLimit: Option[Int],
+    parentTokens: Option[Long]
   ):
     private val runtime = agent.runtime
     private val graph   = agent.loop.graph
@@ -222,13 +247,48 @@ private[agent] object ChildRunner:
       (Observer(Agent.StreamCapacity, scope, nested = true), scope)
 
     /**
-     * A new run's config: each admission is a run of its own, with the timeout capped by what is left of the parent's
-     * deadline now, so time spent waiting for a busy child never lets the child outlive its parent.
+     * This call's whole-life grant for a child started at `startedAt`: its step cap, token limit, granted deadline and
+     * concurrency. A first admission also caps the tokens by `parentTokens`, the parent run's allowance, since nothing
+     * is used yet; a later one does not, because that allowance is one run's, not the child's life's.
      */
-    private def fresh(): RunConfig =
-      val (timeout, capped) = cappedTimeout(config.budgets.timeout, ctx.run.deadline, runtime.now())
+    private def granted(startedAt: java.time.Instant, first: Boolean): ChildGrant =
+      val tokens = if first then lower(config.budgets.maxTokens, parentTokens) else config.budgets.maxTokens
+      val own    = config.budgets.timeout.map(t => startedAt.plusNanos(t.toNanos))
+      // the first admission fixes the deadline, the parent's then included; a later parent run never moves it
+      val deadline = if first then lower(own, ctx.run.deadline) else own
+      ChildGrant(stepLimit, tokens, deadline, Some(config.budgets.maxConcurrency))
+
+    private def lower[A](a: Option[A], b: Option[A])(using ord: Ordering[A]): Option[A] = (a ++ b).reduceOption(ord.min)
+
+    /** The grant a child in `state` runs under: the one recorded on it, narrowed by this call's. */
+    private def effective(state: ThreadState, startedAt: java.time.Instant): Result[ChildGrant] =
+      state
+        .get(DelegationKeys.grant)
+        .map(_.fold(granted(startedAt, first = true))(_.narrowed(granted(startedAt, first = false))))
+
+    /**
+     * A new run's config: each admission is a run of its own, with what is left of the child's `grant` (design 4.45) -
+     * the time to its deadline, capped by what is left of the parent's deadline now, so time spent waiting for a busy
+     * child never lets the child outlive its parent, and its tokens less `consumed`, the tokens the child's earlier
+     * attempts used, at most the parent run's allowance. A spent grant is settled before this is called; what is left
+     * is kept positive regardless.
+     */
+    private def fresh(grant: ChildGrant, consumed: Long): RunConfig =
+      val now               = runtime.now()
+      val ownTime           = grant.deadline.map(d => JDuration.between(now, d).toNanos.max(1.millis.toNanos).nanos)
+      val (timeout, capped) = cappedTimeout(ownTime, ctx.run.deadline, now)
       parentsDeadline = capped
-      base.withBudgets(config.budgets.withTimeout(timeout)).withRunId(RunId.random())
+      val tokens      = lower(grant.tokens.map(_ - consumed), parentTokens).map(_.max(1L))
+      val concurrency = grant.concurrency.getOrElse(config.budgets.maxConcurrency)
+      base
+        .withBudgets(config.budgets.withTimeout(timeout).withMaxTokens(tokens).withMaxConcurrency(concurrency))
+        .withRunId(RunId.random())
+
+    /** `grant` recorded on the child, with its admission. */
+    private def recorded(grant: ChildGrant): StateUpdate = StateUpdate.update(DelegationKeys.grant, Some(grant))
+
+    /** Whether `grant`'s own deadline has passed by the runtime's clock. */
+    private def grantExpired(grant: ChildGrant): Boolean = grant.deadline.exists(d => !runtime.now().isBefore(d))
 
     /**
      * When waiting on a busy child gives up, as a `System.nanoTime` value: twice the claim's life from now, or the
@@ -280,7 +340,7 @@ private[agent] object ChildRunner:
             )
           )
         case Right(None) =>
-          val run                = fresh()
+          val run                = fresh(granted(origin.startedAt, first = true), 0L)
           val (observer, events) = forwarder(run.runId)
           admitted(
             runtime.startChild(
@@ -291,7 +351,12 @@ private[agent] object ChildRunner:
               run,
               observer = Some(observer),
               notAfter = ctx.run.deadline,
-              amend = _ => Right(StateUpdate.update(DelegationKeys.input, Some(inputDigest))),
+              amend = _ =>
+                Right(
+                  StateUpdate
+                    .update(DelegationKeys.input, Some(inputDigest))
+                    .combine(recorded(granted(origin.startedAt, first = true)))
+                ),
               // the child is registered only while the parent run still holds its claim (#2071)
               parentClaim = parentClaim
             ),
@@ -323,26 +388,13 @@ private[agent] object ChildRunner:
             case CheckpointStatus.Running =>
               // an earlier attempt's run: its live events cannot be replayed, so a gap comes before this run's events
               gap(RunId(checkpoint.runId))
-              val run                = fresh()
-              val (observer, events) = forwarder(run.runId)
-              admitted(
-                runtime.recoverChild(
-                  childId,
-                  graph,
-                  run,
-                  observer = Some(observer),
-                  amend = foldLostUsage,
-                  notAfter = ctx.run.deadline,
-                  parentClaim = parentClaim
-                ),
-                events
-              )
+              recovered(checkpoint, exec)
             case CheckpointStatus.Suspended =>
               answering(exec) match
                 case Some(pending) =>
                   // the run that suspended it was an earlier attempt's: a gap, then the resumed run's events
                   gap(RunId(checkpoint.runId))
-                  resumed(pending)
+                  resumed(checkpoint, exec, pending)
                 case None =>
                   // nothing runs here, so the child's live events are gone
                   gap(RunId(checkpoint.runId))
@@ -377,18 +429,28 @@ private[agent] object ChildRunner:
      * What resuming the child with `pending` calls for: its run awaited; for answers the child refuses, the child read
      * again and its interrupts surfaced again, with a warning; any other refusal as [[admitted]] takes it.
      */
-    private def resumed(pending: Map[InterruptId, ujson.Value]): Step =
-      val run                = fresh()
-      val (observer, events) = forwarder(run.runId)
-      runtime.resumeChild(
-        childId,
-        graph,
-        pending,
-        run,
-        observer = Some(observer),
-        notAfter = ctx.run.deadline,
-        parentClaim = parentClaim
-      ) match
+    private def resumed(checkpoint: Checkpoint, exec: Execution, pending: Map[InterruptId, ujson.Value]): Step =
+      // a continuation like a recovery: with what is left of the child's whole-life grant (design 4.45)
+      continued(checkpoint, exec) { (grant, consumed) =>
+        val run                = fresh(grant, consumed)
+        val (observer, events) = forwarder(run.runId)
+        resumeWith(
+          runtime.resumeChild(
+            childId,
+            graph,
+            pending,
+            run,
+            observer = Some(observer),
+            notAfter = ctx.run.deadline,
+            parentClaim = parentClaim,
+            amend = _ => Right(recorded(grant))
+          ),
+          events
+        )
+      }
+
+    private def resumeWith(handle: Result[RunHandle[TurnOutput]], events: RunScope): Step =
+      handle match
         case handle @ Right(_) =>
           applied = true
           admitted(handle, events)
@@ -400,6 +462,75 @@ private[agent] object ChildRunner:
           )
           Step.Again
         case refused => admitted(refused, events)
+
+    /** What a `Running` child calls for (design 4.45): a recovery, under [[continued]]. */
+    private def recovered(checkpoint: Checkpoint, exec: Execution): Step =
+      continued(checkpoint, exec) { (grant, consumed) =>
+        val run                = fresh(grant, consumed)
+        val (observer, events) = forwarder(run.runId)
+        admitted(
+          runtime.recoverChild(
+            childId,
+            graph,
+            run,
+            observer = Some(observer),
+            amend = state => foldLostUsage(state).map(_.combine(recorded(grant))),
+            notAfter = ctx.run.deadline,
+            parentClaim = parentClaim
+          ),
+          events
+        )
+      }
+
+    /**
+     * Every continuation of a child - a recovery or a resume - under its whole-life grant (design 4.45): settled
+     * `TokenLimitReached` or `StepLimitReached` at a spent token or step grant, settled `Failed` with a
+     * `DeadlineExceeded` once its stored deadline has passed, each without running;
+     * else `admit` with the grant and the tokens the child has used, which [[fresh]] deducts.
+     */
+    private def continued(checkpoint: Checkpoint, exec: Execution)(admit: (ChildGrant, Long) => Step): Step =
+      val startedAt = checkpoint.origin.fold(origin.startedAt)(_.startedAt)
+      val spent = for
+        grant  <- effective(exec.state, startedAt)
+        rollUp <- usage()
+        lost   <- lostSteps()
+        turn   <- exec.state.get(LoopKeys.turn)
+      yield
+        val consumed = rollUp.inputTokens + rollUp.outputTokens
+        // a failed attempt's model calls count as steps, though they never committed one
+        val counted = grant.narrowed(grant.copy(lostSteps = lost))
+        val outcome =
+          if counted.tokens.exists(consumed >= _) then Some(RunOutcome.TokenLimitReached)
+          else if counted.steps.exists(turn.steps + counted.lostSteps >= _) then Some(RunOutcome.StepLimitReached)
+          else None
+        (counted, consumed, outcome)
+      spent match
+        case Left(error) => Step.Done(Left(error))
+        case Right((_, _, Some(limitHit))) =>
+          val what = if limitHit == RunOutcome.TokenLimitReached then "token" else "step"
+          settleSpent(limitHit, s"the child's $what grant is spent")
+        case Right((grant, _, _)) if grantExpired(grant) =>
+          // its stored deadline - from its grant or its first parent's cap - has passed, whatever deadline a recovered
+          // parent has now: settled failed as a child timing out mid-run records it, never admitted with no time left
+          val late = GraphError.DeadlineExceeded(childId.value, Some(checkpoint.id))
+          settleSpent(RunOutcome.failed(late), s"the child's granted time is spent: ${late.message}")
+        case Right((grant, consumed, None)) => admit(grant, consumed)
+
+    /** Settles a child whose grant is spent with `outcome`, then reads it again: its refusal, with no run. */
+    private def settleSpent(outcome: RunOutcome, message: String): Step =
+      runtime.settleChild(
+        childId,
+        graph,
+        outcome,
+        message,
+        base.withRunId(RunId.random()),
+        foldLostUsage,
+        ours,
+        parentClaim
+      ) match
+        case Right(_)                          => Step.Again
+        case Left(busy: GraphError.ThreadBusy) => Step.Busy(busy)
+        case Left(other)                       => Step.Done(Left(other))
 
     /**
      * Adds the child's roll-up to the calling task's accumulator, unless the thread's committed state shows it counted
@@ -531,6 +662,20 @@ private[agent] object ChildRunner:
      * The child's roll-up (rules 10, 11): its committed usage, its prior usage, and the lost usage on the terminal
      * events after the last one folded - the final attempt's, or one settled or recovered after it.
      */
+    /**
+     * The agent model steps of the child's attempts that committed nothing: its prior failed steps and those on the
+     * terminals not yet folded. A middleware's model call (a summariser's) is not a step, so it is not counted.
+     */
+    private def lostSteps(): Result[Long] =
+      runtime.childAtRest(childId, graph, base).flatMap {
+        case None => Right(0L)
+        case Some((_, exec)) =>
+          for
+            prior <- exec.state.get(DelegationKeys.priorUsage)
+            lost  <- terminalsAfter(prior.foldedThrough)
+          yield prior.failedSteps + lost.map(_._3).sum
+      }
+
     private def usage(): Result[UsageSummary] =
       runtime.childAtRest(childId, graph, base).flatMap {
         case None => Right(UsageSummary())
@@ -551,22 +696,28 @@ private[agent] object ChildRunner:
         prior     <- state.get(DelegationKeys.priorUsage)
         terminals <- terminalsAfter(prior.foldedThrough)
       yield
-        val folded = terminals.foldLeft(prior)((p, t) => p.fold(t._1, t._2))
+        val folded = terminals.foldLeft(prior)((p, t) => p.fold(t._1, t._2, t._3))
         if folded == prior then StateUpdate.empty else StateUpdate.update(DelegationKeys.priorUsage, folded)
 
-    /** The child's terminal events of attempts that committed nothing after `afterSeq`: each one's seq and usage. */
-    private def terminalsAfter(afterSeq: Long): Result[Vector[(Long, UsageSummary)]] =
-      @tailrec def pages(after: Long, found: Vector[(Long, UsageSummary)]): Result[Vector[(Long, UsageSummary)]] =
+    /**
+     * The child's terminal events of attempts that committed nothing after `afterSeq`: each one's seq, usage and agent
+     * model steps.
+     */
+    private def terminalsAfter(afterSeq: Long): Result[Vector[(Long, UsageSummary, Long)]] =
+      @tailrec def pages(
+        after: Long,
+        found: Vector[(Long, UsageSummary, Long)]
+      ): Result[Vector[(Long, UsageSummary, Long)]] =
         runtime.storedEvents(childId, after, EventPage) match
           case Left(error) => Left(error)
           case Right(page) =>
             val terminals = page.flatMap { record =>
               val lost = record.event match
-                case RunEvent.RunFailed(_, lost) => Some(lost)
-                case RunEvent.RunCancelled(lost) => Some(lost)
-                case RunEvent.RunTimedOut(lost)  => Some(lost)
-                case _                           => None
-              lost.map(l => record.seq -> l.getOrElse(UsageSummary()))
+                case RunEvent.RunFailed(_, lost, steps) => Some(lost -> steps)
+                case RunEvent.RunCancelled(lost, steps) => Some(lost -> steps)
+                case RunEvent.RunTimedOut(lost, steps)  => Some(lost -> steps)
+                case _                                  => None
+              lost.map((l, steps) => (record.seq, l.getOrElse(UsageSummary()), steps))
             }
             if page.size < EventPage then Right(found ++ terminals)
             else pages(page.last.seq, found ++ terminals)

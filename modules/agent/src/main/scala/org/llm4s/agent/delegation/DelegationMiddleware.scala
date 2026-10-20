@@ -1,7 +1,8 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.agent.Agent
 import org.llm4s.agent.events.SubagentEvents
-import org.llm4s.agent.graph.{ RunConfig, RunOrigin }
+import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, RunOrigin }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, PromptSection }
 import org.llm4s.agent.graph.tool.{
   AgentTool,
@@ -14,7 +15,7 @@ import org.llm4s.agent.graph.tool.{
   ToolOutcome,
   ToolResource
 }
-import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage }
+import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage, ToolLoop }
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UserMessage }
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, StringSchema }
@@ -24,6 +25,7 @@ import upickle.default.ReadWriter
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.Semaphore
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 import scala.util.control.Exception.ultimately
 
@@ -36,8 +38,11 @@ import scala.util.control.Exception.ultimately
  *  - Each other subagent has its own tool, `task_<id>`, whose arguments are its input's schema.
  *
  * A call is refused, as a tool error, past `maxTasksPerTurn` (counted in the turn's committed assistant messages up to
- * the call, across handoffs, so exact and stable under replay) or `maxDepth`; it waits for one of the parent run's
- * `maxConcurrentChildren` slots; then it runs the child through the child runner and maps its outcome.
+ * the call, across handoffs, so exact and stable under replay) or `maxDepth`. Its child's limits are then computed
+ * from the snapshot (design 4.45, [[TaskLimits]]): a parent whose deadline has passed fails with its own
+ * `DeadlineExceeded`, and one with no steps or tokens left gives `TaskOutcome.NotStarted`, with no child. Otherwise
+ * the call waits for one of the parent run's `maxConcurrentChildren` slots, runs the child through the child runner,
+ * and maps its outcome.
  *
  * A child that suspends makes its call ask a [[DelegatedQuestion]] (design 4.46): the parent suspends too, listing the
  * child's interrupts under composite ids, and the call's resume, with the [[DelegatedAnswers]], resumes the child.
@@ -45,12 +50,14 @@ import scala.util.control.Exception.ultimately
  * @param depth how deep the agent this is installed in runs: 0 for a top-level agent
  * @param familyTaskNames the task tools of the agent's family (its handoff graph), whose calls before a handoff in the
  *   turn count towards `maxTasksPerTurn` too; this agent's own always count
+ * @param maxSteps the `maxSteps` of the agent this is installed in: a child's steps unless its budget grants others
  */
 final private[agent] class DelegationMiddleware(
   subagents: Vector[BoundAgent[?, ?]],
   config: DelegationConfig,
   depth: Int,
-  familyTaskNames: Set[String] = Set.empty
+  familyTaskNames: Set[String] = Set.empty,
+  maxSteps: Int = Agent.DefaultMaxSteps
 ) extends AgentMiddleware:
 
   val id: MiddlewareId = DelegationMiddleware.Id
@@ -124,20 +131,48 @@ final private[agent] class DelegationMiddleware(
     else if depth + 1 > config.maxDepth then
       error(s"task for subagent '$name' refused: it would nest deeper than maxDepth = ${config.maxDepth}")
     else
-      val slot = slots.computeIfAbsent(ctx.run.incarnation, _ => new Semaphore(config.maxConcurrentChildren, true))
-      CancelledError.attempt(s"task $name")(Right(slot.acquire())) match
-        case Left(cancelled) => ToolOutcome.Fatal(cancelled)
-        case Right(_)        => ultimately(slot.release())(run(bound, input, answers, ctx))
+      TaskLimits.at(
+        bound.definition.inheritance.budget,
+        maxSteps,
+        bound.definition.ownMaxSteps,
+        ctx,
+        bound.agent.runtime.now()
+      ) match
+        case Left(TaskLimits.Refusal.Late(late))    => ToolOutcome.Fatal(late)
+        case Left(TaskLimits.Refusal.Failed(error)) => ToolOutcome.Fatal(error)
+        case Left(TaskLimits.Refusal.Exhausted(reason)) =>
+          DelegationMiddleware.toolOutcome(
+            name,
+            bound.definition.failure,
+            config.maxReportBytes,
+            TaskOutcome.NotStarted(bound.id, reason),
+            None
+          )(using bound.definition.outputCodec)
+        case Right(limits) =>
+          val slot = slots.computeIfAbsent(ctx.run.incarnation, _ => new Semaphore(config.maxConcurrentChildren, true))
+          CancelledError.attempt(s"task $name")(Right(slot.acquire())) match
+            case Left(cancelled) => ToolOutcome.Fatal(cancelled)
+            case Right(_)        => ultimately(slot.release())(run(bound, input, answers, ctx, limits))
 
   private def run[I, O](
     bound: BoundAgent[I, O],
     input: I,
     answers: Option[DelegatedAnswers],
-    ctx: ToolContext
+    ctx: ToolContext,
+    limits: TaskLimits
   ): ToolOutcome =
-    val name   = bound.id.value
-    val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, Instant.now(), depth + 1)
-    bound.delegated(input, origin, childConfig(ctx.run.config), ctx, answers) match
+    val name = bound.id.value
+    val origin =
+      RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, bound.agent.runtime.now(), depth + 1)
+    bound.delegated(
+      input,
+      origin,
+      childConfig(ctx.run.config, limits),
+      ctx,
+      answers,
+      Some(limits.maxSteps),
+      limits.parentTokens
+    ) match
       case Left(error) => DelegationMiddleware.notRun(name, error, config.maxReportBytes)
       case Right((outcome, cause, ended)) =>
         val result =
@@ -153,14 +188,18 @@ final private[agent] class DelegationMiddleware(
         result
 
   /**
-   * The child's config: its own run id, the parent's tenant and principal (rule 16), the parent's budgets without the
-   * timeout - the parent's cancellation reaches the child, its deadline included - and the delegation's child retention.
+   * The child's config: its own run id, the parent's tenant and principal (rule 16), the parent's budgets with the
+   * child's `limits` - its granted timeout (the child runner caps it by the parent's deadline, which reaches the child
+   * with the parent's cancellation), its tokens and its concurrency - and the delegation's child retention.
    */
-  private def childConfig(parent: RunConfig): RunConfig =
+  private def childConfig(parent: RunConfig, limits: TaskLimits): RunConfig =
     RunConfig(
       tenantId = parent.tenantId,
       principal = parent.principal,
-      budgets = parent.budgets.withTimeout(None),
+      budgets = parent.budgets
+        .withTimeout(limits.timeout)
+        .withMaxTokens(limits.maxTokens)
+        .withMaxConcurrency(limits.maxConcurrency),
       childRetention = config.childRetention
     )
 
@@ -347,3 +386,89 @@ private[agent] object TaskTools:
       case ujson.Arr(items)   => ujson.Arr.from(items.map(sorted))
       case other              => other
     ujson.write(sorted(json))
+
+/**
+ * A child's limits for one task call (design 4.45), each its grant capped by its parent's remainder at the call's
+ * snapshot. Every one is positive: an exhausted remainder is a [[TaskLimits.Refusal]] instead.
+ *
+ * @param maxSteps the cap on the child's turn steps, for its whole life
+ * @param maxTokens the child's tokens for its whole life, as its budget grants them, if limited
+ * @param parentTokens the tokens the parent's run has left at the snapshot, if it has a budget: the most this call may
+ *   let the child use, however much of its whole-life grant is left
+ * @param timeout the child's granted time from its start, if any; the child runner caps it by the parent's deadline
+ * @param maxConcurrency the child run's `RunBudgets.maxConcurrency`
+ */
+final private[delegation] case class TaskLimits(
+  maxSteps: Int,
+  maxTokens: Option[Long],
+  parentTokens: Option[Long],
+  timeout: Option[FiniteDuration],
+  maxConcurrency: Int
+)
+
+private[delegation] object TaskLimits:
+
+  /** Why a task call starts no child. */
+  enum Refusal:
+    /** The parent has no steps or tokens left: the call's outcome is `TaskOutcome.NotStarted` with `reason`. */
+    case Exhausted(reason: TaskRefusal)
+
+    /** The parent's deadline has passed: the call fails with the parent's own `DeadlineExceeded`. */
+    case Late(error: GraphError.DeadlineExceeded)
+
+    /** The parent's usage could not be read: the call fails with `error`. */
+    case Failed(error: org.llm4s.error.LLMError)
+
+  /**
+   * The limits of a child granted `budget` by an agent of `parentMaxSteps` steps, for the call `ctx`, at `now` by the
+   * runtime's clock:
+   *
+   *  - steps: the grant, else `parentMaxSteps`, capped by the child's own `maxSteps` (`ownMaxSteps`, when set) and by
+   *    the turn's `RunContext.remainingSteps`;
+   *  - tokens: the grant, and separately the parent's `RunBudgets.maxTokens` less its run's tokens at the snapshot
+   *    (a whole-life grant and one run's allowance, which the child runner combines);
+   *  - time: the grant, which the child runner caps by the parent's deadline;
+   *  - concurrency: the grant capped by the parent's `maxConcurrency`.
+   *
+   * A passed deadline is `Late`, and no steps or tokens left `Exhausted`, so no non-positive limit is ever built. The
+   * same snapshot always decides the same (rule 1).
+   */
+  def at(
+    budget: TaskBudget,
+    parentMaxSteps: Int,
+    ownMaxSteps: Option[Int],
+    ctx: ToolContext,
+    now: Instant
+  ): Either[Refusal, TaskLimits] =
+    val parent: RunBudgets = ctx.run.config.budgets
+    val steps = budget.maxSteps
+      .getOrElse(parentMaxSteps)
+      .min(ownMaxSteps.getOrElse(Int.MaxValue))
+      .min(ctx.run.remainingSteps.getOrElse(Int.MaxValue))
+    ctx.run.deadline.filterNot(now.isBefore) match
+      case Some(_) =>
+        Left(
+          Refusal.Late(
+            GraphError.DeadlineExceeded(ctx.run.position.threadId.value, Some(ctx.run.position.checkpointId))
+          )
+        )
+      case None if steps <= 0 => Left(Refusal.Exhausted(TaskRefusal.StepLimitReached))
+      case None =>
+        val parentLeft: Either[Refusal, Option[Long]] = parent.maxTokens match
+          case None => Right(None)
+          case Some(max) =>
+            ToolLoop.runTokens(ctx.state, ctx.run) match
+              case Left(error) => Left(Refusal.Failed(error))
+              case Right(used) =>
+                val left = max - used
+                if left <= 0 then Left(Refusal.Exhausted(TaskRefusal.TokenLimitReached))
+                else Right(Some(left))
+        parentLeft.map(left =>
+          TaskLimits(
+            steps,
+            budget.maxTokens,
+            left,
+            budget.timeout,
+            budget.maxConcurrency.fold(parent.maxConcurrency)(_.min(parent.maxConcurrency))
+          )
+        )

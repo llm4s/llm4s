@@ -671,10 +671,10 @@ object ToolLoop:
     for
       stack <- MiddlewareStack.of(agent.middleware*)
       // a middleware's tools join the user's, checked as one set: a name clash or invalid schema is refused
-      toolSet <- ToolSet.of(agent.tools.validator, (agent.tools.tools ++ stack.tools)*)
+      toolSet <- ToolSet.of(agent.tools.validator, agent.tools.byTool, (agent.tools.tools ++ stack.tools)*)
       _       <- ownedKeysUntouched(agent.id, toolSet, stack)
       _       <- handoffNamesFree(agent.id, toolSet, agent.handoffs)
-      offered <- ToolSet.of(toolSet.validator, (toolSet.tools ++ HandoffTools.tools(agent.handoffs))*)
+      offered <- ToolSet.of(toolSet.validator, toolSet.byTool, (toolSet.tools ++ HandoffTools.tools(agent.handoffs))*)
       _       <- outputUsable(agent, toolSet.validator)
     yield Prepared(agent, toolSet, offered, stack)
 
@@ -715,7 +715,8 @@ object ToolLoop:
         LoopKeys.transfer.id,
         DelegationKeys.priorUsage.id,
         DelegationKeys.input.id,
-        DelegationKeys.counted.id
+        DelegationKeys.counted.id,
+        DelegationKeys.grant.id
       )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
     val clause =
@@ -909,11 +910,19 @@ object ToolLoop:
     if context.usage.isEmpty then StateUpdate.empty else StateUpdate.update(LoopKeys.usage, context.usage.summary)
 
   /**
+   * The step limit of an agent whose `maxSteps` is `maxSteps` on a thread in `state`: `maxSteps`, or on a child thread
+   * the cap its delegation granted, if lower (design 4.45). The cap is the child's whole life: it is compared with the
+   * turn's steps, which a recovered child keeps.
+   */
+  private[agent] def stepLimit(maxSteps: Int, state: ThreadState): Int =
+    state.get(DelegationKeys.grant).toOption.flatten.flatMap(_.stepCap).fold(maxSteps)(_.min(maxSteps))
+
+  /**
    * The input and output tokens the run has used, for `RunBudgets.maxTokens` (design 4.43): the thread's usage in
    * `state` less its usage when the run was admitted, plus what this task has recorded and not yet committed.
    * Outside a runtime there is no admission, so the thread's whole usage counts.
    */
-  private def runTokens(state: ThreadState, context: RunContext): Result[Long] =
+  private[agent] def runTokens(state: ThreadState, context: RunContext): Result[Long] =
     def tokens(usage: UsageSummary): Long = usage.inputTokens + usage.outputTokens
     for
       now   <- state.get(LoopKeys.usage)
@@ -1078,6 +1087,7 @@ object ToolLoop:
     // the runtime's key on a child thread (design 4.42): written only by the child runner, never by a node
     b.stateKey(DelegationKeys.priorUsage)
     b.stateKey(DelegationKeys.input)
+    b.stateKey(DelegationKeys.grant)
     val locking = prepared.exists(_.tools.tools.exists(_.spec.locksOf.isDefined))
     val agents  = prepared.map(p => p.agent.id -> declare(b, p, locking)).toMap
     // whether a transfer keeps the context, by (source, target)
@@ -1255,7 +1265,7 @@ object ToolLoop:
       nodes.queueKey.flatMap(key => state.get(key).toOption).getOrElse(LockSchedule.empty)
 
     val pipeline =
-      Pipeline(agent.id, tools, stack, nodes.approval, nodes.askRefs, nodes.askedRefs, scheduledWith)
+      Pipeline(agent.id, agent.maxSteps, tools, stack, nodes.approval, nodes.askRefs, nodes.askedRefs, scheduledWith)
     val callWrites = nodes.callWrites
 
     b.implement(nodes.callTool, writes = callWrites) { (task, state, context) =>
@@ -1409,7 +1419,7 @@ object ToolLoop:
           )
         )
       val outcome = state.get(LoopKeys.turn).flatMap { turn =>
-        if turn.steps >= agent.maxSteps then ended(turn, TurnOutcome.StepLimitReached)
+        if turn.steps >= ToolLoop.stepLimit(agent.maxSteps, state) then ended(turn, TurnOutcome.StepLimitReached)
         else
           context.config.budgets.maxTokens match
             case None => modelCall(turn, state, context, answers)
@@ -1721,6 +1731,7 @@ object ToolLoop:
   /** The call pipeline (design #1278, "The call pipeline"; #1279): one call's checks, chain, tool and outcome. */
   final private class Pipeline(
     agent: AgentId,
+    maxSteps: Int,
     tools: ToolSet,
     stack: MiddlewareStack,
     approval: ResumeRef[ApprovalRequest, ApprovalDecision],
@@ -1728,6 +1739,15 @@ object ToolLoop:
     askedRefs: Map[(MiddlewareId, MiddlewareHook), AskedRef[?]],
     scheduleOf: ThreadState => LockSchedule
   ):
+
+    /**
+     * `context` with the model calls the turn may still make (design 4.45): the active agent's step limit, a child's
+     * granted cap included, less the turn's steps at the snapshot `state`.
+     */
+    private def stepped(context: RunContext, state: ThreadState): RunContext =
+      context.withRemainingSteps(
+        state.get(LoopKeys.turn).toOption.map(turn => ToolLoop.stepLimit(maxSteps, state) - turn.steps)
+      )
 
     /** An error result, refused before the middleware chain ran, so of zero duration. */
     def error(task: ToolTask, message: String, context: RunContext): NodeResult =
@@ -1915,7 +1935,7 @@ object ToolLoop:
                         context.resumeDigest.getOrElse(s"unrecorded:${java.util.UUID.randomUUID()}")
                       )
                     val toolContext = ToolContext.resuming(
-                      answering(agent, context, request.answered),
+                      stepped(answering(agent, context, request.answered), state),
                       ToolCallId(request.call.id),
                       request.idempotencyKey,
                       state,
@@ -1970,12 +1990,14 @@ object ToolLoop:
             .fold[Refusal](Refusal.Invalid(describe(thrown)))(Refusal.Cancelled(_))
         }
       for
-        violations <- code(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
-        _          <- Either.cond(violations.isEmpty, (), Refusal.Invalid(violations.mkString("; ")))
-        args       <- decode(tool, call).left.map(Refusal.Invalid(_))
-        check      <- code(tool.spec.validateDecoded(args))
-        _          <- check.left.map(e => Refusal.Invalid(e.message))
-        resources  <- code(tool.spec.resourcesOf(args))
+        violations <- code(
+          tools.validatorOf(tool.spec.name).validate(tool.spec.argumentSchema, argumentsOf(tool, call))
+        )
+        _         <- Either.cond(violations.isEmpty, (), Refusal.Invalid(violations.mkString("; ")))
+        args      <- decode(tool, call).left.map(Refusal.Invalid(_))
+        check     <- code(tool.spec.validateDecoded(args))
+        _         <- check.left.map(e => Refusal.Invalid(e.message))
+        resources <- code(tool.spec.resourcesOf(args))
       yield (args, resources)
 
     /** The resources a call with decoded `args` touches, from its tool's `withResources`. */
@@ -2130,7 +2152,13 @@ object ToolLoop:
     ): NodeResult =
       outsideSchedule(tool, task, call, args, state, context).getOrElse {
         val toolContext =
-          ToolContext(answering(agent, context, answers), ToolCallId(call.id), task.idempotencyKey, state, approved)
+          ToolContext(
+            stepped(answering(agent, context, answers), state),
+            ToolCallId(call.id),
+            task.idempotencyKey,
+            state,
+            approved
+          )
         val (chain, took) =
           timed(tool, call, resources, toolContext, context)(innermost(tool.spec)(tool.execute(args, toolContext)))
         outcome(tool, task, call, approved, chain, context, took, answers)

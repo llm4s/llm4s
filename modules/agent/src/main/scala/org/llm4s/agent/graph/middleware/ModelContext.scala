@@ -45,6 +45,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     toolCalls: Int
   ): Unit =
     run.usage.add(model, usage.getOrElse(TokenUsage(0, 0, 0)), cost)
+    // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
+    if attempt > 0 then run.usage.step()
     AgentEvents.ModelCallCompleted.emit(
       run,
       events.ModelCallCompleted(

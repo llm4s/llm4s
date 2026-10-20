@@ -284,11 +284,34 @@ final class RunContext private[graph] (
    */
   val deadline: Option[Instant] = None,
   /** The thread's state as the run was admitted: what the run's own usage is counted from. `None` outside a runtime. */
-  private[agent] val admitted: Option[ThreadState] = None
+  private[agent] val admitted: Option[ThreadState] = None,
+  /**
+   * The model calls the current agent turn may still make, for a tool call of an agent's tool loop: the active
+   * agent's step limit less the model calls the turn has made at the task's snapshot (design 4.45). It can be zero or
+   * less when the call came from the turn's last allowed step, or after a handoff to an agent with a lower limit.
+   * A delegated task caps its child's steps by it. `None` in any other task.
+   */
+  val remainingSteps: Option[Int] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest, deadline, admitted)
+    new RunContext(
+      config,
+      position,
+      sink,
+      next,
+      usage,
+      journal,
+      owner,
+      resumeDigest,
+      deadline,
+      admitted,
+      remainingSteps
+    )
+
+  /** This context with `steps` as its [[remainingSteps]], recording usage in the same task's accumulator. */
+  private[agent] def withRemainingSteps(steps: Option[Int]): RunContext =
+    new RunContext(config, position, sink, answers, usage, journal, owner, resumeDigest, deadline, admitted, steps)
 
   /**
    * An object unique to this run incarnation: the same for every task of one run of a runtime (or one execution of a
@@ -362,6 +385,15 @@ final private[agent] class TaskUsage:
 
   def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
+
+  /** Whether the task made an agent's model step: its own model call, not a hook's (design 4.45). */
+  private val stepped = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Marks the task as an agent's model step, which a failed task reports as a lost step. */
+  def step(): Unit = stepped.set(true)
+
+  /** The agent model steps a failed task loses: one for a model step that called the model, else none. */
+  def lostSteps: Long = if stepped.get then 1L else 0L
 
   /**
    * Adds a child run's roll-up (design 4.42). It commits with the task's result, as the rest does; a task that fails

@@ -44,8 +44,8 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   private def isEnd(r: EventRecord): Boolean = r.event match {
-    case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) => true
-    case _                                                => false
+    case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) => true
+    case _                                                   => false
   }
 
   private def durableSeqs(events: Vector[StreamEvent]): Vector[Long] =

@@ -1,6 +1,6 @@
 package org.llm4s.agent.delegation
 
-import org.llm4s.agent.{ Agent, AgentId, AgentResult, AgentRun, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentId, AgentResult, AgentRun, AgentStatus }
 import org.llm4s.agent.events.TaskEnded
 import org.llm4s.agent.graph.{
   Checkpoint,
@@ -13,8 +13,8 @@ import org.llm4s.agent.graph.{
   RunOrigin,
   ThreadId
 }
-import org.llm4s.agent.graph.middleware.AgentMiddleware
-import org.llm4s.agent.graph.tool.{ ToolContext, ToolSet }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, PermissionMiddleware }
+import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolContext, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ AgentInput, LoopKeys }
 import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.annotation.Experimental
@@ -57,7 +57,9 @@ final class TypedAgent[I, O] private (
   maxSteps: Option[Int],
   render: Option[I => String],
   val failure: ChildFailure,
-  streaming: Boolean
+  streaming: Boolean,
+  val inheritance: Inheritance,
+  private[delegation] val subagents: Vector[TypedAgent[?, ?]]
 )(using private[delegation] val inputCodec: ReadWriter[I], private[delegation] val outputCodec: ReadWriter[O]):
 
   private def copy(
@@ -69,7 +71,9 @@ final class TypedAgent[I, O] private (
     maxSteps: Option[Int] = maxSteps,
     render: Option[I => String] = render,
     failure: ChildFailure = failure,
-    streaming: Boolean = streaming
+    streaming: Boolean = streaming,
+    inheritance: Inheritance = inheritance,
+    subagents: Vector[TypedAgent[?, ?]] = subagents
   ): TypedAgent[I, O] =
     new TypedAgent(
       rawId,
@@ -85,8 +89,13 @@ final class TypedAgent[I, O] private (
       maxSteps,
       render,
       failure,
-      streaming
+      streaming,
+      inheritance,
+      subagents
     )
+
+  /** The child's own step limit, when [[withMaxSteps]] set one: it caps any step grant (design 4.45). */
+  private[delegation] def ownMaxSteps: Option[Int] = maxSteps
 
   /** The subagent's id: its agent id, and the `subagent_type` or the `task_<id>` tool name the parent model uses. */
   def id: AgentId = AgentId.unsafe(rawId)
@@ -103,7 +112,10 @@ final class TypedAgent[I, O] private (
   /** The child's own harness (`AgentBuilder.withHarness`), over the child's own thread. */
   def withHarness(profile: HarnessProfile): TypedAgent[I, O] = copy(harness = Some(profile))
 
-  /** The client and options the child calls; by default the client of the agent it is bound to, with default options. */
+  /**
+   * The client and options the child calls; by default the client and options of the agent it is bound to (a model is
+   * not a capability, so it is inherited unless set). `DelegationPlan` shows which applies.
+   */
   def withModel(client: LLMClient, options: CompletionOptions): TypedAgent[I, O] = copy(model = Some(client -> options))
 
   /** Model calls per child turn (`AgentBuilder.withMaxSteps`); at the limit the task is refused `StepLimitReached`. */
@@ -122,32 +134,101 @@ final class TypedAgent[I, O] private (
   def withFailure(policy: ChildFailure): TypedAgent[I, O] = copy(failure = policy)
 
   /**
-   * Compiles the definition onto `runtime`, calling `parentClient` unless [[withModel]] set a client, and tracing to
-   * the parent's `tracing` (rule 16: a child never has tracing of its own; design 4.47). Refuses an invalid id, a
-   * blank description, and whatever `AgentBuilder.build()` refuses for the child.
+   * What the child takes from the agent it is bound to (design 4.45), replacing [[Inheritance.none]]: the parent's
+   * tools and middleware it is granted, its budget, and whether it may delegate. See [[Inheritance]].
+   */
+  def withInheritance(inheritance: Inheritance): TypedAgent[I, O] = copy(inheritance = inheritance)
+
+  /**
+   * Appends `agents` to the child's own subagents, in order. The child is offered them only when its inheritance
+   * grants delegation (`Inheritance.delegate`) and its depth is below its parent's `DelegationConfig.maxDepth`;
+   * otherwise it has no task tools (rule 15).
+   */
+  def withSubagents(agents: TypedAgent[?, ?]*): TypedAgent[I, O] = copy(subagents = subagents ++ agents)
+
+  /**
+   * Compiles the definition onto `runtime`, with no parent: for [[BoundAgent.run]] on a top-level thread. It calls
+   * `parentClient` with default options unless [[withModel]] set a client, and traces to `tracing` (rule 16: a child
+   * never has tracing of its own; design 4.47). With no parent there is nothing to inherit:
+   * a tool or middleware grant naming anything is refused, and the child's own subagents are offered only when
+   * delegation is granted, under the default `DelegationConfig`. Refuses an invalid id, a blank description, a
+   * budget value that is not positive, and whatever `AgentBuilder.build()` refuses for the child.
    */
   def bind(parentClient: LLMClient, runtime: GraphRuntime, tracing: Option[Tracing] = None): Result[BoundAgent[I, O]] =
-    if description.trim.isEmpty then Left(ValidationError("subagents", s"subagent '$rawId': the description is blank"))
-    else
-      val (client, options) = model.getOrElse(parentClient -> CompletionOptions())
-      val base = Agent
-        .builder(rawId, client)
-        .withCompletionOptions(options)
-        .withRuntime(runtime)
-        .withMiddleware(middleware*)
-      val prompted  = systemPrompt.fold(base)(base.withSystemPrompt)
-      val tooled    = tools.fold(prompted)(prompted.withTools)
-      val harnessed = harness.fold(tooled)(tooled.withHarness)
-      val limited   = maxSteps.fold(harnessed)(harnessed.withMaxSteps)
-      val outputted = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
-      val traced    = tracing.fold(outputted)(outputted.withTracing)
-      val typed     = if streaming then traced.withStreaming() else traced
-      AgentId
+    bindUnder(ParentScope.standalone(parentClient, runtime).copy(tracing = tracing)).map(_._1)
+
+  /**
+   * Compiles the definition as a subagent of the agent `scope` describes (design 4.45): its own tools and middleware
+   * plus what its inheritance grants from the parent, every ancestor's permission rules outermost, the parent's client
+   * and options unless [[withModel]] set them, and its own subagents when it may delegate. Returns it with its plan.
+   */
+  private[agent] def bindUnder(scope: ParentScope): Result[(BoundAgent[I, O], SubagentPlan)] =
+    val modelInherited    = model.isEmpty
+    val (client, options) = model.getOrElse(scope.client -> scope.options)
+    val delegates         = inheritance.delegate && subagents.nonEmpty && scope.childDepth + 1 <= scope.config.maxDepth
+    for
+      _ <- Either.cond(
+        description.trim.nonEmpty,
+        (),
+        ValidationError("subagents", s"subagent '$rawId': the description is blank")
+      )
+      _ <- AgentId
         .of(rawId)
         .left
         .map(e => ValidationError("subagents", s"subagent id '$rawId': ${e.message}"))
-        .flatMap(_ => typed.build())
-        .map(new BoundAgent(this, _))
+      _                 <- inheritance.budget.validated(rawId)
+      grantedTools      <- scope.grantedTools(rawId, inheritance.tools)
+      grantedMiddleware <- scope.grantedMiddleware(rawId, inheritance.middleware)
+      base = Agent
+        .builder(rawId, client)
+        .withCompletionOptions(options)
+        .withRuntime(scope.runtime)
+        .withMiddleware(middleware*)
+      traced = scope.tracing
+        .fold(base)(base.withTracing)
+        .inheriting(
+          AgentBuilder.Inherited(
+            scope.childDepth,
+            scope.permissions,
+            grantedTools,
+            grantedMiddleware,
+            (grantedTools ++ grantedMiddleware.flatMap(_.tools))
+              .flatMap(t => scope.validators.get(t.spec.name).map(t.spec.name -> _))
+              .toMap
+          )
+        )
+      prompted  = systemPrompt.fold(traced)(traced.withSystemPrompt)
+      tooled    = tools.fold(prompted)(prompted.withTools)
+      harnessed = harness.fold(tooled)(tooled.withHarness)
+      // under a parent, every call grants a step cap (design 4.45), which an unset own limit must not lower to the
+      // default: only `withMaxSteps` caps the grant; with no parent the default applies, as for any agent
+      limited = maxSteps
+        .orElse(Option.when(scope.childDepth > 0)(Int.MaxValue))
+        .fold(harnessed)(harnessed.withMaxSteps)
+      outputted  = output.fold(_ => limited, schema => limited.withOutput(schema)(using outputCodec))
+      typed      = if streaming then outputted.withStreaming() else outputted
+      delegating = if delegates then typed.withSubagents(subagents*).withDelegation(scope.config) else typed
+      inventory <- delegating.inventory
+      agent     <- delegating.build()
+    yield
+      val grantedNames =
+        grantedTools.map(_.spec.name).toSet ++ grantedMiddleware.flatMap(_.tools.map(_.spec.name))
+      val plan = SubagentPlan(
+        scope.agent,
+        id,
+        TaskTools.taskToolName(this),
+        inventory._1.map(name => PlannedTool(name, grantedNames(name))),
+        inventory._2,
+        scope.permissions,
+        client.getClass.getSimpleName,
+        modelInherited,
+        inheritance.budget,
+        delegates,
+        scope.childDepth,
+        scope.config.maxDepth,
+        agent.delegation.subagents
+      )
+      new BoundAgent(this, agent) -> plan
 
   /** The child's first user message for `input`. */
   private[delegation] def rendered(input: I): String =
@@ -186,7 +267,9 @@ object TypedAgent:
       None,
       None,
       ChildFailure.Report,
-      false
+      false,
+      Inheritance.none,
+      Vector.empty
     )
 
   /**
@@ -208,7 +291,9 @@ object TypedAgent:
       None,
       None,
       ChildFailure.Report,
-      false
+      false,
+      Inheritance.none,
+      Vector.empty
     )
 
 /**
@@ -341,15 +426,17 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
     origin: RunOrigin,
     config: RunConfig,
     ctx: ToolContext,
-    answers: Option[DelegatedAnswers] = None
+    answers: Option[DelegatedAnswers] = None,
+    stepLimit: Option[Int] = None,
+    parentTokens: Option[Long] = None
   ): Result[(TaskOutcome[O], Option[LLMError], Option[TaskEnded])] =
     val threadId = ThreadId.child(origin.parent, origin.agent, origin.call)
     val ref      = ChildRef(threadId, config.runId, agent.id, Some(ctx.toolCallId), origin.depth)
     val settle   = definition.failure == ChildFailure.Report
     val query    = AgentInput(definition.rendered(input))
     answers
-      .fold(ChildRunner.run(agent, origin, query, config, ctx, settleOnFailure = settle))(answered =>
-        ChildRunner.resume(agent, origin, query, answered, config, ctx, settleOnFailure = settle)
+      .fold(ChildRunner.run(agent, origin, query, config, ctx, settle, stepLimit, parentTokens))(answered =>
+        ChildRunner.resume(agent, origin, query, answered, config, ctx, settle, stepLimit, parentTokens)
       )
       .map { childEnd =>
         val (taskOutcome, cause, child, status) = childEnd match
@@ -448,3 +535,101 @@ object BoundAgent:
 
   /** How many checkpoints [[storedUsage]] reads at a time. */
   private val UsagePage: Int = 16
+
+/**
+ * The agent a subagent is bound under (design 4.45): what its inheritance may draw on, and what it inherits regardless.
+ *
+ * @param agent the parent's id
+ * @param client the parent's client, the child's unless it sets its own
+ * @param options the parent's completion options, likewise
+ * @param runtime the parent's runtime, always the child's (rule 16)
+ * @param tracing the root's tracing, always the child's (rule 16)
+ * @param tools the parent's tools a grant may name: its own, its harness's and those it was granted
+ * @param middleware the parent's middleware a grant may name, by id
+ * @param permissions every ancestor's permission rules, the parent's own included, outermost first
+ * @param childDepth how deep the child runs
+ * @param config the delegation bounds of the tree, the root's
+ * @param validators the validator the parent checks each of its tools with, by name, which checks it in a child it is
+ *   granted to
+ */
+final private[agent] case class ParentScope(
+  agent: AgentId,
+  client: LLMClient,
+  options: CompletionOptions,
+  runtime: GraphRuntime,
+  tracing: Option[Tracing],
+  tools: Vector[AgentTool[?]],
+  middleware: Vector[AgentMiddleware],
+  permissions: Vector[AncestorRules],
+  childDepth: Int,
+  config: DelegationConfig,
+  validators: Map[String, ToolArgumentValidator] = Map.empty
+):
+
+  /** The parent's tools `grant` names for subagent `id`; a name the parent does not have is refused. */
+  def grantedTools(id: String, grant: ToolGrant): Result[Vector[AgentTool[?]]] =
+    val names = tools.map(_.spec.name).toSet
+    def known(asked: Set[String]): Result[Unit] =
+      (asked -- names).toVector.sorted match
+        case Vector() => Right(())
+        case missing =>
+          Left(
+            ValidationError(
+              "inheritance",
+              s"subagent '$id': agent '${agent.value}' has no tool ${missing.map(n => s"'$n'").mkString(", ")} to grant"
+            )
+          )
+    grant match
+      case ToolGrant.None              => Right(Vector.empty)
+      case ToolGrant.Only(asked)       => known(asked).map(_ => tools.filter(t => asked(t.spec.name)))
+      case ToolGrant.AllExcept(except) => known(except).map(_ => tools.filterNot(t => except(t.spec.name)))
+
+  /**
+   * The parent's middleware `ids` names for subagent `id`, in the parent's order; an id the parent does not have, and
+   * the delegation and ancestor-permissions middleware, which the runtime installs, are refused.
+   */
+  def grantedMiddleware(id: String, ids: Set[MiddlewareId]): Result[Vector[AgentMiddleware]] =
+    val reserved = Set(DelegationMiddleware.Id, AncestorPermissions.Id).intersect(ids)
+    val missing  = ids -- middleware.map(_.id) -- reserved
+    if reserved.nonEmpty then
+      Left(
+        ValidationError(
+          "inheritance",
+          s"subagent '$id': middleware ${reserved.map(m => s"'${m.value}'").toVector.sorted.mkString(", ")} cannot " +
+            "be granted: delegation is granted with Inheritance.delegate, and ancestors' permissions always apply"
+        )
+      )
+    else if middleware.exists(m => ids(m.id) && m.isInstanceOf[PermissionMiddleware]) then
+      Left(
+        ValidationError(
+          "inheritance",
+          s"subagent '$id': a PermissionMiddleware cannot be granted: every ancestor's permission rules reach a " +
+            "child through ancestor-permissions already, and granting them would evaluate one policy twice"
+        )
+      )
+    else if missing.nonEmpty then
+      Left(
+        ValidationError(
+          "inheritance",
+          s"subagent '$id': agent '${agent.value}' has no middleware " +
+            s"${missing.map(m => s"'${m.value}'").toVector.sorted.mkString(", ")} to grant"
+        )
+      )
+    else Right(middleware.filter(m => ids(m.id)))
+
+private[agent] object ParentScope:
+
+  /** No parent: [[TypedAgent.bind]]'s subagent runs on a top-level thread, at depth 0, with nothing to inherit. */
+  def standalone(client: LLMClient, runtime: GraphRuntime): ParentScope =
+    ParentScope(
+      AgentId.unsafe("standalone"),
+      client,
+      CompletionOptions(),
+      runtime,
+      None,
+      Vector.empty,
+      Vector.empty,
+      Vector.empty,
+      0,
+      DelegationConfig.default
+    )

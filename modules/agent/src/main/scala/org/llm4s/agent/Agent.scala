@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest }
+import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -44,7 +44,12 @@ final class Agent private[agent] (
   interruptBefore: Set[NodeId] = Set.empty,
   interruptAfter: Set[NodeId] = Set.empty,
   retention: Option[RetentionPolicy] = None,
-  childRetention: Option[Int] = None
+  childRetention: Option[Int] = None,
+  /**
+   * What this agent's subagents run with (design 4.45): for each, its tools (own or granted), middleware, ancestors'
+   * permission rules, model, budget and whether it may delegate. Empty for an agent without subagents.
+   */
+  val delegation: DelegationPlan = DelegationPlan.empty
 ):
 
   /**

@@ -158,7 +158,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     setup.childClient.callCount shouldBe 1
     // the child's call is counted once, by the replay that committed it, never as the failed attempt's lost usage
     tokens(recovered.usage) shouldBe ((3L, 30L, 60L))
-    events(open(), thread).collect { case RunEvent.RunFailed(_, lost) => lost } shouldBe Vector(None)
+    events(open(), thread).collect { case RunEvent.RunFailed(_, lost, _) => lost } shouldBe Vector(None)
     setup.allEnds should have size 2
     setup.allEnds(1) shouldBe setup.allEnds(0)
     setup.allEnds(0).ok shouldBe a[ChildEnd.Ended]

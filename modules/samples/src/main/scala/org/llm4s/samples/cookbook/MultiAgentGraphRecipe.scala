@@ -112,8 +112,8 @@ object MultiAgentGraphRecipe extends RecipeApp {
         case StreamEvent.Durable(record) =>
           events.add(record.event.productPrefix + record.nodeId.fold("")(n => s"@$n")): Unit
           record.event match {
-            case RunEvent.RunCompleted | RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) | _: RunEvent.RunFailed |
-                _: RunEvent.RunSuspended =>
+            case RunEvent.RunCompleted | RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) |
+                _: RunEvent.RunFailed | _: RunEvent.RunSuspended =>
               ended.countDown()
             case _ => ()
           }

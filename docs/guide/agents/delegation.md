@@ -25,10 +25,10 @@ Hand a bounded task to another agent and get back only its typed report.
 A **subagent** is a `TypedAgent[I, O]`: an agent that takes a typed input `I` and gives back a typed report `O`. A
 parent offers its subagents with `AgentBuilder.withSubagents`, and its model delegates through the `task` tools. Each
 delegated task runs on a **child thread** of the parent's thread, with a fresh conversation and only the child's own
-tools and middleware. Only typed data crosses: the parent sends `I`, which becomes the child's first user message, and
+tools and middleware, plus what its [inheritance](#inheritance) grants. Only typed data crosses: the parent sends `I`, which becomes the child's first user message, and
 gets back `O`. The child's messages never enter the parent's thread, and the parent's never enter the child's.
 
-The API is `@Experimental` (design [§4.44](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md)).
+The API is `@Experimental` (design [§4.44](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md), [§4.45](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.45-stage-4-slice-d2-inheritance.md)).
 
 ## Defining subagents
 
@@ -64,7 +64,44 @@ yield result.answer
 - A cacheable prompt section lists each subagent's id, tool and description.
 
 A text subagent's report is its answer. A typed subagent answers in `O`'s schema (`AgentBuilder.withOutput`), and its
-report is that answer decoded. The child uses the parent's client unless `withModel` sets another.
+report is that answer decoded. The child uses the parent's client and completion options unless `withModel` sets
+others: a model is not a capability, so it is inherited.
+
+## Inheritance
+
+A child takes nothing of its parent's unless granted. `withInheritance` says what it takes:
+
+```scala
+import org.llm4s.agent.delegation.{ Inheritance, TaskBudget, ToolGrant }
+import scala.concurrent.duration.*
+
+researcher.withInheritance(
+  Inheritance()
+    .withTools(ToolGrant.Only(Set("fetch_page")))       // or ToolGrant.AllExcept(...), ToolGrant.None (default)
+    .withMiddleware(MiddlewareId("semantic-memory"))    // the parent's instance: shared memory, same tenant
+    .withBudget(TaskBudget().withMaxSteps(20).withTimeout(2.minutes).withMaxTokens(50_000))
+    .withDelegate(false)                                // its own subagents only when true, to maxDepth
+)
+```
+
+- **Tools and middleware** are the parent's instances, run against the child's thread. A tool over a
+  `StateFileBackend` sees the child's own (empty) files; one over a host, workspace or store backend shares the
+  parent's, so give parallel children distinct paths. A name the parent does not have is refused at `build()`. The
+  task tools are never granted as tools: `withDelegate(true)` lets a child offer its own `withSubagents`, and only
+  while its depth is below `maxDepth`.
+- **Identity is never granted.** Tenant, principal, tracing, the runtime and the checkpointer are always the parent's.
+- **Budgets** are capped by what the parent has left when the task is called: steps by the parent turn's remaining
+  steps (`RunContext.remainingSteps`; the parent's `maxSteps` when the budget sets none), tokens by the parent run's
+  `maxTokens` less its usage, time by the parent's deadline, concurrency by the parent's `maxConcurrency`. A parent
+  with no steps or tokens left starts no child: the call is refused (`TaskOutcome.NotStarted`) naming only the
+  subagent. A parent past its deadline fails the call with its own `DeadlineExceeded`. Each limit is the child's
+  whole life: a child recovered after a crash has its grant less what it used, and its time runs from its first start.
+  Parallel children each get the same remainder, so together they can overshoot the parent's tokens; the parent's
+  next model call then stops at `TokenLimitReached`.
+
+`Agent.delegation` is the `DelegationPlan`: for each subagent its tools (own or granted), middleware in order, the
+ancestors' permission rules, its model and whether it is inherited, its budget, and whether it may delegate. Log it
+with `toString`.
 
 ## Bounds
 
@@ -130,6 +167,10 @@ each subagent:
 ```scala
 new PermissionMiddleware(Seq(PermissionRule.allow(Operation.Invoke, "task:researcher")))
 ```
+
+Permissions only narrow. A child's call runs only if every ancestor's `PermissionMiddleware` rules allow it, and then
+the child's own: a `Deny` at any level denies, and an `Ask` at any level asks once, the approval covering every level.
+So rules on the parent are the whole policy for the subagents below it too: allow there what a child's tools touch.
 
 ## Inspecting children
 

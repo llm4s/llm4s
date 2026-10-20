@@ -11,11 +11,16 @@ import upickle.default.ReadWriter
  * attempts a later `recoverChild` or `settleChild` continued, and `foldedThrough` the sequence number of the last
  * terminal event folded. A terminal event at or below `foldedThrough` is already in `total`.
  */
-final private[agent] case class PriorUsage(total: UsageSummary, foldedThrough: Long) derives ReadWriter:
+final private[agent] case class PriorUsage(total: UsageSummary, foldedThrough: Long, failedSteps: Long = 0L)
+    derives ReadWriter:
 
-  /** This with `lost`, from the terminal event numbered `seq`, folded in; unchanged for an event already folded. */
-  def fold(seq: Long, lost: UsageSummary): PriorUsage =
-    if seq <= foldedThrough then this else PriorUsage(total.merge(lost), seq)
+  /**
+   * This with `lost` and `steps` - the usage and the agent model steps on the terminal event numbered `seq` - folded
+   * in; unchanged for an event already folded. `failedSteps` counts only the agent's own model steps, never a
+   * middleware's model calls, which `total` holds too (design 4.45).
+   */
+  def fold(seq: Long, lost: UsageSummary, steps: Long = 0L): PriorUsage =
+    if seq <= foldedThrough then this else PriorUsage(total.merge(lost), seq, failedSteps + steps)
 
 private[agent] object PriorUsage:
   val empty: PriorUsage = PriorUsage(UsageSummary(), 0L)
@@ -43,6 +48,14 @@ private[agent] object DelegationKeys:
   val input: StateKey[Option[String], Option[String]] =
     StateKey.replace[Option[String]]("delegation-input", None)
 
+  /**
+   * A child thread's whole-life limits (design 4.45, [[ChildGrant]]), written by the child runner with its first
+   * admission and narrowed, never widened, by each later one. The tool loop ends the child's turn `StepLimitReached`
+   * at the lower of its `steps` and the agent's own `maxSteps`. `None` on a top-level thread.
+   */
+  val grant: StateKey[Option[ChildGrant], Option[ChildGrant]] =
+    StateKey.replace[Option[ChildGrant]]("delegation-grant", None)
+
   val counted: StateKey[Set[String], CountedUpdate] =
     StateKey[Set[String], CountedUpdate]("delegation-counted", Set.empty)((ids, update) =>
       Right(update match
@@ -50,6 +63,40 @@ private[agent] object DelegationKeys:
         case CountedUpdate.Reset     => Set.empty
       ): Result[Set[String]]
     )
+
+/**
+ * A child's limits for its whole life (design 4.45), each `None` when unlimited: the cap on its turn's steps, its
+ * input and output tokens, its deadline (chosen at its first admission: its start plus the granted timeout, or the
+ * parent's deadline then if sooner, never moved by a later parent run), and its run's `maxConcurrency`. `lostSteps` is
+ * the model calls of its failed attempts, which never committed their steps but count against `steps`.
+ */
+final private[agent] case class ChildGrant(
+  steps: Option[Int],
+  tokens: Option[Long],
+  deadline: Option[java.time.Instant],
+  concurrency: Option[Int] = None,
+  lostSteps: Long = 0L
+):
+
+  /** The steps the child's turn may still count, its failed attempts' model calls deducted; `None` when unlimited. */
+  def stepCap: Option[Int] = steps.map(s => (s - lostSteps).max(0L).toInt)
+
+  /** Each limit the lower of this one's and `other`'s: a later admission can narrow a grant, never widen it. */
+  def narrowed(other: ChildGrant): ChildGrant =
+    def lower[A](a: Option[A], b: Option[A])(using ord: Ordering[A]): Option[A] =
+      (a ++ b).reduceOption(ord.min)
+    ChildGrant(
+      lower(steps, other.steps),
+      lower(tokens, other.tokens),
+      lower(deadline, other.deadline),
+      lower(concurrency, other.concurrency),
+      lostSteps.max(other.lostSteps)
+    )
+
+private[agent] object ChildGrant:
+  private given ReadWriter[java.time.Instant] =
+    upickle.default.readwriter[String].bimap(_.toString, java.time.Instant.parse)
+  given ReadWriter[ChildGrant] = upickle.default.macroRW
 
 /** An update to [[DelegationKeys.counted]]. */
 private[agent] enum CountedUpdate derives ReadWriter:

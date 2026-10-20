@@ -54,6 +54,9 @@ final class PermissionMiddleware(rules: Seq[PermissionRule], val id: MiddlewareI
 
   private val ordered = rules.toVector
 
+  /** The rules, in order: a subagent's calls must also pass them (design 4.45, `AncestorPermissions`). */
+  private[agent] def orderedRules: Vector[PermissionRule] = ordered
+
   /**
    * The decision for `resource`: for a concrete target, the first matching rule's, or `Deny` when none
    * matches. A target is read as a [[Glob]], so one written as a pattern - an envelope such as `/out/&#42;&#42;`,

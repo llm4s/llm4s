@@ -173,6 +173,6 @@ private[agent] object RunScope:
 
   /** Whether `event` is the last durable event of its run. */
   def terminal(event: RunEvent): Boolean = event match
-    case _: RunEvent.RunSuspended | _: RunEvent.RunFailed                           => true
-    case RunEvent.RunCompleted | RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) => true
-    case _                                                                          => false
+    case _: RunEvent.RunSuspended | _: RunEvent.RunFailed                                 => true
+    case RunEvent.RunCompleted | RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) => true
+    case _                                                                                => false

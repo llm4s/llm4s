@@ -678,7 +678,8 @@ final class GraphRuntime(
 
   /**
    * [[resume]] on a child thread (design 4.41), which `resume` refuses: for the child runner (K2). A top-level
-   * thread is refused with a `ValidationError`.
+   * thread is refused with a `ValidationError`. `amend` adds an update to the resumed state, committed with the run's
+   * claim, as [[recoverChild]]'s does (the child's grant, design 4.45).
    */
   private[agent] def resumeChild[I, O](
     threadId: ThreadId,
@@ -687,7 +688,8 @@ final class GraphRuntime(
     config: RunConfig,
     observer: Option[Observer] = None,
     notAfter: Option[Instant] = None,
-    parentClaim: Option[FencingToken] = None
+    parentClaim: Option[FencingToken] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] =
     resumeOn(
       threadId,
@@ -698,7 +700,8 @@ final class GraphRuntime(
       observer,
       child = true,
       notAfter,
-      parentClaim
+      parentClaim,
+      amend
     )
 
   private def resumeOn[I, O](
@@ -710,7 +713,8 @@ final class GraphRuntime(
     observer: Option[Observer],
     child: Boolean,
     notAfter: Option[Instant] = None,
-    parentClaim: Option[FencingToken] = None
+    parentClaim: Option[FencingToken] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
@@ -742,7 +746,8 @@ final class GraphRuntime(
                       config.tenantId.map(_.value),
                       config.principal.map(_.value)
                     ),
-                  fence = parentFenceOf(stored, parentClaim)
+                  fence = parentFenceOf(stored, parentClaim),
+                  amend = amended(_, amend)
                 )
               yield run
           }
@@ -2972,11 +2977,16 @@ final class GraphRuntime(
     /** The usage of the attempts that committed nothing, for the run's terminal event; `None` when there is none. */
     private def lostUsage: Option[UsageSummary] = Option.when(failedUsage.get.requestCount > 0)(failedUsage.get)
 
+    // the agent model steps of the tasks that failed, for the terminal event with their usage (design 4.45)
+    private val failedSteps = new java.util.concurrent.atomic.AtomicLong(0L)
+
     /** Keeps the usage `context`'s task recorded, when the task commits nothing: no pending write will carry it. */
     private def uncommitted(context: RunContext): Unit =
-      if !context.usage.lostIsEmpty then failedUsage.updateAndGet(_.merge(context.usage.lost)): Unit
+      if !context.usage.lostIsEmpty then
+        failedUsage.updateAndGet(_.merge(context.usage.lost))
+        failedSteps.addAndGet(context.usage.lostSteps): Unit
 
-    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage)
+    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage, failedSteps.get)
 
     /**
      * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
@@ -3506,13 +3516,13 @@ final class GraphRuntime(
         case StopCause.Cancelled | StopCause.Finishing =>
           closeStopped(
             execution,
-            RunEvent.RunCancelled(lostUsage),
+            RunEvent.RunCancelled(lostUsage, failedSteps.get),
             GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
           )
         case StopCause.Expired =>
           closeStopped(
             execution,
-            RunEvent.RunTimedOut(lostUsage),
+            RunEvent.RunTimedOut(lostUsage, failedSteps.get),
             GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
           )
       Thread.currentThread().interrupt()

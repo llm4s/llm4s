@@ -48,21 +48,22 @@ enum RunEvent:
   /**
    * The run failed with `message`. `usage` is the model usage of the attempts of its tasks that committed nothing -
    * a task that failed, or was cut short - which is the only durable record of their calls' cost (design §4.22).
-   * `None` when they made none.
+   * `None` when they made none. `steps` is how many of those attempts were an agent's model step - its own model call,
+   * not a middleware's - which a recovered child counts against its step grant (design 4.45).
    */
-  case RunFailed(message: String, usage: Option[UsageSummary] = None)
+  case RunFailed(message: String, usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. `usage` is the
-   * model usage of the attempts the cancel cut short, as on [[RunFailed]].
+   * model usage of the attempts the cancel cut short, and `steps` their agent model steps, as on [[RunFailed]].
    */
-  case RunCancelled(usage: Option[UsageSummary] = None)
+  case RunCancelled(usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. `usage`
-   * is the model usage of the attempts the deadline cut short, as on [[RunFailed]].
+   * is the model usage of the attempts the deadline cut short, and `steps` their agent model steps, as on [[RunFailed]].
    */
-  case RunTimedOut(usage: Option[UsageSummary] = None)
+  case RunTimedOut(usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * [[GraphRuntime.updateState]] committed a new checkpoint over `fromCheckpoint`, with a state update

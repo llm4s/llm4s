@@ -1,10 +1,21 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.graph.{ BreakpointPhase, GraphRuntime, NodeId, RetentionPolicy }
-import org.llm4s.agent.graph.middleware.AgentMiddleware
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, PermissionMiddleware }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolArgumentValidator, ToolSet }
 import org.llm4s.agent.graph.toolloop.{ LoopAgent, LoopHandoff, ModelStep, OutputFormat, ToolLoop }
-import org.llm4s.agent.delegation.{ BoundAgent, DelegationConfig, DelegationMiddleware, TaskTools, TypedAgent }
+import org.llm4s.agent.delegation.{
+  AncestorPermissions,
+  AncestorRules,
+  BoundAgent,
+  DelegationConfig,
+  DelegationMiddleware,
+  DelegationPlan,
+  ParentScope,
+  SubagentPlan,
+  TaskTools,
+  TypedAgent
+}
 import org.llm4s.agent.harness.HarnessProfile
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -46,7 +57,8 @@ final class AgentBuilder private (
   output: Option[OutputFormat],
   harness: Option[HarnessProfile],
   private val subagents: Vector[TypedAgent[?, ?]],
-  private val delegation: DelegationConfig
+  private val delegation: DelegationConfig,
+  private val inherited: AgentBuilder.Inherited
 ):
 
   private def copy(
@@ -66,7 +78,8 @@ final class AgentBuilder private (
     output: Option[OutputFormat] = output,
     harness: Option[HarnessProfile] = harness,
     subagents: Vector[TypedAgent[?, ?]] = subagents,
-    delegation: DelegationConfig = delegation
+    delegation: DelegationConfig = delegation,
+    inherited: AgentBuilder.Inherited = inherited
   ): AgentBuilder =
     new AgentBuilder(
       id,
@@ -87,7 +100,8 @@ final class AgentBuilder private (
       output,
       harness,
       subagents,
-      delegation
+      delegation,
+      inherited
     )
 
   /** The agent's tools, replacing any set before, checked with the set's validator. */
@@ -160,6 +174,9 @@ final class AgentBuilder private (
   /** The bounds on this agent's delegated tasks, replacing the defaults; [[build]] refuses a bound that is not positive. */
   def withDelegation(config: DelegationConfig): AgentBuilder = copy(delegation = config)
 
+  /** This builder as a subagent's (design 4.45): its depth, its ancestors' permission rules and its granted tools. */
+  private[agent] def inheriting(from: AgentBuilder.Inherited): AgentBuilder = copy(inherited = from)
+
   /** Model calls per turn, at least 1; at the limit the turn ends `StepLimitReached`. */
   def withMaxSteps(n: Int): AgentBuilder = copy(maxSteps = n)
 
@@ -230,10 +247,11 @@ final class AgentBuilder private (
       // a handoff stays in the turn, so each agent counts the whole family's task calls in it (#2067)
       taskNames = family.flatMap(b => TaskTools.names(b.subagents)).toSet
       _ <- AgentBuilder.taskNamesUnshared(family, taskNames)
-      agents <- family.foldLeft[Result[Vector[LoopAgent]]](Right(Vector.empty)) { (acc, builder) =>
+      compiled <- family.foldLeft[Result[Vector[(LoopAgent, Vector[SubagentPlan])]]](Right(Vector.empty)) {
         // every member's subagents trace to the root's tracing, which traces the whole family's runs (design 4.47)
-        acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames).map(done :+ _))
+        (acc, builder) => acc.flatMap(done => builder.loopAgent(graphRuntime, tracing, taskNames).map(done :+ _))
       }
+      agents = compiled.map(_._1)
       root      <- AgentId.of(id)
       loop      <- ToolLoop.build(id, AgentBuilder.fingerprint(family), root, agents)
       installed <- effective
@@ -246,7 +264,8 @@ final class AgentBuilder private (
       family.flatMap(b => b.held(loop, b.interruptAfter, BreakpointPhase.After)).toSet,
       installed.retention,
       // children are made on the family's thread by whichever agent is active: keep the tightest bound any sets
-      family.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption
+      family.filter(_.subagents.nonEmpty).map(_.delegation.childRetention).minOption,
+      DelegationPlan(compiled.flatMap(_._2))
     )
 
   /**
@@ -256,11 +275,11 @@ final class AgentBuilder private (
    */
   private def delegating(
     graphRuntime: GraphRuntime,
-    tracing: Option[Tracing],
+    rootTracing: Option[Tracing],
     familyTaskNames: Set[String]
-  ): Result[Option[DelegationMiddleware]] =
+  ): Result[(Option[DelegationMiddleware], Vector[SubagentPlan])] =
     // the bounds are checked whether or not any subagent is set, so a bad config never lies latent
-    if subagents.isEmpty then delegation.validated.map(_ => None)
+    if subagents.isEmpty then delegation.validated.map(_ => (None, Vector.empty))
     else
       val ids        = subagents.map(_.id.value)
       val duplicated = ids.diff(ids.distinct).distinct
@@ -271,10 +290,50 @@ final class AgentBuilder private (
           (),
           ValidationError("subagents", s"agent '$id': subagent ids defined twice: ${duplicated.mkString(", ")}")
         )
-        bound <- subagents.foldLeft[Result[Vector[BoundAgent[?, ?]]]](Right(Vector.empty)) { (acc, definition) =>
-          acc.flatMap(done => definition.bind(client, graphRuntime, tracing).map(done :+ _))
+        installed <- effective
+        scope = ParentScope(
+          AgentId.unsafe(id),
+          client,
+          options,
+          graphRuntime,
+          rootTracing,
+          installed.tools,
+          installed.middleware,
+          inherited.ancestors ++ installed.middleware.collect { case p: PermissionMiddleware =>
+            AncestorRules(AgentId.unsafe(id), p.orderedRules)
+          },
+          inherited.depth + 1,
+          config,
+          // its tools' and its middleware's, each checked as this agent checks it, to be checked so in a grantee
+          (installed.tools ++ installed.middleware.flatMap(_.tools))
+            .map(t => t.spec.name -> inherited.validators.getOrElse(t.spec.name, validator))
+            .toMap
+        )
+        bound <- subagents.foldLeft[Result[Vector[(BoundAgent[?, ?], SubagentPlan)]]](Right(Vector.empty)) {
+          (acc, definition) => acc.flatMap(done => definition.bindUnder(scope).map(done :+ _))
         }
-      yield Some(new DelegationMiddleware(bound, config, depth = 0, familyTaskNames))
+      yield (
+        Some(new DelegationMiddleware(bound.map(_._1), config, inherited.depth, familyTaskNames, maxSteps)),
+        bound.map(_._2)
+      )
+
+  /**
+   * The tool names this agent's model is offered, and its middleware ids in stack order, `delegation` included when it
+   * has subagents: for its `SubagentPlan` (design 4.45).
+   */
+  private[agent] def inventory: Result[(Vector[String], Vector[MiddlewareId])] =
+    for
+      installed <- effective
+      // the order the stack runs them in, `runsBefore` and `runsAfter` applied, as the loop resolves it: with the
+      // delegation middleware appended innermost, as `loopAgent` appends it, so a constraint naming it resolves
+      // delegation middleware (its task tools' specs included) appended innermost, as `loopAgent` appends it, so a
+      // constraint naming it resolves and every middleware's tools are listed in the order the loop offers them
+      delegation = Option.when(subagents.nonEmpty)(new AgentMiddleware {
+        val id: MiddlewareId                     = DelegationMiddleware.Id
+        override val tools: Vector[AgentTool[?]] = TaskTools.specs(subagents).map(AgentBuilder.planned(_))
+      })
+      stack <- MiddlewareStack.of((installed.middleware ++ delegation)*)
+    yield (installed.tools.map(_.spec.name) ++ stack.tools.map(_.spec.name), stack.ordered.map(_.id))
 
   /** The nodes of `loop` this agent's breakpoints on `nodes` hold in `phase`; its id is checked by `build` first. */
   private def held(loop: ToolLoop, nodes: Vector[AgentNode], phase: BreakpointPhase): Vector[NodeId] =
@@ -285,8 +344,22 @@ final class AgentBuilder private (
    * sets; assembled once per builder, so its middleware are one set of instances however often it is built.
    */
   private lazy val effective: Result[AgentBuilder.Effective] =
+    // a subagent's: every ancestor's permission rules outermost (design 4.45), then the parent middleware it was granted,
+    // outside its harness's and its own; and its granted tools after its own
+    // the guard also reads the agent's own permission rules, so a call they deny is denied before an ancestor asks
+    def ancestors(own: Vector[AgentMiddleware]): Vector[AgentMiddleware] =
+      val ownRules = own.collect { case p: PermissionMiddleware => AncestorRules(AgentId.unsafe(id), p.orderedRules) }
+      Option.when(inherited.ancestors.nonEmpty)(new AncestorPermissions(inherited.ancestors, ownRules)).toVector
     harness match
-      case None => Right(AgentBuilder.Effective(tools, middleware, systemPrompt, None))
+      case None =>
+        Right(
+          AgentBuilder.Effective(
+            tools ++ inherited.tools,
+            ancestors(middleware) ++ inherited.middleware ++ middleware,
+            systemPrompt,
+            None
+          )
+        )
       case Some(profile) =>
         if systemPrompt.isDefined then
           Left(
@@ -298,8 +371,8 @@ final class AgentBuilder private (
         else
           profile.assembled.map(h =>
             AgentBuilder.Effective(
-              h.tools ++ tools,
-              h.middleware ++ middleware,
+              h.tools ++ tools ++ inherited.tools,
+              ancestors(h.middleware ++ middleware) ++ inherited.middleware ++ h.middleware ++ middleware,
               Some(h.systemPrompt),
               Some(h.retention)
             )
@@ -307,9 +380,9 @@ final class AgentBuilder private (
 
   private def loopAgent(
     graphRuntime: GraphRuntime,
-    tracing: Option[Tracing],
+    rootTracing: Option[Tracing],
     familyTaskNames: Set[String]
-  ): Result[LoopAgent] =
+  ): Result[(LoopAgent, Vector[SubagentPlan])] =
     for
       agentId <- AgentId.of(id)
       _ <- Either.cond(
@@ -317,9 +390,9 @@ final class AgentBuilder private (
         (),
         ValidationError("maxSteps", s"agent '$id': must be at least 1, was $maxSteps")
       )
-      installed  <- effective
-      delegating <- delegating(graphRuntime, tracing, familyTaskNames)
-      toolSet    <- ToolSet.of(validator, installed.tools*)
+      installed <- effective
+      delegated <- delegating(graphRuntime, rootTracing, familyTaskNames)
+      toolSet   <- ToolSet.of(validator, inherited.validators, installed.tools*)
       loopHandoffs <- handoffs.foldLeft[Result[Vector[LoopHandoff]]](Right(Vector.empty)) { (acc, h) =>
         acc.flatMap(done => loopHandoff(h).map(done :+ _))
       }
@@ -328,8 +401,8 @@ final class AgentBuilder private (
       .withOutput(output)
       .withMaxSteps(maxSteps)
       .withMaxPromptSectionTokens(maxPromptSectionTokens)
-      .withMiddleware(installed.middleware ++ delegating)
-      .withHandoffs(loopHandoffs)
+      .withMiddleware(installed.middleware ++ delegated._1)
+      .withHandoffs(loopHandoffs) -> delegated._2
 
   private def loopHandoff(handoff: Handoff): Result[LoopHandoff] =
     if !Handoff.isValidId(handoff.id) then
@@ -420,8 +493,29 @@ object AgentBuilder:
       output = None,
       harness = None,
       subagents = Vector.empty,
-      delegation = DelegationConfig.default
+      delegation = DelegationConfig.default,
+      inherited = Inherited.root
     )
+
+  /** A stand-in for a task tool of `spec`, for a plan's inventory only: it is never run. */
+  private def planned[A](spec: org.llm4s.agent.graph.tool.AgentToolSpec[A]): AgentTool[A] =
+    AgentTool(spec)((_, _) => org.llm4s.agent.graph.tool.ToolOutcome.Error("a plan's stand-in is never run"))
+
+  /**
+   * What a subagent's builder inherits from its parent (design 4.45), which only `TypedAgent` sets: how deep it runs,
+   * every ancestor's permission rules, outermost first, and the parent's tools and middleware it was granted.
+   */
+  final private[agent] case class Inherited(
+    depth: Int,
+    ancestors: Vector[AncestorRules],
+    tools: Vector[AgentTool[?]],
+    middleware: Vector[AgentMiddleware],
+    validators: Map[String, ToolArgumentValidator] = Map.empty
+  )
+
+  private[agent] object Inherited:
+    /** A top-level agent's: depth 0, no ancestors, nothing granted. */
+    val root: Inherited = Inherited(0, Vector.empty, Vector.empty, Vector.empty)
 
   /** What an agent runs with once its harness is installed; `retention` only with a harness. */
   final private case class Effective(

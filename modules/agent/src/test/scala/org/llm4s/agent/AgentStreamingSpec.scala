@@ -59,8 +59,8 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
       e match
         case StreamEvent.Durable(record) =>
           record.event match
-            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _) | RunEvent.RunSuspended(_) |
-                RunEvent.RunCancelled(_) | RunEvent.RunTimedOut(_) =>
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_, _, _) | RunEvent.RunSuspended(_) |
+                RunEvent.RunCancelled(_, _) | RunEvent.RunTimedOut(_, _) =>
               ended.countDown()
             case _ => ()
         case _ => ()
