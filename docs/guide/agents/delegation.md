@@ -211,7 +211,7 @@ trace metadata.
 
 ## Running a subagent alone
 
-`typedAgent.bind(client, runtime)` compiles a definition; `BoundAgent.run(input)` runs it once on a new top-level
+`typedAgent.bind(client, runtime)` compiles a definition (pass `options` for non-default `CompletionOptions`; `withModel` overrides both); `BoundAgent.run(input)` runs it once on a new top-level
 thread and returns its `TaskOutcome`, for tests and one-off calls. A graph node calls `bound.run(threadId, input)`
 instead, with a `threadId` derived from its own replay-stable key (one that identifies the input too): a thread
 already there is reattached, never run twice - a settled one returns its stored outcome with no model call, a failed

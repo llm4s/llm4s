@@ -149,14 +149,19 @@ final class TypedAgent[I, O] private (
 
   /**
    * Compiles the definition onto `runtime`, with no parent: for [[BoundAgent.run]] on a top-level thread. It calls
-   * `parentClient` with default options unless [[withModel]] set a client, and traces to `tracing` (rule 16: a child
+   * `client` with `options` unless [[withModel]] set both, and traces to `tracing` (rule 16: a child
    * never has tracing of its own; design 4.47). With no parent there is nothing to inherit:
    * a tool or middleware grant naming anything is refused, and the child's own subagents are offered only when
    * delegation is granted, under the default `DelegationConfig`. Refuses an invalid id, a blank description, a
    * budget value that is not positive, and whatever `AgentBuilder.build()` refuses for the child.
    */
-  def bind(parentClient: LLMClient, runtime: GraphRuntime, tracing: Option[Tracing] = None): Result[BoundAgent[I, O]] =
-    bindUnder(ParentScope.standalone(parentClient, runtime).copy(tracing = tracing)).map(_._1)
+  def bind(
+    client: LLMClient,
+    runtime: GraphRuntime,
+    options: CompletionOptions = CompletionOptions(),
+    tracing: Option[Tracing] = None
+  ): Result[BoundAgent[I, O]] =
+    bindUnder(ParentScope.standalone(client, runtime, options).copy(tracing = tracing)).map(_._1)
 
   /**
    * Compiles the definition as a subagent of the agent `scope` describes (design 4.45): its own tools and middleware
@@ -743,12 +748,12 @@ final private[agent] case class ParentScope(
 
 private[agent] object ParentScope:
 
-  /** No parent: [[TypedAgent.bind]]'s subagent runs on a top-level thread, at depth 0, with nothing to inherit. */
-  def standalone(client: LLMClient, runtime: GraphRuntime): ParentScope =
+  /** No parent: [[TypedAgent.bind]]'s subagent runs on a top-level thread, at depth 0, with nothing to inherit, calling `client` with `options`. */
+  def standalone(client: LLMClient, runtime: GraphRuntime, options: CompletionOptions): ParentScope =
     ParentScope(
       AgentId.unsafe("standalone"),
       client,
-      CompletionOptions(),
+      options,
       runtime,
       None,
       Vector.empty,

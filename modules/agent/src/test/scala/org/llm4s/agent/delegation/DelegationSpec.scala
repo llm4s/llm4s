@@ -460,6 +460,29 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
       case other => fail(s"expected a report, got $other")
   }
 
+  it should "call the model with the options it was bound with, unless withModel set its own (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    val options = CompletionOptions().withTemperature(0.2).withMaxTokens(321)
+    researcher.bind(client, GraphRuntime.inMemory(), options).value.run(Question("x")).value
+    val sent = client.optionsSentTo("CHILD:researcher").loneElement
+    sent.temperature shouldBe 0.2
+    sent.maxTokens shouldBe Some(321)
+
+    val own = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    researcher
+      .withModel(own, CompletionOptions().withMaxTokens(77))
+      .bind(client, GraphRuntime.inMemory(), options)
+      .value
+      .run(Question("x"))
+      .value
+    own.optionsSentTo("CHILD:researcher").loneElement.maxTokens shouldBe Some(77)
+    client.calls should have size 1
+  }
+
   it should "return a renderer's failure as Left, not throw it" in {
     val client = RoutingClient(PartialFunction.empty)
     val broken = researcher.withInputText(_ => throw new IllegalStateException("bad renderer"))
