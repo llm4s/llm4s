@@ -429,6 +429,24 @@ final class Agent private[agent] (
         )
     started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
 
+  /**
+   * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
+   * `GraphError.ThreadExists`, no run started. For `BoundAgent.run` on a caller-chosen thread (#2077), which must
+   * never start a second turn on a thread another caller has created since its read.
+   */
+  private[agent] def startNew(threadId: ThreadId, query: String, config: RunConfig): Result[AgentRun] =
+    if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
+    else
+      runtime
+        .startNew(
+          threadId,
+          loop.graph,
+          AgentInput(query),
+          configured(config),
+          GraphError.ThreadExists(threadId.value)
+        )
+        .map(agentRun(_, None, drain = false))
+
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
     val scope = RunScope(config.runId, listening.listener, listening.onEnd)

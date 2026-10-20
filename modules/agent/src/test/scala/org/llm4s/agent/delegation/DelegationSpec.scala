@@ -550,6 +550,24 @@ class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with Op
     runtime.history(node).value.map(_.runId).distinct shouldBe Vector(first.child.runId.value)
   }
 
+  it should "never give a turn to a thread another caller created after its read, reading it again (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"raced","sources":1}"""))
+    }
+    val stale = new java.util.concurrent.atomic.AtomicBoolean(false)
+    // the first read after `stale` is set misses the thread, as a read made just before another caller started it
+    val store = new org.llm4s.agent.graph.ForwardingCheckpointer(new InMemoryCheckpointer()) {
+      override def latest(threadId: ThreadId) =
+        if stale.getAndSet(false) then Right(None) else super.latest(threadId)
+    }
+    val bound = researcher.bind(client, new GraphRuntime(store)).value
+    val node  = ThreadId("node-race")
+    val first = bound.run(node, Question("tides")).value
+    stale.set(true)
+    bound.run(node, Question("tides")).value shouldBe first
+    client.calls should have size 1
+  }
+
   it should "reattach after a crash mid-run, never repeating a completed tool effect (#2077)" in {
     val runs     = new AtomicInteger(0)
     val failures = new AtomicInteger(0)

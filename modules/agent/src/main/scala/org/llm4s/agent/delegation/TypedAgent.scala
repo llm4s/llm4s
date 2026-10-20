@@ -388,7 +388,8 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
       case Right(None) =>
         rendered(input).fold(
           refused => BoundAgent.Step.Done(Left(refused)),
-          query => admitted(ref, config)(agent.start(ref.threadId, query, config))
+          // only a new thread is started: one another caller created since the read is read again, never given a turn
+          query => admitted(ref, config)(agent.startNew(ref.threadId, query, config))
         )
       case Right(Some((checkpoint, _))) if checkpoint.origin.isDefined =>
         BoundAgent.Step.Done(

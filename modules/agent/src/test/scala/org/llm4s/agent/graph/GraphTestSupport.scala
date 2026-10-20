@@ -111,7 +111,7 @@ object GraphTestSupport {
 }
 
 /** Forwards every call to `to`; a test overrides what it needs. */
-private[graph] class ForwardingCheckpointer(to: Checkpointer) extends Checkpointer {
+private[agent] class ForwardingCheckpointer(to: Checkpointer) extends Checkpointer {
   def claim(threadId: ThreadId, request: ClaimRequest)                    = to.claim(threadId, request)
   def renew(threadId: ThreadId, token: FencingToken, ttl: FiniteDuration) = to.renew(threadId, token, ttl)
   def release(threadId: ThreadId, token: FencingToken)                    = to.release(threadId, token)
