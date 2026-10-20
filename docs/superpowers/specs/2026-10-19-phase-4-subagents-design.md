@@ -247,7 +247,11 @@ Today a thread has no parent. `deleteThread` removes one thread, and nothing can
   settled, written atomically with every terminal (`Completed` or `Failed`) checkpoint of every thread, child or
   not, and cleared when a later run of the thread starts. `CheckpointStatus` and `RunCompleted` alone cannot rebuild
   an `AgentStatus` (a final answer and `StepLimitReached` both complete; a Block's typed `GuardrailBlocked` is not
-  kept on a `Failed` checkpoint), so a settled run is read only through `outcome`.
+  kept on a `Failed` checkpoint), so delegation reads a settled run only through `outcome`. That requirement
+  covers only threads written in format 8: every child (its `origin` is itself format 8) and every thread
+  `BoundAgent.run(threadId)` started (it refuses a thread without its input digest, so a format-7 thread never
+  reaches this read). A settled format-7 top-level thread migrated with `outcome = None` stays valid; no ordinary
+  run path reads `outcome`, so it is never reported as corrupt.
   - `RunOutcome` is a small enum with a `ReadWriter`: `Answered`, `StepLimitReached`, `TokenLimitReached` (K3),
     `Blocked(guardrail: String, reason: String)`, `OutputInvalid(errors: Vector[String])`,
     `Failed(kind: String, message: String)`. The answer itself is already in the thread's state, so `Answered`
