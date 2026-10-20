@@ -186,7 +186,7 @@ final class Agent private[agent] (
 
   /**
    * Follows one delegated child (design 4.47): replays the child thread's own log after `afterSeq`, then delivers its
-   * new events - durable, and live from runs of this runtime - as [[GraphRuntime.subscribe]] does, with `nested = true`
+   * new events - durable, and live from runs of this runtime - as `GraphRuntime.subscribe` does, with `nested = true`
    * so a grandchild's arrive as `StreamEvent.Nested`. Tenant-checked as every read of a thread is: a child of another
    * tenant than `config`'s is `GraphError.TenantMismatch`. `ref` is a `SubagentEvents.TaskStarted`'s or
    * `TaskEnded`'s child, or a `TaskOutcome`'s; a child's durable events outlive its live ones, so this is how to read

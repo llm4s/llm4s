@@ -73,7 +73,7 @@ object ChildThread:
  * ([[Checkpoint.outcome]]), so a settled run's result can be rebuilt from the thread alone, after a restart as well
  * as live (design 4.41). A later run's first checkpoint carries none.
  *
- * The answer itself is in the thread's state, so [[Answered]] carries none. A graph that is not an agent turn records
+ * The answer itself is in the thread's state, so `Answered` carries none. A graph that is not an agent turn records
  * `Answered` when it completes and `Failed` when a node blocks it; any graph records `Blocked` for a
  * `GuardrailBlocked` Block and `OutputInvalid` for a `GraphError.OutputInvalid` one.
  */
