@@ -25,6 +25,8 @@ import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import scala.util.Try
+
 /**
  * What a middleware's `beforeAgent`, `wrapModelCall`, `promptSections` and `afterAgent` hooks see: the task's
  * [[org.llm4s.agent.graph.RunContext]] and the committed [[org.llm4s.agent.graph.ThreadState]] the task read. A hook
@@ -145,13 +147,14 @@ object ModelContext:
 
   /** `message`'s tokens by the estimate's tokenizer, else its whole text - tool calls and thinking too - at four characters a token. */
   private def tokens(message: Message): Int =
-    counter.fold(ConversationTokenCounter.estimateOpaqueTokens(text(message)))(
-      _.countMessage(message)
-    )
+    // an estimate never fails the call it charges: a message the tokenizer cannot read (a null field) falls back
+    counter
+      .flatMap(c => Try(c.countMessage(message)).toOption)
+      .getOrElse(ConversationTokenCounter.estimateOpaqueTokens(text(message)))
 
   private def text(message: Message): String = message match
     case a: AssistantMessage =>
-      (Seq(a.content) ++ a.toolCalls.flatMap(c => Seq(c.name, c.arguments.render())) ++
+      (Seq(a.content) ++ a.toolCalls.flatMap(c => Seq(c.name, Option(c.arguments).fold("")(_.render()))) ++
         a.thinking.map {
           case ThinkingBlock.Text(thought, _) => thought
           case ThinkingBlock.Redacted(data)   => data
@@ -161,8 +164,8 @@ object ModelContext:
 
   /** The schemas a request is sent with, rendered for the usage estimate: each tool's definition and a JSON schema. */
   private[agent] def definitions(tools: Seq[ToolFunction[?, ?]], format: Option[ResponseFormat]): Seq[String] =
-    tools.map(_.toOpenAITool(strict = false).render()) ++
-      format.collect { case ResponseFormat.JsonSchema(schema, name, _) => name + schema.render() }
+    tools.flatMap(t => Try(t.toOpenAITool(strict = false).render()).toOption) ++
+      format.collect { case ResponseFormat.JsonSchema(schema, name, _) => name + Option(schema).fold("")(_.render()) }
 
   /** An accounted call refused at the run's token budget (#2084): the model step ends the turn `TokenLimitReached`. */
   final private[agent] case class TokenLimitRefused(used: Long, budget: Long) extends LLMError with NonRecoverableError:

@@ -591,7 +591,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       "status:COMPLETED:4:0",
       "USER:What is 2+2?",
       "ASSISTANT:4",
-      "usage:1:0:0",
+      "usage:1:11:5", // the completion reports no usage: charged an estimate (#2084)
       "model:m:1:0",
       "same:true:true"
     )

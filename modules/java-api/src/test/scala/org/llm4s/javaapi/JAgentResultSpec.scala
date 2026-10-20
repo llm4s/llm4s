@@ -328,8 +328,9 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
       """assistant::call-1=echo{"input":"hi"}:-""",
       """tool:call-1:{"echoed":"echoed: hi"}""",
       "assistant:echoed::-",
-      "usage:2:10:1",
-      "model:m:2:10:1"
+      // the tool-call completion reports no usage, so it is charged an estimate (#2084)
+      "usage:2:94:1",
+      "model:m:2:94:1"
     )
   }
 
