@@ -279,7 +279,9 @@ The snippets below leave out their imports. Together they use these:
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
+import org.llm4s.javaapi.CompletionStream;
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
@@ -377,6 +379,33 @@ it reported one. A `JCompletion` is a value with `equals`, `hashCode` and a `toS
 The method is `completion`, a noun, because it returns the reply rather than performs a request for its text; `complete`
 keeps returning a `String`. There is no `completion` overload for core's Scala `CompletionOptions`, so
 `client.completion(conversation, null)` compiles, and returns a failed result like any other `null` argument.
+
+## Streaming the reply
+
+`stream` sends the same arguments as `complete` - a query, a conversation, or a conversation and `JCompletionOptions` -
+with a `CompletionStreamListener`, and returns at once. The listener receives each piece of the reply's text as it
+arrives (`onPartial`), then the whole reply (`onComplete`, a `JCompletion`) or the error (`onError`); only `onPartial` is
+abstract, so a lambda or a method reference is a listener:
+
+```java
+JCompletion reply;
+try (CompletionStream stream = client.stream(conversation, System.out::print).get()) {
+    reply = stream.await().get();
+}
+System.out.println();
+
+Flow.Publisher<String> pieces = client.streamAsPublisher(conversation);
+```
+
+The returned `CompletionStream` awaits the reply (`await()`, the same outcome the listener heard) and cancels the call
+(`cancel()`, or `close()`, so try-with-resources stops a call its block leaves). Cancelling interrupts the provider's
+thread, which is how llm4s providers stop, and the listener then hears `onError` with a `CANCELLED` error. Listener calls
+are made one at a time, never on your thread; one that throws stops the call, and `onError` receives what it threw.
+
+`streamAsPublisher` returns the text as a `java.util.concurrent.Flow.Publisher<String>` instead: it is in the JDK, so
+Reactor (`JdkFlowAdapter`), RxJava and Mutiny adapt it without another llm4s dependency. Each subscription makes its own
+call. A subscriber slower than the model holds the provider's thread rather than losing text, and cancelling the
+subscription cancels the call. Streaming yields text only; tool-call deltas are not streamed.
 
 ## Reading a result
 
@@ -600,7 +629,6 @@ available from Java yet, each with the issue that tracks it:
 
 | You may expect | State today |
 |---|---|
-| Streaming tokens | `JLlmClient` has blocking `complete` calls only: [#1485](https://github.com/llm4s/llm4s/issues/1485) |
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |

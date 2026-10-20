@@ -153,6 +153,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   /** The facade's Java-visible classes: every one a Java caller calls or implements. */
   private def facade: List[Class[_]] = List(
     classOf[LlmResult[_]],
+    classOf[CompletionStream],
+    classOf[CompletionStreamListener],
     classOf[JLlmClient],
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
@@ -479,6 +481,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   /** The facade's Scala classes whose constructors only the package may call: each takes the package's token first. */
   private def tokenGuarded: List[Class[_]] = List(
     classOf[LlmResult[_]],
+    classOf[CompletionStream],
     classOf[JLlmClient],
     classOf[JEmbeddingClient],
     classOf[JCompletionOptions],
@@ -535,9 +538,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    * `private[llm4s]` is public in bytecode, so these are visible to Java; nothing else may be.
    */
   private def internalClasses: Set[String] = Set(
-    "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
-    "org.llm4s.javaapi.LlmErrorKinds",   // how LlmException reads an LLMError: its kind, status and retry delay
-    "org.llm4s.javaapi.ClientBuilds"     // what the client builders' build() does with their settings
+    "org.llm4s.javaapi.FacadeInternals",     // reads core's Scala values into the facade's types
+    "org.llm4s.javaapi.CompletionPublisher", // the Flow.Publisher of JLlmClient.streamAsPublisher (#1485)
+    "org.llm4s.javaapi.LlmErrorKinds",       // how LlmException reads an LLMError: its kind, status and retry delay
+    "org.llm4s.javaapi.ClientBuilds"         // what the client builders' build() does with their settings
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */
