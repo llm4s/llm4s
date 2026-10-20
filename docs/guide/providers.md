@@ -281,6 +281,24 @@ Claude models generally score higher on reasoning benchmarks.
 - Excellent vision capabilities
 - Supports prompt caching for repeated queries
 
+### Web search
+
+Set `webSearch = true` in an `anthropic` section and every request carries Anthropic's server-side web search
+tool (`web_search_20250305`). The model then decides per request whether to search, and the sources its answer
+cites arrive on `Completion.citations` (see [Citations and grounding sources](#citations-and-grounding-sources)):
+
+```hocon
+llm4s.providers.claude-search {
+  provider  = "anthropic"
+  model     = "claude-sonnet-4-5"
+  webSearch = true
+}
+```
+
+It is off by default. Anthropic bills each search on top of tokens, and an organization administrator has to
+allow web search in the Console first. The tool is sent beside your own tools; Anthropic runs the search itself,
+so it never reaches a `ToolRegistry` and the completion's `toolCalls` do not include it.
+
 ---
 
 ## Google Gemini
@@ -1717,13 +1735,15 @@ provider's call). `hasSpan` says whether both are present.
 | OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
 | Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
-| Anthropic, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, which llm4s cannot yet request. |
+| Anthropic | With `webSearch = true` in the section (see [Web search](#web-search)): one citation per source a text block cites - for a `web_search_result_location` its `url`, `title` and `cited_text`, for a `search_result_location` its `source` as `url`. Document citations (`char_location`, `page_location`, `content_block_location`) name a document, not a URL, and are skipped. No indices: Anthropic attaches a citation to a text block, not to a position in it. Read from `complete` and from a stream (`citations_delta`). |
+| Ollama, Bedrock, watsonx | Empty. |
 
 Things to know:
 
 - **Streaming.** For OpenAI and OpenRouter, a completion assembled from streamed chunks has no citations:
   neither documents where a stream carries them, so streamed chunks are not read. Gemini and Vertex AI send
-  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. (A model that does not
+  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. Anthropic
+  streams each citation as a `citations_delta`, and the streamed completion carries them. (A model that does not
   stream natively is answered with one ordinary call, and that completion keeps its citations.)
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
