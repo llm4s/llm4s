@@ -475,7 +475,8 @@ final class TypedAgent[I, O] private (...):
   def withInputText(render: I => String): TypedAgent[I, O]         // the child's first user message
   def withFailure(policy: ChildFailure): TypedAgent[I, O]
   def withInheritance(inheritance: Inheritance): TypedAgent[I, O]  // D2; Inheritance.none until then
-  def bind(parentClient: LLMClient, runtime: GraphRuntime): Result[BoundAgent[I, O]]
+  def bind(client: LLMClient, runtime: GraphRuntime, options: CompletionOptions = CompletionOptions(),
+           tracing: Option[Tracing] = None): Result[BoundAgent[I, O]]   // standalone: the given client and options unless withModel
 
 object TypedAgent:
   def apply[I: ReadWriter, O: ReadWriter](
@@ -640,7 +641,7 @@ Tests:
     continuation deducts from those stored values, never from a grant recomputed against a recovered parent's
     fresh or larger budget. A recovered or resumed child's limits are its stored grant less what its earlier attempts
     used: its `usage` key plus `priorUsage.total` (K2) for tokens; for steps its committed model steps **plus the
-    agent model steps of failed attempts**: a dedicated count of the agent's own model calls (what
+    agent model steps of failed attempts**: a dedicated count of the agent's unfinished model **tasks**, at most one per failed attempt's model step however many provider calls (a corrective retry included) it made (what
     `TurnState.steps` counts, never middleware model calls such as a summarizer's), carried on each terminal event
     and folded with `priorUsage` (`PriorUsage.failedSteps`), so a call that completed but never committed its step
     still counts and middleware calls never use up the step grant; and for time the **effective deadline fixed at
