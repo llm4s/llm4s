@@ -2,7 +2,7 @@
 layout: page
 title: Spark and Databricks
 parent: User Guide
-nav_order: 31
+nav_order: 32
 ---
 
 # Using LLM4S from Spark and Databricks
