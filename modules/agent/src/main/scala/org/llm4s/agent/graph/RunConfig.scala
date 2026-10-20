@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.agent.delegation.ChildRef
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.types.Result
 
@@ -409,6 +409,22 @@ final private[agent] class TaskUsage:
 
   /** Whether the task refused a model call at `RunBudgets.maxTokens`. */
   def refused: Boolean = refusedAtLimit.get
+
+  /** Serializes the task's model calls under a token budget, so each is admitted against every earlier one's usage. */
+  private val calls = new java.util.concurrent.locks.ReentrantLock(true)
+
+  /**
+   * `body` - a model call's admission, the call and its recording - run while no other model call of the task runs
+   * (#2084). An interrupt while waiting is `Left(CancelledError)`, with the flag restored.
+   */
+  def serialized[A](body: => Result[A]): Result[A] =
+    CancelledError.catchInterrupt(calls.lockInterruptibly()) match
+      case Left(_) =>
+        Thread.currentThread().interrupt()
+        Left(CancelledError("model"))
+      case Right(_) =>
+        given scala.util.Using.Releasable[java.util.concurrent.locks.ReentrantLock] = _.unlock()
+        scala.util.Using.resource(calls)(_ => body)
 
   /**
    * Adds a child run's roll-up (design 4.42). It commits with the task's result, as the rest does; a task that fails

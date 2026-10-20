@@ -162,4 +162,42 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
     result.usage.inputTokens should be > 0L
     result.usage.outputTokens should be > 0L
   }
+
+  it should "admit concurrent accounted calls one at a time, so a parallel fan-out overshoots by one call at most" in {
+    val made = new java.util.concurrent.atomic.AtomicInteger(0)
+    // each call takes a moment, so unserialized calls would all be admitted before any recorded its 30 tokens
+    val slow = new org.llm4s.llmconnect.LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        made.incrementAndGet(): Unit
+        Thread.sleep(50)
+        Right(CompletionFixture.withUsage("s", 10, 20))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    val fanOut = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("fan-out")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        val client  = context.accounted(slow)
+        val threads = (1 to 4).map(i => new Thread(() => client.complete(Conversation(Seq(UserMessage(s"$i")))): Unit))
+        threads.foreach(_.start())
+        threads.foreach(_.join())
+        next(request)
+    }
+    val model = ScriptedLLMClient.of(CompletionFixture.simple("never sent"))
+    val agent = built(Agent.builder("assistant", model).withMiddleware(fanOut))
+
+    val result = agent.run(thread, "go", limited(50)).value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    made.get shouldBe 2
+    model.callCount shouldBe 0
+    tokens(result.usage) shouldBe 60L
+  }
 }

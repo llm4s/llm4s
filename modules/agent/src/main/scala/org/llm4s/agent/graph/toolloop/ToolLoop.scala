@@ -1460,14 +1460,12 @@ object ToolLoop:
         def call(req: ModelRequest): Result[ModelResponse] =
           val result = stack.wrapModelCall(req, hooks, check) { r =>
             // every call is checked against the token budget, also a wrapper's second one (#2084)
-            hooks
-              .admitCall()
-              .flatMap(_ =>
-                callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
-                  hooks.recordCall(completion, attempt, r.messages)
-                  ModelResponse(completion)
-                }
-              )
+            hooks.admitted(
+              callModel(agent.model, agent.id, context, attempts)(r).map { (completion, attempt) =>
+                hooks.recordCall(completion, attempt, r.messages)
+                ModelResponse(completion)
+              }
+            )
           }
           // an undeclared write fails the step whatever the wrappers returned
           check.failure.fold(result)(Left(_))

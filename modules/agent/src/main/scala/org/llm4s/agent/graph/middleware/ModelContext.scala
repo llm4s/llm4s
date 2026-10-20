@@ -59,20 +59,23 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     )
 
   /**
-   * `Right(())` when the run may make another model call, else `Left` - the refusal - with the task marked refused, so
-   * the model step ends the turn `TokenLimitReached`: at or above `RunBudgets.maxTokens`, the check the loop makes
-   * before its own model step, made before every accounted call (#2084).
+   * `call` - a model call that records its usage before it returns - admitted under `RunBudgets.maxTokens` (#2084):
+   * at or above the budget it is not made, and the result is `Left` - the refusal - with the task marked refused, so
+   * the model step ends the turn `TokenLimitReached`. Under a budget the task's calls run one at a time, so each is
+   * admitted against every earlier call's usage and a concurrent fan-out overshoots by one call at most.
    */
-  private[agent] def admitCall(): Result[Unit] =
+  private[agent] def admitted[A](call: => Result[A]): Result[A] =
     run.config.budgets.maxTokens match
-      case None => Right(())
+      case None => call
       case Some(budget) =>
-        ToolLoop.runTokens(state, run).flatMap { used =>
-          if used < budget then Right(())
-          else
-            run.usage.refuse()
-            Left(ModelContext.TokenLimitRefused(used, budget))
-        }
+        run.usage.serialized(
+          ToolLoop.runTokens(state, run).flatMap { used =>
+            if used < budget then call
+            else
+              run.usage.refuse()
+              Left(ModelContext.TokenLimitRefused(used, budget))
+          }
+        )
 
   private def record(
     model: String,
@@ -125,14 +128,14 @@ object ModelContext:
 
   final private class Accounted(client: LLMClient, context: ModelContext) extends LLMClient:
     def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      context.admitCall().flatMap(_ => recorded(conversation, client.complete(conversation, options)))
+      context.admitted(recorded(conversation, client.complete(conversation, options)))
 
     def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
-      context.admitCall().flatMap(_ => recorded(conversation, client.streamComplete(conversation, options, onChunk)))
+      context.admitted(recorded(conversation, client.streamComplete(conversation, options, onChunk)))
 
     def getContextWindow(): Int           = client.getContextWindow()
     def getReserveCompletion(): Int       = client.getReserveCompletion()
