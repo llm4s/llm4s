@@ -119,6 +119,16 @@ final class GuideSnippets {
         return reply;
     }
 
+    /** The "Structured output" block (#1486). */
+    static String structured(JLlmClient client) {
+        record City(String name, String country, int population) {}
+
+        City city = client.complete("The largest city in Japan, with its population", City.class).get();
+        System.out.println(city.name() + ", " + city.country() + ": " + city.population());
+
+        return city.name();
+    }
+
     /** The "Handling a failure" block. */
     static void handlingAFailure(JLlmClient client) {
         try {
