@@ -586,6 +586,40 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     tokens(result.usage) shouldBe ((3L, 30L, 60L))
   }
 
+  it should "leave the child Running for a wrapper that retries after the timeout, which reattaches it (#2098)" in {
+    val open     = storage()
+    val blocking = new AtomicBoolean(true)
+    val entered  = new CountDownLatch(1)
+    val retrying = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("retry")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome =
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") =>
+            blocking.set(false)
+            next()
+          case other => other
+        }
+    }
+    val setup = new Setup(
+      delegating(),
+      ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
+      childTools = Seq(hanging(blocking, entered)),
+      delegateTimeout = Some(300.millis),
+      parentMiddleware = Seq(retrying)
+    )
+    val runtime = new GraphRuntime(open())
+    val thread  = ThreadId("timed-out-retried")
+    family(runtime, setup)._1.run(thread, "go").ok.answer shouldBe Some("composed")
+    setup.allEnds.head.left.toOption.get shouldBe a[CancelledError]
+    setup.allEnds.last.ok match {
+      case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.Completed("report")
+      case other                => fail(s"unexpected $other")
+    }
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Completed
+  }
+
   it should "fail the parent run when the child is still busy after the drain, and settle it on recover (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)

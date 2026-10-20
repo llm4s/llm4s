@@ -153,27 +153,34 @@ object AgentToolSpec:
     )
 
 /**
- * A tool call's own timeout, between the loop and the tool (#2098). The loop's per-call timeout marks it [[timedOut]]
- * before it interrupts the tool, so a tool interrupted can tell that timeout from a cancel of its task (the run's
- * cancel, its lost claim), which never marks it. A tool that must not have its timeout committed as the call's error
- * [[escalate]]s it: the loop then returns `ToolOutcome.Fatal(error)` for the timed-out call, which fails the run with
- * nothing committed, instead of the timeout's error. Equal to every other, so it never changes a context's equality.
+ * A tool call's own timeout, between the loop and the tool (#2098). The loop's per-call timeout marks the run of the
+ * tool it stops [[timedOut]] before it interrupts it, so the tool can tell that timeout from a cancel of its task (the
+ * run's cancel, its lost claim), which never marks it; each run of the tool (a wrapper's retry) starts unmarked.
+ *
+ * A tool whose timed-out run left something only a later run of the call could finish - a delegating tool's child -
+ * leaves the loop a [[pending]] settlement. The loop runs it once the call's final outcome is known, after every
+ * wrapper, and only for one that commits (a success or an error): a retry that ran the call again cleared it first. A
+ * settlement that fails (the child still busy) makes the call `Fatal` with its error, so it commits nothing. Equal to
+ * every other, so it never changes a context's equality.
  */
 final private[agent] class CallTimeout:
-  private val marked    = new java.util.concurrent.atomic.AtomicBoolean(false)
-  private val escalated = new java.util.concurrent.atomic.AtomicReference[Option[LLMError]](None)
+  private val marked  = new java.util.concurrent.atomic.AtomicBoolean(false)
+  private val settler = new java.util.concurrent.atomic.AtomicReference[Option[() => Result[Unit]]](None)
 
-  /** Marks the call timed out: done by the loop before it interrupts the tool. */
+  /** Starts a run of the tool unmarked: done by the loop's per-call timeout. */
+  def reset(): Unit = marked.set(false)
+
+  /** Marks the run of the tool timed out: done by the loop before it interrupts it. */
   def markTimedOut(): Unit = marked.set(true)
 
-  /** Whether the call's own timeout fired. */
+  /** Whether the call's own timeout stopped the latest run of the tool. */
   def timedOut: Boolean = marked.get
 
-  /** Asks the loop to fail the run with `error` rather than commit the timed-out call's error. */
-  def escalate(error: LLMError): Unit = escalated.set(Some(error))
+  /** Leaves `settle` for the loop to run if the call commits; `None` withdraws one left before. */
+  def pending(settle: Option[() => Result[Unit]]): Unit = settler.set(settle)
 
-  /** The error the tool escalated its timeout to, if any. */
-  def escalation: Option[LLMError] = escalated.get
+  /** Runs the settlement left, once: `None` when none is. */
+  def settle(): Option[Result[Unit]] = settler.getAndSet(None).map(_())
 
   override def equals(other: Any): Boolean = other.isInstanceOf[CallTimeout]
   override def hashCode: Int               = 0

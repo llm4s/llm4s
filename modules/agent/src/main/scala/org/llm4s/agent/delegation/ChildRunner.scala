@@ -65,7 +65,7 @@ private[agent] enum ChildEnd:
  *
  * Interrupting the calling thread (the parent's cancel, its lost claim, a timeout on the call) cancels the child, waits
  * up to [[AgentRun.Drain]] for it to end, and returns `Left(CancelledError)` with the interrupt flag kept; a timeout on
- * the call first settles the child `Failed("timed-out")`, or escalates it when it cannot (#2098). Every other
+ * the call leaves the loop a settlement of the child as `Failed("timed-out")`, run only if the call commits (#2098). Every other
  * `Left` is a refusal the call should fail on (`ToolOutcome.Fatal`).
  *
  * The child's usage (its committed `usage` key, its prior usage, and the lost usage on terminal events not yet
@@ -348,21 +348,24 @@ private[agent] object ChildRunner:
               pause(until, waits, error) match
                 case Left(stop) => Left(stop)
                 case Right(_)   => loop(Some(until), waits + 1)
-      loop(None, 0) match
-        case Left(cancelled: CancelledError) if ctx.timeout.timedOut => timedOut(cancelled)
-        case other                                                   => other
+      // a run of the call that reaches its child again withdraws a settlement an earlier timed-out run left (#2098)
+      ctx.timeout.pending(None)
+      val result = loop(None, 0)
+      result match
+        case Left(_: CancelledError) if ctx.timeout.timedOut => ctx.timeout.pending(Some(() => settleTimedOut()))
+        case _                                               => ()
+      result
 
     /**
-     * The call's own timeout stopped this attempt (#2098), its child drained: the call commits its error and never runs
-     * again, so nothing would reattach the child. It is settled `Failed("timed-out")` under its own claim, fenced by the
-     * parent's, and the run that settled it announced; a child still busy, or one that cannot be settled, escalates the
-     * timeout, so the call fails the parent run with nothing committed, for `recover` to reattach the child. A parent
-     * cancel or lost claim never marks the timeout, so its child stays `Running`. The interrupt flag is cleared while the
-     * child is settled and kept afterwards.
+     * What the call's own timeout leaves the loop once this attempt drained its child (#2098), the child left `Running`
+     * so that a wrapper's retry of the call reattaches it: if the call then commits, it never runs again, so the child is
+     * settled `Failed("timed-out")` under its own claim, fenced by the parent's, and the run that settled it announced. A
+     * child still busy, or one that cannot be settled, is the error the call fails the parent run with, committing
+     * nothing, for `recover` to reattach the child. A parent cancel or lost claim never marks the timeout, so its child
+     * stays `Running`.
      */
-    private def timedOut(cancelled: CancelledError): Result[ChildEnd] =
-      val interrupted = Thread.interrupted()
-      val message     = s"timed-out: its call on '${origin.parent.value}' timed out, and never runs again"
+    private def settleTimedOut(): Result[Unit] =
+      val message = s"timed-out: its call on '${origin.parent.value}' timed out, and never runs again"
       runtime.settleChild(
         childId,
         graph,
@@ -374,14 +377,14 @@ private[agent] object ChildRunner:
         parentClaim
       ) match
         case Right(_) =>
+          // the run that settled it - this settlement, or one that got there first - names its latest checkpoint
           runtime.childAtRest(childId, graph, base).foreach(_.foreach((checkpoint, _) => gap(RunId(checkpoint.runId))))
-        case Left(_: GraphError.NothingToRecover) => ()
+          Right(())
+        case Left(_: GraphError.NothingToRecover) => Right(())
         case Left(busy: GraphError.ThreadBusy) =>
           held(busy)
-          ctx.timeout.escalate(busy)
-        case Left(other) => ctx.timeout.escalate(other)
-      if interrupted then Thread.currentThread().interrupt()
-      Left(cancelled)
+          Left(busy)
+        case Left(other) => Left(other)
 
     /** One read of the child and what it calls for. */
     private def step(): Step =

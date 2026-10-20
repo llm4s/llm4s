@@ -1977,11 +1977,12 @@ object ToolLoop:
                       request.approved,
                       phase
                     )
-                    val (chain, took) = timed(tool, request.call, resources, toolContext, context)(
+                    val (ran, took) = timed(tool, request.call, resources, toolContext, context)(
                       innermost(tool.spec, toolContext.timeout)(
                         AgentTool.resumeWith(tool, args, question, reply, toolContext)
                       )
                     )
+                    val chain = afterTimeout(ran, toolContext.timeout)
                     outcome(
                       tool,
                       task,
@@ -2196,12 +2197,29 @@ object ToolLoop:
             state,
             approved
           )
-        val (chain, took) =
+        val (ran, took) =
           timed(tool, call, resources, toolContext, context)(
             innermost(tool.spec, toolContext.timeout)(tool.execute(args, toolContext))
           )
-        outcome(tool, task, call, approved, chain, context, took, answers)
+        outcome(tool, task, call, approved, afterTimeout(ran, toolContext.timeout), context, took, answers)
       }
+
+    /**
+     * The call's final outcome, after every wrapper, with what a timed-out run of its tool left pending settled first
+     * ([[CallTimeout]], #2098): only for an outcome that commits - a success or an error - since the call then never
+     * runs again. A settlement that fails (a child still busy) makes the call `Fatal` with its error, committing nothing,
+     * so the run fails and `recover` runs the call again.
+     */
+    private def afterTimeout(
+      chain: MiddlewareStack.ToolChainResult,
+      timeout: CallTimeout
+    ): MiddlewareStack.ToolChainResult =
+      chain.outcome match
+        case ToolOutcome.Success(_, _) | ToolOutcome.Error(_) =>
+          timeout.settle() match
+            case Some(Left(error)) => chain.copy(outcome = ToolOutcome.Fatal(error))
+            case _                 => chain
+        case _ => chain
 
     /**
      * The chain's innermost function, for one chain invocation: the tool's `execute` or `resume`,
@@ -2234,20 +2252,18 @@ object ToolLoop:
      * as for an untimed tool.
      *
      * Past the limit the call's [[CallTimeout]] is marked timed out before the fork is interrupted, so the tool can tell
-     * its own timeout from a cancel of its task (#2098); a tool that escalated it makes the call `Fatal` with its error,
-     * committing nothing, instead of the timeout's error.
+     * its own timeout from a cancel of its task (#2098); each run starts unmarked.
      */
     private def bounded(name: String, limit: FiniteDuration, timeout: CallTimeout)(run: => ToolOutcome): ToolOutcome =
       guarded(name)(
         ox.supervised {
+          timeout.reset()
           val fork = ox.forkCancellable(guarded(name)(run))
           ox.timeoutOption(limit)(fork.join()).getOrElse {
             // marked before the fork is interrupted, then the fork is joined: its tool reads the mark as it stops
             timeout.markTimedOut()
             fork.cancel(): Unit
-            timeout.escalation.fold(ToolOutcome.Error(s"Tool '$name' timed out after ${limit.toMillis} ms"))(
-              ToolOutcome.Fatal(_)
-            )
+            ToolOutcome.Error(s"Tool '$name' timed out after ${limit.toMillis} ms")
           }
         }
       )
