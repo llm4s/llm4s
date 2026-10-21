@@ -49,15 +49,93 @@ final case class CompletionOptions private (
   budgetTokens: Option[Int],
   responseFormat: Option[ResponseFormat]
 ) {
-  def withTemperature(temperature: Double): CompletionOptions              = copy(temperature = temperature)
-  def withTopP(topP: Double): CompletionOptions                            = copy(topP = topP)
-  def withMaxTokens(maxTokens: Int): CompletionOptions                     = copy(maxTokens = Some(maxTokens))
-  def withMaxTokens(maxTokens: Option[Int]): CompletionOptions             = copy(maxTokens = maxTokens)
-  def withPresencePenalty(presencePenalty: Double): CompletionOptions      = copy(presencePenalty = presencePenalty)
-  def withFrequencyPenalty(frequencyPenalty: Double): CompletionOptions    = copy(frequencyPenalty = frequencyPenalty)
-  def withTools(tools: Seq[ToolFunction[_, _]]): CompletionOptions         = copy(tools = tools)
+
+  /**
+   * Sets the sampling temperature. Higher values make the output more random.
+   * Reasoning models (o1/o3) ignore this setting.
+   *
+   * @param temperature the sampling temperature (default 0.7)
+   * @return new CompletionOptions with temperature set
+   */
+  def withTemperature(temperature: Double): CompletionOptions = copy(temperature = temperature)
+
+  /**
+   * Sets the nucleus sampling value. Lower values make the output more focused.
+   *
+   * @param topP the top-p value (default 1.0)
+   * @return new CompletionOptions with topP set
+   */
+  def withTopP(topP: Double): CompletionOptions = copy(topP = topP)
+
+  /**
+   * Limits the number of tokens generated in the completion.
+   *
+   * @param maxTokens the maximum number of tokens to generate
+   * @return new CompletionOptions with maxTokens set to `Some(maxTokens)`
+   */
+  def withMaxTokens(maxTokens: Int): CompletionOptions = copy(maxTokens = Some(maxTokens))
+
+  /**
+   * Sets or clears the limit on the number of tokens generated in the completion.
+   *
+   * @param maxTokens the maximum number of tokens to generate; `None` sets no limit (the default)
+   * @return new CompletionOptions with maxTokens set
+   */
+  def withMaxTokens(maxTokens: Option[Int]): CompletionOptions = copy(maxTokens = maxTokens)
+
+  /**
+   * Sets the presence penalty, which penalizes new tokens based on whether they appear in the text so far,
+   * encouraging new topics.
+   *
+   * @param presencePenalty the presence penalty (default 0.0)
+   * @return new CompletionOptions with presencePenalty set
+   */
+  def withPresencePenalty(presencePenalty: Double): CompletionOptions = copy(presencePenalty = presencePenalty)
+
+  /**
+   * Sets the frequency penalty, which penalizes new tokens based on their existing frequency in the text so far,
+   * discouraging repetition.
+   *
+   * @param frequencyPenalty the frequency penalty (default 0.0)
+   * @return new CompletionOptions with frequencyPenalty set
+   */
+  def withFrequencyPenalty(frequencyPenalty: Double): CompletionOptions = copy(frequencyPenalty = frequencyPenalty)
+
+  /**
+   * Sets the tool function definitions that the LLM can request during a completion.
+   * Replaces any tools set before.
+   *
+   * @param tools the tools to offer; an empty sequence offers none (the default)
+   * @return new CompletionOptions with tools set
+   */
+  def withTools(tools: Seq[ToolFunction[_, _]]): CompletionOptions = copy(tools = tools)
+
+  /**
+   * Sets or clears the reasoning effort level for models that support extended thinking (o1/o3, Claude).
+   * For non-reasoning models, this setting is silently ignored.
+   *
+   * @param reasoning the reasoning effort level; `None` sets no reasoning effort (the default)
+   * @return new CompletionOptions with reasoning set
+   */
   def withReasoning(reasoning: Option[ReasoningEffort]): CompletionOptions = copy(reasoning = reasoning)
-  def withBudgetTokens(budgetTokens: Option[Int]): CompletionOptions       = copy(budgetTokens = budgetTokens)
+
+  /**
+   * Sets or clears the explicit budget for thinking tokens (Anthropic Claude).
+   * If set, it overrides the default budget from the reasoning effort level.
+   *
+   * @param budgetTokens the thinking token budget; `None` sets no explicit budget (the default), so the budget
+   *                     comes from the reasoning effort level, if any
+   * @return new CompletionOptions with budgetTokens set
+   */
+  def withBudgetTokens(budgetTokens: Option[Int]): CompletionOptions = copy(budgetTokens = budgetTokens)
+
+  /**
+   * Sets or clears the structured output format (e.g. JSON or JSON schema).
+   * Support is provider- and model-dependent; see capability validation in RequestTransformer.
+   *
+   * @param responseFormat the desired response format; `None` requests no particular format (the default)
+   * @return new CompletionOptions with responseFormat set
+   */
   def withResponseFormat(responseFormat: Option[ResponseFormat]): CompletionOptions =
     copy(responseFormat = responseFormat)
 
