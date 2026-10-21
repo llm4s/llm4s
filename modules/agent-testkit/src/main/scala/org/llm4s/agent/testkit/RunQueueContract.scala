@@ -131,7 +131,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
       checkpointer.release(on, claim.token).value
 
     /** Deletes `on` under a fresh claim. */
-    def delete(on: ThreadId = thread): Unit =
+    def deleteThread(on: ThreadId = thread): Unit =
       val claim = checkpointer.claim(on, ClaimRequest(RunId(s"deleter-${unique()}"), None, ttl)).value
       checkpointer.deleteThread(on, claim.token, None).value
 
@@ -483,7 +483,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val c = Case()
     c.commitAs("direct", "c1")
     val id = c.submit().value.entryId
-    c.delete()
+    c.deleteThread()
     val leased = c.take().value
     c.queue.recordAttempt(leased.lease, RunId("late")).value match
       case AttemptStart.ThreadDeleted(e) =>
@@ -498,7 +498,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val c = Case()
     c.submit().value
     // a thread with a claim and nothing else: its delete leaves no tombstone and numbers nothing
-    c.delete()
+    c.deleteThread()
     val leased = c.take().value
     c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
   }
@@ -511,7 +511,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val run    = s"run-${unique()}"
     c.queue.recordAttempt(leased.lease, RunId(run)).value shouldBe a[AttemptStart.Recorded]
     // the delete lands between the attempt's record and its admission
-    c.delete()
+    c.deleteThread()
     def admit(as: String, id: String): Result[Vector[EventRecord]] =
       val claim  = c.checkpointer.claim(c.thread, ClaimRequest(RunId(as), None, ttl)).value
       val parent = c.checkpointer.latest(c.thread).value.map(_.checkpoint.id)
@@ -562,7 +562,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
   it should "not take a delete before the submission for one after it" in {
     val c = Case()
     c.commitAs("direct", "c1")
-    c.delete()
+    c.deleteThread()
     c.submit().value
     val leased = c.take().value
     c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.Recorded]

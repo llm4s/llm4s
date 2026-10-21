@@ -145,7 +145,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         )(rows => rows.getLong(1) -> rows.getString(2))
         // the thread's lock, tried: a submission or another take on the thread is deciding its order now
         val chosen = candidates.find { (id, thread) =>
-          tryLock(c, s"thread:$thread") && query(
+          lockIfFree(c, s"thread:$thread") && query(
             c,
             s"""SELECT 1 FROM $entries e
                |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
@@ -192,7 +192,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       id
     )(instant(_, 1)).forall(expires => !now.isBefore(expires))
 
-  private def tryLock(c: Connection, name: String): Boolean =
+  private def lockIfFree(c: Connection, name: String): Boolean =
     query(c, "SELECT pg_try_advisory_xact_lock(hashtextextended(?, 0))", lockName(name))(_.getBoolean(1)).head
 
   /** `lease`'s entry, locked, if `lease` is its current lease and it is open. */
