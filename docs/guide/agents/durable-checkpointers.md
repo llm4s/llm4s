@@ -338,12 +338,12 @@ There is no unfenced delete: to delete a thread outside a runtime, claim it and 
 
 ### Limits
 
-- A deleted thread that numbered any event leaves a small record in the store for good: its next event number, and
-  nothing of its data. It is what lets a reader of the deleted log - in any process, however late - be told that the
-  thread was deleted, and a new thread of the id be numbered past it. Nothing removes it, `prune` included, so a store
-  grows by one such record per deleted thread; `Agent.run(query)` forgets the thread of every failed or cancelled
-  one-shot turn, so a long-lived store gains one per such turn. Deleting the same id again, with no event since,
-  adds nothing.
+- A deleted thread that numbered any event leaves a small record in the store, a tombstone: its next event number and
+  when it was deleted, nothing of its data. It is what lets a reader of the deleted log, in any process, be told that
+  the thread was deleted, and a new thread of the id be numbered past it. `prune` never removes it, so a store grows by
+  one per deleted thread - `Agent.run(query)` forgets the thread of every failed or cancelled one-shot turn, and child
+  retention deletes children - until a [sweep](#sweeping-the-whole-store) with a `tombstoneAge` reclaims the old ones.
+  Deleting the same id again, with no event since, adds nothing.
 
 ## Subscriptions across runtimes
 
@@ -488,7 +488,9 @@ continues its event numbering), 3 and 4 for effect records, and 5 since claims r
 with `claim_tenant_token`, the token of the claim the tenant belongs to), 6 for child threads, and 7 since each
 checkpoint and event records when the store committed it, which retention judges age by (rows from before 7 are judged
 by their producer's timestamps), and 8 for the thread registry (see [Finding threads](#finding-threads)), filled from
-each thread's latest checkpoint when a version-7 file is opened. A claim a version-4 file holds when it is
+each thread's latest checkpoint when a version-7 file is opened, and 9 for tombstone reclamation (see
+[Sweeping the whole store](#sweeping-the-whole-store)), which dates the tombstones a version-8 file holds from the
+upgrade. A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one: an
@@ -664,6 +666,40 @@ can run while a run executes; call it on a schedule that suits you.
 that same clock - never with the `createdAt` and event timestamps the committing runtime stamped by its own, which stay
 as the producer's record. So a host whose clock is skewed makes nothing too old or too young. The SQLite and in-memory
 stores judge by the clock they were opened with; the PostgreSQL store by the database server's.
+
+### Sweeping the whole store
+
+`prune` works on one thread. `Checkpointer.sweep` applies a policy to every thread the store holds, a bounded page at a
+time, and reclaims the tombstones of threads deleted long enough ago (design 4.53):
+
+```scala
+val policy = SweepPolicy(
+  retention = RetentionPolicy(maxAge = Some(30.days), maxCheckpoints = Some(50)),
+  tombstoneAge = Some(7.days),
+  batchSize = 100
+)
+@annotation.tailrec
+def sweepAll(after: Option[ThreadId]): Result[Unit] =
+  checkpointer.sweep(policy, after, SweepGuard.none) match
+    case Right(page) if page.next.isDefined => sweepAll(page.next)
+    case other                              => other.map(_ => ())
+```
+
+- Each call visits at most `batchSize` threads (1 to 1000), tombstones included, and returns the cursor of the next
+  page, so every call stays within the store's bound however many threads it holds. The PostgreSQL store makes a call
+  in up to three short transactions, so one returns within three times its bound.
+- Each thread is pruned exactly as `prune(threadId, policy.retention)` would prune it, by the store's commit times.
+- A tombstone is reclaimed once the store deleted the thread more than `tombstoneAge` ago, by its clock, and nothing was
+  stored under the id since (a claim counts until it has lapsed for `tombstoneAge` too).
+- A reader of a reclaimed log is still refused with `ThreadDeleted`: reclaiming raises the store's reclamation mark,
+  and a new thread of any id without a tombstone numbers its events from it, past every reclaimed thread's. So once a
+  store has reclaimed a tombstone, new threads no longer number from `1`. Paging `children` after a reclaimed child
+  refuses that cursor.
+- A `SweepGuard` names the threads something outside the store still depends on: each keeps its tombstone, and the
+  newest checkpoint each of its named `RunId`s committed, whatever the policy. A run queue's open entries are what a
+  guard will name (Stage 5, rule 4); `SweepGuard.none` protects nothing.
+
+A sweep needs no claim. Run one at a time per store, on a schedule: two at once are safe, only wasteful.
 
 ## Finding threads
 

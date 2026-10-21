@@ -40,6 +40,9 @@ import scala.util.{ Try, Using }
  *  - '''History, retention, deletes and children''' behave exactly as in the SQLite store: every superseded
  *    checkpoint is kept until `prune`, `retractTurn` or [[deleteThread]] removes it; a deleted thread leaves a
  *    tombstone of its event numbering; a parent's children are listed in the order their first commits landed.
+ *  - '''The retention sweep''' (design 4.53) pages through the threads by primary key, prunes each and reclaims old
+ *    tombstones, raising the schema's reclamation mark in the same transaction, under an advisory lock that every
+ *    claim creating a row shares; see [[sweep]].
  *  - '''Data only.''' Checkpoints, pending writes, events and effect records are stored as JSON text and decoded on
  *    read, so nothing executable is stored.
  *  - '''Change notification by polling''' for now: a subscription reads the log once per `WatchPolicy.pollInterval`
@@ -332,46 +335,110 @@ final class PostgresCheckpointer private (
    * which a writer with a skewed clock would make too old or too young (rule 1).
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = writing("prune") { c =>
-    lockRow(c, threadId) match
-      case None => Right(())
-      case Some(current) =>
-        val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
-        // oldest first: (position, id, committed at)
-        val history =
-          query(c, Sql.historyAges(t), threadId.value)(rows => (rows.getLong(1), rows.getString(2), instant(rows, 3)))
-        // the latest checkpoint is always kept, whatever its age
-        val (older, latest) = history.splitAt(history.size - 1)
-        val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
-        val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptPositions   = kept.map(_._1).toSet
-        history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
-          update(c, Sql.deleteHistoryAt(t), threadId.value, position)
-        }
-        // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-        val byCheckpoint =
-          if kept.size == history.size then None
-          else
-            query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
-              Option(rows.getObject(1)).map(_ => rows.getLong(1))
-            ).head
-        val byAge = cutoff.map { cut =>
-          query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
-            Option(rows.getObject(1)).map(_ => rows.getLong(1))
-          ).head
-            .getOrElse(current.nextSeq)
-        }
-        val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-        val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
-        update(c, Sql.deleteEventsBefore(t), threadId.value, floor)
-        update(c, Sql.setFloor(t), floor, threadId.value)
-        Right(())
+    lockRow(c, threadId).foreach(pruneRow(c, threadId, _, policy, Set.empty))
+    Right(())
   }
+
+  /**
+   * [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest checkpoint each of
+   * `protectedRuns` committed (a sweep's protected thread, design 4.53).
+   */
+  private def pruneRow(
+    c: Connection,
+    threadId: ThreadId,
+    current: Row,
+    policy: RetentionPolicy,
+    protectedRuns: Set[RunId]
+  ): Unit =
+    val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
+    // oldest first: (position, id, committed at, run)
+    val history =
+      query(c, Sql.historyAges(t, withRuns = protectedRuns.nonEmpty), threadId.value)(rows =>
+        (rows.getLong(1), rows.getString(2), instant(rows, 3), Option(rows.getString(4)).getOrElse(""))
+      )
+    val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
+    val keptPositions    = (kept ++ evidence).map(_._1).toSet
+    history.filterNot(h => keptPositions(h._1)).foreach(h => update(c, Sql.deleteHistoryAt(t), threadId.value, h._1))
+    // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+    val byCheckpoint =
+      if kept.size == history.size then None
+      else
+        query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
+          Option(rows.getObject(1)).map(_ => rows.getLong(1))
+        ).head
+    val byAge = cutoff.map { cut =>
+      query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
+        Option(rows.getObject(1)).map(_ => rows.getLong(1))
+      ).head
+        .getOrElse(current.nextSeq)
+    }
+    val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+    val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
+    update(c, Sql.deleteEventsBefore(t), threadId.value, floor)
+    update(c, Sql.setFloor(t), floor, threadId.value)
+
+  /**
+   * One page of the sweep (design 4.53), in up to three transactions, each bounded as every call is - so a sweep call
+   * returns within three times the store's bound: the page's ids read by the primary key; the guard asked outside any
+   * transaction; then, if the policy reclaims, the page's old tombstones reclaimed under the reclamation lock (taken
+   * exclusively, so no claim creates a row from the mark meanwhile), each row locked in id order as every call locks
+   * rows and removed only if it is still only an old tombstone; then the rest of the page pruned, the rows locked in
+   * that same order. Time is the database's.
+   */
+  def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
+    reading("sweep") { c =>
+      Right(after match
+        case None => query(c, Sql.sweepPage(t), policy.batchSize + 1)(rows => ThreadId(rows.getString(1)))
+        case Some(id) =>
+          query(c, Sql.sweepPageAfter(t), id.value, policy.batchSize + 1)(rows => ThreadId(rows.getString(1)))
+      )
+    }.flatMap { page =>
+      val visited = page.take(policy.batchSize)
+      // asked outside the store's transactions: the guard may read another store, such as a run queue
+      guard.retained(visited).flatMap { protectedRuns =>
+        val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
+        val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
+          case Some(age) if candidates.nonEmpty =>
+            writing("sweep") { c =>
+              query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+              val cutoff = clockNow(c).minusNanos(age.toNanos)
+              val gone = candidates.flatMap { threadId =>
+                lockRow(c, threadId).flatMap { _ =>
+                  query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
+                }
+              }
+              // readers of a reclaimed log are still refused: a new thread of the id starts past it
+              gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
+              Right(gone.map(_._1).toSet)
+            }
+          case _ => Right(Set.empty)
+        reclaimed.flatMap { gone =>
+          val pruning = visited.filterNot(gone).sortBy(_.value)
+          val pruned =
+            if policy.retention == RetentionPolicy.keepAll || pruning.isEmpty then Right(())
+            else
+              writing("sweep") { c =>
+                pruning.foreach { threadId =>
+                  lockRow(c, threadId).foreach { row =>
+                    pruneRow(c, threadId, row, policy.retention, protectedRuns.getOrElse(threadId, Set.empty))
+                  }
+                }
+                Right(())
+              }
+          pruned.map(_ => SweepPage(visited.size, gone.size, RetentionSweep.next(page, policy.batchSize)))
+        }
+      }
+    }
+
+  /** The key of the reclamation lock (see `Sql.lockReclamation`): one per schema. */
+  private val reclamationLock = PostgresSchema.lockName(config.schema) + ":reclamation"
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
-      val row      = readRow(c, threadId, Sql.row(t))
-      val first    = row.fold(1L)(_.firstSeq)
-      val earliest = row.fold(1L)(_.earliestSeq)
+      val row = readRow(c, threadId, Sql.row(t))
+      // an id with no row numbers from the reclamation mark (design 4.53)
+      val first    = row.fold(query(c, Sql.reclaimedFirst(t))(_.getLong(1)).headOption.getOrElse(1L))(_.firstSeq)
+      val earliest = row.fold(first)(_.earliestSeq)
       // a reader from the start reads the thread now under the id, from its first event
       if Checkpointer.deleted(afterSeq, first) then Left(GraphError.ThreadDeleted(threadId.value, afterSeq, first))
       else if math.max(afterSeq, first - 1) + 1 < earliest then
@@ -455,7 +522,7 @@ final class PostgresCheckpointer private (
         Vector(t.events, t.pendingWrites, t.history, t.effects).foreach { table =>
           update(c, s"DELETE FROM $table WHERE thread_id = ?", threadId.value)
         }
-        update(c, Sql.tombstone(t), threadId.value)
+        update(c, Sql.tombstone(t), clockNow(c), threadId.value)
         dropIfEmpty(c, threadId)
         Right(())
   }
@@ -570,18 +637,23 @@ final class PostgresCheckpointer private (
     threadIds.distinct.sortBy(_.value).flatMap(id => lockRow(c, id).map(id -> _)).toMap
 
   /**
-   * The thread's row, created if it has none, and locked. A row a concurrent call deletes (an emptied thread's) while
-   * this one waits for its lock is gone once the lock is granted: the insert is tried again.
+   * The thread's row, created if it has none, and locked. A row a concurrent call deletes (an emptied thread's, or a
+   * tombstone a sweep reclaims) while this one waits for its lock is gone once the lock is granted: the insert is
+   * tried again. A row is created only under the reclamation lock, shared, so it numbers from a reclamation mark no
+   * sweep in flight is raising (design 4.53); a row that exists is locked without it.
    */
   private def lockOrCreate(c: Connection, threadId: ThreadId): Row =
-    Iterator
-      .continually {
-        update(c, Sql.ensureRow(t), threadId.value)
-        lockRow(c, threadId)
-      }
-      .take(8)
-      .collectFirst { case Some(row) => row }
-      .getOrElse(throw new IllegalStateException(s"thread ${threadId.value}'s row kept vanishing while being locked"))
+    lockRow(c, threadId).getOrElse {
+      query(c, Sql.shareReclamation, reclamationLock)(_ => ()): Unit
+      Iterator
+        .continually {
+          update(c, Sql.ensureRow(t), threadId.value)
+          lockRow(c, threadId)
+        }
+        .take(8)
+        .collectFirst { case Some(row) => row }
+        .getOrElse(throw new IllegalStateException(s"thread ${threadId.value}'s row kept vanishing while being locked"))
+    }
 
   private def setClaim(c: Connection, threadId: ThreadId, claim: Option[Claim]): Unit =
     update(

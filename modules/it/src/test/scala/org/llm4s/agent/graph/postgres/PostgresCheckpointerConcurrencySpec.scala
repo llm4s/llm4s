@@ -24,9 +24,11 @@ import scala.jdk.CollectionConverters.*
 class PostgresCheckpointerConcurrencySpec extends AnyFlatSpec with Matchers with EitherValues with BeforeAndAfterAll {
 
   private val schema = PgCheckpointerDb.freshSchema()
-  private val config = PostgresCheckpointerConfig(schema = schema)
-  private val ttl    = 30.seconds
-  private val wait   = 60.seconds
+  // the schemas of the cases that reclaim tombstones, dropped with the suite's
+  private val reclaiming = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+  private val config     = PostgresCheckpointerConfig(schema = schema)
+  private val ttl        = 30.seconds
+  private val wait       = 60.seconds
 
   private def stores(n: Int): Vector[PostgresCheckpointer] = {
     PgCheckpointerDb.require()
@@ -175,7 +177,51 @@ class PostgresCheckpointerConcurrencySpec extends AnyFlatSpec with Matchers with
     all.foreach(_.close())
   }
 
+  "Claims racing a sweep that reclaims their threads' tombstones" should "number every new thread past its old one" in {
+    PgCheckpointerDb.require()
+    // a schema of its own: reclaiming moves the store-wide mark new threads number from
+    val own = PgCheckpointerDb.freshSchema()
+    reclaiming.add(own)
+    val ownConfig = PostgresCheckpointerConfig(schema = own)
+    val all       = Vector.fill(8)(PgCheckpointerDb.store(ownConfig, maxPoolSize = 4))
+    (1 to 5).foreach { round =>
+      // each thread numbered a different count of events, so the tombstones' first numbers differ
+      val olds = (1 to 20).map { i =>
+        val t     = thread()
+        val token = all.head.claim(t, ClaimRequest(RunId("old"), None, ttl)).value.token
+        all.head.commit(t, Commit(token, events = Vector.tabulate(i * round)(n => event(s"e$n")))).value
+        all.head.deleteThread(t, token, None).value
+        t -> (i * round + 2L)
+      }.toVector
+      PgCheckpointerDb.execute(s"""UPDATE "$own".checkpoint_threads SET deleted_at = deleted_at - INTERVAL '2 hours'""")
+      val policy = SweepPolicy(tombstoneAge = Some(1.hour), batchSize = 3)
+      val results = race(olds.size + 1) {
+        case 0 =>
+          Iterator
+            .iterate(all(0).sweep(policy, None, SweepGuard.none))(_.flatMap { page =>
+              page.next.fold(Right(page))(next => all(0).sweep(policy, Some(next), SweepGuard.none))
+            })
+            .find(_.forall(_.next.isEmpty))
+            .get
+            .map(_ => 0L)
+        case i =>
+          val (t, _) = olds(i - 1)
+          val store  = all(i % all.size)
+          store.claim(t, ClaimRequest(RunId("new"), None, ttl)).flatMap { claim =>
+            store.commit(t, Commit(claim.token, events = Vector(event("new")))).map(_.head.seq)
+          }
+      }
+      withClue(s"round $round: ")(results.collect { case Left(e) => e } shouldBe empty)
+      olds.zip(results.tail.map(_.value)).foreach { case ((t, first), seq) =>
+        withClue(s"round $round, ${t.value}: ")(seq should be >= first)
+        all.head.eventsAfter(t, first - 2, 10).left.value shouldBe a[GraphError.ThreadDeleted]
+      }
+    }
+    all.foreach(_.close())
+  }
+
   override def afterAll(): Unit = {
+    if (PgCheckpointerDb.enabled) reclaiming.asScala.foreach(PgCheckpointerDb.dropSchema)
     if (PgCheckpointerDb.enabled) PgCheckpointerDb.dropSchema(schema)
     super.afterAll()
   }

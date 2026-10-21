@@ -134,6 +134,15 @@ Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s
 - **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
 - **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### Store-wide retention and tombstone reclamation (#2059)
+
+A store can be swept, a bounded page at a time, and a deleted thread's tombstone is no longer kept for good ([design 4.53](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md)). Code that only runs agents changes nothing; these change:
+
+- **A new abstract `Checkpointer` method.** `sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage]` prunes every thread the store holds by `policy.retention`, as `prune` does, and reclaims tombstones older than `policy.tombstoneAge`, at most `policy.batchSize` threads per call. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store whose cases share one database also overrides the contract's new `isolatedCheckpointer` hook with storage of its own.
+- **A reclaimed id numbers from the store's reclamation mark.** Once a sweep has reclaimed a tombstone, a new thread of an id with no tombstone - any id, not only a reclaimed one - numbers its events from the highest first number of every tombstone reclaimed, not from `1`, so a reader of the reclaimed log still gets `GraphError.ThreadDeleted`. Code that assumed a new thread's first event is `1` reads from `afterSeq = 0` instead, as a reader of a deleted id already had to.
+- **Paging children after a reclaimed child** refuses that cursor with a `ValidationError`, as for any id the store does not know as a child.
+- **Schemas move on, with no way back.** SQLite schema 9 and PostgreSQL schema 3 record when each tombstone was deleted and hold the reclamation mark; the tombstones a store already holds are dated from the upgrade. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:
