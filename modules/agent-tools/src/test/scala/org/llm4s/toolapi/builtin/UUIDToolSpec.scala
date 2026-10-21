@@ -139,6 +139,12 @@ class UUIDToolSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "name every UUID variant, including those a random UUID never has" in {
+    Map(0 -> "NCS", 2 -> "Leach-Salz (standard)", 6 -> "Microsoft", 7 -> "Future", 3 -> "Unknown").foreach {
+      case (variant, name) => UUIDTool.variantName(variant) shouldBe name
+    }
+  }
+
   it should "generate one UUID when count is absent" in {
     generate(ujson.Obj("format" -> "compact")) should have size 1
   }

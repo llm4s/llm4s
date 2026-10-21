@@ -72,6 +72,15 @@ object UUIDTool {
       case Left(error)                                  => Left(error.getMessage)
     }
 
+  /** The name of a `java.util.UUID#variant` value. */
+  private[builtin] def variantName(variant: Int): String = variant match {
+    case 0 => "NCS"
+    case 2 => "Leach-Salz (standard)"
+    case 6 => "Microsoft"
+    case 7 => "Future"
+    case _ => "Unknown"
+  }
+
   /**
    * The UUID generator tool instance, returning a Result for safe error handling.
    */
@@ -95,13 +104,7 @@ object UUIDTool {
           UUIDResult(
             uuid = uuidStr,
             version = uuid.version(),
-            variant = uuid.variant() match {
-              case 0 => "NCS"
-              case 2 => "Leach-Salz (standard)"
-              case 6 => "Microsoft"
-              case 7 => "Future"
-              case _ => "Unknown"
-            }
+            variant = variantName(uuid.variant())
           )
         }
 
