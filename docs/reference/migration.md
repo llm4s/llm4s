@@ -10,7 +10,7 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
 [Multimodal content parts](#multimodal-content-parts-1913). After 0.5.1, [`MemoryManagerConfig` is
-growth-safe](#memorymanagerconfig-is-growth-safe-1847).
+growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so is [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708).
 
 ## Multimodal content parts (#1913)
 
@@ -215,6 +215,20 @@ val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .cop
 ```
 
 `toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
+
+### `ToolRetryPolicy` is growth-safe (#1708)
+
+`ToolRetryPolicy` follows the growth-prone pattern, so that it could gain `jitter`
+([#1708](https://github.com/llm4s/llm4s/issues/1708)): build it with `ToolRetryPolicy(...)`, whose arguments are
+unchanged apart from the new `jitter` (default `0.0`, no jitter), and change it with `withMaxAttempts`,
+`withBaseDelay`, `withBackoffFactor` and `withJitter`. `new` and `.copy` are private:
+
+```scala
+import org.llm4s.toolapi.ToolRetryPolicy
+import scala.concurrent.duration._
+
+val policy = ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis).withMaxAttempts(5) // was .copy(maxAttempts = 5)
+```
 
 ### `AssistantMessage` and `Completion.thinking` (#1381)
 
