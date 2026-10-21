@@ -11,7 +11,7 @@ import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException }
 import java.time.{ Instant, OffsetDateTime, ZoneOffset }
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ Executor, ScheduledThreadPoolExecutor, ThreadFactory, TimeUnit }
+import java.util.concurrent.{ Executor, ScheduledFuture, ScheduledThreadPoolExecutor, ThreadFactory, TimeUnit }
 import javax.sql.DataSource
 import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
@@ -463,8 +463,11 @@ final class PostgresCheckpointer private (
             }
           }
           val aborted = !watch.disarm()
-          if aborted || outcome.isFailure then discard(c)
-          else Try(c.setAutoCommit(true)).flatMap(_ => Try(c.close())): Unit
+          // back to the pool only as it came, after a call that went well; anything else is discarded, so a connection
+          // whose reset or close fails is never left checked out
+          val returned =
+            !aborted && outcome.isSuccess && Try(c.setAutoCommit(true)).isSuccess && Try(c.close()).isSuccess
+          if !returned then discard(c)
           outcome.toEither.left.map { e =>
             if aborted then failure(operation, timedOut(callTimeout), Some(e))
             else failure(operation, describe(e), Some(e))
@@ -745,20 +748,30 @@ object PostgresCheckpointer:
    * A call's client-side bound: unless [[disarm]]ed first, it aborts the call's connection once `timeout` has passed,
    * closing its socket, so a call whose server or network stalls fails at the bound rather than at the socket timeout.
    */
-  final private class Watch private (connection: Connection):
+  final private[postgres] class Watch private (connection: Connection):
     private val state = new java.util.concurrent.atomic.AtomicInteger(0) // 0 armed, 1 disarmed, 2 fired
+    @volatile private var task: Option[ScheduledFuture[?]] = None
 
     private def fire(): Unit =
       if state.compareAndSet(0, 2) then Try(connection.abort(DirectExecutor)): Unit
 
-    /** Stops the watch; `false` if it had already fired and aborted the connection. */
-    def disarm(): Boolean = state.compareAndSet(0, 1) || state.get == 1
+    /**
+     * Stops the watch and takes its task off the watchdog's queue, so a finished call holds neither its connection
+     * nor a queued task until its timeout; `false` if it had already fired and aborted the connection.
+     */
+    def disarm(): Boolean =
+      val stopped = state.compareAndSet(0, 1) || state.get == 1
+      task.foreach(_.cancel(false))
+      stopped
 
-  private object Watch:
+  private[postgres] object Watch:
     def arm(connection: Connection, timeout: FiniteDuration): Watch =
       val watch = new Watch(connection)
-      watchdog.schedule((() => watch.fire()): Runnable, timeout.toNanos, TimeUnit.NANOSECONDS): Unit
+      watch.task = Some(watchdog.schedule((() => watch.fire()): Runnable, timeout.toNanos, TimeUnit.NANOSECONDS))
       watch
+
+    /** How many watches are queued, armed or not: what a finished call must not leave behind. */
+    private[postgres] def queued: Int = watchdog.getQueue.size
 
   // ---- JDBC ----
 

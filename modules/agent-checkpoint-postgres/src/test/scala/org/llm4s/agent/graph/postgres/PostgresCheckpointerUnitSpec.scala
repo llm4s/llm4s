@@ -156,6 +156,35 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     made.last shouldBe "close"
   }
 
+  it should "discard, not leave checked out, a connection whose reset fails after a call that went well" in {
+    val calls = new CopyOnWriteArrayList[String]()
+    val pool  = FakePool(_ => FakeConnection(calls, failOn = "<nothing>", failReset = true))
+    // the schema reads as current, so the open's one call commits and succeeds
+    val store = PostgresCheckpointer.create(pool, ownsDataSource = false).value
+    val made  = calls.asScala.toVector
+    made should contain("commit")
+    made should contain("setAutoCommit(true)")
+    made should contain("abort")
+    made.last shouldBe "close"
+    store.close()
+  }
+
+  "The watchdog" should "abort a call's connection once its timeout passes, and leave nothing queued once disarmed" in {
+    val calls  = new CopyOnWriteArrayList[String]()
+    val before = PostgresCheckpointer.Watch.queued
+    val watches =
+      Vector.fill(100)(PostgresCheckpointer.Watch.arm(FakeConnection(calls, failOn = "<nothing>"), 1.hour))
+    PostgresCheckpointer.Watch.queued should be >= before + 100
+    watches.foreach(_.disarm() shouldBe true)
+    PostgresCheckpointer.Watch.queued shouldBe before
+    calls.asScala should not contain "abort"
+    val late     = PostgresCheckpointer.Watch.arm(FakeConnection(calls, failOn = "<nothing>"), 10.millis)
+    val deadline = System.nanoTime() + 5.seconds.toNanos
+    while (!calls.contains("abort") && System.nanoTime() < deadline) Thread.sleep(5)
+    calls.asScala should contain("abort")
+    late.disarm() shouldBe false
+  }
+
   "An unreachable database" should "fail a store's own pool fast, as a ProcessingError" in {
     val unreachable = PostgresCheckpointer.open(
       "jdbc:postgresql://127.0.0.1:1/none",
@@ -184,14 +213,21 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
   }
 
   /** A connection that records the calls made on it and fails any statement whose SQL contains `failOn`. */
-  private def FakeConnection(calls: CopyOnWriteArrayList[String], failOn: String): Connection = {
+  private def FakeConnection(
+    calls: CopyOnWriteArrayList[String],
+    failOn: String,
+    failReset: Boolean = false
+  ): Connection = {
     val handler: InvocationHandler = (_: Any, method: Method, args: Array[AnyRef]) =>
       method.getName match {
-        case "setAutoCommit" => calls.add(s"setAutoCommit(${args(0)})"); null
-        case "rollback"      => calls.add("rollback"); null
-        case "commit"        => calls.add("commit"); null
-        case "abort"         => calls.add("abort"); null
-        case "close"         => calls.add("close"); null
+        case "setAutoCommit" =>
+          calls.add(s"setAutoCommit(${args(0)})")
+          if (failReset && args(0) == java.lang.Boolean.TRUE) throw new SQLException("connection reset", "08006")
+          null
+        case "rollback" => calls.add("rollback"); null
+        case "commit"   => calls.add("commit"); null
+        case "abort"    => calls.add("abort"); null
+        case "close"    => calls.add("close"); null
         case "createStatement" =>
           calls.add("createStatement")
           statement(calls, failOn, "")
@@ -216,11 +252,31 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
         case "execute" =>
           calls.add(s"execute: ${Option(args).map(_.head).getOrElse(sql)}")
           java.lang.Boolean.FALSE
-        case "close" => null
-        case other   => throw new SQLException(s"$other is not faked ($failOn)")
+        case "executeQuery" => oneRow()
+        case "setString"    => null
+        case "close"        => null
+        case other          => throw new SQLException(s"$other is not faked ($failOn)")
       }
     Proxy
       .newProxyInstance(getClass.getClassLoader, Array(classOf[java.sql.PreparedStatement]), handler)
       .asInstanceOf[java.sql.PreparedStatement]
+  }
+
+  /** One row whose every column reads as `true` and as the current schema version: a schema already migrated. */
+  private def oneRow(): java.sql.ResultSet = {
+    var left = 1
+    val handler: InvocationHandler = (_: Any, method: Method, _: Array[AnyRef]) =>
+      method.getName match {
+        case "next" =>
+          left -= 1
+          java.lang.Boolean.valueOf(left >= 0)
+        case "getBoolean" => java.lang.Boolean.TRUE
+        case "getInt"     => Integer.valueOf(PostgresSchema.Current)
+        case "close"      => null
+        case other        => throw new SQLException(s"$other is not faked")
+      }
+    Proxy
+      .newProxyInstance(getClass.getClassLoader, Array(classOf[java.sql.ResultSet]), handler)
+      .asInstanceOf[java.sql.ResultSet]
   }
 }
