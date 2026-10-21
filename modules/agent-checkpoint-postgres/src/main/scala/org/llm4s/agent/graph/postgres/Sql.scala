@@ -216,3 +216,104 @@ private[postgres] object Sql:
     s"""SELECT checkpoint_json FROM ${t.threads}
        |WHERE parent_thread_id = ? AND child_order > ? AND checkpoint_json IS NOT NULL
        |ORDER BY child_order LIMIT ?""".stripMargin
+
+  // ---- the run queue (design 4.55) ----
+
+  private def queueColumns: String = PostgresRunQueue.Columns
+
+  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
+  val QueueRunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
+
+  /** The head of `e`'s thread, as a correlated subquery. */
+  def queueHeadOf(t: Tables): String =
+    s"""SELECT h.entry_id FROM ${t.queueEntries} h WHERE h.thread_id = e.thread_id AND h.state = 'open'
+       |ORDER BY $QueueRunOrder LIMIT 1""".stripMargin
+
+  /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
+  def queueLiveSibling(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueEntries} o WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
+       |  AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?""".stripMargin
+
+  def queueEntry(t: Tables): String       = s"SELECT $queueColumns FROM ${t.queueEntries} WHERE entry_id = ?"
+  def queueEntryLocked(t: Tables): String = s"${queueEntry(t)} FOR UPDATE"
+  def queueEntryThread(t: Tables): String = s"SELECT thread_id FROM ${t.queueEntries} WHERE entry_id = ?"
+
+  def queueEntryByKey(t: Tables): String =
+    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE key_scope = ? AND submission_key = ? FOR UPDATE"
+
+  def openQueueEntries(t: Tables): String =
+    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' ORDER BY $QueueRunOrder"
+
+  def nextQueueEntryId(t: Tables): String = s"SELECT nextval('${t.queueEntryIds}')"
+  def nextLeaseToken(t: Tables): String   = s"SELECT nextval('${t.queueLeaseTokens}')"
+
+  def issuedQueueEntries(t: Tables): String =
+    s"SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM ${t.queueEntryIds}"
+
+  def insertQueueEntry(t: Tables): String =
+    s"""INSERT INTO ${t.queueEntries}
+       |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
+       | max_attempts, attempt_count, submitted_at, thread_deleted, state)
+       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, 'open')""".stripMargin
+
+  /** Candidate heads for `take` (the agents, then the time twice), skipping rows another worker holds. */
+  def queueCandidates(t: Tables): String =
+    s"""SELECT e.entry_id, e.thread_id FROM ${t.queueEntries} e
+       |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND e.entry_id = (${queueHeadOf(t)})
+       |  AND NOT EXISTS (${queueLiveSibling(t)})
+       |ORDER BY e.entry_id
+       |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
+
+  /** Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock. */
+  def queueTakeable(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueEntries} e
+       |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND e.entry_id = (${queueHeadOf(t)})
+       |  AND NOT EXISTS (${queueLiveSibling(t)})""".stripMargin
+
+  def siblingLeases(t: Tables): String =
+    s"""SELECT lease_expires_at FROM ${t.queueEntries}
+       |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL FOR UPDATE""".stripMargin
+
+  def endSiblingLeases(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL
+       |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin
+
+  def setLease(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ? WHERE entry_id = ?"
+
+  def renewLease(t: Tables): String = s"UPDATE ${t.queueEntries} SET lease_expires_at = ? WHERE entry_id = ?"
+
+  def releaseLease(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?"
+
+  def insertQueueAttempt(t: Tables): String =
+    s"""INSERT INTO ${t.queueAttempts} (entry_id, attempt, thread_id, run_id, started_at, holder)
+       |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+
+  def countQueueAttempt(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET attempt_count = attempt_count + 1 WHERE entry_id = ?"
+
+  def queueAttemptsOf(t: Tables): String =
+    s"SELECT run_id, started_at, holder FROM ${t.queueAttempts} WHERE entry_id = ? ORDER BY attempt"
+
+  /** Closes entry `?` (state, outcome and time bound first), recording the thread's last event number then. */
+  def closeQueueEntry(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} e
+       |SET state = ?, outcome_json = ?, closed_at = ?, lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
+       |  closed_seq = COALESCE((SELECT th.next_seq - 1 FROM ${t.threads} th WHERE th.thread_id = e.thread_id), 0)
+       |WHERE entry_id = ?""".stripMargin
+
+  /** [[closeQueueEntry]], only while the entry is open with no attempt (checked on the locked row). */
+  def closeUnstartedQueueEntry(t: Tables): String = s"${closeQueueEntry(t)} AND state = 'open' AND attempt_count = 0"
+
+  def reclaimableQueueEntries(t: Tables): String =
+    s"""SELECT entry_id FROM ${t.queueEntries} WHERE state <> 'open' AND closed_at <= ?
+       |ORDER BY closed_at, entry_id LIMIT ? FOR UPDATE SKIP LOCKED""".stripMargin
+
+  def deleteQueueAttempts(t: Tables): String =
+    s"DELETE FROM ${t.queueAttempts} WHERE entry_id = ANY(?::text[]::bigint[])"
+
+  def deleteQueueEntries(t: Tables): String =
+    s"DELETE FROM ${t.queueEntries} WHERE entry_id = ANY(?::text[]::bigint[])"

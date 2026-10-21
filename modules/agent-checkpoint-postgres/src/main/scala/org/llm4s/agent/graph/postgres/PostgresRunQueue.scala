@@ -32,9 +32,6 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   private val t                                   = store.t
   private given PostgresCheckpointer.ErrorContext = store.errorContext
 
-  private val entries  = t.queueEntries
-  private val attempts = t.queueAttempts
-
   // ---- submissions ----
 
   def submit(submission: Submission): Result[Ticket] = store.writing("queue.submit") { c =>
@@ -45,7 +42,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       // locked, so a reclaim running now either deletes it first - and the key is free - or skips it
       query(
         c,
-        s"SELECT $Columns FROM $entries WHERE key_scope = ? AND submission_key = ? FOR UPDATE",
+        Sql.queueEntryByKey(t),
         scope,
         key.value
       )(raw).headOption
@@ -61,7 +58,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
         else
           val now = store.clockNow(c)
-          val id  = query(c, s"SELECT nextval('${t.queueEntryIds}')")(_.getLong(1)).head
+          val id  = query(c, Sql.nextQueueEntryId(t))(_.getLong(1)).head
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it
           // runs - only while it still has no attempt, which a concurrent recordAttempt may have recorded meanwhile
           if submission.policy == BusyThreadPolicy.Interrupt then
@@ -70,10 +67,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             }
           update(
             c,
-            s"""INSERT INTO $entries
-               |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-               | max_attempts, attempt_count, submitted_at, thread_deleted, state)
-               |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, 'open')""".stripMargin,
+            Sql.insertQueueEntry(t),
             id,
             submission.threadId.value,
             submission.agentId.value,
@@ -110,7 +104,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     rowOf(c, entryId.value).filter(_.tenantId == tenantId.map(_.value)) match
       case Some(row) => view(c, row)
       case None =>
-        val issued = query(c, s"SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM ${t.queueEntryIds}")(
+        val issued = query(c, Sql.issuedQueueEntries(t))(
           _.getLong(1)
         ).head
         if entryId.value <= issued then Left(QueueError.TicketExpired(entryId))
@@ -133,12 +127,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         // candidate heads, skipping rows another worker has locked: workers do not wait for one another
         val candidates = query(
           c,
-          s"""SELECT e.entry_id, e.thread_id FROM $entries e
-             |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
-             |  AND e.entry_id = ($HeadOf)
-             |  AND NOT EXISTS ($LiveSibling)
-             |ORDER BY e.entry_id
-             |FOR UPDATE OF e SKIP LOCKED LIMIT $Candidates""".stripMargin,
+          Sql.queueCandidates(t),
           agents,
           now,
           now
@@ -147,10 +136,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         val chosen = candidates.find { (id, thread) =>
           lockIfFree(c, s"thread:$thread") && query(
             c,
-            s"""SELECT 1 FROM $entries e
-               |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
-               |  AND e.entry_id = ($HeadOf)
-               |  AND NOT EXISTS ($LiveSibling)""".stripMargin,
+            Sql.queueTakeable(t),
             id,
             now,
             now
@@ -162,16 +148,15 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
             update(
               c,
-              s"""UPDATE $entries SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL
-                 |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin,
+              Sql.endSiblingLeases(t),
               thread,
               id
             )
-            val token   = query(c, s"SELECT nextval('${t.queueLeaseTokens}')")(_.getLong(1)).head
+            val token   = query(c, Sql.nextLeaseToken(t))(_.getLong(1)).head
             val expires = micros(now.plusNanos(request.ttl.toNanos))
             update(
               c,
-              s"UPDATE $entries SET lease_holder = ?, lease_token = ?, lease_expires_at = ? WHERE entry_id = ?",
+              Sql.setLease(t),
               request.holder,
               token,
               expires,
@@ -186,8 +171,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   private def siblingsFree(c: Connection, thread: String, id: Long, now: Instant): Boolean =
     query(
       c,
-      s"""SELECT lease_expires_at FROM $entries
-         |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL FOR UPDATE""".stripMargin,
+      Sql.siblingLeases(t),
       thread,
       id
     )(instant(_, 1)).forall(expires => !now.isBefore(expires))
@@ -197,7 +181,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
   /** `lease`'s entry, locked, if `lease` is its current lease and it is open. */
   private def leased(c: Connection, lease: Lease): Result[Raw] =
-    query(c, s"SELECT $Columns FROM $entries WHERE entry_id = ? FOR UPDATE", lease.entryId.value)(raw).headOption match
+    query(c, Sql.queueEntryLocked(t), lease.entryId.value)(raw).headOption match
       case None => Left(QueueError.LeaseLost(lease.entryId, lease.token, None))
       case Some(row) =>
         row.outcome match
@@ -210,7 +194,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   def renew(lease: Lease, ttl: FiniteDuration): Result[Lease] = store.writing("queue.renew") { c =>
     leased(c, lease).map { row =>
       val expires = micros(store.clockNow(c).plusNanos(ttl.toNanos))
-      update(c, s"UPDATE $entries SET lease_expires_at = ? WHERE entry_id = ?", expires, row.id)
+      update(c, Sql.renewLease(t), expires, row.id)
       lease.copy(expiresAt = expires)
     }
   }
@@ -222,7 +206,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       case Right(row) =>
         update(
           c,
-          s"UPDATE $entries SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?",
+          Sql.releaseLease(t),
           row.id
         )
         Right(())
@@ -231,7 +215,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
     // an attempt moves its entry ahead in the thread's run order, so it is decided under the thread's lock, as a take
     // and a submission are: a take can never lease another head while this attempt is being recorded
-    query(c, s"SELECT thread_id FROM $entries WHERE entry_id = ?", lease.entryId.value)(_.getString(1)).headOption
+    query(c, Sql.queueEntryThread(t), lease.entryId.value)(_.getString(1)).headOption
       .foreach(thread => lock(c, s"thread:$thread"))
     leased(c, lease).flatMap { row =>
       // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
@@ -251,8 +235,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       else
         update(
           c,
-          s"""INSERT INTO $attempts (entry_id, attempt, thread_id, run_id, started_at, holder)
-             |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin,
+          Sql.insertQueueAttempt(t),
           row.id,
           row.attempts + 1,
           row.threadId,
@@ -260,7 +243,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           micros(store.clockNow(c)),
           lease.holder
         )
-        update(c, s"UPDATE $entries SET attempt_count = attempt_count + 1 WHERE entry_id = ?", row.id)
+        update(c, Sql.countQueueAttempt(t), row.id)
         view(c, rowOf(c, row.id).get).map(AttemptStart.Recorded(_))
     }
   }
@@ -276,11 +259,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   private def closeRow(c: Connection, id: Long, outcome: EntryOutcome, at: Instant, unstarted: Boolean = false): Unit =
     update(
       c,
-      s"""UPDATE $entries e
-         |SET state = ?, outcome_json = ?, closed_at = ?, lease_holder = NULL, lease_token = NULL,
-         |  closed_seq = COALESCE((SELECT t.next_seq - 1 FROM ${t.threads} t WHERE t.thread_id = e.thread_id), 0),
-         |  lease_expires_at = NULL
-         |WHERE entry_id = ?${if unstarted then " AND state = 'open' AND attempt_count = 0" else ""}""".stripMargin,
+      if unstarted then Sql.closeUnstartedQueueEntry(t) else Sql.closeQueueEntry(t),
       outcome.state,
       ujson.write(EntryOutcome.toJson(outcome)),
       micros(at),
@@ -294,28 +273,27 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         val cutoff = store.clockNow(c).minusNanos(ticketLifetime.toNanos)
         val expired = query(
           c,
-          s"""SELECT entry_id FROM $entries WHERE state <> 'open' AND closed_at <= ?
-             |ORDER BY closed_at, entry_id LIMIT ? FOR UPDATE SKIP LOCKED""".stripMargin,
+          Sql.reclaimableQueueEntries(t),
           cutoff,
           limit
         )(_.getLong(1))
         if expired.nonEmpty then
           val ids = expired.map(_.toString).toArray
-          update(c, s"DELETE FROM $attempts WHERE entry_id = ANY(?::text[]::bigint[])", ids)
-          update(c, s"DELETE FROM $entries WHERE entry_id = ANY(?::text[]::bigint[])", ids)
+          update(c, Sql.deleteQueueAttempts(t), ids)
+          update(c, Sql.deleteQueueEntries(t), ids)
         Right(expired.size)
       }
 
   // ---- rows ----
 
   private def rowOf(c: Connection, id: Long): Option[Raw] =
-    query(c, s"SELECT $Columns FROM $entries WHERE entry_id = ?", id)(raw).headOption
+    query(c, Sql.queueEntry(t), id)(raw).headOption
 
   /** The thread's open entries, in the order they run. */
   private def openOf(c: Connection, threadId: ThreadId): Vector[Raw] =
     query(
       c,
-      s"SELECT $Columns FROM $entries WHERE thread_id = ? AND state = 'open' ORDER BY $RunOrder",
+      Sql.openQueueEntries(t),
       threadId.value
     )(
       raw
@@ -329,7 +307,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     decoding("queue", "queue entry") {
       val recorded = query(
         c,
-        s"SELECT run_id, started_at, holder FROM $attempts WHERE entry_id = ? ORDER BY attempt",
+        Sql.queueAttemptsOf(t),
         row.id
       )(a => Attempt(RunId(a.getString(1)), instant(a, 2), a.getString(3)))
       QueueEntry.stored(
@@ -386,19 +364,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       long(18)
     )
 
-  /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
-  private val LiveSibling: String =
-    s"""SELECT 1 FROM $entries o WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
-       |  AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?""".stripMargin
-
-  /** The head of `e`'s thread, as a correlated subquery. */
-  private val HeadOf: String =
-    s"SELECT h.entry_id FROM $entries h WHERE h.thread_id = e.thread_id AND h.state = 'open' ORDER BY $RunOrder LIMIT 1"
-
 private[postgres] object PostgresRunQueue:
-
-  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
-  val RunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
 
   /** How many candidate heads one `take` locks and tries. */
   val Candidates: Int = 16

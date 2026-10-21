@@ -105,7 +105,7 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     statements.size should be > 30
     // a set-returning function in FROM (the run-id lookup's `unnest` of its parameter) reads no table, nor does a
     // lateral join: its subquery names its own
-    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b)(?!unnest\()(?!LATERAL\b)([^\s(]+)""".r
+    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b|SKIP\b|OF\b)(?!unnest\()(?!LATERAL\b)([^\s(]+)""".r
     statements.foreach { sql =>
       tableRef.findAllMatchIn(sql).map(_.group(1)).foreach { name =>
         withClue(sql)(name should startWith("\"agents\".checkpoint_"))
