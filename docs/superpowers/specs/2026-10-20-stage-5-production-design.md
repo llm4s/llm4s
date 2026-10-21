@@ -316,7 +316,9 @@ the load that names it, with an error naming the module.
 A `RunQueue` SPI and a submission API in `org.llm4s.agent.service`:
 
 - **Submit** a start, a resume (answers) or a recover for a thread, with the agent's id, the tenant, a busy-thread
-  policy (W3) and optional trace context (O1). It returns a ticket naming the entry and its queue position; the
+  policy (W3), optional trace context (O1) and an optional caller-supplied submission key. A submission key is
+  unique per tenant and looked up or inserted atomically, so a caller that retries a submit whose answer it lost (a
+  dropped response, an ambiguous timeout) gets the existing ticket rather than a second entry. It returns a ticket naming the entry and its queue position; the
   entry records each attempt's `RunId` as it starts (rule 4). `RunConfig.runId` already lets the worker choose
   each attempt's id.
 - **Entries** are durable, per thread FIFO except for `Interrupt` entries (rule 5), with a lease (taken, renewed,
@@ -356,7 +358,10 @@ An `AgentWorker` that runs queued runs on a `GraphRuntime`:
   queue lease.
 - **Recovery**: a crashed worker's entries come back when their leases expire, and the worker that takes one
   recovers its thread (rule 4), so a run whose machine died continues without user code. The claim and the lease
-  expire on the same database clock; a thread whose claim is still live is left for a later attempt.
+  expire on the same database clock. A worker checks the thread's claim **before** recording an attempt: a thread
+  whose claim is still live is left without recording one, so deferring to a live run never spends `maxAttempts`.
+  A worker renews a run's queue lease with its claim, and one that fails to renew the lease cancels the run (W3)
+  rather than run on beside the entry's next attempt.
 - **Retention**: the worker runs S4's sweep on a schedule, one instance at a time.
 - **Drain**: on shutdown it stops taking entries and lets running runs reach a suspension or their end within a grace
   period, then cancels the rest. A cancelled run's claim and lease are released only once the run has actually
