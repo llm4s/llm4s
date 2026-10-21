@@ -129,12 +129,18 @@ class UUIDToolSpec extends AnyFlatSpec with Matchers {
     generate(ujson.Obj("count" -> 3.0)) should have size 3
   }
 
-  it should "use the default count of one when count is not a whole number or not a number" in {
-    // The handler falls back to the documented default instead of reporting a type mismatch.
-    generate(ujson.Obj("count" -> 3.5)) should have size 1
-    generate(ujson.Obj("count" -> "5")) should have size 1
-    generate(ujson.Obj("count" -> ujson.Null)) should have size 1
-    generate(ujson.Obj("count" -> 2147483648.0)) should have size 1
+  it should "refuse a count that is not a whole number in the Int range, instead of generating one UUID (#1514)" in {
+    Seq[ujson.Value](3.5, "5", ujson.Null, 2147483648.0, true, ujson.Arr(2)).foreach { count =>
+      withClue(s"count = $count: ") {
+        val error =
+          tool.execute(ujson.Obj("count" -> count)).fold(identity, json => fail(s"Expected an error, got $json"))
+        error.toString should include("count")
+      }
+    }
+  }
+
+  it should "generate one UUID when count is absent" in {
+    generate(ujson.Obj("format" -> "compact")) should have size 1
   }
 
   it should "return the number of UUIDs asked for in the requested format when both parameters are given" in {
