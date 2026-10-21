@@ -18,7 +18,8 @@ This section will guide you through:
 5. **[Ollama Quick Start](ollama-quickstart)** - Local LLM development (no API keys needed)
 6. **[Gradle Integration](gradle)** - Use LLM4S from a Gradle (Java or Kotlin) build
 7. **[Scala CLI Quick Start](scala-cli)** - A first LLM call from a single file, with no sbt project
-8. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
+8. **[Maven Quick Start](maven)** - A complete `pom.xml` that runs a first call from Java with `llm4s-java-api`
+9. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
    and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`
    {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
 

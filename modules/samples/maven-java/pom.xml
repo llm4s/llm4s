@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A standalone Maven project that calls llm4s from Java through llm4s-java-api. See README.md and
+  docs/getting-started/maven.md.
+
+  Build against a release with -Dllm4s.version=0.5.1 (or later). The default is the locally built snapshot that
+  `sbt publishM2` puts in your local Maven repository; CI builds the sample against it, so the sample cannot drift
+  from the API on main.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.llm4s.samples</groupId>
+  <artifactId>llm4s-maven-sample</artifactId>
+  <version>1</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <!-- llm4s-java-api is JDK 21 bytecode, so the sample compiles for 21 whatever JDK runs Maven. -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <llm4s.version>0.1.0-SNAPSHOT</llm4s.version>
+    <!-- The Scala 3 library the llm4s modules were built with. -->
+    <scala3.version>3.7.1</scala3.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Pin scala3-library_3 by name. Scala 3 runs on the Scala 2.13 scala-library, which has no 3.x release,
+           so never pin the whole org.scala-lang group. -->
+      <dependency>
+        <groupId>org.scala-lang</groupId>
+        <artifactId>scala3-library_3</artifactId>
+        <version>${scala3.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- Scala 3 only, and Maven does not add the cross-version suffix: write _3 yourself. The POM brings
+         llm4s-core, llm4s-agent and the provider modules, so nothing else is declared here. -->
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-java-api_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+
+    <!-- llm4s logs through SLF4J and ships no logging backend; without one SLF4J prints a warning and drops the logs. -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.5.34</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>enforce-convergence</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <!-- Fails when two dependencies ask for different versions of the same library, instead of
+                     letting Maven's nearest-wins rule pick one silently. -->
+                <dependencyConvergence/>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <mainClass>org.llm4s.samples.HelloLLM4S</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
