@@ -169,7 +169,7 @@ samples' default is `llama3:latest`, which needs `ollama pull llama3` once, or `
 JVM's, not LLM4S's), or the doctor reports:
 
 ```text
-Java 17 is too old: LLM4S needs 21 or newer
+Java <version> is too old: LLM4S needs 21 or newer
 ```
 
 **Cause.** Every LLM4S artifact is compiled for JDK 21 and needs at least that. `java -version`, `JAVA_HOME`, and the
