@@ -208,7 +208,9 @@ cases against it.
    worker: its owner calls `recover`, as today. (My call, from the builder check: it is what keeps a cancel
    sticking, rule 4's idempotency surviving pruning, and ticket waiters answered.)
 5. **One run per thread.** The claim, not the queue, decides who runs a thread. Several queue entries for one
-   thread run in submission order, one at a time.
+   thread run one at a time, in submission order, with one exception: an `Interrupt` entry (W3) goes ahead of the
+   thread's queued entries, which keep their order behind it; of two `Interrupt` entries, the later one goes first
+   and the earlier is closed `interrupted` before it runs.
 6. **No new infrastructure** beyond Postgres, and no JDBC or HTTP dependency in `llm4s-agent` or core.
 7. **The in-memory and SQLite stores implement every SPI addition** and pass the same contract cases, so a single
    machine and a test keep working with no database server.
@@ -310,8 +312,11 @@ A `RunQueue` SPI and a submission API in `org.llm4s.agent.service`:
   policy (W3) and optional trace context (O1). It returns a ticket naming the entry and its queue position; the
   entry records each attempt's `RunId` as it starts (rule 4). `RunConfig.runId` already lets the worker choose
   each attempt's id.
-- **Entries** are durable, per thread FIFO, with a lease (taken, renewed, expired), attempts and a terminal state
-  (done, failed, cancelled). Taking an entry is skip-locked in Postgres so workers do not contend.
+- **Entries** are durable, per thread FIFO except for `Interrupt` entries (rule 5), with a lease (taken, renewed,
+  expired), attempts and a terminal state (`done`, `failed`, `cancelled`, `interrupted`). Attempts are bounded
+  (`maxAttempts`, a default named in the slice): an entry whose attempts run out is closed `failed` with a typed
+  reason (a dead letter), so a poison entry that crashes its worker before its first commit cannot keep an open entry
+  and a growing attempt list for ever, and the run-id lookup (rule 4) takes at most `maxAttempts` ids. Taking an entry is skip-locked in Postgres so workers do not contend.
 - **Wait and follow**: a caller waits for a ticket's terminal state or follows its run's events from any machine
   (through `awaitEventsAfter`).
 - **Entry retention**: a terminal entry is kept for a ticket lifetime (configurable, a default named in the slice),
