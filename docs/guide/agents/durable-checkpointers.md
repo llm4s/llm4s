@@ -551,6 +551,58 @@ A release that changes neither the store's schema nor the checkpoint format can 
 release that changes either needs every instance stopped before the first new one starts: an old instance that meets
 the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing.
 
+## Choosing the store in application.conf
+
+`CheckpointerConfigLoader.open()` (`org.llm4s.config`, in `llm4s-agent`) opens the store `llm4s.agent.checkpointer.kind`
+names, and `RuntimeConfigLoader.runtime(checkpointer)` builds a `GraphRuntime` over it with the `ClaimPolicy` and
+`WatchPolicy` from `llm4s.agent.runtime`. Changing store is then a dependency and a setting, with no code:
+
+```hocon
+llm4s.agent {
+  checkpointer {
+    kind = "postgres"                 # memory (the default) | sqlite | postgres; or LLM4S_CHECKPOINTER
+    postgres {
+      url    = "jdbc:postgresql://db:5432/app"   # or LLM4S_CHECKPOINTER_POSTGRES_URL
+      user   = "agents"                          # or LLM4S_CHECKPOINTER_POSTGRES_USER
+      # password: LLM4S_CHECKPOINTER_POSTGRES_PASSWORD
+      schema = "agents"
+      callTimeout = 5 seconds
+      connectionTimeout = 5 seconds
+      maxPoolSize = 10
+    }
+    sqlite {
+      path = "/var/lib/app/threads.db"           # or LLM4S_CHECKPOINTER_SQLITE_PATH
+      busyTimeout = 5 seconds
+    }
+  }
+  runtime {
+    claims { ttl = 30 seconds, renewEvery = 10 seconds }   # label: LLM4S_RUNTIME_LABEL
+    watch  { enabled = true, pollInterval = 250 milliseconds }
+  }
+}
+```
+
+```scala
+import org.llm4s.config.{ CheckpointerConfigLoader, RuntimeConfigLoader }
+
+for
+  store   <- CheckpointerConfigLoader.open()            // a CheckpointStore: close it when the application stops
+  runtime <- RuntimeConfigLoader.runtime(store.checkpointer)
+  agent   <- Agent.builder("assistant", client).withRuntime(runtime).build()
+yield (store, agent)
+```
+
+- **`memory`** is built into `llm4s-agent` and is the default; **`sqlite`** needs `llm4s-agent-checkpoint-sqlite` and
+  **`postgres`** `llm4s-agent-checkpoint-postgres`. Each store module ships its block's defaults in its own
+  `reference.conf`. A kind whose module is not on the classpath fails only `open`, with an error naming the module.
+- **Only the selected kind's block is read**, so a half-written `postgres` block does not matter while `kind = sqlite`.
+- **Credentials stay out of logs.** No setting's value reaches a log line or an error; set the password through its
+  variable rather than in a checked-in file.
+- **A store of your own** registers a `CheckpointerBackend` (`org.llm4s.agent.graph.spi`): a `class` with a public
+  no-arg constructor, listed in `META-INF/services/org.llm4s.agent.graph.spi.CheckpointerBackend`, that opens its store
+  from its block `llm4s.agent.checkpointer.<kind>`, handed to it as a `CheckpointerSettings`.
+  `CheckpointerBackends.of(...)` registers backends explicitly, for a shaded jar whose services files were lost.
+
 ## Checkpoint history, fork and updateState
 
 A store keeps every checkpoint a thread's runs commit, not only the latest. `history` lists them newest first, a
