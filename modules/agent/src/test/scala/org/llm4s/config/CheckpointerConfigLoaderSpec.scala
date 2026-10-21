@@ -8,7 +8,7 @@ import org.llm4s.agent.graph.spi.{
   CheckpointerSettings,
   FixtureCheckpointerBackend
 }
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -98,5 +98,57 @@ class CheckpointerConfigLoaderSpec extends AnyFlatSpec with Matchers with Either
       def open(settings: CheckpointerSettings): Result[CheckpointStore] = throw new IllegalStateException("bad")
     open("llm4s.agent.checkpointer.kind = boom", CheckpointerBackends.of(throwing)).left.value.message should
       include("IllegalStateException: bad")
+  }
+
+  it should "be reported, not thrown, when it throws a LinkageError (a stale or half-present jar)" in {
+    val stale = new CheckpointerBackend:
+      val kind = "stale"
+      def open(settings: CheckpointerSettings): Result[CheckpointStore] =
+        throw new NoClassDefFoundError("com/zaxxer/hikari/HikariConfig")
+    open("llm4s.agent.checkpointer.kind = stale", CheckpointerBackends.of(stale)).left.value.message should
+      include("NoClassDefFoundError")
+  }
+
+  /** A block with a password and a URL carrying another; what a driver might echo back. */
+  private def SecretBlock: String =
+    """llm4s.agent.checkpointer { kind = leaky, leaky { url = "jdbc:x://db/app?password=urlpw", password = "hunter2", schema = "plain" } }"""
+
+  private def leaky(fail: CheckpointerSettings => Result[CheckpointStore]) = new CheckpointerBackend:
+    val kind                                                          = "leaky"
+    def open(settings: CheckpointerSettings): Result[CheckpointStore] = fail(settings)
+
+  "A secret in what a backend throws" should "be redacted" in {
+    val error = open(
+      SecretBlock,
+      CheckpointerBackends.of(leaky(_ => throw new IllegalStateException("cannot use hunter2 or urlpw")))
+    ).left.value
+    error.message should include("<redacted>")
+    (error.message should not).include("hunter2")
+    (error.message should not).include("urlpw")
+  }
+
+  "A secret in the error a backend returns" should "never leave in its message, context or cause" in {
+    val inMessage = open(
+      SecretBlock,
+      CheckpointerBackends.of(leaky(_ => Left(ProcessingError("open", "bad url jdbc:x://db/app?password=urlpw"))))
+    ).left.value
+    inMessage shouldBe a[ConfigurationError]
+    (inMessage.formatted should not).include("urlpw")
+
+    val inCause = open(
+      SecretBlock,
+      CheckpointerBackends.of(
+        leaky(_ =>
+          Left(ProcessingError("open", "failed", Some(new RuntimeException("wrapped", new Exception("hunter2")))))
+        )
+      )
+    ).left.value
+    inCause shouldBe a[ConfigurationError]
+    (inCause.formatted should not).include("hunter2")
+  }
+
+  "An error that carries no secret" should "be returned as the backend gave it" in {
+    val original = ProcessingError("open", "the plain schema is locked")
+    open(SecretBlock, CheckpointerBackends.of(leaky(_ => Left(original)))).left.value shouldBe original
   }
 }

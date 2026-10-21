@@ -4,7 +4,7 @@ package org.llm4s.config
 import com.typesafe.config.{ ConfigObject, ConfigRenderOptions, ConfigUtil, ConfigValue, ConfigValueType }
 import org.llm4s.agent.graph.spi.{ CheckpointStore, CheckpointerBackends, CheckpointerSettings }
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 import pureconfig.ConfigSource
@@ -67,16 +67,45 @@ object CheckpointerConfigLoader:
       case None => Left(missingBackend(settings.kind, backends))
       case Some(backend) =>
         logger.info(s"Opening the '${settings.kind}' checkpoint store (${backend.getClass.getName})")
-        try backend.open(settings)
+        try backend.open(settings).left.map(scrubbed(settings, _))
         catch
-          case NonFatal(e) =>
-            Left(
-              ConfigurationError(
-                s"The '${settings.kind}' checkpoint store backend (${backend.getClass.getName}) failed to open: " +
-                  s"${e.getClass.getName}: ${Option(e.getMessage).getOrElse("")}",
-                List(s"$Path.kind")
-              )
-            )
+          // A stale or half-present backend jar throws a LinkageError, which NonFatal lets through.
+          case e: LinkageError => Left(thrown(settings, backend.getClass.getName, e))
+          case NonFatal(e)     => Left(thrown(settings, backend.getClass.getName, e))
+
+  /**
+   * `error`, unless its text - message, formatted context, or the message of any exception it carries - contains one
+   * of the block's sensitive values (`CheckpointerSettings.sensitiveValues`) (a driver that echoes the JDBC URL, say).
+   * Then a `ConfigurationError` with that text redacted and no cause, so no secret leaves through `message`,
+   * `formatted` or a logged stack trace.
+   */
+  private def scrubbed(settings: CheckpointerSettings, error: LLMError): LLMError =
+    val secrets = settings.sensitiveValues
+    val texts   = Vector(error.message, error.formatted) ++ causes(error).flatMap(c => Option(c.getMessage))
+    if secrets.isEmpty || !texts.exists(t => secrets.exists(t.contains)) then error
+    else
+      ConfigurationError(
+        s"The '${settings.kind}' checkpoint store failed to open: ${settings.redact(error.message)}",
+        List(s"$Path.${settings.kind}")
+      )
+
+  /** The exceptions `error` carries, with their causes. */
+  private def causes(error: LLMError): Vector[Throwable] =
+    error.productIterator.toVector
+      .flatMap {
+        case t: Throwable       => Vector(t)
+        case Some(t: Throwable) => Vector(t)
+        case _                  => Vector.empty
+      }
+      .flatMap(t => Iterator.iterate(t)(_.getCause).takeWhile(_ != null).take(16).toVector)
+
+  /** What a backend's thrown `e` is reported as: its class and its message, redacted, with no cause. */
+  private def thrown(settings: CheckpointerSettings, backend: String, e: Throwable): ConfigurationError =
+    ConfigurationError(
+      s"The '${settings.kind}' checkpoint store backend ($backend) failed to open: " +
+        s"${e.getClass.getName}: ${settings.redact(Option(e.getMessage).getOrElse(""))}",
+      List(s"$Path.kind")
+    )
 
   private[llm4s] def settings(source: ConfigSource): Result[CheckpointerSettings] =
     source

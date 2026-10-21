@@ -60,12 +60,37 @@ final class CheckpointerSettings private (val kind: String, val extras: Map[Stri
       case Some(value) =>
         Try(parse(value)).toEither.left.map(_ => ConfigurationError(s"${key(name)} must be $what", List(key(name))))
 
+  /**
+   * The values in this block that may hold a secret, longest first: those of keys whose name mentions a password,
+   * secret, token, credential or key, or a URL, URI or DSN (which can carry credentials in its parameters), and the
+   * value of each `password=` or `secret=`-like parameter inside any value.
+   */
+  def sensitiveValues: Vector[String] =
+    val byKey = extras.collect { case (k, v) if CheckpointerSettings.SensitiveKey.matches(k) && !v.isBlank => v }
+    val parameters =
+      extras.values.flatMap(v => CheckpointerSettings.SensitiveParameter.findAllMatchIn(v).map(_.group(1)))
+    (byKey ++ parameters).filter(_.nonEmpty).toVector.distinct.sortBy(-_.length)
+
+  /** `text` with every sensitive value (`sensitiveValues`) replaced by `<redacted>`. */
+  def redact(text: String): String =
+    sensitiveValues.foldLeft(text)((t, secret) => t.replace(secret, CheckpointerSettings.Redacted))
+
   override def toString: String = s"CheckpointerSettings($kind, keys = ${extras.keys.toVector.sorted.mkString(", ")})"
 
 object CheckpointerSettings:
 
   /** The configuration path of the store settings. */
   val Path: String = "llm4s.agent.checkpointer"
+
+  private val Redacted = "<redacted>"
+
+  /** A key whose last segment names a secret or a locator that can carry one. */
+  private val SensitiveKey =
+    "(?i)(?:.*\\.)?[^.]*(?:password|passwd|secret|token|credential|key|url|uri|dsn)[^.]*".r
+
+  /** A `name=value` parameter (in a URL query, a DSN) whose name says it is a secret. */
+  private val SensitiveParameter =
+    "(?i)(?:password|passwd|pwd|secret|token|apikey|api_key|key)=([^&;\\s]+)".r
 
   /** The settings for `kind` (lower-cased) from its block `extras`. */
   def apply(kind: String, extras: Map[String, String] = Map.empty): CheckpointerSettings =

@@ -36,6 +36,9 @@ object PostgresCheckpointerBackend:
   /** The `llm4s.agent.checkpointer.kind` this backend serves. */
   val Kind: String = "postgres"
 
+  /** A pgjdbc URL parameter that carries a credential (`password`, `sslpassword`), or user info before the host. */
+  private val CredentialParameter = "(?i)[?&;](?:ssl)?password=|^jdbc:postgresql://[^/?]*@".r
+
   /** What the store is opened with; `toString` leaves out the password. */
   final private[postgres] case class Connection(
     url: String,
@@ -50,14 +53,23 @@ object PostgresCheckpointerBackend:
     val d = PostgresCheckpointerConfig.default
     for
       url <- settings.string("url", Some("LLM4S_CHECKPOINTER_POSTGRES_URL")).flatMap { url =>
-        Either.cond(
-          url.startsWith("jdbc:postgresql:"),
-          url,
-          ConfigurationError(
-            s"${settings.key("url")} must be a jdbc:postgresql://host:port/database URL",
-            List(settings.key("url"))
+        if !url.startsWith("jdbc:postgresql:") then
+          Left(
+            ConfigurationError(
+              s"${settings.key("url")} must be a jdbc:postgresql://host:port/database URL",
+              List(settings.key("url"))
+            )
           )
-        )
+        else if CredentialParameter.findFirstIn(url).isDefined then
+          // Drivers echo the URL in their errors far more readily than a password: keep credentials out of it.
+          Left(
+            ConfigurationError(
+              s"${settings.key("url")} must not carry a password: set ${settings.key("password")} " +
+                "(LLM4S_CHECKPOINTER_POSTGRES_PASSWORD) instead",
+              List(settings.key("url"))
+            )
+          )
+        else Right(url)
       }
       user              <- settings.string("user", Some("LLM4S_CHECKPOINTER_POSTGRES_USER"))
       callTimeout       <- settings.duration("callTimeout", d.callTimeout)

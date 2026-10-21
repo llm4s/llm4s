@@ -75,6 +75,22 @@ class PostgresCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eit
     error.message should include("jdbc:postgresql://")
   }
 
+  "A url that carries a credential" should "be refused, without showing it" in {
+    Vector(
+      "jdbc:postgresql://db:5432/app?password=urlpw",
+      "jdbc:postgresql://db:5432/app?ssl=true&sslpassword=urlpw",
+      "jdbc:postgresql://agents:urlpw@db:5432/app"
+    ).foreach { url =>
+      val error = connection("", Env + ("LLM4S_CHECKPOINTER_POSTGRES_URL" -> url)).left.value
+      withClue(url) {
+        error.message should include("LLM4S_CHECKPOINTER_POSTGRES_PASSWORD")
+        (error.message should not).include("urlpw")
+      }
+    }
+    connection("", Env + ("LLM4S_CHECKPOINTER_POSTGRES_URL" -> "jdbc:postgresql://db/app?ssl=true")).isRight shouldBe
+      true
+  }
+
   "Settings the store refuses" should "fail the load naming the block" in {
     connection("llm4s.agent.checkpointer.postgres.schema = Agents").left.value.message should
       (include("llm4s.agent.checkpointer.postgres").and(include("schema")))

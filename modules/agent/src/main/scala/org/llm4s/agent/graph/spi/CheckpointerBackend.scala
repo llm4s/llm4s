@@ -46,7 +46,7 @@ trait CheckpointerBackend:
    * Opens the store `settings` describes.
    *
    * Return a `Left` rather than throwing - a missing setting, a value the store refuses, a database that cannot be
-   * reached - naming the key at fault ([[CheckpointerSettings.key]]). Never put a setting's value in an error or a log
+   * reached - naming the key at fault (`CheckpointerSettings.key`). Never put a setting's value in an error or a log
    * line: the block may hold a password. A thrown exception is caught and reported, but loses what went wrong.
    */
   def open(settings: CheckpointerSettings): Result[CheckpointStore]

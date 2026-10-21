@@ -14,8 +14,7 @@ import scala.util.Try
 
 /**
  * Loads a [[org.llm4s.agent.graph.GraphRuntime GraphRuntime]]'s policies from `llm4s.agent.runtime` at the
- * application's edge (design 4.54): how its runs hold their threads' claims ([[org.llm4s.agent.graph.ClaimPolicy
- * ClaimPolicy]], `claims`) and how its subscriptions watch the store for commits made elsewhere
+ * application's edge (design 4.54): how its runs hold their threads' claims (`ClaimPolicy`, `claims`) and how its subscriptions watch the store for commits made elsewhere
  * ([[org.llm4s.agent.graph.WatchPolicy WatchPolicy]], `watch`). `llm4s-agent`'s `reference.conf` holds the defaults,
  * which are the policies' own, and binds `claims.label` to `LLM4S_RUNTIME_LABEL`, so each instance of a service can
  * name itself in the logs (a pod name, say).
