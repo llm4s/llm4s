@@ -85,8 +85,8 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
       t.queueAttempts
     ).foreach(_ should startWith("\"agents\".checkpoint_"))
     // the run queue's tables (version 3) are in the schema too
-    PostgresSchema.steps(2)(t).filter(_.startsWith("CREATE")).foreach { statement =>
-      withClue(statement)(statement should include("\"agents\".checkpoint_"))
+    PostgresSchema.steps(2)(t).filter(s => s.startsWith("CREATE") && !s.startsWith("CREATE FUNCTION pg_temp")).foreach {
+      statement => withClue(statement)(statement should include("\"agents\".checkpoint_"))
     }
     val ddl = PostgresSchema.steps(0)(t)
     ddl.filter(_.startsWith("CREATE TABLE")) should have size 5

@@ -1159,11 +1159,15 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token).withRunId("run-a")))).value
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c2", Some("c1"), token).withRunId("run-b")))).value
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c3", Some("c2"), token).withRunId("run-c")))).value
     first.release(thread, token).value
     first.close()
     asVersionEight(db)
+    // one damaged row must not stop the file opening: it keeps no run id
+    exec(db, "UPDATE llm4s_checkpoint_history SET checkpoint_json = 'not json' WHERE checkpoint_id = 'c3'")
 
     val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE run_id IS NULL")(_.getInt(1)) shouldBe 1
     scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
     reopened.latestOfRuns(thread, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
     reopened.latestOfRuns(thread, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")

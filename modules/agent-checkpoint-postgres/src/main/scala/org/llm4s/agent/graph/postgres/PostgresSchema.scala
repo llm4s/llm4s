@@ -105,7 +105,7 @@ private[postgres] object PostgresSchema:
 
   /**
    * Version 3: the run queue (Stage 5 slice W1, design 4.55). Every history row gets the run that committed it
-   * (`run_id`), backfilled from its JSON, indexed by `(thread_id, run_id, position)` for the run-id lookup.
+   * (`run_id`), backfilled from its JSON (NULL for a row whose JSON cannot be read), indexed by `(thread_id, run_id, position)` for the run-id lookup.
    *
    * `checkpoint_queue_entries` holds one row per entry: its id (from `checkpoint_queue_entry_ids`, so ids follow
    * submission order and are never reused, and the sequence's last value tells a reclaimed id from one never issued),
@@ -120,7 +120,15 @@ private[postgres] object PostgresSchema:
    */
   private def addRunQueue(t: Tables): Vector[String] = Vector(
     s"ALTER TABLE ${t.history} ADD COLUMN run_id text",
-    s"UPDATE ${t.history} SET run_id = checkpoint_json::jsonb ->> 'runId'",
+    // a row whose JSON cannot be read keeps no run id: its reads already fail as undecodable, and the schema still opens
+    """CREATE FUNCTION pg_temp.llm4s_run_id(checkpoint text) RETURNS text LANGUAGE plpgsql AS $$
+      |BEGIN
+      |  RETURN CASE WHEN jsonb_typeof(checkpoint::jsonb -> 'runId') = 'string' THEN checkpoint::jsonb ->> 'runId' END;
+      |EXCEPTION WHEN others THEN
+      |  RETURN NULL;
+      |END $$""".stripMargin,
+    s"UPDATE ${t.history} SET run_id = pg_temp.llm4s_run_id(checkpoint_json)",
+    "DROP FUNCTION pg_temp.llm4s_run_id(text)",
     s"CREATE INDEX checkpoint_history_run ON ${t.history} (thread_id, run_id, position)",
     s"CREATE SEQUENCE ${t.queueEntryIds} AS bigint MINVALUE 1 NO CYCLE",
     s"CREATE SEQUENCE ${t.queueLeaseTokens} AS bigint MINVALUE 1 NO CYCLE",

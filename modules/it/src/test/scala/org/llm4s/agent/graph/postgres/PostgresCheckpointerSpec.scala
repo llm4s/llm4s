@@ -256,11 +256,17 @@ class PostgresCheckpointerSpec
     val token  = store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
     store.commit(t, Commit(token, Some(checkpoint("c1", None, t).withRunId("run-a")))).value
     store.commit(t, Commit(token, Some(checkpoint("c2", Some("c1"), t).withRunId("run-b")))).value
+    store.commit(t, Commit(token, Some(checkpoint("c3", Some("c2"), t).withRunId("run-c")))).value
     store.close()
     asVersionTwo(config)
+    val q = s""""${config.schema}""""
+    // one damaged row must not stop the schema opening: it keeps no run id
+    PgCheckpointerDb.execute(
+      s"UPDATE $q.checkpoint_history SET checkpoint_json = 'not json' WHERE checkpoint_id = 'c3'"
+    )
 
     val reopened = PgCheckpointerDb.store(config)
-    val q        = s""""${config.schema}""""
+    PgCheckpointerDb.scalar(s"SELECT COUNT(*) FROM $q.checkpoint_history WHERE run_id IS NULL")(_.getInt(1)) shouldBe 1
     PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
     reopened.latestOfRuns(t, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
     reopened.latestOfRuns(t, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")

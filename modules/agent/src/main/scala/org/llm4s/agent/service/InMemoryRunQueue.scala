@@ -52,6 +52,13 @@ final class InMemoryRunQueue private[agent] (
   private var lastId    = 0L
   private var lastLease = 0L
 
+  /** Each thread's open entries, and the run ids every held entry of it recorded: so no call scans every entry. */
+  private val openByThread = mutable.Map.empty[ThreadId, mutable.Set[Long]]
+  private val attemptRuns  = mutable.Map.empty[ThreadId, mutable.Set[RunId]]
+
+  /** Closed entries by when they closed, then id: what `reclaim` takes from the front of. */
+  private val closedOrder = mutable.TreeSet.empty[(Instant, Long)]
+
   /** Signalled, under `lock`, whenever an entry closes. */
   private val closed = lock.newCondition()
 
@@ -61,7 +68,7 @@ final class InMemoryRunQueue private[agent] (
     (row.attempts.isEmpty, row.policy != BusyThreadPolicy.Interrupt, row.id)
 
   private def queueOf(threadId: ThreadId): Vector[Row] =
-    rows.valuesIterator.filter(r => r.open && r.threadId == threadId).toVector.sortBy(runOrder)
+    openByThread.get(threadId).fold(Vector.empty[Row])(_.toVector.map(rows).sortBy(runOrder))
 
   private def view(row: Row): QueueEntry =
     val position = Option.when(row.open)(queueOf(row.threadId).indexWhere(_.id == row.id))
@@ -125,6 +132,7 @@ final class InMemoryRunQueue private[agent] (
             None
           )
           rows.update(id, row)
+          openByThread.getOrElseUpdate(row.threadId, mutable.Set.empty) += id
           submission.submissionKey.foreach(k => keys.update(tenant -> k.value, id))
           Right(Ticket(EntryId.unsafe(id), submission.threadId, view(row).position, existing = false))
   }
@@ -165,13 +173,9 @@ final class InMemoryRunQueue private[agent] (
 
   def take(request: TakeRequest): Result[Option[LeasedEntry]] = withLock(lock) {
     val now = clock.instant()
-    val heads = rows.valuesIterator
-      .filter(_.open)
-      .toVector
-      .groupBy(_.threadId)
-      .valuesIterator
-      .flatMap { queue =>
-        val ordered = queue.sortBy(runOrder)
+    val heads = openByThread.keysIterator
+      .flatMap { thread =>
+        val ordered = queueOf(thread)
         val head    = ordered.head
         // one run per thread: no other entry of the thread holds a live lease
         Option.when(!live(head, now) && !ordered.tail.exists(live(_, now)))(head)
@@ -181,9 +185,8 @@ final class InMemoryRunQueue private[agent] (
       case None       => Right(None)
       case Some(head) =>
         // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
-        rows.valuesIterator
-          .filter(r => r.open && r.threadId == head.threadId && r.id != head.id && r.lease.isDefined)
-          .toVector
+        queueOf(head.threadId)
+          .filter(r => r.id != head.id && r.lease.isDefined)
           .foreach(r => rows.update(r.id, r.copy(lease = None)))
         lastLease += 1
         val held = Held(request.holder, lastLease, now.plusNanos(request.ttl.toNanos))
@@ -228,7 +231,7 @@ final class InMemoryRunQueue private[agent] (
     leased(lease).flatMap { row =>
       // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
       val used = runCommitted(row.threadId, runId) ||
-        rows.valuesIterator.exists(r => r.threadId == row.threadId && r.attempts.exists(_.runId == runId))
+        attemptRuns.get(row.threadId).exists(_.contains(runId))
       if used then
         Left(
           ValidationError(
@@ -242,6 +245,7 @@ final class InMemoryRunQueue private[agent] (
       else
         val recorded = row.copy(attempts = row.attempts :+ Attempt(runId, clock.instant(), lease.holder))
         rows.update(row.id, recorded)
+        attemptRuns.getOrElseUpdate(row.threadId, mutable.Set.empty) += runId
         Right(AttemptStart.Recorded(view(recorded)))
     }
   }
@@ -254,18 +258,24 @@ final class InMemoryRunQueue private[agent] (
     val done =
       row.copy(lease = None, outcome = Some(outcome), closedAt = Some(at), closedAtSeq = Some(lastEvent(row.threadId)))
     rows.update(row.id, done)
+    closedOrder += (at -> row.id)
+    openByThread.get(row.threadId).foreach { open =>
+      open -= row.id
+      if open.isEmpty then openByThread.remove(row.threadId)
+    }
     closed.signalAll()
     done
 
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int] = withLock(lock) {
-    val cutoff = clock.instant().minusNanos(ticketLifetime.toNanos)
-    val expired = rows.valuesIterator
-      .filter(r => r.closedAt.exists(at => !at.isAfter(cutoff)))
-      .toVector
-      .sortBy(r => (r.closedAt.get, r.id))
-      .take(math.max(limit, 0))
-    expired.foreach { r =>
+    val cutoff  = clock.instant().minusNanos(ticketLifetime.toNanos)
+    val expired = closedOrder.iterator.takeWhile((at, _) => !at.isAfter(cutoff)).take(math.max(limit, 0)).toVector
+    expired.map(_._2).flatMap(rows.get).foreach { r =>
       rows.remove(r.id)
+      closedOrder -= (r.closedAt.get -> r.id)
+      attemptRuns.get(r.threadId).foreach { runs =>
+        runs --= r.attempts.map(_.runId)
+        if runs.isEmpty then attemptRuns.remove(r.threadId)
+      }
       r.key.foreach(k => keys.remove(r.tenantId.map(_.value) -> k.value))
     }
     Right(expired.size)
@@ -273,13 +283,11 @@ final class InMemoryRunQueue private[agent] (
 
   /** Marks the thread's open entries as having outlived their thread: the checkpointer's `deleteThread`, under the lock. */
   private[agent] def threadDeleted(threadId: ThreadId): Unit =
-    rows.valuesIterator.filter(r => r.open && r.threadId == threadId).toVector.foreach { r =>
-      rows.update(r.id, r.copy(threadDeleted = true))
-    }
+    queueOf(threadId).foreach(r => rows.update(r.id, r.copy(threadDeleted = true)))
 
   /**
    * The runs whose newest checkpoint on `threadId` the checkpointer's `prune` keeps: every attempt of every open entry
    * of the thread (rule 4). Call under the lock.
    */
   private[agent] def keptRuns(threadId: ThreadId): Set[String] =
-    rows.valuesIterator.filter(r => r.open && r.threadId == threadId).flatMap(_.attempts.map(_.runId.value)).toSet
+    queueOf(threadId).iterator.flatMap(_.attempts.map(_.runId.value)).toSet

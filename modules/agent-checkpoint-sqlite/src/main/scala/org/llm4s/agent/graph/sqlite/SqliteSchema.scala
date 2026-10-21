@@ -85,15 +85,16 @@ private[sqlite] object SqliteSchema:
    */
   /**
    * Version 9: the run queue (design 4.55). Every history row gets the run that committed it (`run_id`), backfilled
-   * from its JSON, indexed by `(thread_id, run_id, position)` so the run-id lookup reads one index entry per run.
+   * from its JSON (NULL for a row whose JSON cannot be read, so one damaged row does not stop the file opening), indexed by `(thread_id, run_id, position)` so the run-id lookup reads one index entry per run.
    *
    * `llm4s_checkpoint_queue_entries` holds one row per entry: its id (`AUTOINCREMENT`, so an id is never reused, and
    * the meta table's `last_entry` the highest issued, which tells a reclaimed id from one never issued), thread, agent,
    * tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique while held -
    * its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
    * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
-   * (`open` or the outcome's), outcome JSON, close time, the thread's last event number at the close (`closed_seq`) and the trace context it carries (`trace_parent`). It is indexed
-   * by thread for the run order, by agent for `take`, and by close time for `reclaim`.
+   * (`open` or the outcome's), outcome JSON, close time, the thread's last event number at the close (`closed_seq`)
+   * and the trace context it carries (`trace_parent`). It is indexed by thread for the run order, by agent for `take`,
+   * and by close time for `reclaim`.
    * `llm4s_checkpoint_queue_attempts` holds `(entry_id, attempt)` with the attempt's thread, run id, start time and
    * holder, indexed by `(thread_id, run_id)` for `prune`'s evidence.
    */
@@ -102,7 +103,10 @@ private[sqlite] object SqliteSchema:
     statements(
       connection,
       "ALTER TABLE llm4s_checkpoint_history ADD COLUMN run_id TEXT",
-      "UPDATE llm4s_checkpoint_history SET run_id = json_extract(checkpoint_json, '$.runId')",
+      // a row whose JSON cannot be read keeps no run id: its reads already fail as undecodable, and the file still opens
+      """UPDATE llm4s_checkpoint_history SET run_id = CASE
+        |  WHEN json_valid(checkpoint_json) AND json_type(checkpoint_json, '$.runId') = 'text'
+        |  THEN json_extract(checkpoint_json, '$.runId') END""".stripMargin,
       "CREATE INDEX llm4s_checkpoint_history_run ON llm4s_checkpoint_history (thread_id, run_id, position)",
       "INSERT OR IGNORE INTO llm4s_checkpoint_meta (key, value) VALUES ('last_entry', 0)",
       "INSERT OR IGNORE INTO llm4s_checkpoint_meta (key, value) VALUES ('last_lease', 0)",

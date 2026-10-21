@@ -379,7 +379,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     tenant: Option[String],
     graphId: String,
     deleting: Boolean,
-    runId: String
+    runId: String,
+    /** Its place in the thread's history: increasing along the thread, also across a retraction. */
+    position: Long
   )
 
   final private case class ThreadRecord(
@@ -400,7 +402,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     /** The thread's metadata (design 4.52); a delete removes it. */
     metadata: ThreadMetadata = ThreadMetadata.empty,
     /** When the store last committed a checkpoint or metadata to the thread, by its clock; a delete removes it. */
-    updatedAt: Instant = Instant.EPOCH
+    updatedAt: Instant = Instant.EPOCH,
+    /** The newest checkpoint of each run in `history`: the run-id lookup's index (design 4.55). */
+    runs: Map[String, Stored] = Map.empty
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
     def isEmpty: Boolean = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty && metadata.isEmpty
@@ -427,7 +431,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     new org.llm4s.agent.service.InMemoryRunQueue(
       clock,
       lock,
-      (threadId, runId) => withLock(lock)(record(threadId).history.exists(_.runId == runId.value)),
+      (threadId, runId) => withLock(lock)(record(threadId).runs.contains(runId.value)),
       threadId => withLock(lock)(record(threadId).nextSeq - 1)
     )
 
@@ -475,6 +479,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
     GraphError.StaleClaim(threadId.value, token, current.claim.map(c => FencingToken(c.token)))
+
+  /** The newest checkpoint of each run in `history`, oldest first. */
+  private def indexed(history: Vector[Stored]): Map[String, Stored] = history.iterator.map(s => s.runId -> s).toMap
 
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
@@ -554,8 +561,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       val kept =
         if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
         else current.history
+      val position = current.history.lastOption.fold(0L)(_.position + 1)
       val added = commit.checkpoint.map { c =>
-        Stored(c.id, c.status, committedAt, Checkpoint.toJson(c), c.tenantId, c.snapshot.graphId, c.deleting, c.runId)
+        val json = Checkpoint.toJson(c)
+        Stored(c.id, c.status, committedAt, json, c.tenantId, c.snapshot.graphId, c.deleting, c.runId, position)
       }
       // released before this commit's own records are applied
       val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
@@ -565,6 +574,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         current.copy(
           effects = effects,
           history = kept ++ added,
+          runs = if commit.retractTurn then indexed(kept ++ added) else current.runs ++ added.map(s => s.runId -> s),
           pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
           events = current.events ++ stored,
           nextSeq = current.nextSeq + stored.size,
@@ -627,7 +637,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         val byPolicy = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
         val keptIds  = byPolicy.map(_.id).toSet
         // an open queue entry's admission evidence (rule 4): the newest checkpoint each of its runs committed
-        val evidence = runQueue.keptRuns(threadId).flatMap(run => current.history.findLast(_.runId == run).map(_.id))
+        val evidence = runQueue.keptRuns(threadId).flatMap(run => current.runs.get(run).map(_.id))
         val kept     = current.history.filter(c => keptIds(c.id) || evidence(c.id))
         val events   = current.events.map((seq, json, at) => (seq, upickle.default.read[EventRecord](json), at))
         // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
@@ -641,7 +651,12 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
         store(
           threadId,
-          current.copy(history = kept, events = current.events.filter(_._1 >= floor), earliestSeq = floor)
+          current.copy(
+            history = kept,
+            runs = indexed(kept),
+            events = current.events.filter(_._1 >= floor),
+            earliestSeq = floor
+          )
         )
       }.toResult
   }
@@ -681,8 +696,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
 
   def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]] = withLock(lock) {
-    val runs = runIds.map(_.value)
-    record(threadId).history.findLast(c => runs(c.runId)) match
+    val runs = record(threadId).runs
+    runIds.iterator.flatMap(run => runs.get(run.value)).maxByOption(_.position) match
       case None         => Right(None)
       case Some(stored) => Checkpoint.fromJson(stored.json).map(Some(_))
   }
@@ -721,6 +736,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
             threadId,
             current.copy(
               history = Vector.empty,
+              runs = Map.empty,
               pendingWrites = Vector.empty,
               claim = None,
               effects = Map.empty,
