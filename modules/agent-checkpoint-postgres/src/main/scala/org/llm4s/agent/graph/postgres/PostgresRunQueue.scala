@@ -67,8 +67,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             c,
             s"""INSERT INTO $entries
                |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-               | max_attempts, attempt_count, submitted_at, deletion_marker, state)
-               |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'open')""".stripMargin,
+               | max_attempts, attempt_count, submitted_at, thread_deleted, state)
+               |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, 'open')""".stripMargin,
             id,
             submission.threadId.value,
             submission.agentId.value,
@@ -79,8 +79,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             scope,
             submission.submissionKey.map(_.value),
             submission.maxAttempts,
-            micros(now),
-            deletionMarker(c, submission.threadId)
+            micros(now)
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
@@ -207,11 +206,17 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
     leased(c, lease).flatMap { row =>
+      // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
       val used =
-        query(c, s"SELECT 1 FROM $attempts WHERE entry_id = ? AND run_id = ?", row.id, runId.value)(_ => ()).nonEmpty
+        query(c, Sql.runIdUsed(t), row.threadId, runId.value, row.threadId, runId.value)(_.getBoolean(1)).head
       if used then
-        Left(ValidationError("runId", s"entry ${row.id} already recorded an attempt as run '${runId.value}'"))
-      else if deletionMarker(c, ThreadId(row.threadId)) > row.marker then
+        Left(
+          ValidationError(
+            "runId",
+            s"run '${runId.value}' already names a run or an attempt on thread '${row.threadId}'"
+          )
+        )
+      else if row.threadDeleted then
         closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), store.clockNow(c))
         view(c, rowOf(c, row.id).get).map(AttemptStart.ThreadDeleted(_))
       else if row.attempts >= row.maxAttempts then view(c, row).map(AttemptStart.Exhausted(_))
@@ -324,11 +329,6 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
     )
 
-  /** Where the event numbering of the thread now under the id starts: `deleteThread` moves it on. */
-  private def deletionMarker(c: Connection, threadId: ThreadId): Long =
-    query(c, s"SELECT first_seq FROM ${t.threads} WHERE thread_id = ?", threadId.value)(_.getLong(1)).headOption
-      .getOrElse(1L)
-
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
 
@@ -347,7 +347,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       r.getInt(9),
       r.getInt(10),
       instant(r, 11),
-      r.getLong(12),
+      r.getBoolean(12),
       Option(r.getString(13)),
       long(14),
       at(15),
@@ -369,7 +369,7 @@ private[postgres] object PostgresRunQueue:
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
-      |attempt_count, submitted_at, deletion_marker, lease_holder, lease_token, lease_expires_at, outcome_json,
+      |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
       |closed_at""".stripMargin
 
   final case class Raw(
@@ -384,7 +384,7 @@ private[postgres] object PostgresRunQueue:
     maxAttempts: Int,
     attempts: Int,
     submitted: Instant,
-    marker: Long,
+    threadDeleted: Boolean,
     leaseHolder: Option[String],
     leaseToken: Option[Long],
     leaseExpires: Option[Instant],

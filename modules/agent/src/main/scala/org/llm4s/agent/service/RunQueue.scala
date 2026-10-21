@@ -24,8 +24,7 @@ import scala.concurrent.duration.*
  *    submission under a held key is refused ([[QueueError.SubmissionKeyReused]]); refuse a `Reject` submission to a
  *    thread with an open entry with `GraphError.ThreadBusy` naming no holder; close every queued `Interrupt` entry of
  *    the thread that has recorded no attempt `Interrupted(by = the new entry)` when an `Interrupt` entry is submitted;
- *    issue entry ids in submission order, never reused; and record the thread's deletion marker - where the event
- *    numbering of the thread now under the id starts, which a `deleteThread` moves on - so a later delete is seen;
+ *    and issue entry ids in submission order, never reused;
  *  - '''order''' each thread's open entries (rule 5): an entry that has recorded an attempt first, then `Interrupt`
  *    entries, then the rest, each by id; only a thread's first entry in that order - its head - is ever taken, and only
  *    while no other entry of the thread holds a live lease;
@@ -35,10 +34,14 @@ import scala.concurrent.duration.*
  *    the entry's current one, expired or not, and every such call under another token is refused
  *    ([[QueueError.LeaseLost]]), as is any on a closed entry ([[QueueError.EntryClosed]]); taking is skip-locked
  *    where the store can, so workers do not contend for one entry;
- *  - '''record attempts''' durably before answering ([[recordAttempt]]): an attempt's `RunId` never reused within the
- *    entry, no attempt past `maxAttempts` ([[AttemptStart.Exhausted]]), and none after the thread was deleted - the
- *    deletion marker moved on since submission - closing the entry `Cancelled(ThreadDeleted)` instead
+ *  - '''record attempts''' durably before answering ([[recordAttempt]]): an attempt's `RunId` naming no other run on
+ *    the thread - no checkpoint of the thread's history and no attempt of any entry of the thread has it - so the
+ *    run-id lookup finds only the attempt's own run; no attempt past `maxAttempts` ([[AttemptStart.Exhausted]]); and
+ *    none once the thread was deleted while the entry was open, closing the entry `Cancelled(ThreadDeleted)` instead
  *    ([[AttemptStart.ThreadDeleted]]);
+ *  - '''learn of deletes''': the store's `Checkpointer.deleteThread` marks every open entry of the thread in the
+ *    delete's own transaction (or under its lock), whatever the deleted thread numbered, so no such entry runs on a new
+ *    thread of the id; an entry submitted after the delete is not marked;
  *  - '''keep the evidence''': while an entry is open, its store's `Checkpointer.prune` keeps the newest checkpoint each
  *    of the entry's recorded runs committed on its thread, so `latestOfRuns` never loses an admitted run;
  *  - '''close''' an entry once, with its [[EntryOutcome]] and the store's time, and keep it for the ticket lifetime;
@@ -104,8 +107,9 @@ trait RunQueue:
 
   /**
    * Records an attempt at `lease`'s entry running as `runId`, durably, before the caller touches the thread (rule 4);
-   * see [[AttemptStart]]. Refused unless `lease` is current, and for a `runId` the entry already recorded
-   * (`ValidationError`): a reused `RunId` would name two runs.
+   * see [[AttemptStart]]. Refused unless `lease` is current, and with a `ValidationError` for a `runId` that already
+   * names a run on the thread - a checkpoint, or an attempt of any entry - since a reused `RunId` would name two runs
+   * and the run-id lookup would take the other for this attempt's. A worker gives each attempt `RunId.random()`.
    */
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart]
 

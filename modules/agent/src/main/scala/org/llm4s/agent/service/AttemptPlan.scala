@@ -41,7 +41,7 @@ object AttemptPlan:
         latest match
           case Some(now) if now.id == own.id && now.status == CheckpointStatus.Running => Recover
           case Some(now)                                                               => Close(closedFrom(now))
-          // admitted, and the thread is gone: a delete the deletion marker did not catch (it numbered nothing)
+          // admitted, and the thread is gone: deleted after the attempt was recorded
           case None => Close(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
 
   /** The outcome of an entry closed from the thread's state `latest`, without running anything. */

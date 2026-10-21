@@ -123,6 +123,15 @@ private[postgres] object Sql:
        |  WHERE thread_id = ? AND run_id = r.run_id ORDER BY position DESC LIMIT 1) h
        |ORDER BY h.position DESC LIMIT 1""".stripMargin
 
+  /** Marks the thread's open queue entries as having outlived their thread: `deleteThread`, in its transaction. */
+  def queueThreadDeleted(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET thread_deleted = true WHERE thread_id = ? AND state = 'open'"
+
+  /** Whether a run id already names a checkpoint or a queue attempt on the thread (bound twice). */
+  def runIdUsed(t: Tables): String =
+    s"""SELECT EXISTS (SELECT 1 FROM ${t.queueAttempts} WHERE thread_id = ? AND run_id = ?)
+       |    OR EXISTS (SELECT 1 FROM ${t.history} WHERE thread_id = ? AND run_id = ?)""".stripMargin
+
   /** The positions `prune` keeps for open queue entries: the newest checkpoint of each run they recorded on the thread. */
   def queueEvidence(t: Tables): String =
     s"""SELECT MAX(h.position) FROM ${t.history} h

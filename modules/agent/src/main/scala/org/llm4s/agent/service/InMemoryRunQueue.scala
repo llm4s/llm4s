@@ -14,16 +14,15 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * The [[RunQueue]] of an `InMemoryCheckpointer` (`InMemoryCheckpointer.runQueue`): entries in memory, under the
- * checkpointer's own lock, leases judged and closes stamped by its clock. It shares the checkpointer's lock so its
- * submissions read the thread's deletion marker, and the checkpointer's `prune` reads its open entries' runs, in one
- * step. [[awaitClosed]] wakes on closes rather than polling. Its calls take only each other's brief turn at the lock,
+ * checkpointer's own lock, leases judged and closes stamped by its clock. It shares the checkpointer's lock so the
+ * checkpointer's `deleteThread` marks its open entries, and its `prune` reads their runs, in one step. [[awaitClosed]] wakes on closes rather than polling. Its calls take only each other's brief turn at the lock,
  * so each returns at once.
  */
 @Experimental
 final class InMemoryRunQueue private[agent] (
   clock: Clock,
   lock: ReentrantLock,
-  deletionMarker: ThreadId => Long
+  runCommitted: (ThreadId, RunId) => Boolean
 ) extends RunQueue:
 
   final private case class Held(holder: String, token: Long, expiresAt: Instant)
@@ -38,7 +37,7 @@ final class InMemoryRunQueue private[agent] (
     key: Option[SubmissionKey],
     maxAttempts: Int,
     submittedAt: Instant,
-    marker: Long,
+    threadDeleted: Boolean,
     attempts: Vector[Attempt],
     lease: Option[Held],
     outcome: Option[EntryOutcome],
@@ -116,7 +115,7 @@ final class InMemoryRunQueue private[agent] (
             submission.submissionKey,
             submission.maxAttempts,
             now,
-            deletionMarker(submission.threadId),
+            false,
             Vector.empty,
             None,
             None,
@@ -214,9 +213,17 @@ final class InMemoryRunQueue private[agent] (
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = withLock(lock) {
     leased(lease).flatMap { row =>
-      if row.attempts.exists(_.runId == runId) then
-        Left(ValidationError("runId", s"entry ${row.id} already recorded an attempt as run '${runId.value}'"))
-      else if deletionMarker(row.threadId) > row.marker then
+      // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
+      val used = runCommitted(row.threadId, runId) ||
+        rows.valuesIterator.exists(r => r.threadId == row.threadId && r.attempts.exists(_.runId == runId))
+      if used then
+        Left(
+          ValidationError(
+            "runId",
+            s"run '${runId.value}' already names a run or an attempt on thread '${row.threadId.value}'"
+          )
+        )
+      else if row.threadDeleted then
         Right(AttemptStart.ThreadDeleted(view(closeRow(row, EntryOutcome.Cancelled(CancelReason.ThreadDeleted)))))
       else if row.attempts.size >= row.maxAttempts then Right(AttemptStart.Exhausted(view(row)))
       else
@@ -249,6 +256,12 @@ final class InMemoryRunQueue private[agent] (
     }
     Right(expired.size)
   }
+
+  /** Marks the thread's open entries as having outlived their thread: the checkpointer's `deleteThread`, under the lock. */
+  private[agent] def threadDeleted(threadId: ThreadId): Unit =
+    rows.valuesIterator.filter(r => r.open && r.threadId == threadId).toVector.foreach { r =>
+      rows.update(r.id, r.copy(threadDeleted = true))
+    }
 
   /**
    * The runs whose newest checkpoint on `threadId` the checkpointer's `prune` keeps: every attempt of every open entry

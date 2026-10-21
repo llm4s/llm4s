@@ -395,9 +395,10 @@ final class PostgresCheckpointer private (
       }
 
   /**
-   * The store's run queue (design 4.55), in the same schema and over the same pool as its checkpoints: its entries
-   * record each thread's deletion marker from this schema, its leases expire by the same database clock as claims, and
-   * [[prune]] keeps the newest checkpoint of every run an open entry recorded. Closing the store closes it.
+   * The store's run queue (design 4.55), in the same schema and over the same pool as its checkpoints: its open
+   * entries learn of their thread's deletion in [[deleteThread]]'s own transaction, its leases expire by the same
+   * database clock as claims, and [[prune]] keeps the newest checkpoint of every run an open entry recorded. Closing
+   * the store closes it.
    */
   lazy val runQueue: org.llm4s.agent.service.RunQueue = new PostgresRunQueue(this)
 
@@ -476,6 +477,9 @@ final class PostgresCheckpointer private (
         Vector(t.events, t.pendingWrites, t.history, t.effects).foreach { table =>
           update(c, s"DELETE FROM $table WHERE thread_id = ?", threadId.value)
         }
+        // the thread's open queue entries learn of the delete in its own transaction (design 4.55), so none of them
+        // runs on a new thread of the id, whatever the deleted thread numbered
+        update(c, Sql.queueThreadDeleted(t), threadId.value)
         update(c, Sql.tombstone(t), threadId.value)
         dropIfEmpty(c, threadId)
         Right(())

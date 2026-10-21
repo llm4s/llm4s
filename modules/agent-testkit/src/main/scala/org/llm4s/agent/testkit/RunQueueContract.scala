@@ -478,6 +478,34 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.close(leased.lease, EntryOutcome.Done(None, None)).refused shouldBe a[QueueError.EntryClosed]
   }
 
+  it should "close an entry Cancelled(ThreadDeleted) when its thread, never committed to, was deleted after submission" in {
+    val c = Case()
+    c.submit().value
+    // a thread with a claim and nothing else: its delete leaves no tombstone and numbers nothing
+    c.delete()
+    val leased = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
+  }
+
+  it should "refuse an attempt's run id that already names a run or another entry's attempt on the thread" in {
+    val c = Case()
+    c.commitAs("direct", "c1")
+    c.submit().value
+    val first = c.take().value
+    c.queue.recordAttempt(first.lease, RunId("direct")).refused shouldBe a[ValidationError]
+    val run = RunId(s"run-${unique()}")
+    c.queue.recordAttempt(first.lease, run).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(first.lease, EntryOutcome.Done(None, None)).value
+    c.submit().value
+    val second = c.take().value
+    c.queue.recordAttempt(second.lease, run).refused shouldBe a[ValidationError]
+    second.entry.attempts shouldBe empty
+    // another thread's run ids are its own
+    c.submit(on = c.newThread()).value
+    val elsewhere = c.take().value
+    c.queue.recordAttempt(elsewhere.lease, run).value shouldBe a[AttemptStart.Recorded]
+  }
+
   it should "not take a delete before the submission for one after it" in {
     val c = Case()
     c.commitAs("direct", "c1")

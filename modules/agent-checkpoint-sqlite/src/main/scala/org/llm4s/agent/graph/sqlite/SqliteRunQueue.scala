@@ -57,8 +57,8 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             c,
             """INSERT INTO llm4s_checkpoint_queue_entries
               |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-              | max_attempts, attempt_count, submitted_nanos, deletion_marker, state)
-              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'open')""".stripMargin,
+              | max_attempts, attempt_count, submitted_nanos, thread_deleted, state)
+              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'open')""".stripMargin,
             id,
             submission.threadId.value,
             submission.agentId.value,
@@ -69,8 +69,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             scope,
             submission.submissionKey.map(_.value),
             submission.maxAttempts,
-            now,
-            deletionMarker(c, submission.threadId)
+            now
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
@@ -178,15 +177,20 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
     leased(c, lease).flatMap { row =>
+      // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
       val used = query(
         c,
-        "SELECT 1 FROM llm4s_checkpoint_queue_attempts WHERE entry_id = ? AND run_id = ?",
-        row.id,
+        """SELECT 1 FROM llm4s_checkpoint_queue_attempts WHERE thread_id = ? AND run_id = ?
+          |UNION ALL
+          |SELECT 1 FROM llm4s_checkpoint_history INDEXED BY llm4s_checkpoint_history_run
+          |WHERE thread_id = ? AND run_id = ? LIMIT 1""".stripMargin,
+        row.threadId,
+        runId.value,
+        row.threadId,
         runId.value
       )(_ => ()).nonEmpty
-      if used then
-        Left(ValidationError("runId", s"entry ${row.id} already recorded an attempt as run '${runId.value}'"))
-      else if deletionMarker(c, ThreadId(row.threadId)) > row.marker then
+      if used then Left(runIdUsed(row.threadId, runId))
+      else if row.threadDeleted then
         closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), epochNanos(clock.instant()))
         view(c, rowOf(c, row.id).get).map(AttemptStart.ThreadDeleted(_))
       else if row.attempts >= row.maxAttempts then view(c, row).map(AttemptStart.Exhausted(_))
@@ -300,13 +304,6 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
     )
 
-  /** Where the event numbering of the thread now under the id starts: `deleteThread` moves it on. */
-  private def deletionMarker(c: Connection, threadId: ThreadId): Long =
-    query(c, "SELECT first_seq FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(
-      _.getLong(1)
-    ).headOption
-      .getOrElse(1L)
-
   /** The meta counter `key`, moved on by one, inside the caller's write transaction. */
   private def bump(c: Connection, key: String): Long =
     update(c, "UPDATE llm4s_checkpoint_meta SET value = value + 1 WHERE key = ?", key)
@@ -322,7 +319,7 @@ private[sqlite] object SqliteRunQueue:
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
-      |attempt_count, submitted_nanos, deletion_marker, lease_holder, lease_token, lease_expires_nanos, outcome_json,
+      |attempt_count, submitted_nanos, thread_deleted, lease_holder, lease_token, lease_expires_nanos, outcome_json,
       |closed_nanos""".stripMargin
 
   final case class Raw(
@@ -337,7 +334,7 @@ private[sqlite] object SqliteRunQueue:
     maxAttempts: Int,
     attempts: Int,
     submitted: Long,
-    marker: Long,
+    threadDeleted: Boolean,
     leaseHolder: Option[String],
     leaseToken: Option[Long],
     leaseExpires: Option[Long],
@@ -359,13 +356,16 @@ private[sqlite] object SqliteRunQueue:
       r.getInt(9),
       r.getInt(10),
       r.getLong(11),
-      r.getLong(12),
+      r.getInt(12) == 1,
       Option(r.getString(13)),
       long(14),
       long(15),
       Option(r.getString(16)),
       long(17)
     )
+
+  def runIdUsed(threadId: String, runId: RunId): ValidationError =
+    ValidationError("runId", s"run '${runId.value}' already names a run or an attempt on thread '$threadId'")
 
   /** The scope a submission key is unique in: its tenant, or `-` for none (a tenant id is never `-` here: it is `t:`). */
   def keyScope(tenantId: Option[TenantId]): String = tenantId.fold("-")(t => s"t:${t.value}")

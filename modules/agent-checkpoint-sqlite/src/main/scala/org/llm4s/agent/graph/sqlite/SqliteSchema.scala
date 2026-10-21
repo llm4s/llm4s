@@ -90,8 +90,8 @@ private[sqlite] object SqliteSchema:
    * `llm4s_checkpoint_queue_entries` holds one row per entry: its id (`AUTOINCREMENT`, so an id is never reused, and
    * the meta table's `last_entry` the highest issued, which tells a reclaimed id from one never issued), thread, agent,
    * tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique while held -
-   * its `max_attempts` and `attempt_count`, the thread's deletion marker at submission (`deletion_marker`, the thread's
-   * `first_seq`), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
+   * its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
+   * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
    * (`open` or the outcome's), outcome JSON, close time and the trace context it carries (`trace_parent`). It is indexed
    * by thread for the run order, by agent for `take`, and by close time for `reclaim`.
    * `llm4s_checkpoint_queue_attempts` holds `(entry_id, attempt)` with the attempt's thread, run id, start time and
@@ -119,7 +119,7 @@ private[sqlite] object SqliteSchema:
         |  max_attempts        INTEGER NOT NULL,
         |  attempt_count       INTEGER NOT NULL,
         |  submitted_nanos     INTEGER NOT NULL,
-        |  deletion_marker     INTEGER NOT NULL,
+        |  thread_deleted      INTEGER NOT NULL,
         |  trace_parent        TEXT,
         |  lease_holder        TEXT,
         |  lease_token         INTEGER,

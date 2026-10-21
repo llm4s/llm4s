@@ -110,8 +110,8 @@ private[postgres] object PostgresSchema:
    * `checkpoint_queue_entries` holds one row per entry: its id (from `checkpoint_queue_entry_ids`, so ids follow
    * submission order and are never reused, and the sequence's last value tells a reclaimed id from one never issued),
    * thread, agent, tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique
-   * while held - its `max_attempts` and `attempt_count`, the thread's deletion marker at submission (`deletion_marker`,
-   * the thread's `first_seq`), whether it is an `Interrupt` entry, its lease (holder, token from
+   * while held - its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
+   * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token from
    * `checkpoint_queue_lease_tokens`, expiry by the database's clock), its state (`open` or the outcome's), outcome JSON,
    * close time (the database's clock) and the trace context it carries (`trace_parent`). Partial indexes serve the run
    * order (by thread), `take` (by agent) and `reclaim` (by close time). `checkpoint_queue_attempts` holds
@@ -137,7 +137,7 @@ private[postgres] object PostgresSchema:
        |  max_attempts      integer NOT NULL,
        |  attempt_count     integer NOT NULL,
        |  submitted_at      timestamptz NOT NULL,
-       |  deletion_marker   bigint NOT NULL,
+       |  thread_deleted    boolean NOT NULL,
        |  trace_parent      text,
        |  lease_holder      text,
        |  lease_token       bigint,

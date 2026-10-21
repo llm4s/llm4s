@@ -419,12 +419,16 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private val appended = lock.newCondition()
 
   /**
-   * The store's run queue (design 4.55), in the same memory as its checkpoints and under the same lock: its entries
-   * record each thread's deletion marker from this store, and [[prune]] keeps the newest checkpoint of every run an
-   * open entry of it recorded.
+   * The store's run queue (design 4.55), in the same memory as its checkpoints and under the same lock: its open
+   * entries learn of their thread's deletion in [[deleteThread]], under the lock the delete is made under, and
+   * [[prune]] keeps the newest checkpoint of every run an open entry of it recorded.
    */
   val runQueue: org.llm4s.agent.service.InMemoryRunQueue =
-    new org.llm4s.agent.service.InMemoryRunQueue(clock, lock, threadId => withLock(lock)(record(threadId).firstSeq))
+    new org.llm4s.agent.service.InMemoryRunQueue(
+      clock,
+      lock,
+      (threadId, runId) => withLock(lock)(record(threadId).history.exists(_.runId == runId.value))
+    )
 
   private def record(threadId: ThreadId): ThreadRecord =
     threads.getOrElse(threadId.value, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, 1L, 1L, None, 1L))
@@ -704,7 +708,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       })
     refused match
       case Some(error) => Left(error)
-      case None        =>
+      case None =>
+        runQueue.threadDeleted(threadId)
         // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
         // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
         // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no

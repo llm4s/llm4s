@@ -459,8 +459,8 @@ final class SqliteCheckpointer private (
 
   /**
    * The store's run queue (design 4.55), in the same file and over the same connection as its checkpoints: its
-   * entries record each thread's deletion marker from this file, and [[prune]] keeps the newest checkpoint of every
-   * run an open entry recorded. Closing the store closes it.
+   * open entries learn of their thread's deletion in [[deleteThread]]'s own transaction, and [[prune]] keeps the
+   * newest checkpoint of every run an open entry recorded. Closing the store closes it.
    */
   lazy val runQueue: org.llm4s.agent.service.RunQueue = new SqliteRunQueue(this, clock)
 
@@ -557,6 +557,13 @@ final class SqliteCheckpointer private (
         update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
         update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
         update(c, "DELETE FROM llm4s_checkpoint_thread_metadata WHERE thread_id = ?", threadId.value)
+        // the thread's open queue entries learn of the delete in its own transaction (design 4.55), so none of them
+        // runs on a new thread of the id, whatever the deleted thread numbered
+        update(
+          c,
+          "UPDATE llm4s_checkpoint_queue_entries SET thread_deleted = 1 WHERE thread_id = ? AND state = 'open'",
+          threadId.value
+        )
         update(
           c,
           // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
