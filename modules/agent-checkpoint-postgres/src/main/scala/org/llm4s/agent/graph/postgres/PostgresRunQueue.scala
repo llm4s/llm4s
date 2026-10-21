@@ -17,7 +17,8 @@ import scala.concurrent.duration.FiniteDuration
  * - the one claims expire by - never a host's (rule 1).
  *
  * Concurrency: a submission takes a transaction-scoped advisory lock on its submission key, if any, and then on its
- * thread, so the key's lookup-or-insert and the thread's run order are decided one submission at a time. [[take]]
+ * thread, so the key's lookup-or-insert and the thread's run order are decided one submission at a time; recording an
+ * attempt, which moves its entry ahead in that order, takes the thread's lock too. [[take]]
  * reads candidate heads `FOR UPDATE SKIP LOCKED`, so workers skip each other's entries rather than wait, and leases
  * one only once it holds the thread's advisory lock (tried, never waited for) and has checked again that the entry is
  * the thread's head and no other entry of the thread holds a live lease. Every call under a lease locks the entry's
@@ -41,9 +42,13 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     submission.submissionKey.foreach(key => lock(c, s"key:$scope:${key.value}"))
     lock(c, s"thread:${submission.threadId.value}")
     val held = submission.submissionKey.flatMap { key =>
-      query(c, s"SELECT $Columns FROM $entries WHERE key_scope = ? AND submission_key = ?", scope, key.value)(
-        raw
-      ).headOption
+      // locked, so a reclaim running now either deletes it first - and the key is free - or skips it
+      query(
+        c,
+        s"SELECT $Columns FROM $entries WHERE key_scope = ? AND submission_key = ? FOR UPDATE",
+        scope,
+        key.value
+      )(raw).headOption
     }
     held match
       case Some(existing) =>
@@ -224,6 +229,10 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   }
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
+    // an attempt moves its entry ahead in the thread's run order, so it is decided under the thread's lock, as a take
+    // and a submission are: a take can never lease another head while this attempt is being recorded
+    query(c, s"SELECT thread_id FROM $entries WHERE entry_id = ?", lease.entryId.value)(_.getString(1)).headOption
+      .foreach(thread => lock(c, s"thread:$thread"))
     leased(c, lease).flatMap { row =>
       // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
       val used =
