@@ -632,7 +632,8 @@ final class GraphRuntime(
                     admitting,
                     stored.checkpoint.origin,
                     notAfter,
-                    stored.checkpoint.trace
+                    // an explicit context wins over the one the work started in, and is what later runs continue
+                    config.traceContext.orElse(stored.checkpoint.trace)
                   ).admit(
                     execution,
                     Some(stored.checkpoint.id),
@@ -741,7 +742,7 @@ final class GraphRuntime(
                   admitting,
                   stored.checkpoint.origin,
                   notAfter,
-                  stored.checkpoint.trace
+                  config.traceContext.orElse(stored.checkpoint.trace)
                 ).admit(
                   resumed,
                   Some(stored.checkpoint.id),

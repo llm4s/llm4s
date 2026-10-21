@@ -207,8 +207,11 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    val traced = continuing(threadId, config)
-    runtime.recover(threadId, loop.graph, configured(traced)).map(agentRun(_, None, drain = false, traced.traceContext))
+    continuing(threadId, config).flatMap(traced =>
+      runtime
+        .recover(threadId, loop.graph, configured(traced))
+        .map(agentRun(_, None, drain = false, traced.traceContext))
+    )
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -233,12 +236,11 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    val traced = continuing(threadId, config)
-    routed(threadId, answers, traced).flatMap(grouped =>
-      runtime
-        .resume(threadId, loop.graph, grouped, configured(traced))
-        .map(agentRun(_, None, drain = false, traced.traceContext))
-    )
+    for
+      traced  <- continuing(threadId, config)
+      grouped <- routed(threadId, answers, traced)
+      handle  <- runtime.resume(threadId, loop.graph, grouped, configured(traced))
+    yield agentRun(handle, None, drain = false, traced.traceContext)
 
   /**
    * `answers` as the runtime takes them (design 4.46): composite answers to delegated interrupts, checked against the
@@ -378,13 +380,12 @@ final class Agent private[agent] (
     requested: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
-    val config = continuing(threadId, requested)
-    routed(threadId, answers, config).flatMap { grouped =>
-      val (observer, scope) = observed(config, listening)
-      runtime
-        .resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
-        .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
-    }
+    for
+      config  <- continuing(threadId, requested)
+      grouped <- routed(threadId, answers, config)
+      (observer, scope) = observed(config, listening)
+      handle <- runtime.resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
+    yield agentRun(handle, Some(scope), listening.drain, config.traceContext)
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
@@ -402,11 +403,12 @@ final class Agent private[agent] (
     else begin.flatMap(Agent.awaitBlocking)
 
   private def recoverWith(threadId: ThreadId, requested: RunConfig, listening: Listening): Result[AgentRun] =
-    val config            = continuing(threadId, requested)
-    val (observer, scope) = observed(config, listening)
-    runtime
-      .recover(threadId, loop.graph, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
+    continuing(threadId, requested).flatMap { config =>
+      val (observer, scope) = observed(config, listening)
+      runtime
+        .recover(threadId, loop.graph, configured(config), observer = Some(observer))
+        .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
+    }
 
   private def startWith(
     threadId: ThreadId,
@@ -474,17 +476,15 @@ final class Agent private[agent] (
   /**
    * `config` for a continuation - a resume or recover - of `threadId` (design 4.58): with no trace context of its own
    * it continues the trace the thread's latest checkpoint records ([[org.llm4s.agent.graph.Checkpoint.trace]]), so
-   * every run of one piece of work - and the child a suspended `task` call started - is in one trace.
+   * every run of one piece of work - and the child a suspended `task` call started - is in one trace. A failed read
+   * fails the continuation, never silently starting a new trace.
    */
-  private def continuing(threadId: ThreadId, config: RunConfig): RunConfig =
-    if config.traceContext.isDefined then config
+  private def continuing(threadId: ThreadId, config: RunConfig): Result[RunConfig] =
+    if config.traceContext.isDefined then Right(config)
     else
       runtime
         .history(threadId, None, 1, config)
-        .toOption
-        .flatMap(_.headOption)
-        .flatMap(_.trace)
-        .fold(config)(config.withTraceContext)
+        .map(_.headOption.flatMap(_.trace).fold(config)(config.withTraceContext))
 
   private[agent] def agentRun(
     handle: RunHandle[TurnOutput],

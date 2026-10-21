@@ -210,6 +210,21 @@ class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     runEnds(tracing).filter(_.threadId != "t1").foreach(_.span.value.parent shouldBe Some(call))
   }
 
+  it should "record an explicit context given to a resume, which later continuations then continue" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    val tracing = new Recording
+    val agent =
+      lead(approvingClient()).withTracing(tracing).withSubagents(asking(probe(new AtomicInteger(0)))).build().value
+    val first   = agent.run(ThreadId("t1"), "go").value
+    val started = agent.runtime.history(ThreadId("t1"), None, 1).value.loneElement.trace.value
+    started should not be submitter
+    val id = suspendedOf(first).delegated.loneElement._1
+    agent.resume(ThreadId("t1"), Map(first.approve(id)), RunConfig().withTraceContext(submitter)).value
+
+    runEnds(tracing).filter(_.threadId == "t1").last.span.value.parent shouldBe Some(submitter)
+    agent.runtime.history(ThreadId("t1"), None, 1).value.loneElement.trace shouldBe Some(submitter)
+  }
+
   "a child recovered by a later run of its parent" should "continue the trace its origin recorded, under the same call" in {
     val tracing    = new Recording
     val childCalls = new AtomicInteger(0)
