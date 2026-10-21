@@ -207,7 +207,8 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false, config.traceContext))
+    val traced = continuing(threadId, config)
+    runtime.recover(threadId, loop.graph, configured(traced)).map(agentRun(_, None, drain = false, traced.traceContext))
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -232,10 +233,11 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    routed(threadId, answers, config).flatMap(grouped =>
+    val traced = continuing(threadId, config)
+    routed(threadId, answers, traced).flatMap(grouped =>
       runtime
-        .resume(threadId, loop.graph, grouped, configured(config))
-        .map(agentRun(_, None, drain = false, config.traceContext))
+        .resume(threadId, loop.graph, grouped, configured(traced))
+        .map(agentRun(_, None, drain = false, traced.traceContext))
     )
 
   /**
@@ -373,9 +375,10 @@ final class Agent private[agent] (
   private def resumeWith(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
-    config: RunConfig,
+    requested: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
+    val config = continuing(threadId, requested)
     routed(threadId, answers, config).flatMap { grouped =>
       val (observer, scope) = observed(config, listening)
       runtime
@@ -398,7 +401,8 @@ final class Agent private[agent] (
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
     else begin.flatMap(Agent.awaitBlocking)
 
-  private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
+  private def recoverWith(threadId: ThreadId, requested: RunConfig, listening: Listening): Result[AgentRun] =
+    val config            = continuing(threadId, requested)
     val (observer, scope) = observed(config, listening)
     runtime
       .recover(threadId, loop.graph, configured(config), observer = Some(observer))
@@ -466,6 +470,21 @@ final class Agent private[agent] (
     if history.exists { case _: SystemMessage => true; case _ => false } then
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
+
+  /**
+   * `config` for a continuation - a resume or recover - of `threadId` (design 4.58): with no trace context of its own
+   * it continues the trace the thread's latest checkpoint records ([[org.llm4s.agent.graph.Checkpoint.trace]]), so
+   * every run of one piece of work - and the child a suspended `task` call started - is in one trace.
+   */
+  private def continuing(threadId: ThreadId, config: RunConfig): RunConfig =
+    if config.traceContext.isDefined then config
+    else
+      runtime
+        .history(threadId, None, 1, config)
+        .toOption
+        .flatMap(_.headOption)
+        .flatMap(_.trace)
+        .fold(config)(config.withTraceContext)
 
   private[agent] def agentRun(
     handle: RunHandle[TurnOutput],

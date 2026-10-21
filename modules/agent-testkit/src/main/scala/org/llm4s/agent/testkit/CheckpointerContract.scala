@@ -1529,6 +1529,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         s.checkpoint("c2", Some("c1"), on = child, status = CheckpointStatus.Completed)
           .withOrigin(origin)
           .withOutcome(RunOutcome.Blocked("LengthCheck", "too long"))
+          .withTrace(origin.trace)
       ),
       on = child
     ).value
@@ -1536,6 +1537,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val latest = s.store.latest(child).value.value.checkpoint
     latest.origin shouldBe Some(origin)
     latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    // and the trace the work belongs to (design 4.58)
+    latest.trace shouldBe origin.trace
+    s.store.checkpoint(child, "c1").value.value.trace shouldBe None
     s.store.history(child, None, 10).value.map(c => (c.id, c.origin, c.outcome)) shouldBe Vector(
       ("c2", Some(origin), Some(RunOutcome.Blocked("LengthCheck", "too long"))),
       ("c1", Some(origin), None)

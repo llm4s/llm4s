@@ -140,10 +140,9 @@ Not in a release yet. Stage 5 runs one agent service on several machines ([#2129
   its parent's trace, under the `execute_tool task` observation. A run traced without a placement (a hand-built
   `AgentRunEnded`) is unchanged.
 - **Continuing a trace.** To put a run in an upstream request's trace, pass its `traceparent`:
-  `RunConfig().withTraceContext(TraceContext.parse(header).toOption)`. Pass the same context to a `recover` to keep a
-  recovered run in the original trace; without one the recovered run starts a trace of its own (its children stay
-  in the trace that started them, which their `RunOrigin.trace` records).
-- **Stored data needs nothing.** `RunOrigin.trace` is optional; a child thread stored without it reads as `None`.
+  `RunConfig().withTraceContext(TraceContext.parse(header).toOption)`. A `resume` or `recover` with no context
+  continues the trace its work started in.
+- **Stored data needs nothing.** `RunOrigin.trace` and `Checkpoint.trace` are optional; a thread stored without them reads as `None`. A `resume` or `recover` given no `traceContext` now continues the trace its work started in (`Checkpoint.trace`) rather than starting one.
 
 ## Workspace command confinement (#1983)
 

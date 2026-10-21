@@ -435,8 +435,8 @@ val upstream = TraceContext.parse(request.header("traceparent")).toOption
 agent.run(threadId, query, RunConfig().withTraceContext(upstream), Nil)
 ```
 
-The run's span then takes that context as its remote parent and keeps its trace id. Pass the same context to
-`recover` to keep a recovered run in the original trace.
+The run's span then takes that context as its remote parent and keeps its trace id. A `resume` or `recover` given
+no context continues the trace its work started in, which the thread's checkpoints record.
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|

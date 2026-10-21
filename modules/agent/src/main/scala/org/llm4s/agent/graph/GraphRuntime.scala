@@ -631,7 +631,8 @@ final class GraphRuntime(
                     execution.superstep,
                     admitting,
                     stored.checkpoint.origin,
-                    notAfter
+                    notAfter,
+                    stored.checkpoint.trace
                   ).admit(
                     execution,
                     Some(stored.checkpoint.id),
@@ -739,7 +740,8 @@ final class GraphRuntime(
                   resumed.superstep,
                   admitting,
                   stored.checkpoint.origin,
-                  notAfter
+                  notAfter,
+                  stored.checkpoint.trace
                 ).admit(
                   resumed,
                   Some(stored.checkpoint.id),
@@ -923,7 +925,7 @@ final class GraphRuntime(
               Some(held.claim.token),
               open.origin,
               Some(outcome)
-            )
+            ).withTrace(open.trace)
             event  = EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             fence  = parentFenceOf(stored, parentClaim)
             commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
@@ -1319,7 +1321,7 @@ final class GraphRuntime(
               Some(held.claim.token),
               open.origin,
               Some(outcome)
-            )
+            ).withTrace(open.trace)
             val event =
               EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             val fence  = Some(parent -> token)
@@ -1578,7 +1580,7 @@ final class GraphRuntime(
             stored.checkpoint.origin,
             // the status is kept, and with it how the run it records settled
             stored.checkpoint.outcome
-          )
+          ).withTrace(stored.checkpoint.trace)
           val event = EventDraft(
             config.runId.value,
             Some(saved.id),
@@ -2251,9 +2253,20 @@ final class GraphRuntime(
     firstSuperstep: Int,
     admitting: Admitting,
     origin: Option[RunOrigin],
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    continuing: Option[org.llm4s.trace.TraceContext] = None
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting, origin, notAfter)
+    new Run(
+      graph,
+      threadId,
+      config,
+      committer(threadId, durability),
+      firstSuperstep,
+      admitting,
+      origin,
+      notAfter,
+      continuing
+    )
 
   /**
    * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
@@ -2791,7 +2804,9 @@ final class GraphRuntime(
      * deadline fixed at the claim is the sooner of it and `budgets.timeout` from then, so admission's own latency never
      * moves a child's deadline past its parent's.
      */
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    /** The trace of the work this run continues (a recover or resume), copied onto its checkpoints (design 4.58). */
+    continuing: Option[org.llm4s.trace.TraceContext] = None
   ):
     private val signal      = admitting.signal
     val runId               = config.runId
@@ -3516,8 +3531,17 @@ final class GraphRuntime(
           claim.map(_.token),
           origin,
           outcome
-        )
+        ).withTrace(trace)
       }
+
+    /**
+     * The trace this run's checkpoints record (design 4.58): the one it continues, else - for a run that starts work -
+     * its own span, named by its incarnation as its tracing names it.
+     */
+    private def trace: Option[org.llm4s.trace.TraceContext] =
+      continuing.orElse(
+        claim.map(c => org.llm4s.agent.AgentTraceSpans.run(threadId, runId, Some(c.token), config.traceContext))
+      )
 
     private def checkpoint(
       execution: Execution,

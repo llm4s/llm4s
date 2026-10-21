@@ -59,25 +59,34 @@ final case class Checkpoint private (
    * first descendant is deleted, so a cascade stopped part-way leaves the thread refusing every admission
    * ([[GraphError.ThreadDeleting]]) until `deleteThread` finishes it. `false` on every other checkpoint.
    */
-  deleting: Boolean = false
+  deleting: Boolean = false,
+  /**
+   * The trace the run in progress belongs to (design 4.58): the span of the run that started it, which a `resume` or
+   * `recover` given no trace context of its own continues, so every run of one piece of work is in one trace. Written
+   * by every run - a run that starts work records its own span, a continuation copies the one it continues - and
+   * `None` on checkpoints written before it.
+   */
+  trace: Option[org.llm4s.trace.TraceContext] = None
 ):
-  def withFormatVersion(v: Int): Checkpoint                 = copy(formatVersion = v)
-  def withId(i: String): Checkpoint                         = copy(id = i)
-  def withParent(p: Option[String]): Checkpoint             = copy(parent = p)
-  def withThreadId(t: String): Checkpoint                   = copy(threadId = t)
-  def withRunId(r: String): Checkpoint                      = copy(runId = r)
-  def withStatus(s: CheckpointStatus): Checkpoint           = copy(status = s)
-  def withCreatedAt(at: Instant): Checkpoint                = copy(createdAt = at)
-  def withSnapshot(s: GraphSnapshot): Checkpoint            = copy(snapshot = s)
-  def withTenantId(t: String): Checkpoint                   = copy(tenantId = Some(t))
-  def withTenantId(t: Option[String]): Checkpoint           = copy(tenantId = t)
-  def withFencingToken(t: FencingToken): Checkpoint         = copy(fencingToken = Some(t))
-  def withFencingToken(t: Option[FencingToken]): Checkpoint = copy(fencingToken = t)
-  def withOrigin(o: RunOrigin): Checkpoint                  = copy(origin = Some(o))
-  def withOrigin(o: Option[RunOrigin]): Checkpoint          = copy(origin = o)
-  def withOutcome(o: RunOutcome): Checkpoint                = copy(outcome = Some(o))
-  def withOutcome(o: Option[RunOutcome]): Checkpoint        = copy(outcome = o)
-  def withDeleting(d: Boolean): Checkpoint                  = copy(deleting = d)
+  def withFormatVersion(v: Int): Checkpoint                          = copy(formatVersion = v)
+  def withId(i: String): Checkpoint                                  = copy(id = i)
+  def withParent(p: Option[String]): Checkpoint                      = copy(parent = p)
+  def withThreadId(t: String): Checkpoint                            = copy(threadId = t)
+  def withRunId(r: String): Checkpoint                               = copy(runId = r)
+  def withStatus(s: CheckpointStatus): Checkpoint                    = copy(status = s)
+  def withCreatedAt(at: Instant): Checkpoint                         = copy(createdAt = at)
+  def withSnapshot(s: GraphSnapshot): Checkpoint                     = copy(snapshot = s)
+  def withTenantId(t: String): Checkpoint                            = copy(tenantId = Some(t))
+  def withTenantId(t: Option[String]): Checkpoint                    = copy(tenantId = t)
+  def withFencingToken(t: FencingToken): Checkpoint                  = copy(fencingToken = Some(t))
+  def withFencingToken(t: Option[FencingToken]): Checkpoint          = copy(fencingToken = t)
+  def withOrigin(o: RunOrigin): Checkpoint                           = copy(origin = Some(o))
+  def withOrigin(o: Option[RunOrigin]): Checkpoint                   = copy(origin = o)
+  def withOutcome(o: RunOutcome): Checkpoint                         = copy(outcome = Some(o))
+  def withOutcome(o: Option[RunOutcome]): Checkpoint                 = copy(outcome = o)
+  def withDeleting(d: Boolean): Checkpoint                           = copy(deleting = d)
+  def withTrace(t: org.llm4s.trace.TraceContext): Checkpoint         = copy(trace = Some(t))
+  def withTrace(t: Option[org.llm4s.trace.TraceContext]): Checkpoint = copy(trace = t)
 
 object Checkpoint:
 
@@ -94,7 +103,8 @@ object Checkpoint:
     fencingToken: Option[FencingToken] = None,
     origin: Option[RunOrigin] = None,
     outcome: Option[RunOutcome] = None,
-    deleting: Boolean = false
+    deleting: Boolean = false,
+    trace: Option[org.llm4s.trace.TraceContext] = None
   ): Checkpoint =
     new Checkpoint(
       formatVersion,
@@ -109,7 +119,41 @@ object Checkpoint:
       fencingToken,
       origin,
       outcome,
-      deleting
+      deleting,
+      trace
+    )
+
+  /** A checkpoint recording no trace, as before `trace` existed. */
+  def apply(
+    formatVersion: Int,
+    id: String,
+    parent: Option[String],
+    threadId: String,
+    runId: String,
+    status: CheckpointStatus,
+    createdAt: Instant,
+    snapshot: GraphSnapshot,
+    tenantId: Option[String],
+    fencingToken: Option[FencingToken],
+    origin: Option[RunOrigin],
+    outcome: Option[RunOutcome],
+    deleting: Boolean
+  ): Checkpoint =
+    new Checkpoint(
+      formatVersion,
+      id,
+      parent,
+      threadId,
+      runId,
+      status,
+      createdAt,
+      snapshot,
+      tenantId,
+      fencingToken,
+      origin,
+      outcome,
+      deleting,
+      None
     )
 
   /** A checkpoint of a top-level thread recording no outcome, as before format 8. */

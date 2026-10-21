@@ -75,7 +75,7 @@ class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
     // the child's run is under the task call's span, and its events under the child's run
     child.span.value.parent shouldBe Some(task.span.value.context)
-    !child.span.value.startedAt.isBefore(task.span.value.startedAt) shouldBe true
+    // (a tool span's start is its event's time less its duration, so it is approximate: not compared with the child's)
     placedOf(tracing, child.runId).foreach(_.span.value.parent shouldBe Some(child.span.value.context))
 
     // the child's origin records the call's span
@@ -180,6 +180,34 @@ class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val children = runEnds(tracing).filter(_.threadId != "t1")
     children should have size 2
     children.foreach(_.span.value.parent shouldBe Some(call))
+  }
+
+  it should "keep the whole turn in one trace when resumed with no trace context" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    val tracing = new Recording
+    val agent =
+      lead(approvingClient()).withTracing(tracing).withSubagents(asking(probe(new AtomicInteger(0)))).build().value
+    val first = agent.run(ThreadId("t1"), "go").value
+    val id    = suspendedOf(first).delegated.loneElement._1
+    agent.resume(ThreadId("t1"), Map(first.approve(id))).value
+
+    val parents = runEnds(tracing).filter(_.threadId == "t1")
+    parents should have size 2
+    val trace = parents.head.span.value.context.traceId
+    // every event of every run - both parent runs and the child's - is in the first run's trace
+    tracing.events.foreach(_.span.value.context.traceId shouldBe trace)
+    // the resumed run continues the first run's span
+    parents(1).span.value.parent shouldBe Some(parents.head.span.value.context)
+    // and places the task call at the span the child's origin records, which every child run is under
+    val call = agent.children(ThreadId("t1")).value.loneElement.origin.trace.value
+    tracing.events
+      .collect {
+        case e: TraceEvent.CustomEvent if e.name == "agent.tool_executed" && e.span.value.context == call => e
+      }
+      .loneElement
+      .data("runId")
+      .str shouldBe parents(1).runId
+    runEnds(tracing).filter(_.threadId != "t1").foreach(_.span.value.parent shouldBe Some(call))
   }
 
   "a child recovered by a later run of its parent" should "continue the trace its origin recorded, under the same call" in {
