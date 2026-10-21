@@ -206,7 +206,8 @@ cases against it.
    is open: the retention sweep never prunes a thread that has an open entry, nor reclaims its tombstone. Deletion
    must not resurrect a thread either: the entry records the thread's deletion marker at submission (its tombstone,
    if any), and an attempt that finds a newer tombstone closes the entry `cancelled` with a "thread deleted" reason,
-   running nothing. The service's delete closes the thread's open entries first; this rule covers a direct
+   running nothing. The service's delete closes the thread's queued entries, cancels its running one (W3: the cancel
+   waits for the run to exit and settles it), and only then deletes the thread; this rule covers a direct
    `deleteThread`, which does not consult the queue. The entry is the durable record of its
    runs and survives retention pruning older checkpoints once it is closed. A thread run directly, outside the queue, is never adopted by a
    worker: its owner calls `recover`, as today. (My call, from the builder check: it is what keeps a cancel
@@ -366,9 +367,13 @@ An `AgentWorker` that runs queued runs on a `GraphRuntime`:
   locally, waits for the run to actually exit, and closes the entry from how it ended: `cancelled` when the
   cancellation stopped it, otherwise the run's own outcome (a cancel that arrives while the run is already committing
   a completed, suspended or failed result is a no-op, `GraphRuntime`, and the ticket reports that result). Either
-  way the entry is closed, so no worker runs it again. The thread stays as a local cancel leaves it
-  (`Running`, recoverable by an explicit `recover` or a new submission). A cancel of a queued entry closes it
-  before it runs.
+  way the entry is closed, so no worker runs it again. A queued run stopped by cancellation is then **settled**, not
+  left `Running`: its turn is closed as an interrupted turn is (every tool call without a result gets a synthetic
+  "cancelled" result) and a terminal `Failed` checkpoint with a "cancelled" outcome is committed under the same
+  claim before it is released. So the thread is at rest, and the thread's next queued entry starts normally rather
+  than meeting `IncompleteRun` or recovering the cancelled input. (A local `AgentRun.cancel` of a direct run is
+  unchanged: its thread stays `Running` for its owner's `recover`.) A cancel of a queued entry closes it before it
+  runs.
 - **Busy-thread policy** (reverses §5.3's "do not queue"; decided 2026-10-20), per submission:
   - `Reject`: today's `ThreadBusy`.
   - `Enqueue`: the entry waits behind the thread's running and queued entries (W1's FIFO).
