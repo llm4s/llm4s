@@ -2,7 +2,7 @@
 layout: page
 title: Embeddings
 parent: User Guide
-nav_order: 21
+nav_order: 33
 ---
 
 # Embeddings
