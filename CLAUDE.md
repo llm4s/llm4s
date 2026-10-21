@@ -106,6 +106,7 @@ llm4s/
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── agent-checkpoint-sqlite/ # SqliteCheckpointer: the first durable Checkpointer, one SQLite file (published)
+│   ├── agent-checkpoint-postgres/ # PostgresCheckpointer: threads shared across machines, the database's clock (published)
 │   ├── agent-memory/          # SemanticMemoryMiddleware: per-tenant recall and replay-safe recording on llm4s-memory (published)
 │   ├── bom/                   # llm4s-bom: POM-only bill of materials pinning every published artifact, generated (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
