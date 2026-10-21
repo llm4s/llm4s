@@ -203,7 +203,11 @@ cases against it.
    moved on through a direct `recover`, which applied the same input once). Recording before admission and
    classifying by run id closes the crash windows, so a submitted input is applied once however many attempts run,
    with no transaction spanning the queue and the commit. The lookup must not lose a committed run while its entry
-   is open: the retention sweep never prunes a thread that has an open entry. The entry is the durable record of its
+   is open: the retention sweep never prunes a thread that has an open entry, nor reclaims its tombstone. Deletion
+   must not resurrect a thread either: the entry records the thread's deletion marker at submission (its tombstone,
+   if any), and an attempt that finds a newer tombstone closes the entry `cancelled` with a "thread deleted" reason,
+   running nothing. The service's delete closes the thread's open entries first; this rule covers a direct
+   `deleteThread`, which does not consult the queue. The entry is the durable record of its
    runs and survives retention pruning older checkpoints once it is closed. A thread run directly, outside the queue, is never adopted by a
    worker: its owner calls `recover`, as today. (My call, from the builder check: it is what keeps a cancel
    sticking, rule 4's idempotency surviving pruning, and ticket waiters answered.)
@@ -232,7 +236,7 @@ A new published module, `llm4s-agent-checkpoint-postgres`, with `PostgresCheckpo
   whose schema is newer than the build is refused with a typed error, as SQLite refuses one. No migration library
   (none is used in the repo).
 - **Upgrades** (decided 2026-10-21). A rolling upgrade works across releases that change neither the schema nor the
-  checkpoint format. A release that changes either needs every instance stopped before the first new one starts; the
+  checkpoint format (a changed graph version is routed by W2, not refused). A release that changes either needs every instance stopped before the first new one starts; the
   release notes and the deployment guide (P2) say so, and an old instance that meets the newer schema fails with the
   typed error above rather than corrupting anything. Expand-then-contract migrations, so that old and new builds can
   share a database, come with the 1.0 baseline, once the formats stop moving. The schema lives in a configurable Postgres schema (`llm4s` by default) so it can
@@ -337,8 +341,11 @@ A `RunQueue` SPI and a submission API in `org.llm4s.agent.service`:
 
 An `AgentWorker` that runs queued runs on a `GraphRuntime`:
 
-- **Agents by id**: the worker is built with the agents it can run; an entry naming another agent is left for a
-  worker that can (or fails after a bound, named in the slice).
+- **Agents by id and graph version**: the worker is built with the agents it can run; an entry names the agent and,
+  once its run has committed, the graph version that run's checkpoints need. A worker takes only entries whose agent
+  it has at a graph version that can restore them (`CompiledGraph.restoreStored`); any other entry is left for a
+  worker that can, or fails after a bound named in the slice. So a rolling upgrade that changes a graph's version
+  leaves in-flight runs to old workers until they finish, and new entries to either.
 - **Concurrency**: at most N runs at once per worker; each run holds its thread's claim (renewed as today) and its
   queue lease.
 - **Recovery**: a crashed worker's entries come back when their leases expire, and the worker that takes one
