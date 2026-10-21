@@ -61,6 +61,42 @@ provider modules, so it is the one llm4s dependency a Java project needs.
         <artifactId>scala3-library_3</artifactId>
         <version>${scala3.version}</version>
       </dependency>
+      <!-- The OpenAI and Anthropic SDKs, pureconfig and the llm4s modules ask for different versions of these;
+           dependencyConvergence fails until each is pinned. Pin the newest version any of them asks for. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>2.19.4</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-bom</artifactId>
+        <version>1.9.10</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.typesafe</groupId>
+        <artifactId>config</artifactId>
+        <version>1.4.9</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>2.0.17</version>
+      </dependency>
+      <dependency>
+        <groupId>com.google.errorprone</groupId>
+        <artifactId>error_prone_annotations</artifactId>
+        <version>2.50.0</version>
+      </dependency>
+      <dependency>
+        <groupId>io.swagger.core.v3</groupId>
+        <artifactId>swagger-annotations</artifactId>
+        <version>2.2.50</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
@@ -121,6 +157,10 @@ What each part is for:
   versions of one library, so a conflict shows up at build time and not as a `NoSuchMethodError` at run time.
   When it fails, it names the library and both paths: add a `dependencyManagement` entry for it, as for
   `scala3-library_3`, or an exclusion.
+- **The other `dependencyManagement` entries** settle the conflicts the enforcer finds today: the OpenAI and
+  Anthropic SDKs ask for different Jackson, Kotlin, error-prone and Swagger versions, and pureconfig for an older
+  Typesafe Config and SLF4J than llm4s. Each pin is the newest version any of them asks for; the Jackson and Kotlin
+  BOMs pin every artifact of those families at once.
 - **`exec-maven-plugin`** gives `mvn exec:java`, which runs the `main` class.
 
 ## The code and the configuration
