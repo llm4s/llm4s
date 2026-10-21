@@ -188,13 +188,17 @@ cases against it.
    that thread's claim (or, for a child, its parent's, as K1 #2045 fixed), or is a store-wide operation the contract
    names as claim-free (`prune`, `compactEvents`, reclamation).
 4. **At least once, applied at most once; the queue entry is the unit of recovery.** A submitted run is one queue
-   entry, and the entry, not a scan of threads, owns its recovery. A worker that takes an entry starts it the first
-   time, and on every later attempt (its lease expired, or a draining worker returned it) recovers the thread instead
-   of starting it again: a submitted input is applied once, however many attempts run. Each attempt has its own
-   `RunId` (a reused `RunId` names two runs, `GraphRuntime`), recorded on the entry, so the entry is the durable
-   record of its runs and survives retention pruning the checkpoints. An attempt that finds the thread already at
-   rest (its predecessor reached a terminal commit and died before closing the entry) closes the entry from the
-   thread's state, without running anything. A thread run directly, outside the queue, is never adopted by a
+   entry, and the entry, not a scan of threads, owns its recovery. Each attempt has its own `RunId` (a reused
+   `RunId` names two runs, `GraphRuntime`), and the entry records it durably **before** the attempt touches the
+   thread. An attempt decides what to do from the thread's latest checkpoint, never from an attempt count: if that
+   checkpoint's `runId` is not one of the entry's recorded `RunId`s, the input was never admitted (an earlier attempt
+   died before its first commit), so the attempt starts it; if it is one of them, the input was admitted, so the
+   attempt recovers a `Running` thread, and closes the entry from the thread's state, without running anything, when
+   the thread is already at rest (its predecessor reached a terminal commit and died before closing the entry).
+   Recording before admission and classifying by the checkpoint's `runId` closes both crash windows, so a submitted
+   input is applied once however many attempts run, with no transaction spanning the queue and the commit. The test
+   holds because a thread has at most one open entry running at a time (rule 5) and the latest checkpoint is never
+   pruned; the entry is the durable record of its runs and survives retention pruning older checkpoints. A thread run directly, outside the queue, is never adopted by a
    worker: its owner calls `recover`, as today. (My call, from the builder check: it is what keeps a cancel
    sticking, rule 4's idempotency surviving pruning, and ticket waiters answered.)
 5. **One run per thread.** The claim, not the queue, decides who runs a thread. Several queue entries for one
@@ -325,9 +329,11 @@ An `AgentWorker` that runs queued runs on a `GraphRuntime`:
   recovers its thread (rule 4), so a run whose machine died continues without user code. The claim and the lease
   expire on the same database clock; a thread whose claim is still live is left for a later attempt.
 - **Retention**: the worker runs S4's sweep on a schedule, one instance at a time.
-- **Drain**: on shutdown it stops taking entries, lets running runs reach a suspension or their end within a grace
-  period, then cancels the rest and releases their claims and leases, so another worker recovers them at once
-  instead of after the claim's ttl.
+- **Drain**: on shutdown it stops taking entries and lets running runs reach a suspension or their end within a grace
+  period, then cancels the rest. A cancelled run's claim and lease are released only once the run has actually
+  exited (cancellation is cooperative, and a provider or tool may ignore interruption), so another worker recovers it
+  at once without overlapping its side effects. A run that has not exited by a second bound keeps its claim and
+  lease; the process exits, renewal stops, and they expire after their ttl, as after a crash.
 - **Health**: a readiness answer that checks the store and the worker's loop, for P1's probes.
 
 ### W3: cancel from any machine, and the busy-thread policy (4.57)
