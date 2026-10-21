@@ -11,7 +11,8 @@ import scala.concurrent.duration.FiniteDuration
  * A page of a queued run's events ([[RunSubmitter.follow]]): `events`, those of the entry's attempts among the thread's
  * events after the cursor the caller passed, ascending; `next`, the cursor to pass next (the last thread event read,
  * whoever's it was); and `entry` as it was read after the events, so its attempts cover them. `finished` is `true` once
- * the entry is closed and every event up to its close has been read: nothing more will come.
+ * the entry is closed and every event up to its close ([[QueueEntry.closedAtSeq]]) has been read: nothing more will
+ * come, however busy the thread stays with later runs.
  */
 @Experimental
 final case class FollowedRun(entry: QueueEntry, events: Vector[EventRecord], next: Long, finished: Boolean)
@@ -70,18 +71,28 @@ final class RunSubmitter(
     limit: Int,
     timeout: FiniteDuration
   ): Result[FollowedRun] =
-    for
-      before <- queue.entry(tenantId, entryId)
-      read <-
-        if before.isOpen then checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout)
-        else checkpointer.eventsAfter(before.threadId, after, limit)
-      // read again after the events: an attempt is recorded before it commits, so these attempts cover every event
-      now <- if read.isEmpty && !before.isOpen then Right(before) else queue.entry(tenantId, entryId)
-    yield
-      val runs = now.runIds.map(_.value)
-      FollowedRun(
-        now,
-        read.filter(e => runs(e.runId)),
-        read.lastOption.fold(after)(_.seq),
-        finished = !before.isOpen && read.size < limit
-      )
+    queue.entry(tenantId, entryId).flatMap { before =>
+      before.closedAtSeq match
+        // closed: every event of its runs is at or below the thread's last event at the close, so read no further
+        case Some(end) =>
+          val read =
+            if after >= end then Right(Vector.empty) else checkpointer.eventsAfter(before.threadId, after, limit)
+          read.map { raw =>
+            val runs = before.runIds.map(_.value)
+            val done = raw.size < limit || raw.lastOption.exists(_.seq >= end)
+            FollowedRun(
+              before,
+              raw.filter(e => e.seq <= end && runs(e.runId)),
+              if done then math.max(after, end) else raw.last.seq,
+              finished = done
+            )
+          }
+        case None =>
+          checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout).flatMap { read =>
+            // read again after the events: an attempt is recorded before it commits, so these attempts cover every event
+            queue.entry(tenantId, entryId).map { now =>
+              val runs = now.runIds.map(_.value)
+              FollowedRun(now, read.filter(e => runs(e.runId)), read.lastOption.fold(after)(_.seq), finished = false)
+            }
+          }
+    }

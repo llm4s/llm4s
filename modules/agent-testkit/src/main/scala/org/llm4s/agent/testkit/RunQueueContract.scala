@@ -533,9 +533,27 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.entry(first).outcome shouldBe Some(outcome)
     c.queue.close(leased.lease, outcome).refused shouldBe QueueError.EntryClosed(first, outcome)
     c.queue.renew(leased.lease, ttl).refused shouldBe QueueError.EntryClosed(first, outcome)
+    // a worker that would give the entry back learns it is terminal, not requeued
+    c.queue.release(leased.lease).refused shouldBe QueueError.EntryClosed(first, outcome)
     c.ids() shouldBe Vector(second)
     c.entry(second).position shouldBe Some(0)
     c.take().value.entry.id shouldBe second
+  }
+
+  it should "record the thread's last event number when an entry closes" in {
+    val c = Case()
+    c.commitAs("direct", "c1")
+    c.commitAs("direct", "c2")
+    val id     = c.submit().value.entryId
+    val leased = c.take().value
+    c.entry(id).closedAtSeq shouldBe None
+    c.queue.close(leased.lease, EntryOutcome.Done(None, None)).value.closedAtSeq shouldBe Some(2L)
+    c.commitAs("direct", "c3")
+    c.entry(id).closedAtSeq shouldBe Some(2L)
+    val fresh  = c.submit(on = c.newThread()).value.entryId
+    val second = c.take().value
+    second.entry.id shouldBe fresh
+    c.queue.close(second.lease, EntryOutcome.Done(None, None)).value.closedAtSeq shouldBe Some(0L)
   }
 
   it should "read every outcome back as it was closed with" in {

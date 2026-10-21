@@ -194,14 +194,16 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   }
 
   def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
-    leased(c, lease).foreach { row =>
-      update(
-        c,
-        s"UPDATE $entries SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?",
-        row.id
-      )
-    }
-    Right(())
+    leased(c, lease) match
+      case Left(_: QueueError.LeaseLost) => Right(())
+      case Left(other)                   => Left(other)
+      case Right(row) =>
+        update(
+          c,
+          s"UPDATE $entries SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?",
+          row.id
+        )
+        Right(())
   }
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
@@ -248,8 +250,9 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
   private def closeRow(c: Connection, id: Long, outcome: EntryOutcome, at: Instant, unstarted: Boolean = false): Unit =
     update(
       c,
-      s"""UPDATE $entries
+      s"""UPDATE $entries e
          |SET state = ?, outcome_json = ?, closed_at = ?, lease_holder = NULL, lease_token = NULL,
+         |  closed_seq = COALESCE((SELECT t.next_seq - 1 FROM ${t.threads} t WHERE t.thread_id = e.thread_id), 0),
          |  lease_expires_at = NULL
          |WHERE entry_id = ?${if unstarted then " AND state = 'open' AND attempt_count = 0" else ""}""".stripMargin,
       outcome.state,
@@ -320,6 +323,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
         ),
         row.closed,
+        row.closedSeq,
         position
       )
     }
@@ -352,7 +356,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       long(14),
       at(15),
       Option(r.getString(16)),
-      at(17)
+      at(17),
+      long(18)
     )
 
   /** The head of `e`'s thread, as a correlated subquery. */
@@ -370,7 +375,7 @@ private[postgres] object PostgresRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at""".stripMargin
+      |closed_at, closed_seq""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -389,7 +394,8 @@ private[postgres] object PostgresRunQueue:
     leaseToken: Option[Long],
     leaseExpires: Option[Instant],
     outcome: Option[String],
-    closed: Option[Instant]
+    closed: Option[Instant],
+    closedSeq: Option[Long]
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */

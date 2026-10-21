@@ -22,7 +22,8 @@ import scala.concurrent.duration.FiniteDuration
 final class InMemoryRunQueue private[agent] (
   clock: Clock,
   lock: ReentrantLock,
-  runCommitted: (ThreadId, RunId) => Boolean
+  runCommitted: (ThreadId, RunId) => Boolean,
+  lastEvent: ThreadId => Long
 ) extends RunQueue:
 
   final private case class Held(holder: String, token: Long, expiresAt: Instant)
@@ -41,7 +42,8 @@ final class InMemoryRunQueue private[agent] (
     attempts: Vector[Attempt],
     lease: Option[Held],
     outcome: Option[EntryOutcome],
-    closedAt: Option[Instant]
+    closedAt: Option[Instant],
+    closedAtSeq: Option[Long] = None
   ):
     def open: Boolean = outcome.isEmpty
 
@@ -78,6 +80,7 @@ final class InMemoryRunQueue private[agent] (
       row.lease.map(_.expiresAt),
       row.outcome,
       row.closedAt,
+      row.closedAtSeq,
       position
     )
 
@@ -207,9 +210,14 @@ final class InMemoryRunQueue private[agent] (
   }
 
   def release(lease: Lease): Result[Unit] = withLock(lock) {
-    leased(lease).foreach(row => rows.update(row.id, row.copy(lease = None)))
-    Right(())
+    released(leased(lease)).map(_.foreach(row => rows.update(row.id, row.copy(lease = None))))
   }
+
+  /** What `release` does with `leased`'s answer: a closed entry is reported, a lease that is not current is a no-op. */
+  private def released(leased: Result[Row]): Result[Option[Row]] = leased match
+    case Right(row)                    => Right(Some(row))
+    case Left(_: QueueError.LeaseLost) => Right(None)
+    case Left(other)                   => Left(other)
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = withLock(lock) {
     leased(lease).flatMap { row =>
@@ -238,7 +246,8 @@ final class InMemoryRunQueue private[agent] (
   }
 
   private def closeRow(row: Row, outcome: EntryOutcome, at: Instant = clock.instant()): Row =
-    val done = row.copy(lease = None, outcome = Some(outcome), closedAt = Some(at))
+    val done =
+      row.copy(lease = None, outcome = Some(outcome), closedAt = Some(at), closedAtSeq = Some(lastEvent(row.threadId)))
     rows.update(row.id, done)
     closed.signalAll()
     done

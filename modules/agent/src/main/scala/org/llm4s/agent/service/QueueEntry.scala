@@ -135,6 +135,8 @@ object EntryOutcome:
  *
  * @param maxAttempts the most attempts the entry may make, fixed at submission
  * @param attempts the attempts recorded, oldest first, each before it touched the thread
+ * @param closedAtSeq the number of the thread's last event when the entry closed (`0` for none): every event of the
+ *   entry's runs is at or below it, so following the entry stops there ([[RunSubmitter.follow]])
  */
 @Experimental
 final case class QueueEntry private (
@@ -152,6 +154,7 @@ final case class QueueEntry private (
   leaseExpiresAt: Option[Instant],
   outcome: Option[EntryOutcome],
   closedAt: Option[Instant],
+  closedAtSeq: Option[Long],
   position: Option[Int]
 ):
   /** Whether the entry is still to run or running: it has no outcome. */
@@ -179,6 +182,7 @@ object QueueEntry:
     leaseExpiresAt: Option[Instant],
     outcome: Option[EntryOutcome],
     closedAt: Option[Instant],
+    closedAtSeq: Option[Long],
     position: Option[Int]
   ): QueueEntry =
     new QueueEntry(
@@ -196,6 +200,7 @@ object QueueEntry:
       leaseExpiresAt,
       outcome,
       closedAt,
+      closedAtSeq,
       position
     )
 

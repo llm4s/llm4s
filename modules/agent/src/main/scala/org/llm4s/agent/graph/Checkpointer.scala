@@ -427,7 +427,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     new org.llm4s.agent.service.InMemoryRunQueue(
       clock,
       lock,
-      (threadId, runId) => withLock(lock)(record(threadId).history.exists(_.runId == runId.value))
+      (threadId, runId) => withLock(lock)(record(threadId).history.exists(_.runId == runId.value)),
+      threadId => withLock(lock)(record(threadId).nextSeq - 1)
     )
 
   private def record(threadId: ThreadId): ThreadRecord =

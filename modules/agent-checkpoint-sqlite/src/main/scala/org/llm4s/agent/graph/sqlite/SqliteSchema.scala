@@ -92,7 +92,7 @@ private[sqlite] object SqliteSchema:
    * tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique while held -
    * its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
    * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
-   * (`open` or the outcome's), outcome JSON, close time and the trace context it carries (`trace_parent`). It is indexed
+   * (`open` or the outcome's), outcome JSON, close time, the thread's last event number at the close (`closed_seq`) and the trace context it carries (`trace_parent`). It is indexed
    * by thread for the run order, by agent for `take`, and by close time for `reclaim`.
    * `llm4s_checkpoint_queue_attempts` holds `(entry_id, attempt)` with the attempt's thread, run id, start time and
    * holder, indexed by `(thread_id, run_id)` for `prune`'s evidence.
@@ -126,7 +126,8 @@ private[sqlite] object SqliteSchema:
         |  lease_expires_nanos INTEGER,
         |  state               TEXT NOT NULL,
         |  outcome_json        TEXT,
-        |  closed_nanos        INTEGER
+        |  closed_nanos        INTEGER,
+        |  closed_seq          INTEGER
         |)""".stripMargin,
       """CREATE UNIQUE INDEX llm4s_checkpoint_queue_entries_key
         |ON llm4s_checkpoint_queue_entries (key_scope, submission_key) WHERE submission_key IS NOT NULL""".stripMargin,

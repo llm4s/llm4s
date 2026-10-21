@@ -46,6 +46,7 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       None,
       None,
       None,
+      None,
       Some(0)
     )
 
@@ -163,9 +164,21 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     page.next shouldBe 2L
     page.finished shouldBe false
     store.runQueue.close(leased.lease, EntryOutcome.Done(Some("c2"), Some(CheckpointStatus.Completed))).value
-    val last = submitter.follow(None, ticket.entryId, 2L, 10, 1.second).value
+    // the thread goes on with other runs: following the closed entry stops at its close, however busy the thread
+    commitAs("direct", "c3", Some("c2"))
+    commitAs("direct", "c4", Some("c3"))
+    submitter.entry(None, ticket.entryId).value.closedAtSeq shouldBe Some(2L)
+    val last = submitter.follow(None, ticket.entryId, 2L, 1, 1.second).value
     last.finished shouldBe true
     last.events shouldBe empty
+    last.next shouldBe 2L
+    val replayed = submitter.follow(None, ticket.entryId, 0L, 1, 1.second).value
+    replayed.finished shouldBe false
+    replayed.events shouldBe empty
+    replayed.next shouldBe 1L
+    val rest = submitter.follow(None, ticket.entryId, 1L, 1, 1.second).value
+    rest.events.map(_.runId) shouldBe Vector("queued-run")
+    rest.finished shouldBe true
     submitter.await(None, ticket.entryId, 1.second).value.outcome shouldBe
       Some(EntryOutcome.Done(Some("c2"), Some(CheckpointStatus.Completed)))
     submitter.follow(Some(TenantId("other")), ticket.entryId, 0L, 10, 10.millis).left.value shouldBe

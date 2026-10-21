@@ -113,7 +113,7 @@ private[postgres] object PostgresSchema:
    * while held - its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
    * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token from
    * `checkpoint_queue_lease_tokens`, expiry by the database's clock), its state (`open` or the outcome's), outcome JSON,
-   * close time (the database's clock) and the trace context it carries (`trace_parent`). Partial indexes serve the run
+   * close time (the database's clock), the thread's last event number at the close (`closed_seq`) and the trace context it carries (`trace_parent`). Partial indexes serve the run
    * order (by thread), `take` (by agent) and `reclaim` (by close time). `checkpoint_queue_attempts` holds
    * `(entry_id, attempt)` with the attempt's thread, run id, start time and holder, indexed by `(thread_id, run_id)`
    * for `prune`'s evidence.
@@ -144,7 +144,8 @@ private[postgres] object PostgresSchema:
        |  lease_expires_at  timestamptz,
        |  state             text NOT NULL,
        |  outcome_json      text,
-       |  closed_at         timestamptz
+       |  closed_at         timestamptz,
+       |  closed_seq        bigint
        |)""".stripMargin,
     s"""CREATE UNIQUE INDEX checkpoint_queue_entries_key
        |ON ${t.queueEntries} (key_scope, submission_key) WHERE submission_key IS NOT NULL""".stripMargin,

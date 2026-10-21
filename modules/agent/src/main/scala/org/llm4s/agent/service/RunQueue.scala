@@ -44,7 +44,8 @@ import scala.concurrent.duration.*
  *    thread of the id; an entry submitted after the delete is not marked;
  *  - '''keep the evidence''': while an entry is open, its store's `Checkpointer.prune` keeps the newest checkpoint each
  *    of the entry's recorded runs committed on its thread, so `latestOfRuns` never loses an admitted run;
- *  - '''close''' an entry once, with its [[EntryOutcome]] and the store's time, and keep it for the ticket lifetime;
+ *  - '''close''' an entry once, with its [[EntryOutcome]], the store's time and the thread's last event number then
+ *    ([[QueueEntry.closedAtSeq]]), and keep it for the ticket lifetime;
  *    [[reclaim]] removes closed entries older than that, oldest first, and never an open one;
  *  - '''scope by tenant''' (rule 9): [[entry]], [[awaitClosed]] and [[openEntries]] answer for the caller's tenant's
  *    entries only (`None` and `Some` differ), another tenant's being as unknown as a reclaimed one;
@@ -101,7 +102,8 @@ trait RunQueue:
 
   /**
    * Gives the entry back without closing it - as a worker that defers to a live run on the thread does, recording no
-   * attempt - so it may be taken again at once. A lease that is not the current one changes nothing.
+   * attempt - so it may be taken again at once. A lease that is not the current one changes nothing; a closed entry is
+   * [[QueueError.EntryClosed]], so the worker knows it is terminal rather than requeued.
    */
   def release(lease: Lease): Result[Unit]
 

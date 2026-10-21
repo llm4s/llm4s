@@ -164,15 +164,17 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
   }
 
   def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
-    leased(c, lease).foreach { row =>
-      update(
-        c,
-        """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
-          |WHERE entry_id = ?""".stripMargin,
-        row.id
-      )
-    }
-    Right(())
+    leased(c, lease) match
+      case Left(_: QueueError.LeaseLost) => Right(())
+      case Left(other)                   => Left(other)
+      case Right(row) =>
+        update(
+          c,
+          """UPDATE llm4s_checkpoint_queue_entries SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
+            |WHERE entry_id = ?""".stripMargin,
+          row.id
+        )
+        Right(())
   }
 
   def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
@@ -227,6 +229,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       c,
       """UPDATE llm4s_checkpoint_queue_entries
         |SET state = ?, outcome_json = ?, closed_nanos = ?, lease_holder = NULL, lease_token = NULL,
+        |  closed_seq = COALESCE((SELECT next_seq - 1 FROM llm4s_checkpoint_threads t WHERE t.thread_id = llm4s_checkpoint_queue_entries.thread_id), 0),
         |  lease_expires_nanos = NULL
         |WHERE entry_id = ?""".stripMargin,
       outcome.state,
@@ -295,6 +298,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           EntryOutcome.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
         ),
         row.closed.map(fromEpochNanos),
+        row.closedSeq,
         position
       )
     }
@@ -320,7 +324,7 @@ private[sqlite] object SqliteRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_nanos, thread_deleted, lease_holder, lease_token, lease_expires_nanos, outcome_json,
-      |closed_nanos""".stripMargin
+      |closed_nanos, closed_seq""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -339,7 +343,8 @@ private[sqlite] object SqliteRunQueue:
     leaseToken: Option[Long],
     leaseExpires: Option[Long],
     outcome: Option[String],
-    closed: Option[Long]
+    closed: Option[Long],
+    closedSeq: Option[Long]
   )
 
   def raw(r: ResultSet): Raw =
@@ -361,7 +366,8 @@ private[sqlite] object SqliteRunQueue:
       long(14),
       long(15),
       Option(r.getString(16)),
-      long(17)
+      long(17),
+      long(18)
     )
 
   def runIdUsed(threadId: String, runId: RunId): ValidationError =
