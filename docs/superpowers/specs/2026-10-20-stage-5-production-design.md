@@ -203,7 +203,9 @@ cases against it.
    moved on through a direct `recover`, which applied the same input once). Recording before admission and
    classifying by run id closes the crash windows, so a submitted input is applied once however many attempts run,
    with no transaction spanning the queue and the commit. The lookup must not lose a committed run while its entry
-   is open: the retention sweep never prunes a thread that has an open entry, nor reclaims its tombstone. Deletion
+   is open: the retention sweep still prunes a thread that has an open entry (a long-running entry must not let
+   its history grow without bound), but keeps the newest checkpoint each of the entry's `RunId`s committed, which is
+   the admission evidence, and never reclaims the thread's tombstone. Deletion
    must not resurrect a thread either: the entry records the thread's deletion marker at submission (its tombstone,
    if any), and an attempt that finds a newer tombstone closes the entry `cancelled` with a "thread deleted" reason,
    running nothing. The service's delete closes the thread's queued entries, cancels its running one (W3: the cancel
@@ -320,7 +322,10 @@ A `RunQueue` SPI and a submission API in `org.llm4s.agent.service`:
 - **Entries** are durable, per thread FIFO except for `Interrupt` entries (rule 5), with a lease (taken, renewed,
   expired), attempts and a terminal state (`done`, `failed`, `cancelled`, `interrupted`). Attempts are bounded
   (`maxAttempts`, a default named in the slice): an entry whose attempts run out is closed `failed` with a typed
-  reason (a dead letter), so a poison entry that crashes its worker before its first commit cannot keep an open entry
+  reason (a dead letter). If its input was admitted (rule 4), the worker that finds the attempts exhausted first
+  settles the thread as a cancel does (W3: synthetic results, a terminal `Failed` checkpoint with an "attempts
+  exhausted" outcome, under its claim), so the thread is at rest and later entries start; an unadmitted entry is
+  simply closed. This bound means a poison entry that keeps crashing its worker, admitted or not, cannot keep an open entry
   and a growing attempt list for ever, and the run-id lookup (rule 4) takes at most `maxAttempts` ids. Taking an entry is skip-locked in Postgres so workers do not contend.
 - **Wait and follow**: a caller waits for a ticket's terminal state or follows its run's events from any machine
   (through `awaitEventsAfter`).
