@@ -179,8 +179,11 @@ cases against it.
 ## Rules every slice must satisfy
 
 1. **Postgres decides time.** Claim expiry, retention age and queue leases are judged by the database's `now()`,
-   never a host's clock, so skew between machines changes nothing. (In-memory and SQLite keep their injected
-   `Clock`.) Durations are `FiniteDuration`, points `Instant` (CLAUDE.md, API rules).
+   never a host's clock, so skew between machines changes nothing. Retention compares that `now()` against a
+   **server-recorded commit time** the store stamps on every checkpoint and event row in the commit's transaction,
+   never against the producer-stamped `Checkpoint.createdAt` or event timestamps (which a skewed worker would make
+   too old or too young); those stay as the producer's record. The contract tests a skewed producer explicitly.
+   (In-memory and SQLite keep their injected `Clock`, which is also their commit time.) Durations are `FiniteDuration`, points `Instant` (CLAUDE.md, API rules).
 2. **Every store call is bounded**: a statement timeout, a socket timeout and the pool's connection timeout, each
    set from the store's documented bound; a call that exceeds it fails, it never waits. A thread interrupt during a
    call returns or replaces the pooled connection, leaving the store usable (`Checkpointer.scala:208-218`).
@@ -190,15 +193,18 @@ cases against it.
 4. **At least once, applied at most once; the queue entry is the unit of recovery.** A submitted run is one queue
    entry, and the entry, not a scan of threads, owns its recovery. Each attempt has its own `RunId` (a reused
    `RunId` names two runs, `GraphRuntime`), and the entry records it durably **before** the attempt touches the
-   thread. An attempt decides what to do from the thread's latest checkpoint, never from an attempt count: if that
-   checkpoint's `runId` is not one of the entry's recorded `RunId`s, the input was never admitted (an earlier attempt
-   died before its first commit), so the attempt starts it; if it is one of them, the input was admitted, so the
-   attempt recovers a `Running` thread, and closes the entry from the thread's state, without running anything, when
-   the thread is already at rest (its predecessor reached a terminal commit and died before closing the entry).
-   Recording before admission and classifying by the checkpoint's `runId` closes both crash windows, so a submitted
-   input is applied once however many attempts run, with no transaction spanning the queue and the commit. The test
-   holds because a thread has at most one open entry running at a time (rule 5) and the latest checkpoint is never
-   pruned; the entry is the durable record of its runs and survives retention pruning older checkpoints. A thread run directly, outside the queue, is never adopted by a
+   thread. An attempt decides what to do from whether any of the entry's recorded `RunId`s ever committed on the
+   thread, never from an attempt count or from the thread's latest checkpoint alone (a direct run on the thread after
+   an attempt died would replace the latest one). The `Checkpointer` answers this with a run-id lookup (the latest
+   checkpoint committed by any of a set of `RunId`s on a thread; named in W1). If none committed, the input was never
+   admitted (an earlier attempt died before its first commit), so the attempt starts it. If one did, the input was
+   admitted: the attempt recovers the thread when that run's checkpoint is the thread's latest and `Running`, and
+   otherwise closes the entry from the thread's state without running anything (its run reached rest, or the thread
+   moved on through a direct `recover`, which applied the same input once). Recording before admission and
+   classifying by run id closes the crash windows, so a submitted input is applied once however many attempts run,
+   with no transaction spanning the queue and the commit. The lookup must not lose a committed run while its entry
+   is open: the retention sweep never prunes a thread that has an open entry. The entry is the durable record of its
+   runs and survives retention pruning older checkpoints once it is closed. A thread run directly, outside the queue, is never adopted by a
    worker: its owner calls `recover`, as today. (My call, from the builder check: it is what keeps a cancel
    sticking, rule 4's idempotency surviving pruning, and ticket waiters answered.)
 5. **One run per thread.** The claim, not the queue, decides who runs a thread. Several queue entries for one
