@@ -6,7 +6,7 @@ import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
-import org.llm4s.trace.Tracing
+import org.llm4s.trace.{ TraceContext, Tracing }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -207,7 +207,7 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
+    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false, config.traceContext))
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -233,7 +233,9 @@ final class Agent private[agent] (
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
     routed(threadId, answers, config).flatMap(grouped =>
-      runtime.resume(threadId, loop.graph, grouped, configured(config)).map(agentRun(_, None, drain = false))
+      runtime
+        .resume(threadId, loop.graph, grouped, configured(config))
+        .map(agentRun(_, None, drain = false, config.traceContext))
     )
 
   /**
@@ -378,7 +380,7 @@ final class Agent private[agent] (
       val (observer, scope) = observed(config, listening)
       runtime
         .resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
-        .map(agentRun(_, Some(scope), listening.drain))
+        .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
     }
 
   /**
@@ -400,7 +402,7 @@ final class Agent private[agent] (
     val (observer, scope) = observed(config, listening)
     runtime
       .recover(threadId, loop.graph, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain))
+      .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
 
   private def startWith(
     threadId: ThreadId,
@@ -427,7 +429,7 @@ final class Agent private[agent] (
             observer
           )
         )
-    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
+    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain), config.traceContext))
 
   /**
    * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
@@ -452,7 +454,7 @@ final class Agent private[agent] (
           GraphError.ThreadExists(threadId.value),
           amend = _ => Right(record)
         )
-        .map(agentRun(_, None, drain = false))
+        .map(agentRun(_, None, drain = false, config.traceContext))
 
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
@@ -469,9 +471,10 @@ final class Agent private[agent] (
     handle: RunHandle[TurnOutput],
     scope: Option[RunScope],
     drain: Boolean,
+    continues: Option[TraceContext],
     parent: Option[(ThreadId, RunId)] = None
   ): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent)
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, continues)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])

@@ -42,6 +42,30 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
 - **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
 - **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Production adapters (Stage 5)
+
+Not in a release yet. Stage 5 runs one agent service on several machines ([#2129](https://github.com/llm4s/llm4s/issues/2129)). Each slice adds its breaks here.
+
+### One trace per run (#2137)
+
+- **Positional patterns** on `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` need
+  one more binder, for the new last field `span: Option[TraceSpan]` (`case TraceEvent.CustomEvent(name, data, at, _)`).
+  Constructor calls are unchanged: `span` defaults to `None`.
+- **OpenTelemetry dashboards and queries.** An agent run is now one trace: `invoke_agent <agent>` is the parent of the
+  run's `chat <model>` (new: one per model call, `SpanKind.CLIENT`), `execute_tool <tool>` (now `SpanKind.INTERNAL`)
+  and its other events, and a delegated child's `invoke_agent` is under the `execute_tool task` that started it. A
+  query that counted one trace per event, or keyed on the old parentless spans, needs rewriting; filter by
+  `gen_ai.operation.name` instead.
+- **Langfuse trace ids.** A traced agent run's Langfuse trace id is now its 32-hex trace id (the OpenTelemetry one),
+  not the run id, which moves to the trace's `run_id` metadata. A child run has no trace of its own: find it inside
+  its parent's trace, under the `execute_tool task` observation. A run traced without a placement (a hand-built
+  `AgentRunEnded`) is unchanged.
+- **Continuing a trace.** To put a run in an upstream request's trace, pass its `traceparent`:
+  `RunConfig().withTraceContext(TraceContext.parse(header).toOption)`. Pass the same context to a `recover` to keep a
+  recovered run in the original trace; without one the recovered run starts a trace of its own (its children stay
+  in the trace that started them, which their `RunOrigin.trace` records).
+- **Stored data needs nothing.** `RunOrigin.trace` is optional; a child thread stored without it reads as `None`.
+
 ## Subagents and isolation (Phase 4)
 
 Not in a release yet. Stage 4 lets an agent delegate to child agents on threads of their own ([#2044](https://github.com/llm4s/llm4s/issues/2044)). Each slice adds its breaks here.

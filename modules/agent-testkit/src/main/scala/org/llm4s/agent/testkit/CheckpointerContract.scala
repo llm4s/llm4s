@@ -47,7 +47,8 @@ import scala.jdk.CollectionConverters.*
  *    latest checkpoint; effect records (design §4.24) -
  *    upserted by key and fenced like any commit, released at a commit with a checkpoint exactly as
  *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; child threads (design
- *    4.41) - a checkpoint's `origin` and `outcome` read back, a format-7 checkpoint read with neither, and `children`
+ *    4.41) - a checkpoint's `origin` (its trace context included, design 4.58) and `outcome` read back, a format-7
+ *    checkpoint read with neither, and `children`
  *    listing a parent's children oldest first, paged, without a tenant, never one deleted or one whose latest
  *    checkpoint names another parent; and claims and fencing - one
  *    live claim per thread, tokens strictly
@@ -1514,10 +1515,13 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     """{"formatVersion":7,"id":"c7","parent":null,"threadId":"format-7","runId":"run","status":"Completed","createdAt":"2026-10-09T12:00:00Z","snapshot":{"graphId":"g","graphVersion":"v1","fingerprint":"f","superstep":0,"state":{},"frontier":[],"staticJoins":[],"dynamicJoins":[],"parked":[],"paused":false},"tenantId":"tenant-a","fencingToken":3}"""
 
   it should "read back a checkpoint's origin and outcome, on the latest, in the history and by id, across a reopen" in {
-    val s      = Store()
-    val origin = originOf(s.thread, 1)
-    val child  = ThreadId(s"${s.thread.value}/~task/worker/1")
-    val token  = s.claim("run", on = child).value.token
+    val s = Store()
+    // with the trace context of the call that started the child (design 4.58), which reads back as written
+    val origin = originOf(s.thread, 1).withTrace(
+      org.llm4s.trace.TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
+    )
+    val child = ThreadId(s"${s.thread.value}/~task/worker/1")
+    val token = s.claim("run", on = child).value.token
     s.commit(token, Some(s.checkpoint("c1", None, on = child).withOrigin(origin)), on = child).value
     s.commit(
       token,

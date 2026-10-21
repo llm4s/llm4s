@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `execute_tool <tool>`: exhaustive matches, positional patterns and dashboards break; [migration](docs/reference/migration.md#nested-streams-and-tracing-2051).
 - `HarnessProfile.deepAgents` offers a `task` tool (a tool named `task` clashes; permission rules need an `Invoke` rule for it),
   and `withDelegation` beside a harness is refused; [migration](docs/reference/migration.md#subagents-in-the-harness-profile-2052).
+- `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` gain a `span` field, and an agent
+  run's OpenTelemetry spans and Langfuse trace ids change: positional patterns and dashboards break; [migration](docs/reference/migration.md#one-trace-per-run-2137).
+
+### Observability
+
+- **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
+  run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
+  `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
 
 ### Agent subagents (Phase 4)
 

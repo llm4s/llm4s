@@ -156,10 +156,138 @@ class LangfuseTracing(
   }
 
   def traceEvent(event: TraceEvent): Result[Unit] = event match {
+    // A run placed in a trace (design 4.58) is an observation in that trace: a child run's in its parent's.
+    case e: TraceEvent.AgentRunEnded if e.span.isDefined => tracePlacedRun(e, e.span.get)
     // An ended agent run becomes one trace (id = run, session = thread) with a child span per
     // message, whether or not it carries messages.
     case e: TraceEvent.AgentRunEnded => traceConversation(e)
-    case other                       => traceSingleEvent(other)
+    case e: TraceEvent.CustomEvent if e.span.isDefined && LangfuseTracing.spanEvents.contains(e.name) =>
+      sendBatch(Seq(placedCall(e, e.span.get)))
+    case other => traceSingleEvent(other)
+  }
+
+  /**
+   * An agent's model call or tool call placed in a trace, as a Langfuse observation in it: a generation (`chat
+   * <model>`, with its model and usage) or a span (`execute_tool <tool>`), with the placement's ids, parent and times.
+   * The event's data - which an agent's events keep free of message content - is its metadata.
+   */
+  private def placedCall(e: TraceEvent.CustomEvent, span: TraceSpan): ujson.Obj = {
+    val payload                   = e.data.objOpt.flatMap(_.get("payload")).flatMap(_.objOpt)
+    def text(key: String): String = payload.flatMap(_.get(key)).flatMap(_.strOpt).getOrElse("")
+    val body = LangfuseTracing.placed(
+      ujson.Obj(
+        "startTime" -> span.startedAt.toString,
+        "endTime"   -> e.timestamp.toString,
+        "metadata"  -> e.data
+      ),
+      span
+    )
+    val kind =
+      if (e.name == LangfuseTracing.ModelCallCompleted) {
+        body("name") = s"chat ${text("model")}"
+        body("model") = text("model")
+        payload.flatMap(_.get("usage")).flatMap(_.objOpt).foreach { usage =>
+          def tokens(key: String): ujson.Value = usage.get(key).getOrElse(ujson.Null)
+          body("usage") = ujson.Obj(
+            "input"  -> tokens("promptTokens"),
+            "output" -> tokens("completionTokens"),
+            "total"  -> tokens("totalTokens"),
+            "unit"   -> "TOKENS"
+          )
+        }
+        "generation-create"
+      } else {
+        body("name") = s"execute_tool ${text("tool")}"
+        if (payload.flatMap(_.get("outcome")).exists(_.toString.contains("Errored"))) body("level") = "ERROR"
+        "span-create"
+      }
+    ujson.Obj("id" -> uuid, "timestamp" -> nowIso, "type" -> kind, "body" -> body)
+  }
+
+  /**
+   * An ended run placed in a trace (design 4.58). A top-level run creates the trace - its id the placement's trace id,
+   * its session the thread - as an unplaced run does; a delegated child run creates none, so it stays in its parent's
+   * trace. Either way the run is a span observation (`invoke_agent <agent>`) with the placement's id and times, a
+   * child's under the `execute_tool task` that started it, and each message of the turn is a span under the run.
+   */
+  private def tracePlacedRun(run: TraceEvent.AgentRunEnded, span: TraceSpan): Result[Unit] = {
+    val traceId  = span.context.traceId
+    val runSpan  = span.context.spanId
+    val isChild  = run.parentRunId.isDefined
+    val metadata = LangfuseTracing.runMetadata(run)
+    val events   = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
+
+    val firstUserMessage = run.messages.find(_.isInstanceOf[org.llm4s.llmconnect.model.UserMessage])
+    val lastAssistantMessage =
+      run.messages.findLast(_.isInstanceOf[org.llm4s.llmconnect.model.AssistantMessage])
+    val input  = ujson.Str(firstUserMessage.map(_.content).getOrElse(""))
+    val output = ujson.Str(lastAssistantMessage.map(_.content).getOrElse(""))
+
+    if (!isChild)
+      events += ujson.Obj(
+        "id"        -> uuid,
+        "timestamp" -> nowIso,
+        "type"      -> "trace-create",
+        "body" -> ujson.Obj(
+          "id"          -> traceId,
+          "timestamp"   -> span.startedAt.toString,
+          "environment" -> environment,
+          "release"     -> release,
+          "version"     -> version,
+          "public"      -> true,
+          "name"        -> "LLM4S Agent Run",
+          "input"       -> input,
+          "output"      -> output,
+          "userId"      -> "llm4s-user",
+          "sessionId"   -> run.threadId,
+          "metadata"    -> metadata,
+          "tags"        -> ujson.Arr("llm4s", "agent", "conversation")
+        )
+      )
+
+    // a top-level run's parent, if any, is its submitter's span, which this trace does not hold
+    val runBody = LangfuseTracing.placed(
+      ujson.Obj(
+        "name"      -> s"invoke_agent ${run.agent}",
+        "startTime" -> span.startedAt.toString,
+        "endTime"   -> run.timestamp.toString,
+        "input"     -> input,
+        "output"    -> output,
+        "metadata"  -> metadata
+      ),
+      if (isChild) span else span.withParent(None)
+    )
+    if (Set("failed", "cancelled", "timed_out").contains(run.status)) {
+      runBody("level") = "ERROR"
+      runBody("statusMessage") = run.status
+    }
+    events += ujson.Obj("id" -> uuid, "timestamp" -> nowIso, "type" -> "span-create", "body" -> runBody)
+
+    run.messages.zipWithIndex.foreach { case (message, index) =>
+      events += ujson.Obj(
+        "id"        -> uuid,
+        "timestamp" -> nowIso,
+        "type"      -> "span-create",
+        "body" -> ujson.Obj(
+          "id"                  -> uuid,
+          "traceId"             -> traceId,
+          "parentObservationId" -> runSpan,
+          "startTime"           -> run.timestamp.toString,
+          "name"                -> s"${LangfuseTracing.messageName(message)} $index",
+          "input" -> ujson.Obj(
+            "content" -> message.content,
+            "role"    -> message.getClass.getSimpleName.replace("Message", "").toLowerCase
+          ),
+          "metadata" -> ujson.Obj(
+            "framework"     -> "llm4s",
+            "message_index" -> index,
+            "message_type"  -> message.getClass.getSimpleName
+          ),
+          "tags" -> ujson.Arr("llm4s", "agent", "conversation", "message")
+        )
+      )
+    }
+    sendBatch(events.toSeq)
   }
 
   private def traceSingleEvent(event: TraceEvent): Result[Unit] = {
@@ -487,6 +615,18 @@ class LangfuseTracing(
         )
     }
 
+    // an event placed in a trace (design 4.58) keeps its shape, inside that trace: its body takes the placement's ids
+    event.span.foreach { span =>
+      langfuseEvent("body") match {
+        case body: ujson.Obj =>
+          LangfuseTracing.placed(body, span)
+          // its recorded time, not the export's: a placed event may be exported late, or replayed from the log
+          body("timestamp") = event.timestamp.toString
+          body("startTime") = span.startedAt.toString
+          if (langfuseEvent("type").str != "event-create") body("endTime") = event.timestamp.toString
+        case _ => ()
+      }
+    }
     batchEvents += langfuseEvent
     sendBatch(batchEvents.toSeq)
   }
@@ -606,12 +746,37 @@ object LangfuseTracing {
    * The metadata of the trace an ended agent run becomes: its agent, status, thread and totals, and - for a delegated
    * child run - `parent_thread_id` and `parent_run_id`, which link it to the parent run's trace.
    */
+  private[trace] val ModelCallCompleted = "agent.model_call_completed"
+  private[trace] val ToolExecuted       = "agent.tool_executed"
+
+  /** The agent events a placed one of becomes an observation with a duration, rather than a point event. */
+  private[trace] val spanEvents: Set[String] = Set(ModelCallCompleted, ToolExecuted)
+
+  /**
+   * `body` placed in the trace `span` names (design 4.58): the observation's id is the span's, its trace the span's
+   * trace and, when the span has a parent, its `parentObservationId` that parent's span id.
+   */
+  private[trace] def placed(body: ujson.Obj, span: TraceSpan): ujson.Obj = {
+    body("id") = span.context.spanId
+    body("traceId") = span.context.traceId
+    span.parent.foreach(p => body("parentObservationId") = p.spanId)
+    body
+  }
+
+  private[trace] def messageName(message: org.llm4s.llmconnect.model.Message): String = message match {
+    case _: org.llm4s.llmconnect.model.SystemMessage    => "System Message"
+    case _: org.llm4s.llmconnect.model.UserMessage      => "User Input"
+    case _: org.llm4s.llmconnect.model.AssistantMessage => "LLM Generation"
+    case _                                              => message.getClass.getSimpleName
+  }
+
   private[trace] def runMetadata(run: TraceEvent.AgentRunEnded): ujson.Obj = {
     val metadata = ujson.Obj(
       "framework"     -> "llm4s",
       "agent"         -> run.agent,
       "status"        -> run.status,
       "thread_id"     -> run.threadId,
+      "run_id"        -> run.runId,
       "message_count" -> run.messages.size,
       "input_tokens"  -> run.usage.inputTokens.toDouble,
       "output_tokens" -> run.usage.outputTokens.toDouble,

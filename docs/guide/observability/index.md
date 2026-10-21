@@ -424,11 +424,25 @@ Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn
 it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
 names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
 
+Every one of these events is placed in one trace (`TraceEvent.span`, design 4.58): the run is a span, each event a
+span under it - a tool call's spanning its duration - and a subagent's run is a span under the `task` tool call that
+started it, whichever machine runs it. A run continues an upstream trace when given its context:
+
+```scala
+import org.llm4s.trace.TraceContext
+
+val upstream = TraceContext.parse(request.header("traceparent")).toOption
+agent.run(threadId, query, RunConfig().withTraceContext(upstream), Nil)
+```
+
+The run's span then takes that context as its remote parent and keeps its trace id. Pass the same context to
+`recover` to keep a recovered run in the original trace.
+
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per run (trace id = run id), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage, and a subagent's parent thread and run; one span per message |
-| OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status, message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; tool calls are `execute_tool <tool>` spans |
-| `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost |
+| Langfuse | One trace per top-level run (trace id = the run's 32-hex trace id, the OpenTelemetry one; `run_id` in its metadata), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage. The run is an `invoke_agent <agent>` observation over its model calls (generations `chat <model>`), tool calls (spans `execute_tool <tool>`), other events and one span per message; a subagent's run creates no trace and nests under the `execute_tool task` that started it |
+| OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status (`ERROR` when failed, cancelled or timed out), message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; it is the parent of the run's `chat <model>` (`CLIENT`, per-call `gen_ai.usage.*`) and `execute_tool <tool>` (`INTERNAL`) spans and its other events, and a subagent's `invoke_agent` is under its `execute_tool task`. No attribute carries message content |
+| `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost; like every event of the run it is stored in the run's own trace, with its span id, parent and start |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
 
 ### Environment Setup

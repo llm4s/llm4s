@@ -56,14 +56,17 @@ enum ToolExecutionOutcome derives ReadWriter:
 /**
  * One tool call's outcome; `duration` is the middleware chain's, zero for a call refused before it.
  * `tool` is the called tool's name when the agent has that tool, else `"<unknown>"`
- * (`ToolLoop.UnknownTool`): a name the model invented is not stored.
+ * (`ToolLoop.UnknownTool`): a name the model invented is not stored. `idempotencyKey` is the call's
+ * [[org.llm4s.agent.graph.IdempotencyKey]] (a digest, no content), which names the call's trace span
+ * (design 4.58); `None` in an event stored before it existed.
  */
 final case class ToolExecuted(
   agent: String,
   toolCallId: String,
   tool: String,
   duration: FiniteDuration,
-  outcome: ToolExecutionOutcome
+  outcome: ToolExecutionOutcome,
+  idempotencyKey: Option[String] = None
 )
 
 object ToolExecuted:

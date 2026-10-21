@@ -1832,7 +1832,7 @@ object ToolLoop:
     ): NodeResult =
       // a tool that bounds its errors (the task tools, design 4.44) has every error recorded for it cut to fit
       val stored = ToolErrors.recorded(tools.get(task.call.name), content, isError)
-      announce(task.call, stored, isError, context, outcome, duration)
+      announce(task.call, task.idempotencyKey, stored, isError, context, outcome, duration)
       NodeResult.Continue(
         Command.empty
           .update(
@@ -1847,6 +1847,7 @@ object ToolLoop:
      */
     private def announce(
       call: ToolCall,
+      key: IdempotencyKey,
       content: String,
       isError: Boolean,
       context: RunContext,
@@ -1854,14 +1855,16 @@ object ToolLoop:
       duration: FiniteDuration
     ): Unit =
       AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(call.id, content, isError))
-      executed(call, context, outcome, duration)
+      executed(call, key, context, outcome, duration)
 
     /**
      * A call of a mixed handoff batch, which runs nothing and gives every call `error` as its result:
      * announced as an `Errored` call of zero duration, as an unknown tool is.
      */
     def refusedInBatch(call: ToolCall, error: String, context: RunContext): Unit =
-      announce(call, error, isError = true, context, ToolExecutionOutcome.Errored, Duration.Zero)
+      // refused in the model step that issued it: the key that step gives the call (`issued`)
+      val key = IdempotencyKey.ofCall(context.position.threadId, context.taskKey, call)
+      announce(call, key, error, isError = true, context, ToolExecutionOutcome.Errored, Duration.Zero)
 
     /**
      * The call's outcome, content-free: committed with the task, so stored once per committed call.
@@ -1870,12 +1873,16 @@ object ToolLoop:
      */
     private def executed(
       call: ToolCall,
+      key: IdempotencyKey,
       context: RunContext,
       outcome: ToolExecutionOutcome,
       duration: FiniteDuration
     ): Unit =
       val tool = if tools.get(call.name).isDefined then call.name else ToolLoop.UnknownTool
-      AgentEvents.ToolExecuted.emit(context, events.ToolExecuted(agent.value, call.id, tool, duration, outcome))
+      AgentEvents.ToolExecuted.emit(
+        context,
+        events.ToolExecuted(agent.value, call.id, tool, duration, outcome, Some(key.value))
+      )
 
     /** Announces the call live, runs the middleware chain around `innermost`, and times it. */
     private def timed(
@@ -2391,7 +2398,7 @@ object ToolLoop:
                 // live only, and the text view only: media is not put on the event bus
                 AgentEvents.ToolCallResult
                   .progress(context, events.ToolCallResult(call.id, ContentPart.text(parts), isError = false))
-                executed(task.call, context, ToolExecutionOutcome.Succeeded, took)
+                executed(task.call, task.idempotencyKey, context, ToolExecutionOutcome.Succeeded, took)
                 NodeResult.Continue(
                   Command(update, Nil)
                     .update(results, ToolResult(task.assistantMessageId, call.id, parts, isError = false))
@@ -2416,7 +2423,7 @@ object ToolLoop:
           else if approved then errored(s"$asker asked for approval again: $reason")
           else
             // a suspending task commits its events with its pending write
-            executed(task.call, context, ToolExecutionOutcome.NeedsApproval, took)
+            executed(task.call, task.idempotencyKey, context, ToolExecutionOutcome.NeedsApproval, took)
             suspend(task, call, reason, source, answers)
         case ToolOutcome.Ask(question) if chain.raisedBy.isDefined =>
           middlewareAsked(task, call, approved, chain.raisedBy.get, question, context, took, answers, resumed)(failRun)
@@ -2426,7 +2433,7 @@ object ToolLoop:
               // a question of another type than the declared one fails to encode: a tool bug, like an undeclared one
               Try(upickle.default.writeJs(question.asInstanceOf[q])(using declared.questionCodec)).toResult match
                 case Right(json) =>
-                  executed(task.call, context, ToolExecutionOutcome.Asked, took)
+                  executed(task.call, task.idempotencyKey, context, ToolExecutionOutcome.Asked, took)
                   NodeResult.Suspend(
                     StateUpdate.empty,
                     ToolQuestionRequest(
@@ -2483,7 +2490,7 @@ object ToolLoop:
             Try(upickle.default.writeJs(question.asInstanceOf[q])(using codecs.questionCodec)).toResult match
               case Right(json) =>
                 // a suspending task commits its events with its pending write
-                executed(task.call, context, ToolExecutionOutcome.Asked, took)
+                executed(task.call, task.idempotencyKey, context, ToolExecutionOutcome.Asked, took)
                 ref.suspend(
                   MiddlewareQuestionRequest(
                     agent,

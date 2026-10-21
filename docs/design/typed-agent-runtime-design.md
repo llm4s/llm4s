@@ -445,6 +445,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.48 | [Stage 4 slice P1: subagents in the harness profile](typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md) ([#2052](https://github.com/llm4s/llm4s/issues/2052)) |
 | 4.49 | [Stage 4 slice P2: the exit example, parallel-specialist deep research](typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md) ([#2053](https://github.com/llm4s/llm4s/issues/2053)) |
 | 4.50 | [Stage 5 slice S1: the PostgreSQL checkpointer](typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md) ([#2130](https://github.com/llm4s/llm4s/issues/2130)) |
+| 4.58 | [Stage 5 slice O1: one trace per run, across machines and child runs](typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md) ([#2137](https://github.com/llm4s/llm4s/issues/2137)) |
 
 ### 4.9 Stage 0 carry-forward
 

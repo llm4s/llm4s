@@ -30,7 +30,33 @@ class TraceCollectorTracing[F[_]](
   val traceId: TraceId = initialTraceId.getOrElse(TraceId(UUID.randomUUID().toString))
 
   override def traceEvent(event: TraceEvent): Result[Unit] =
-    lift(store.saveSpan(eventToSpan(event)))
+    event.span.fold[Result[Unit]](Right(()))(registered).flatMap(_ => lift(store.saveSpan(eventToSpan(event))))
+
+  // the placed traces this collector has made sure the store holds; guarded by itself
+  private val placedTraces = scala.collection.mutable.Set.empty[String]
+
+  /**
+   * Makes sure the store holds the trace a placed event is in (design 4.58) before its span is saved, so the trace can
+   * be read, queried and deleted like the collector's own: created at the first event seen in it, started at that
+   * event's start, unless the store has it already; a root span - one without a parent, such as a top-level run's -
+   * is recorded as its root.
+   */
+  private def registered(placed: TraceSpan): Result[Unit] = {
+    val id   = TraceId(placed.context.traceId)
+    val root = if (placed.parent.isEmpty) Some(SpanId(placed.context.spanId)) else None
+    // one registration at a time, so two cannot read the trace and overwrite each other's save; remembered only once
+    // the store has it, so a failed read or save is tried again with the next event
+    placedTraces.synchronized {
+      if (placedTraces.contains(id.value) && root.isEmpty) Right(())
+      else
+        lift(store.getTrace(id))
+          .flatMap { existing =>
+            val trace = existing.getOrElse(Trace.start(id).copy(startTime = placed.startedAt))
+            lift(store.saveTrace(root.fold(trace)(r => trace.copy(rootSpanId = Some(r)))))
+          }
+          .map(_ => placedTraces.add(id.value): Unit)
+    }
+  }
 
   override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     lift(
@@ -89,7 +115,21 @@ class TraceCollectorTracing[F[_]](
       )
     )
 
-  private def eventToSpan(event: TraceEvent): Span = eventToSpan(event, SpanId.generate())
+  /**
+   * The span an event becomes. An event placed in a trace (design 4.58) keeps its placement: its own trace and span
+   * ids, its parent and its start, so the collector holds each run's tree rather than one flat trace; any other event
+   * is a span of this collector's trace, as before.
+   */
+  private def eventToSpan(event: TraceEvent): Span =
+    event.span match {
+      case Some(placed) =>
+        eventToSpan(event, SpanId(placed.context.spanId)).copy(
+          traceId = TraceId(placed.context.traceId),
+          parentSpanId = placed.parent.map(p => SpanId(p.spanId)),
+          startTime = placed.startedAt
+        )
+      case None => eventToSpan(event, SpanId.generate())
+    }
 
   private[trace] def eventToSpan(event: TraceEvent, spanId: SpanId): Span = {
     val spanName = event.eventType
@@ -148,7 +188,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.ErrorOccurred(error, context, ts) =>
+      case TraceEvent.ErrorOccurred(error, context, ts, _) =>
         val errorMessage = Option(error.getMessage).getOrElse("")
         Span(
           spanId = spanId,
@@ -166,7 +206,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.TokenUsageRecorded(usage, model, operation, ts) =>
+      case TraceEvent.TokenUsageRecorded(usage, model, operation, ts, _) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -185,7 +225,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts, parentThread, parentRun) =>
+      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts, parentThread, parentRun, _) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -207,7 +247,7 @@ class TraceCollectorTracing[F[_]](
             parentRun.map(id => "parent_run_id" -> SpanValue.StringValue(id))
         )
 
-      case TraceEvent.CustomEvent(name, data, ts) =>
+      case TraceEvent.CustomEvent(name, data, ts, _) =>
         val attrs = data.obj.map { case (k, v) =>
           k -> (v match {
             case ujson.Str(s)   => SpanValue.StringValue(s)

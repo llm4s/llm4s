@@ -243,7 +243,9 @@ own log, tenant-checked like any read of a thread. The cats-effect, ZIO and Pekk
 
 A subagent traces to its parent's `Tracing`; its `AgentRunEnded` names the parent thread and run
 (`parentThreadId`, `parentRunId`), which OpenTelemetry puts on the `invoke_agent <agent>` span and Langfuse in the
-trace metadata.
+run's metadata. The child's run is in its parent's trace, under the `execute_tool task` span of the call that started
+it - in Langfuse too, with no trace of its own - and stays there when a later run of the parent recovers or resumes it:
+its `RunOrigin.trace` records that call's span (design 4.58).
 
 ## Running a subagent alone
 
