@@ -438,12 +438,13 @@ final class SqliteCheckpointer private (
    */
   def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
     reading("sweep") { c =>
+      // no lower bound for the first page, so every id - the empty one included - is visited
+      val (where, bound) = after.fold(("", Vector.empty[Any]))(a => ("WHERE thread_id > ?", Vector(a.value)))
       Right(
         query(
           c,
-          "SELECT thread_id FROM llm4s_checkpoint_threads WHERE thread_id > ? ORDER BY thread_id LIMIT ?",
-          after.fold("")(_.value),
-          policy.batchSize + 1
+          s"SELECT thread_id FROM llm4s_checkpoint_threads $where ORDER BY thread_id LIMIT ?",
+          (bound :+ (policy.batchSize + 1))*
         )(rows => ThreadId(rows.getString(1)))
       )
     }.flatMap { page =>

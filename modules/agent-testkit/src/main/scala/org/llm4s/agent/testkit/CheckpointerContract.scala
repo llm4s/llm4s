@@ -1547,6 +1547,20 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.sweep(SweepPolicy(batchSize = 10), Some(newThread()), SweepGuard.none).value.next shouldBe None
   }
 
+  it should "visit every id in a sweep, the empty one included" in {
+    val s     = Store(isolated = true)
+    val empty = ThreadId("")
+    val token = s.claim("run", empty).value.token
+    Vector("c1", "c2").foldLeft(Option.empty[String]) { (parent, id) =>
+      s.commit(token, Some(s.checkpoint(id, parent, on = empty)), on = empty).value
+      Some(id)
+    }: Unit
+    val (pages, visited) = sweepAll(s.store, SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), batchSize = 1))
+    visited.flatten shouldBe Vector(empty)
+    pages.map(_.examined).sum shouldBe 1
+    s.historyIds(empty) shouldBe Vector("c2")
+  }
+
   it should "prune in a sweep by when the store committed, never by a skewed producer's own timestamps" in {
     val s      = Store(isolated = true)
     val token  = s.claim("run").value.token
