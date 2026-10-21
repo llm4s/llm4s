@@ -170,7 +170,9 @@ trait Checkpointer:
 
   /**
    * Removes the checkpoints and events of the thread that `policy` does not keep (see
-   * [[org.llm4s.agent.graph.RetentionPolicy RetentionPolicy]]), by the store's clock. The latest checkpoint and its pending writes are always
+   * [[org.llm4s.agent.graph.RetentionPolicy RetentionPolicy]]), by the store's clock: `maxAge` is judged against the time the store
+   * committed each checkpoint and event, by that same clock, never against the producer's `Checkpoint.createdAt` or
+   * `EventRecord.timestamp`, so a writer whose clock is skewed makes nothing too old or too young. The latest checkpoint and its pending writes are always
    * kept. Pruning a checkpoint also removes the events before the oldest checkpoint kept; `maxAge` and
    * `maxEvents` may remove more, including the latest checkpoint's. Removing events raises the replay
    * floor as [[compactEvents]] does. Needs no claim: it touches nothing a run reads or writes. An unknown thread
@@ -300,7 +302,8 @@ object Checkpointer:
 /**
  * A [[org.llm4s.agent.graph.Checkpointer Checkpointer]] in memory. Checkpoints and pending writes are stored as JSON and decoded on
  * read, exactly as a database-backed store would, so nothing executable survives a round trip.
- * Claims expire, and [[prune]] judges age, by `clock`. Fencing tokens come from one counter for the
+ * Claims expire, and [[prune]] judges age, by `clock`, which also stamps each checkpoint and event with the time
+ * it was committed. Fencing tokens come from one counter for the
  * whole store, so they never repeat for a thread, even after it is deleted; a deleted thread that
  * numbered any event leaves a tombstone record of its next event number. [[awaitEventsAfter]] wakes
  * on the store's own commits and deletes, so every runtime sharing the instance sees a commit as soon
@@ -315,14 +318,15 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   final private case class Claim(holder: String, tenantId: Option[String], token: Long, expiresAt: Instant)
 
-  /** One stored checkpoint: its JSON, with the fields the store itself reads. */
-  final private case class Stored(id: String, status: CheckpointStatus, createdAt: Instant, json: ujson.Value)
+  /** One stored checkpoint: its JSON, with the fields the store itself reads; `committedAt` by the store's clock. */
+  final private case class Stored(id: String, status: CheckpointStatus, committedAt: Instant, json: ujson.Value)
 
   final private case class ThreadRecord(
     /** Oldest first; the last is the latest. */
     history: Vector[Stored],
     pendingWrites: Vector[ujson.Value],
-    events: Vector[(Long, ujson.Value)],
+    /** By `seq`: the event as JSON, and when the store committed it, by its clock. */
+    events: Vector[(Long, ujson.Value, Instant)],
     nextSeq: Long,
     earliestSeq: Long,
     claim: Option[Claim],
@@ -461,17 +465,18 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
       // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
       // records handed back can alias what is durable
+      val committedAt = clock.instant()
       val stored = commit.events.zipWithIndex.map { (draft, i) =>
         val seq = current.nextSeq + i
-        seq -> upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft))
+        (seq, upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft)), committedAt)
       }
-      val records = stored.map((_, json) => upickle.default.read[EventRecord](json))
+      val records = stored.map((_, json, _) => upickle.default.read[EventRecord](json))
       val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
       // a blocked turn is retracted back to the newest settled checkpoint, which stays
       val kept =
         if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
         else current.history
-      val added = commit.checkpoint.map(c => Stored(c.id, c.status, c.createdAt, Checkpoint.toJson(c)))
+      val added = commit.checkpoint.map(c => Stored(c.id, c.status, committedAt, Checkpoint.toJson(c)))
       // released before this commit's own records are applied
       val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
         commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
@@ -534,16 +539,17 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
         // the latest checkpoint is always kept, whatever its age
         val (older, latest) = current.history.splitAt(current.history.size - 1)
-        val young           = older.filter(c => cutoff.forall(cut => !c.createdAt.isBefore(cut)))
-        val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptIds         = kept.map(_.id).toSet
-        val events          = current.events.map((seq, json) => seq -> upickle.default.read[EventRecord](json))
+        // by when each was committed, never by its producer's own timestamp
+        val young   = older.filter(c => cutoff.forall(cut => !c.committedAt.isBefore(cut)))
+        val kept    = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
+        val keptIds = kept.map(_.id).toSet
+        val events  = current.events.map((seq, json, at) => (seq, upickle.default.read[EventRecord](json), at))
         // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
         val byCheckpoint =
           if kept.size == current.history.size then None
-          else events.collectFirst { case (seq, e) if e.checkpointId.exists(keptIds) => seq }
+          else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
         val byAge = cutoff.map { cut =>
-          events.collectFirst { case (seq, e) if !e.timestamp.isBefore(cut) => seq }.getOrElse(current.nextSeq)
+          events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
         }
         val bySize = policy.maxEvents.map(n => current.nextSeq - n)
         val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
@@ -563,10 +569,11 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
     else
       // events are held in ascending `seq`, so the first one after `afterSeq` is found by bisection
-      val first: (Long, ujson.Value) = (afterSeq + 1) -> ujson.Null
-      val from = current.events.search(first)(using Ordering.by[(Long, ujson.Value), Long](_._1)).insertionPoint
+      val first: (Long, ujson.Value, Instant) = (afterSeq + 1, ujson.Null, Instant.EPOCH)
+      val from =
+        current.events.search(first)(using Ordering.by[(Long, ujson.Value, Instant), Long](_._1)).insertionPoint
       Try(
-        current.events.slice(from, from + limit).map((_, json) => upickle.default.read[EventRecord](json))
+        current.events.slice(from, from + limit).map((_, json, _) => upickle.default.read[EventRecord](json))
       ).toResult
   }
 

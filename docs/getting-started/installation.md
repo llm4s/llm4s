@@ -606,6 +606,16 @@ writes, event logs and run claims - in one SQLite file, so a run survives a rest
 in a new process. It brings the SQLite JDBC driver (`org.xerial:sqlite-jdbc`), which `llm4s-agent` itself does
 not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-sqlite-store).
 
+### For agent threads shared across machines (PostgreSQL checkpointer)
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-postgres" % llm4sVersion // same version as llm4s-agent
+```
+
+`PostgresCheckpointer` (`org.llm4s.agent.graph.postgres`) keeps the same threads in a PostgreSQL schema that
+runtimes on several machines share, with claims and retention judged by the database's clock. It brings the
+PostgreSQL JDBC driver and HikariCP. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-postgresql-store).
+
 ### For semantic memory in agents
 
 ```scala

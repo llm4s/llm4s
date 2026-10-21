@@ -312,6 +312,7 @@ lazy val llm4s = (project in file("."))
     testkit,
     agentTestkit,
     agentCheckpointSqlite,
+    agentCheckpointPostgres,
     agentMemory,
     llm4sEffect,
     llm4sZio,
@@ -1674,6 +1675,34 @@ lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqli
     )
   )
 
+// `llm4s-agent-checkpoint-postgres` (#2130, design 4.50) is the networked `Checkpointer`: `PostgresCheckpointer`,
+// shared by runtimes on several machines, claims and retention judged by the database's clock. Its own module, as
+// every checkpoint adapter is, so `llm4s-agent` stays free of a JDBC driver; the driver and HikariCP are declared
+// here at the versions `llm4s-memory-postgres` uses. The suites that need a server - the `CheckpointerContract`, the
+// concurrency and cross-process cases - are in `modules/it` (`@Docker`); this module's own tests are the pure ones
+// (configuration, schema steps, statements, bounds).
+lazy val agentCheckpointPostgres = (project in file("modules/agent-checkpoint-postgres"))
+  .dependsOn(agent)
+  .settings(
+    name := "llm4s-agent-checkpoint-postgres",
+    commonSettings,
+    // Measured 32.11% statement coverage (`sbt coverage agentCheckpointPostgres/test
+    // agentCheckpointPostgres/coverageReport`) on its first version: the in-module suite is the server-free part. The
+    // real signal is `modules/it`'s contract, concurrency, clock, schema and cross-process suites, which run on every
+    // PR against the pgvector service container and are not counted here. Floor is the measured value rounded down
+    // to the nearest 5. Never lower it.
+    coverageFloor(30),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.postgres,
+      Deps.hikariCP,
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 // `llm4s-agent-memory` (#1911, design 4.31) is semantic memory for agents: `SemanticMemoryMiddleware` recalls a
 // tenant's memories before a turn and records the turn after it, each write one replayable effect (C4) on a
 // `TransactionalMemoryStore`. Its own module because `llm4s-memory` depends on core only and `llm4s-agent` must not
@@ -1786,7 +1815,9 @@ lazy val it = (project in file("modules/it"))
     agentTestkit % Test,
     // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
     testkit               % Test,
-    agentCheckpointSqlite % Test
+    agentCheckpointSqlite % Test,
+    // the PostgreSQL checkpointer's contract, concurrency and cross-process suites (design 4.50)
+    agentCheckpointPostgres % Test
   )
   .settings(
     name := "llm4s-it",
@@ -1872,6 +1903,7 @@ lazy val docs = (project in file("modules/docs"))
     agent,
     agentTestkit,
     agentCheckpointSqlite,
+    agentCheckpointPostgres,
     agentMemory,
     agentTools,
     knowledgegraphNeo4j,
@@ -1922,6 +1954,7 @@ lazy val docs = (project in file("modules/docs"))
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
         (agentCheckpointSqlite / Compile / sources).value ++
+        (agentCheckpointPostgres / Compile / sources).value ++
         (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++

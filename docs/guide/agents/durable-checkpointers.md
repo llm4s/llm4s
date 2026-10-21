@@ -485,7 +485,9 @@ next refused renewal or commit.
 
 The file records its schema version: 2 since the fenced delete (which added `first_seq`, where a deleted thread's id
 continues its event numbering), 3 and 4 for effect records, and 5 since claims record their tenant (`claim_tenant`,
-with `claim_tenant_token`, the token of the claim the tenant belongs to). A claim a version-4 file holds when it is
+with `claim_tenant_token`, the token of the claim the tenant belongs to), 6 for child threads, and 7 since each
+checkpoint and event records when the store committed it, which retention judges age by (rows from before 7 are judged
+by their producer's timestamps). A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one: an
@@ -503,6 +505,50 @@ newest first by an index, so a long history costs a page, not a scan, and `prune
 in one transaction each, safely beside other stores writing the file. `prune` reads the thread's whole history and
 event log inside its transaction, so on a very long log it holds the file for a while and other stores' writes wait,
 up to `busyTimeout`; prune regularly, or off-peak, rather than once after months.
+
+## The PostgreSQL store
+
+`PostgresCheckpointer`, in `llm4s-agent-checkpoint-postgres` (`org.llm4s.agent.graph.postgres`), keeps threads in a
+PostgreSQL schema that runtimes on any number of machines share: the store for one agent service on several machines.
+
+```scala
+import org.llm4s.agent.graph.GraphRuntime
+import org.llm4s.agent.graph.postgres.{ PostgresCheckpointer, PostgresCheckpointerConfig }
+
+for
+  store <- PostgresCheckpointer.open(
+             "jdbc:postgresql://db:5432/app",
+             user,
+             password,
+             PostgresCheckpointerConfig.default.withSchema("agents")
+           )
+  runtime = GraphRuntime(store)
+  // ...
+yield store.close()
+```
+
+`open` builds a HikariCP pool of its own; `PostgresCheckpointer.create(dataSource, ownsDataSource, config)` uses a
+`DataSource` the application already has, and closes it with the store only if `ownsDataSource`.
+
+- **One schema, created and migrated on open.** The tables live in the configured schema (`llm4s` by default), so
+  the store can share a database. Opening creates the schema if it is missing and brings it to the current version in
+  one transaction under an advisory lock, so instances starting together migrate it once; a schema already current
+  is only read, so the application's role needs no `CREATE` once it exists.
+- **The database decides time.** Claim expiry and retention age are judged by the server's clock, never a host's, so
+  skew between machines changes nothing.
+- **Every write locks the thread's row** (`SELECT ... FOR UPDATE`) and checks the claim, the fence and the parent
+  checkpoint before it writes; two rows are always locked in the order of their ids, so fenced commits never
+  deadlock. Fencing tokens come from one sequence for the schema.
+- **Every call returns within `connectionTimeout + callTimeout`** (5 + 5 seconds by default): the call timeout is set
+  on the server for each transaction and enforced on the client, which discards a connection whose call overran it.
+  A caller-supplied pool's own connection timeout stands in for `connectionTimeout`; set a driver socket timeout on it.
+- **Subscriptions poll**, as with SQLite, once per `WatchPolicy.pollInterval`.
+
+### Upgrades
+
+A release that changes neither the store's schema nor the checkpoint format can replace instances one at a time. A
+release that changes either needs every instance stopped before the first new one starts: an old instance that meets
+the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing.
 
 ## Checkpoint history, fork and updateState
 
@@ -613,11 +659,10 @@ may remove more events than that, including those of checkpoints still kept, the
 Removing events raises the replay floor (`ReplayUnavailable`) as `compactEvents` does. `prune` needs no claim, so it
 can run while a run executes; call it on a schedule that suits you.
 
-`maxAge` compares the store's clock with the `createdAt` and event timestamps the committing runtimes stamped by
-theirs, so on a store shared by several hosts, clock skew between them shifts the effective age by that much. A
-runtime's `clock` stamps what it writes - checkpoints' `createdAt`, events' timestamps - and the store's clock judges
-claim expiry and retention; give a runtime and its store the same clock, as `GraphRuntime.inMemory(clock)` does for
-its `InMemoryCheckpointer`.
+`maxAge` compares the store's clock with the time the store committed each checkpoint and event, which it records by
+that same clock - never with the `createdAt` and event timestamps the committing runtime stamped by its own, which stay
+as the producer's record. So a host whose clock is skewed makes nothing too old or too young. The SQLite and in-memory
+stores judge by the clock they were opened with; the PostgreSQL store by the database server's.
 
 ## Writing a store
 

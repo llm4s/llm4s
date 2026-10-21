@@ -161,6 +161,10 @@ flags:
     paths:
       - modules/agent-checkpoint-sqlite/src/main/scala
     carryforward: true
+  agent-checkpoint-postgres:
+    paths:
+      - modules/agent-checkpoint-postgres/src/main/scala
+    carryforward: true
   agent-memory:
     paths:
       - modules/agent-memory/src/main/scala

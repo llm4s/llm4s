@@ -43,7 +43,8 @@ import scala.jdk.CollectionConverters.*
  *    commit ([[org.llm4s.agent.graph.GraphError.StaleClaim GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
  *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
- *    by age, by count and by event count, never the latest checkpoint; effect records (design §4.24) -
+ *    by age (by when the store committed, never a skewed producer's timestamps), by count and by event count, never the
+ *    latest checkpoint; effect records (design §4.24) -
  *    upserted by key and fenced like any commit, released at a commit with a checkpoint exactly as
  *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; child threads (design
  *    4.41) - a checkpoint's `origin` and `outcome` read back, a format-7 checkpoint read with neither, and `children`
@@ -1411,13 +1412,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   it should "prune by age by the store's clock, never the latest checkpoint" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    val ages  = Vector("old" -> 0.minutes, "middle" -> 30.minutes, "young" -> 50.minutes)
-    ages.foldLeft(Option.empty[String]) { case (parent, (id, offset)) =>
+    // committed 0, 30 and 50 minutes after the start by the store's clock, which stamps each with its commit time
+    val ages = Vector("old" -> 0.minutes, "middle" -> 30.minutes, "young" -> 50.minutes)
+    ages.foldLeft((Option.empty[String], 0.minutes)) { case ((parent, now), (id, offset)) =>
+      s.advance(offset - now)
       val at = start.plusNanos(offset.toNanos)
       s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
-      Some(id)
-    }
-    s.advance(60.minutes)
+      (Some(id), offset)
+    }: Unit
+    s.advance(10.minutes)
     s.store.prune(s.thread, RetentionPolicy(maxAge = Some(20.minutes))).value shouldBe (())
     s.historyIds() shouldBe Vector("young")
     s.store.eventsAfter(s.thread, 2L, 10).value.map(_.seq) shouldBe Vector(3L)
@@ -1426,6 +1429,26 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.historyIds() shouldBe Vector("young")
     s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
     s.commit(token, events = Vector(s.event("after"))).value.map(_.seq) shouldBe Vector(4L)
+  }
+
+  it should "prune by age by when the store committed, never by a skewed producer's own timestamps" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    // the producer's clock is wrong both ways: the oldest commit says it is from next year, the younger ones from last
+    // year; the store's commit times, not these, decide what is old (Stage 5, rule 1)
+    val future = start.plus(java.time.Duration.ofDays(365))
+    val past   = start.minus(java.time.Duration.ofDays(365))
+    def commitAt(id: String, parent: Option[String], at: Instant) =
+      s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
+    commitAt("old", None, future)
+    s.advance(40.minutes)
+    commitAt("young", Some("old"), past)
+    commitAt("latest", Some("young"), past)
+    s.advance(10.minutes)
+    s.store.prune(s.thread, RetentionPolicy(maxAge = Some(30.minutes))).value shouldBe (())
+    s.historyIds() shouldBe Vector("latest", "young")
+    s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L, 3L)
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 2L)
   }
 
   it should "prune by event count, never lowering the floor, and accept an unknown thread" in {

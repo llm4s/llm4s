@@ -160,6 +160,8 @@ final class SqliteCheckpointer private (
     fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
       // a thread with a claim always has a row
       val nextSeq = current.fold(1L)(_.nextSeq)
+      // what `prune` judges age by: the store's clock, never the producer's timestamps (schema 7)
+      val committedAt = clock.instant()
       commit.checkpoint.foreach { checkpoint =>
         val json = ujson.write(Checkpoint.toJson(checkpoint))
         // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
@@ -188,15 +190,18 @@ final class SqliteCheckpointer private (
         update(
           c,
           """INSERT INTO llm4s_checkpoint_history
-            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json)
-            |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin,
+            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json,
+            | committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin,
           threadId.value,
           position,
           checkpoint.id,
           checkpoint.status.toString,
           checkpoint.createdAt.getEpochSecond,
           checkpoint.createdAt.getNano.toLong,
-          json
+          json,
+          committedAt.getEpochSecond,
+          committedAt.getNano.toLong
         )
         update(
           c,
@@ -247,11 +252,12 @@ final class SqliteCheckpointer private (
       }
       Using.resource(
         c.prepareStatement(
-          "INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json) VALUES (?, ?, ?)"
+          """INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json, committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?)""".stripMargin
         )
       ) { insert =>
         stored.foreach { (seq, json) =>
-          bind(insert, threadId.value, seq, json)
+          bind(insert, threadId.value, seq, json, committedAt.getEpochSecond, committedAt.getNano.toLong)
           insert.executeUpdate(): Unit
         }
       }
@@ -345,11 +351,12 @@ final class SqliteCheckpointer private (
       case Some(current) =>
         val now    = clock.instant()
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
-        // oldest first: (position, id, createdAt)
+        // oldest first: (position, id, committed at) - a row from before schema 7 has its producer's time instead
         val history = query(
           c,
-          """SELECT position, checkpoint_id, created_second, created_nano FROM llm4s_checkpoint_history
-            |WHERE thread_id = ? ORDER BY position""".stripMargin,
+          """SELECT position, checkpoint_id, COALESCE(committed_second, created_second),
+            |  CASE WHEN committed_second IS NULL THEN created_nano ELSE committed_nano END
+            |FROM llm4s_checkpoint_history WHERE thread_id = ? ORDER BY position""".stripMargin,
           threadId.value
         )(rows => (rows.getLong(1), rows.getString(2), Instant.ofEpochSecond(rows.getLong(3), rows.getLong(4))))
         // the latest checkpoint is always kept, whatever its age
@@ -369,18 +376,26 @@ final class SqliteCheckpointer private (
         decoding("prune", "event") {
           query(
             c,
-            "SELECT seq, record_json FROM llm4s_checkpoint_events WHERE thread_id = ? ORDER BY seq",
+            """SELECT seq, record_json, committed_second, committed_nano FROM llm4s_checkpoint_events
+              |WHERE thread_id = ? ORDER BY seq""".stripMargin,
             threadId.value
-          )(rows => rows.getLong(1) -> rows.getString(2)).map((seq, json) =>
-            seq -> upickle.default.read[EventRecord](json)
-          )
+          ) { rows =>
+            val seq    = rows.getLong(1)
+            val json   = rows.getString(2)
+            val second = rows.getLong(3)
+            (seq, json, Option.when(!rows.wasNull())(Instant.ofEpochSecond(second, rows.getLong(4))))
+          }.map { (seq, json, committed) =>
+            val event = upickle.default.read[EventRecord](json)
+            // a row from before schema 7 has its producer's timestamp in place of its commit time
+            (seq, event, committed.getOrElse(event.timestamp))
+          }
         }.map { events =>
           // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
           val byCheckpoint =
             if kept.size == history.size then None
-            else events.collectFirst { case (seq, e) if e.checkpointId.exists(keptIds) => seq }
+            else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
           val byAge = cutoff.map { cut =>
-            events.collectFirst { case (seq, e) if !e.timestamp.isBefore(cut) => seq }.getOrElse(current.nextSeq)
+            events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
           }
           val bySize = policy.maxEvents.map(n => current.nextSeq - n)
           val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)

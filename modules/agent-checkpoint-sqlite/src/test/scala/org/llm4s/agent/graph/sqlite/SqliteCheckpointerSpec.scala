@@ -325,6 +325,52 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.close()
   }
 
+  "A version-6 file" should "keep judging its rows' age by their producer's timestamps, and new rows' by their commit time" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val store  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("before-commit-times")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    // written by a version-6 build: no commit time, a producer that says it is an hour old
+    val hourAgo = start.minusSeconds(3600)
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c1", None, token).withCreatedAt(hourAgo)),
+          events = Vector(event("old").copy(timestamp = hourAgo))
+        )
+      )
+      .value: Unit
+    store.close()
+    exec(
+      db,
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN committed_second",
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN committed_nano",
+      "ALTER TABLE llm4s_checkpoint_events DROP COLUMN committed_second",
+      "ALTER TABLE llm4s_checkpoint_events DROP COLUMN committed_nano",
+      "UPDATE llm4s_checkpoint_schema SET version = 6"
+    )
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    // a new row, whose producer says it is from long ago, is as young as its commit
+    reopened
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c2", Some("c1"), token).withCreatedAt(start.minusSeconds(86400))),
+          events = Vector(event("new").copy(timestamp = start.minusSeconds(86400)))
+        )
+      )
+      .value: Unit
+    reopened.prune(thread, RetentionPolicy(maxAge = Some(30.minutes))).value
+    reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
+    reopened.eventsAfter(thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
+    reopened.close()
+  }
+
   "A version-1 file" should "open at the current version, its threads numbering on, and a deleted thread's id numbering past it" in {
     val db      = SqliteFiles.fresh()
     val thread  = ThreadId("v1-thread")

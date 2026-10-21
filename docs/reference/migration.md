@@ -112,6 +112,19 @@ A parent's subscribers can follow its children, and a child's trace names its pa
 - **`withDelegation` beside a harness is refused.** The profile's `SubagentConfig.delegation` sets the bounds: `profile.withSubagents(profile.subagents.withDelegation(config))`.
 - **A harness agent's `delegation` middleware runs inside its permissions and outside its other middleware**, not innermost, so its prompt section comes before the harness's. Subagents added with `AgentBuilder.withSubagents` beside a harness follow the profile's own.
 
+## Production adapters (Stage 5)
+
+Not in a release yet. Stage 5 runs one agent service on several machines ([#2129](https://github.com/llm4s/llm4s/issues/2129)). Each slice adds its breaks here.
+
+### The PostgreSQL checkpointer (#2130)
+
+`llm4s-agent-checkpoint-postgres` adds `PostgresCheckpointer` ([design 4.50](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md)). Adopting it needs nothing of existing code; these change for every store:
+
+- **`RetentionPolicy.maxAge` is judged by commit time.** `prune` compares the store's clock with the time the store committed each checkpoint and event, by that same clock, no longer with the producer's `Checkpoint.createdAt` and event `timestamp`, so a writer with a skewed clock makes nothing too old or too young. With one clock for the runtime and the store, as before, nothing changes. A custom `Checkpointer` records a commit time with each checkpoint and event and judges `maxAge` by it; `CheckpointerContract` checks it, with a skewed producer.
+- **SQLite schema 7, with no way back.** It adds the commit times to `llm4s_checkpoint_history` and `llm4s_checkpoint_events`. Rows written before it have none and are judged by their producer's timestamps, as before. A schema-6 build refuses a schema-7 file, so upgrade every process sharing a file together.
+- **`GraphError.UnsupportedStoreSchema(store, found, supported)`** is a new case, returned when a store's storage was migrated by a newer build (the PostgreSQL store's refusal of a newer schema). An exhaustive match on `GraphError` needs it.
+- **Upgrading a PostgreSQL deployment.** Instances of releases that change neither the store's schema nor the checkpoint format can be replaced one at a time. A release that changes either needs every instance stopped before the first new one starts: an old instance that meets the newer schema refuses to open with `UnsupportedStoreSchema` rather than writing anything.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

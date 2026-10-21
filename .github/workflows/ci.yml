@@ -363,7 +363,8 @@ jobs:
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
                       providerTestkit, javaApi, springBootStarter, deployService]
           - leg: agent
-            modules: [agent, agentTestkit, agentCheckpointSqlite, agentMemory, llm4sEffect, llm4sZio, llm4sPekko]
+            modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
+                      llm4sPekko]
 
     # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
     # others it costs a few seconds of start-up.
@@ -794,6 +795,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-sqlite/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-checkpoint-sqlite
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-checkpoint-postgres coverage to Codecov
+        if: contains(matrix.modules, 'agentCheckpointPostgres')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-checkpoint-postgres
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

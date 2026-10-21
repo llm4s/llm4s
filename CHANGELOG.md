@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- Checkpoint format 8 and SQLite schema 6: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- Checkpoint format 8 and SQLite schema 7: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
+  and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
 - `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
   `fence` on the claim above, checked atomically with the delete, and a store checks `Commit.fence` atomically with
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
@@ -50,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `task`, plus specialists and `llm4s.agent.harness.subagents` config [#2052](https://github.com/llm4s/llm4s/issues/2052); [design §4.48](docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md).
 - **Added** the exit example, `ParallelDeepResearchExample`: typed specialists in parallel under bounds, a crash, a child's failure,
   approval and cancel, nested streams, with an acceptance suite on a scripted model [#2053](https://github.com/llm4s/llm4s/issues/2053); [design §4.49](docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md).
+
+### Production adapters (Stage 5)
+
+- **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
+  claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
 
 ### Agent harness (Phase 3)
 

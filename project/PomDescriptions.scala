@@ -22,6 +22,8 @@ object PomDescriptions {
       "Agent runtime for LLM4S: agents, guardrails, handoffs, a typed graph runtime, streaming and an assistant.",
     "llm4s-agent-checkpoint-sqlite" ->
       "SQLite checkpoint store for the LLM4S graph runtime: durable threads, restart and recovery, fenced run claims.",
+    "llm4s-agent-checkpoint-postgres" ->
+      "PostgreSQL checkpoint store for the LLM4S graph runtime: threads shared across machines, fenced run claims by the database clock.",
     "llm4s-agent-memory" ->
       "Semantic memory for LLM4S agents: recall before a turn, recording and consolidation after it, replay-safe across recovery.",
     "llm4s-agent-testkit" ->

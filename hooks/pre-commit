@@ -123,6 +123,7 @@ map_file_to_project() {
     modules/agent-tools/*)                echo "agentTools" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
+    modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
     modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
@@ -254,6 +255,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentCheckpointPostgres
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
@@ -428,6 +430,7 @@ propagate_downstream() {
     agent)
       set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentCheckpointPostgres
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE workspaceClient

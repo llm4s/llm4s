@@ -28,9 +28,10 @@ import scala.util.{ Try, Using }
  *  - `llm4s_checkpoint_history`: every checkpoint of every thread's history, latest included, as JSON, keyed by
  *    `(thread, position)` - the position counts up along the thread, so paging newest first reads the primary key
  *    backwards - and unique by `(thread, checkpoint id)`, so a read by id and the duplicate-id check use that index.
- *    The checkpoint's status and creation time sit beside it for retraction and retention.
+ *    The checkpoint's status, creation time and (from version 7) commit time sit beside it for retraction and retention.
  *  - `llm4s_checkpoint_pending_writes`: the latest checkpoint's pending writes as JSON, in commit order.
- *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`.
+ *  - `llm4s_checkpoint_events`: the durable event log, one JSON `EventRecord` per `(thread, seq)`, and from version 7
+ *    when the store committed it, which `prune` judges age by.
  *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
  *    per `(thread, effect key)`, with the task it belongs to - its id and, from version 4, its lineage - which
  *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
@@ -43,7 +44,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 6
+  val Current: Int = 7
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -55,8 +56,31 @@ private[sqlite] object SqliteSchema:
     2 -> addEffects,
     3 -> addEffectLineages,
     4 -> addClaimTenants,
-    5 -> addChildThreads
+    5 -> addChildThreads,
+    6 -> addCommitTimes
   )
+
+  /**
+   * Version 7: when the store committed each checkpoint and event, by its clock (Stage 5 rule 1, design 4.50), which
+   * `prune` judges `maxAge` against instead of the producer's `createdAt` and `timestamp`. A row a version-6 file
+   * holds has none (NULL), and its producer's timestamp stands in for it: such a row was written by a build that
+   * judged age that way, and nothing better is known. The history table of a file a pre-release version-1 build
+   * wrote is created first ([[ensureHistory]]), and a column already there is left as it is.
+   */
+  private def addCommitTimes(connection: Connection): Unit =
+    ensureHistory(connection)
+    for
+      table  <- Vector("llm4s_checkpoint_history", "llm4s_checkpoint_events")
+      column <- Vector("committed_second", "committed_nano")
+      if !columnExists(connection, table, column)
+    do statements(connection, s"ALTER TABLE $table ADD COLUMN $column INTEGER")
+
+  private def columnExists(connection: Connection, table: String, column: String): Boolean =
+    Using.resource(connection.prepareStatement("SELECT 1 FROM pragma_table_info(?) WHERE name = ?")) { query =>
+      query.setString(1, table)
+      query.setString(2, column)
+      Using.resource(query.executeQuery())(_.next())
+    }
 
   /**
    * Version 6: child threads (#2045). `parent_thread_id` is the parent the thread's latest checkpoint's origin names,
