@@ -57,7 +57,22 @@ class ToolExecutionConfigSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "reject a jitter outside 0.0 to 1.0" in {
+  "ToolRetryPolicy setters" should "each change only their own field" in {
+    val policy = ToolRetryPolicy(maxAttempts = 2, baseDelay = 10.millis)
+    policy.withMaxAttempts(4) shouldBe ToolRetryPolicy(maxAttempts = 4, baseDelay = 10.millis)
+    policy.withBaseDelay(20.millis) shouldBe ToolRetryPolicy(maxAttempts = 2, baseDelay = 20.millis)
+    policy.withBackoffFactor(3.0) shouldBe ToolRetryPolicy(maxAttempts = 2, baseDelay = 10.millis, backoffFactor = 3.0)
+    policy.withJitter(0.25) shouldBe ToolRetryPolicy(maxAttempts = 2, baseDelay = 10.millis, jitter = 0.25)
+  }
+
+  it should "validate what they set" in {
+    an[IllegalArgumentException] should be thrownBy ToolRetryPolicy(maxAttempts = 1, baseDelay = 1.milli)
+      .withMaxAttempts(0)
+    an[IllegalArgumentException] should be thrownBy ToolRetryPolicy(maxAttempts = 1, baseDelay = 1.milli)
+      .withBackoffFactor(0.5)
+  }
+
+  "ToolRetryPolicy jitter" should "reject a jitter outside 0.0 to 1.0" in {
     an[IllegalArgumentException] should be thrownBy ToolRetryPolicy(maxAttempts = 1, baseDelay = 1.milli, jitter = -0.1)
     an[IllegalArgumentException] should be thrownBy ToolRetryPolicy(maxAttempts = 1, baseDelay = 1.milli)
       .withJitter(1.5)
