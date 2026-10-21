@@ -34,6 +34,7 @@ object DocSnippets {
     "getting-started/ollama-quickstart.md",
     "getting-started/testing-guide.md",
     "guide/basic-usage.md",
+    "guide/custom-tools.md",
     "guide/error-handling.md",
     "guide/providers.md"
   )
