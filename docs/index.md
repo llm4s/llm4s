@@ -39,6 +39,16 @@ Meet the LLM4S community at a talk near you, or join the weekly Dev Hour online.
 
 ---
 
+## LLM4S Around the World
+
+Snapshots from LLM4S talks held around the world. Select a picture to open it full size.
+
+{% include talk-snapshots.html %}
+
+[See all talks and events](/events/){: .btn .btn-primary }
+
+---
+
 ## Why LLM4S?
 
 LLM4S brings the power of large language models to the Scala ecosystem with a focus on **type safety**, **functional programming**, and **production-oriented design**.

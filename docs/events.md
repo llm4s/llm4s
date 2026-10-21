@@ -47,12 +47,7 @@ Recordings and slides are linked where they are available.
 
 Snapshots from LLM4S talks around the world. Select a picture to open it full size.
 
-<ul class="event-gallery">
-{%- assign photos = site.data.event_photos | sort: "date" | reverse -%}
-{%- for photo in photos -%}
-<li><a href="{{ photo.src | relative_url }}"><img src="{{ photo.src | relative_url }}" alt="{{ photo.caption | escape }}" loading="lazy"></a><span>{{ photo.caption }}</span></li>
-{%- endfor -%}
-</ul>
+{% include talk-snapshots.html %}
 
 ## Invite us to speak
 
