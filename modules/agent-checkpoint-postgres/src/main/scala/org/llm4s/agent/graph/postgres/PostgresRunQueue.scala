@@ -181,7 +181,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
   /** `lease`'s entry, locked, if `lease` is its current lease and it is open. */
   private def leased(c: Connection, lease: Lease): Result[Raw] =
-    query(c, Sql.queueEntryLocked(t), lease.entryId.value)(raw).headOption match
+    query(c, Sql.lockedQueueEntry(t), lease.entryId.value)(raw).headOption match
       case None => Left(QueueError.LeaseLost(lease.entryId, lease.token, None))
       case Some(row) =>
         row.outcome match

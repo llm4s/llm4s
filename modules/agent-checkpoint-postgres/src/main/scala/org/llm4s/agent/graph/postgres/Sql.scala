@@ -235,7 +235,7 @@ private[postgres] object Sql:
        |  AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?""".stripMargin
 
   def queueEntry(t: Tables): String       = s"SELECT $queueColumns FROM ${t.queueEntries} WHERE entry_id = ?"
-  def queueEntryLocked(t: Tables): String = s"${queueEntry(t)} FOR UPDATE"
+  def lockedQueueEntry(t: Tables): String = s"${queueEntry(t)} FOR UPDATE"
   def queueEntryThread(t: Tables): String = s"SELECT thread_id FROM ${t.queueEntries} WHERE entry_id = ?"
 
   def queueEntryByKey(t: Tables): String =
