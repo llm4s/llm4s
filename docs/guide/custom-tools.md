@@ -2,7 +2,7 @@
 layout: page
 title: Custom Tools
 parent: User Guide
-nav_order: 22
+nav_order: 34
 ---
 
 # Build Your Own Tool
