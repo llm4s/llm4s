@@ -308,6 +308,11 @@ A `RunQueue` SPI and a submission API in `org.llm4s.agent.service`:
   (done, failed, cancelled). Taking an entry is skip-locked in Postgres so workers do not contend.
 - **Wait and follow**: a caller waits for a ticket's terminal state or follows its run's events from any machine
   (through `awaitEventsAfter`).
+- **Entry retention**: a terminal entry is kept for a ticket lifetime (configurable, a default named in the slice),
+  then reclaimed, input and attempt history included, by the store-wide retention sweep (S4's, run by W2). An open
+  entry is never reclaimed. Waiting on or following a reclaimed ticket returns a typed "ticket expired" answer,
+  distinct from "no such ticket" only where the store can tell them apart (the slice says which). This keeps the
+  queue inside the bounded-database goal.
 - A `RunQueue` is implemented by the in-memory store, SQLite and Postgres, in the same database as the checkpoints;
   correctness rests on rule 4 (idempotency by `RunId`), not on a transaction spanning the queue and the commit, so the
   SPI stays separate from `Checkpointer`. (My call; a builder who finds the shared transaction simpler in all three
@@ -340,7 +345,10 @@ An `AgentWorker` that runs queued runs on a `GraphRuntime`:
 
 - **Cancel**: a durable cancel request for a run or a thread, visible to the worker that holds the claim (through S2's
   notifications, or with its claim renewal, at the builder's choice), which cancels the run as `AgentRun.cancel` does
-  locally, and closes the entry `cancelled`, so no worker runs it again. The thread stays as a local cancel leaves it
+  locally, waits for the run to actually exit, and closes the entry from how it ended: `cancelled` when the
+  cancellation stopped it, otherwise the run's own outcome (a cancel that arrives while the run is already committing
+  a completed, suspended or failed result is a no-op, `GraphRuntime`, and the ticket reports that result). Either
+  way the entry is closed, so no worker runs it again. The thread stays as a local cancel leaves it
   (`Running`, recoverable by an explicit `recover` or a new submission). A cancel of a queued entry closes it
   before it runs.
 - **Busy-thread policy** (reverses §5.3's "do not queue"; decided 2026-10-20), per submission:
@@ -366,7 +374,10 @@ An `AgentWorker` that runs queued runs on a `GraphRuntime`:
 OTel spans form a tree, `invoke_agent` (the run) over model calls and `execute_tool` calls (names already aligned with
 the GenAI conventions in D4 #2051), with each child run's span under the tool call that started it. Trace context is
 carried in the child's origin and in queue entries (W1), so a run executed by another worker, or recovered on another
-machine, continues its submitter's trace (as a child span or a link: the slice decides, and says why). Langfuse nests
+machine, continues its submitter's trace: the continued run's span takes the propagated context as its remote
+parent, so it has the original trace id. A span link alone does not preserve the trace id and would split the run
+into several traces, so links are only supplemental (for example, from a recovery attempt to the attempt it
+replaces). Langfuse nests
 child runs under their parent's trace instead of linking by metadata. No message content in attributes (rule 10).
 
 ### O2: run, claim, queue and child-task metrics (4.59)
