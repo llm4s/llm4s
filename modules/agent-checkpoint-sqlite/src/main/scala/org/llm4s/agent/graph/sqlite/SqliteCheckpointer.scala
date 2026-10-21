@@ -157,9 +157,9 @@ final class SqliteCheckpointer private (
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55)
+    // a queued attempt recorded before a delete never writes to the id again, whatever thread holds it (design 4.55)
     def orphaned =
-      commit.checkpoint.filter(c0 => latestId.isEmpty && orphanedAttempt(c, threadId, c0.runId)).map { checkpoint =>
+      commit.checkpoint.filter(c0 => orphanedAttempt(c, threadId, c0.runId)).map { checkpoint =>
         invalid(
           s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )

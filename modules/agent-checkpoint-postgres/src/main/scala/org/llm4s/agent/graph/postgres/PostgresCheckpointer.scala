@@ -154,10 +154,10 @@ final class PostgresCheckpointer private (
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55); the thread's row is
+    // a queued attempt recorded before a delete never writes to the id again (design 4.55); the thread's row is
     // locked, and a delete locks it too, so the delete's marks are seen
     def orphaned = commit.checkpoint
-      .filter(c0 => latestId.isEmpty && query(c, Sql.orphanedAttempt(t), threadId.value, c0.runId)(_ => ()).nonEmpty)
+      .filter(c0 => query(c, Sql.orphanedAttempt(t), threadId.value, c0.runId)(_ => ()).nonEmpty)
       .map(checkpoint =>
         invalid(
           s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"

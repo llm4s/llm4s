@@ -547,9 +547,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55)
+    // a queued attempt recorded before a delete never writes to the id again, whatever thread holds it (design 4.55)
     val orphaned =
-      commit.checkpoint.filter(c => latestId.isEmpty && runQueue.orphaned(threadId, RunId(c.runId))).map { checkpoint =>
+      commit.checkpoint.filter(c => runQueue.orphaned(threadId, RunId(c.runId))).map { checkpoint =>
         invalid(
           s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )
