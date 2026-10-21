@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
 - `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
   `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
+- `Checkpointer.latestOfRuns` is a new abstract method every store implements, with SQLite schema 9 and PostgreSQL schema 3;
+  [migration](docs/reference/migration.md#the-run-queue-2134).
 - `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
   and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
 - `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
@@ -65,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
 - **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
   `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
+- **Added** the durable run queue: `RunQueue` and `RunSubmitter` (`org.llm4s.agent.service`) in the in-memory, SQLite and PostgreSQL
+  stores, `RunQueueContract`, and `llm4s.agent.queue` settings [#2134](https://github.com/llm4s/llm4s/issues/2134); [design §4.55](docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md).
 
 ### Agent harness (Phase 3)
 

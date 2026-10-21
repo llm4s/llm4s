@@ -174,6 +174,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
       limit: Int
     ) =
       alive(underlying.incompleteThreads(tenantId, after, limit))
+    def latestOfRuns(threadId: ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      alive(underlying.latestOfRuns(threadId, runIds))
     def checkpoint(threadId: ThreadId, checkpointId: String) = alive(underlying.checkpoint(threadId, checkpointId))
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = alive(underlying.prune(threadId, policy))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
@@ -223,6 +225,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
       limit: Int
     ) =
       underlying.incompleteThreads(tenantId, after, limit)
+    def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      underlying.latestOfRuns(threadId, runIds)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =

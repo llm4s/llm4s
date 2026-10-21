@@ -83,9 +83,9 @@ final class SqliteCheckpointer private (
 
   import SqliteCheckpointer.*
 
-  private val lock           = new ReentrantLock()
-  @volatile private var shut = false
-  private given ErrorContext = ErrorContext(path)
+  private val lock                                 = new ReentrantLock()
+  @volatile private var shut                       = false
+  private[sqlite] given errorContext: ErrorContext = ErrorContext(path)
 
   // ---- claims ----
 
@@ -191,8 +191,8 @@ final class SqliteCheckpointer private (
           c,
           """INSERT INTO llm4s_checkpoint_history
             |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json,
-            | committed_second, committed_nano)
-            |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin,
+            | committed_second, committed_nano, run_id)
+            |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin,
           threadId.value,
           position,
           checkpoint.id,
@@ -201,7 +201,8 @@ final class SqliteCheckpointer private (
           checkpoint.createdAt.getNano.toLong,
           json,
           committedAt.getEpochSecond,
-          committedAt.getNano.toLong
+          committedAt.getNano.toLong,
+          checkpoint.runId
         )
         // the registry's columns (schema 8) follow the latest checkpoint
         update(
@@ -371,7 +372,16 @@ final class SqliteCheckpointer private (
         val (older, latest) = history.splitAt(history.size - 1)
         val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
         val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptPositions   = kept.map(_._1).toSet
+        // an open queue entry's admission evidence (rule 4): the newest checkpoint each of its runs committed
+        val evidence = query(
+          c,
+          """SELECT MAX(h.position) FROM llm4s_checkpoint_history h
+            |JOIN llm4s_checkpoint_queue_attempts a ON a.thread_id = h.thread_id AND a.run_id = h.run_id
+            |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = a.entry_id AND e.state = 'open'
+            |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin,
+          threadId.value
+        )(_.getLong(1)).toSet
+        val keptPositions = kept.map(_._1).toSet ++ evidence
         history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
           update(
             c,
@@ -433,6 +443,26 @@ final class SqliteCheckpointer private (
           )(_.getString(1))
         )
     }.flatMap(rows => decoding("eventsAfter", "event")(rows.map(upickle.default.read[EventRecord](_))))
+
+  def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]] =
+    if runIds.isEmpty then Right(None)
+    else
+      reading("latestOfRuns") { c =>
+        // one probe of the (thread, run, position) index per run, the newest of them kept
+        val newest = runIds.toVector.flatMap { run =>
+          query(c, LatestOfRunSql, threadId.value, run.value)(rows => rows.getLong(1) -> rows.getString(2))
+        }
+        newest.maxByOption(_._1) match
+          case None            => Right(None)
+          case Some((_, json)) => decodeCheckpoint("latestOfRuns", json).map(Some(_))
+      }
+
+  /**
+   * The store's run queue (design 4.55), in the same file and over the same connection as its checkpoints: its
+   * entries record each thread's deletion marker from this file, and [[prune]] keeps the newest checkpoint of every
+   * run an open entry recorded. Closing the store closes it.
+   */
+  lazy val runQueue: org.llm4s.agent.service.RunQueue = new SqliteRunQueue(this, clock)
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = writing("compactEvents") { c =>
     readRow(c, threadId).foreach { current =>
@@ -616,7 +646,7 @@ final class SqliteCheckpointer private (
    * `busyTimeout` from the call's start, and then for SQLite's own lock, held by another process, at most
    * `busyTimeout` again - so a write waits at most twice `busyTimeout` in all before it fails, changing nothing.
    */
-  private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[sqlite] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     val deadline = System.nanoTime() + busyTimeout.toNanos
     guarded(operation, deadline) { c =>
       val written = CancelledError.catchInterrupt {
@@ -642,7 +672,7 @@ final class SqliteCheckpointer private (
    * `body` in one read transaction, so the rows it reads are from one snapshot of the file. In WAL mode a read never
    * waits for a writer, so it waits only for this store's earlier calls, at most `busyTimeout` (#1919).
    */
-  private def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[sqlite] def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
     guarded(operation, System.nanoTime() + busyTimeout.toNanos) { c =>
       transaction(c, "BEGIN DEFERRED") { guard =>
         val result = body(c)
@@ -653,6 +683,11 @@ final class SqliteCheckpointer private (
     }
 
 object SqliteCheckpointer:
+
+  /** The newest checkpoint run `?` committed on thread `?`, by the `(thread_id, run_id, position)` index. */
+  private[sqlite] val LatestOfRunSql: String =
+    """SELECT position, checkpoint_json FROM llm4s_checkpoint_history INDEXED BY llm4s_checkpoint_history_run
+      |WHERE thread_id = ? AND run_id = ? ORDER BY position DESC LIMIT 1""".stripMargin
 
   /** Opens (creating it if need be) the store in the file at `path`; claims expire by the system clock. */
   def open(path: Path): Result[SqliteCheckpointer] =
@@ -805,9 +840,9 @@ object SqliteCheckpointer:
     claim: Option[Claim]
   )
 
-  final private case class ErrorContext(path: Path)
+  final private[sqlite] case class ErrorContext(path: Path)
 
-  private def failure(operation: String, message: String, cause: Option[Throwable])(using
+  private[sqlite] def failure(operation: String, message: String, cause: Option[Throwable])(using
     context: ErrorContext
   ): LLMError =
     ProcessingError(s"sqlite-checkpointer.$operation", s"$message (${context.path})", cause)
@@ -818,7 +853,7 @@ object SqliteCheckpointer:
     failure(operation, s"a stored $what does not decode: $problem", cause)
 
   /** `body`, decoding stored rows; a row that does not decode is a `ProcessingError` naming the operation and file. */
-  private def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
+  private[sqlite] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
@@ -900,7 +935,7 @@ object SqliteCheckpointer:
   private[sqlite] def epochNanos(at: Instant): Long =
     Math.addExact(Math.multiplyExact(at.getEpochSecond, 1000000000L), at.getNano.toLong)
 
-  private def fromEpochNanos(nanos: Long): Instant =
+  private[sqlite] def fromEpochNanos(nanos: Long): Instant =
     Instant.ofEpochSecond(Math.floorDiv(nanos, 1000000000L), Math.floorMod(nanos, 1000000000L))
 
   /** Replaces the thread's metadata, inside the caller's write transaction: as JSON on its row, and by entry. */
@@ -1128,7 +1163,7 @@ object SqliteCheckpointer:
 
   // ---- JDBC ----
 
-  private def bind(statement: PreparedStatement, params: Any*): Unit =
+  private[sqlite] def bind(statement: PreparedStatement, params: Any*): Unit =
     params.zipWithIndex.foreach { (param, i) =>
       param match
         case None        => statement.setObject(i + 1, null)
@@ -1142,13 +1177,13 @@ object SqliteCheckpointer:
     case i: Int    => statement.setInt(index, i)
     case other     => statement.setObject(index, other)
 
-  private def update(c: Connection, sql: String, params: Any*): Unit =
+  private[sqlite] def update(c: Connection, sql: String, params: Any*): Unit =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       statement.executeUpdate(): Unit
     }
 
-  private def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
+  private[sqlite] def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       Using.resource(statement.executeQuery()) { rows =>

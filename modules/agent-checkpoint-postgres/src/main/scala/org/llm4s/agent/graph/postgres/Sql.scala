@@ -90,8 +90,8 @@ private[postgres] object Sql:
     s"SELECT COALESCE(MAX(position) + 1, 0) FROM ${t.history} WHERE thread_id = ?"
 
   def insertHistory(t: Tables): String =
-    s"""INSERT INTO ${t.history} (thread_id, position, checkpoint_id, status, committed_at, checkpoint_json)
-       |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+    s"""INSERT INTO ${t.history} (thread_id, position, checkpoint_id, status, committed_at, checkpoint_json, run_id)
+       |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin
 
   /** A blocked turn retracted back to the newest settled checkpoint (statuses bound as the 3rd and 4th parameters). */
   def retract(t: Tables): String =
@@ -111,6 +111,24 @@ private[postgres] object Sql:
   /** The history oldest first, with each checkpoint's commit time: what `prune` decides on. */
   def historyAges(t: Tables): String =
     s"SELECT position, checkpoint_id, committed_at FROM ${t.history} WHERE thread_id = ? ORDER BY position"
+
+  /**
+   * The run-id lookup (design 4.55): the newest checkpoint any of the runs bound first (a `text[]`) committed on the
+   * thread bound second - one backwards probe of the `(thread_id, run_id, position)` index per run.
+   */
+  def latestOfRuns(t: Tables): String =
+    s"""SELECT h.checkpoint_json FROM unnest(?::text[]) AS r(run_id)
+       |CROSS JOIN LATERAL (
+       |  SELECT position, checkpoint_json FROM ${t.history}
+       |  WHERE thread_id = ? AND run_id = r.run_id ORDER BY position DESC LIMIT 1) h
+       |ORDER BY h.position DESC LIMIT 1""".stripMargin
+
+  /** The positions `prune` keeps for open queue entries: the newest checkpoint of each run they recorded on the thread. */
+  def queueEvidence(t: Tables): String =
+    s"""SELECT MAX(h.position) FROM ${t.history} h
+       |JOIN ${t.queueAttempts} a ON a.thread_id = h.thread_id AND a.run_id = h.run_id
+       |JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id AND e.state = 'open'
+       |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin
 
   def deleteHistoryAt(t: Tables): String = s"DELETE FROM ${t.history} WHERE thread_id = ? AND position = ?"
 

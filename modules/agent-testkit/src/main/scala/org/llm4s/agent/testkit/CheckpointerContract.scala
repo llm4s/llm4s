@@ -1872,6 +1872,43 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.incompleteThreads(tenant, None, ThreadQuery.MaxLimit + 1).refused shouldBe a[ValidationError]
   }
 
+  // ---- the run-id lookup (design 4.55) ----
+
+  it should "answer latestOfRuns with the newest checkpoint any of the runs committed, by place in the history" in {
+    val s     = Store()
+    val token = s.claim("h").value.token
+    // createdAt runs backwards, so only the place in the history can say which is newest
+    Vector("a1" -> "run-a", "b1" -> "run-b", "a2" -> "run-a", "c1" -> "run-c").zipWithIndex
+      .foldLeft(Option.empty[String]) { case (parent, ((id, run), i)) =>
+        val checkpoint = s.checkpoint(id, parent, Some(token), createdAt = start.minusSeconds(i.toLong)).withRunId(run)
+        s.commit(token, Some(checkpoint)).value
+        Some(id)
+      }
+    def lookup(runs: String*) = s.store.latestOfRuns(s.thread, runs.map(RunId(_)).toSet).value.map(_.id)
+    lookup("run-a") shouldBe Some("a2")
+    lookup("run-a", "run-b") shouldBe Some("a2")
+    lookup("run-b") shouldBe Some("b1")
+    lookup("run-b", "run-c") shouldBe Some("c1")
+    lookup("run-x") shouldBe None
+    lookup() shouldBe None
+    s.store.latestOfRuns(newThread(), Set(RunId("run-a"))).value shouldBe None
+    s.store.latestOfRuns(s.thread, Set(RunId("run-a"))).value.map(_.runId) shouldBe Some("run-a")
+    s.reopened()
+    lookup("run-b") shouldBe Some("b1")
+  }
+
+  it should "lose a run's checkpoints from latestOfRuns once prune or deleteThread removes them" in {
+    val s     = Store()
+    val token = s.claim("h").value.token
+    s.commit(token, Some(s.checkpoint("old", None, Some(token)).withRunId("run-old"))).value
+    s.commit(token, Some(s.checkpoint("new", Some("old"), Some(token)).withRunId("run-new"))).value
+    s.store.prune(s.thread, RetentionPolicy(maxCheckpoints = Some(1))).value
+    s.store.latestOfRuns(s.thread, Set(RunId("run-old"))).value shouldBe None
+    s.store.latestOfRuns(s.thread, Set(RunId("run-new"))).value.map(_.id) shouldBe Some("new")
+    s.store.deleteThread(s.thread, token, None).value
+    s.store.latestOfRuns(s.thread, Set(RunId("run-new"))).value shouldBe None
+  }
+
   // ---- effect records (design §4.24) ----
 
   /**
@@ -2235,6 +2272,8 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         after: Option[org.llm4s.agent.graph.ThreadCursor],
         limit: Int
       ) = s.store.incompleteThreads(tenantId, after, limit)
+      def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+        s.store.latestOfRuns(threadId, runIds)
       def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     val first   = GraphRuntime(counted, claims = ClaimPolicy(ttl = ttl, renewEvery = 20.millis))
@@ -2412,6 +2451,8 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         after: Option[org.llm4s.agent.graph.ThreadCursor],
         limit: Int
       ) = s.store.incompleteThreads(tenantId, after, limit)
+      def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+        s.store.latestOfRuns(threadId, runIds)
       def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     completed(GraphRuntime(s.store, claims = neverRenewed).start(s.thread, w.graph, Vector("a"), config("a")).value)

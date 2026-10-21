@@ -44,8 +44,21 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-8 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionEight(path: Path): Unit =
+    exec(
+      path,
+      "DROP TABLE llm4s_checkpoint_queue_attempts",
+      "DROP TABLE llm4s_checkpoint_queue_entries",
+      "DELETE FROM llm4s_checkpoint_meta WHERE key IN ('last_entry', 'last_lease')",
+      "DROP INDEX llm4s_checkpoint_history_run",
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN run_id",
+      "UPDATE llm4s_checkpoint_schema SET version = 8"
+    )
+
   /** The file as a version-7 build left it: no thread registry (design 4.52). */
   private def asVersionSeven(path: Path): Unit =
+    asVersionEight(path)
     exec(
       path,
       (Vector("", "_status", "_agent", "_claimed").map(s => s"DROP INDEX llm4s_checkpoint_threads_registry$s") ++
@@ -147,9 +160,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           _ == 1,
           s"round $round: not exactly one schema version row"
         ),
+        // the last token, entry and lease issued (schema 9)
         read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
-          _ == 1,
-          s"round $round: not exactly one meta row"
+          _ == 3,
+          s"round $round: not exactly three meta rows"
         ),
         read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
       )
@@ -1135,6 +1149,30 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         ) shouldBe true
         steps.exists(_.contains("TEMP B-TREE")) shouldBe false
       }
+    }
+  }
+
+  "A version-8 file" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v8-thread")
+    val first  = SqliteCheckpointer.open(db).value
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token).withRunId("run-a")))).value
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c2", Some("c1"), token).withRunId("run-b")))).value
+    first.release(thread, token).value
+    first.close()
+    asVersionEight(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    reopened.latestOfRuns(thread, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
+    reopened.latestOfRuns(thread, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
+    reopened.runQueue.openEntries(None, thread).value shouldBe empty
+    reopened.close()
+    val steps = plan(db, (SqliteCheckpointer.LatestOfRunSql, Vector[Any]("v8-thread", "run-a")))
+    withClue(steps.mkString("\n")) {
+      steps.exists(_.contains("USING INDEX llm4s_checkpoint_history_run")) shouldBe true
+      steps.exists(_.contains("TEMP B-TREE")) shouldBe false
     }
   }
 }

@@ -34,6 +34,9 @@ import scala.util.Using
  *    names and `committed_at` beside it, so `prune` decides by the database's clock without decoding the log.
  *  - `checkpoint_effects`: the thread's effect records (design §4.24), one JSON `EffectRecord` per
  *    `(thread, effect key)`, with its task's id and lineage and the token of the commit that wrote it.
+ *  - the run queue (version 3, design 4.55, [[addRunQueue]]): `checkpoint_queue_entries` and
+ *    `checkpoint_queue_attempts`, with the sequences their ids and lease tokens come from, and `run_id` on every
+ *    history row for the run-id lookup.
  *
  * Opening a store brings the schema to [[Current]] in one transaction under a transaction-scoped advisory lock on the
  * schema's name, so instances that start together migrate it once; it refuses a schema whose version is newer than
@@ -44,13 +47,13 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 2
+  val Current: Int = 3
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addRunQueue)
 
   /**
    * Version 2: the thread registry (Stage 5 slice S3, design 4.52). Each thread's row gains what `threads` and
@@ -100,6 +103,66 @@ private[postgres] object PostgresSchema:
          |ON ${t.threads} USING gin (metadata jsonb_path_ops) $registered""".stripMargin
     )
 
+  /**
+   * Version 3: the run queue (Stage 5 slice W1, design 4.55). Every history row gets the run that committed it
+   * (`run_id`), backfilled from its JSON, indexed by `(thread_id, run_id, position)` for the run-id lookup.
+   *
+   * `checkpoint_queue_entries` holds one row per entry: its id (from `checkpoint_queue_entry_ids`, so ids follow
+   * submission order and are never reused, and the sequence's last value tells a reclaimed id from one never issued),
+   * thread, agent, tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique
+   * while held - its `max_attempts` and `attempt_count`, the thread's deletion marker at submission (`deletion_marker`,
+   * the thread's `first_seq`), whether it is an `Interrupt` entry, its lease (holder, token from
+   * `checkpoint_queue_lease_tokens`, expiry by the database's clock), its state (`open` or the outcome's), outcome JSON,
+   * close time (the database's clock) and the trace context it carries (`trace_parent`). Partial indexes serve the run
+   * order (by thread), `take` (by agent) and `reclaim` (by close time). `checkpoint_queue_attempts` holds
+   * `(entry_id, attempt)` with the attempt's thread, run id, start time and holder, indexed by `(thread_id, run_id)`
+   * for `prune`'s evidence.
+   */
+  private def addRunQueue(t: Tables): Vector[String] = Vector(
+    s"ALTER TABLE ${t.history} ADD COLUMN run_id text",
+    s"UPDATE ${t.history} SET run_id = checkpoint_json::jsonb ->> 'runId'",
+    s"CREATE INDEX checkpoint_history_run ON ${t.history} (thread_id, run_id, position)",
+    s"CREATE SEQUENCE ${t.queueEntryIds} AS bigint MINVALUE 1 NO CYCLE",
+    s"CREATE SEQUENCE ${t.queueLeaseTokens} AS bigint MINVALUE 1 NO CYCLE",
+    s"""CREATE TABLE ${t.queueEntries} (
+       |  entry_id          bigint PRIMARY KEY,
+       |  thread_id         text NOT NULL,
+       |  agent_id          text NOT NULL,
+       |  tenant_id         text,
+       |  input_json        text NOT NULL,
+       |  policy            text NOT NULL,
+       |  is_interrupt      boolean NOT NULL,
+       |  key_scope         text NOT NULL,
+       |  submission_key    text,
+       |  max_attempts      integer NOT NULL,
+       |  attempt_count     integer NOT NULL,
+       |  submitted_at      timestamptz NOT NULL,
+       |  deletion_marker   bigint NOT NULL,
+       |  trace_parent      text,
+       |  lease_holder      text,
+       |  lease_token       bigint,
+       |  lease_expires_at  timestamptz,
+       |  state             text NOT NULL,
+       |  outcome_json      text,
+       |  closed_at         timestamptz
+       |)""".stripMargin,
+    s"""CREATE UNIQUE INDEX checkpoint_queue_entries_key
+       |ON ${t.queueEntries} (key_scope, submission_key) WHERE submission_key IS NOT NULL""".stripMargin,
+    s"CREATE INDEX checkpoint_queue_entries_thread ON ${t.queueEntries} (thread_id, entry_id) WHERE state = 'open'",
+    s"CREATE INDEX checkpoint_queue_entries_agent ON ${t.queueEntries} (agent_id, entry_id) WHERE state = 'open'",
+    s"CREATE INDEX checkpoint_queue_entries_closed ON ${t.queueEntries} (closed_at, entry_id) WHERE state <> 'open'",
+    s"""CREATE TABLE ${t.queueAttempts} (
+       |  entry_id    bigint NOT NULL,
+       |  attempt     integer NOT NULL,
+       |  thread_id   text NOT NULL,
+       |  run_id      text NOT NULL,
+       |  started_at  timestamptz NOT NULL,
+       |  holder      text NOT NULL,
+       |  PRIMARY KEY (entry_id, attempt)
+       |)""".stripMargin,
+    s"CREATE INDEX checkpoint_queue_attempts_run ON ${t.queueAttempts} (thread_id, run_id, entry_id)"
+  )
+
   /** The qualified name of each table and sequence in `schema`. */
   final case class Tables(schema: String):
     private def q(name: String): String = s""""$schema".$name"""
@@ -112,6 +175,10 @@ private[postgres] object PostgresSchema:
     val pendingWrites: String           = q("checkpoint_pending_writes")
     val events: String                  = q("checkpoint_events")
     val effects: String                 = q("checkpoint_effects")
+    val queueEntryIds: String           = q("checkpoint_queue_entry_ids")
+    val queueLeaseTokens: String        = q("checkpoint_queue_lease_tokens")
+    val queueEntries: String            = q("checkpoint_queue_entries")
+    val queueAttempts: String           = q("checkpoint_queue_attempts")
 
   /** Version 1: every table, as the store's Scaladoc describes them. */
   private def createTables(t: Tables): Vector[String] = Vector(

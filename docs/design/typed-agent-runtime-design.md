@@ -446,6 +446,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.49 | [Stage 4 slice P2: the exit example, parallel-specialist deep research](typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md) ([#2053](https://github.com/llm4s/llm4s/issues/2053)) |
 | 4.50 | [Stage 5 slice S1: the PostgreSQL checkpointer](typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md) ([#2130](https://github.com/llm4s/llm4s/issues/2130)) |
 | 4.52 | [Stage 5 slice S3: the thread registry](typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md) ([#2132](https://github.com/llm4s/llm4s/issues/2132)) |
+| 4.55 | [Stage 5 slice W1: run submission and the durable run queue](typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md) ([#2134](https://github.com/llm4s/llm4s/issues/2134)) |
 
 ### 4.9 Stage 0 carry-forward
 

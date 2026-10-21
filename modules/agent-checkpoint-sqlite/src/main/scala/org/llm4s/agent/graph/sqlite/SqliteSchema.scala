@@ -38,6 +38,9 @@ import scala.util.{ Try, Using }
  *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
  *  - `llm4s_checkpoint_thread_metadata` (version 8): each thread's metadata (design 4.52), entry by entry, indexed by
  *    `(key, value)` for the registry's equality search; `deleteThread` removes a thread's.
+ *  - the run queue (version 9, design 4.55, [[addRunQueue]]): `llm4s_checkpoint_queue_entries`, one row per entry,
+ *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
+ *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`).
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -47,7 +50,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 8
+  val Current: Int = 9
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -61,7 +64,8 @@ private[sqlite] object SqliteSchema:
     4 -> addClaimTenants,
     5 -> addChildThreads,
     6 -> addCommitTimes,
-    7 -> addThreadRegistry
+    7 -> addThreadRegistry,
+    8 -> addRunQueue
   )
 
   /** The partial index predicate every registry index shares: root threads with a registered latest checkpoint. */
@@ -79,6 +83,71 @@ private[sqlite] object SqliteSchema:
    * commit time (or, for a row from before schema 7, its creation time); they have no metadata. A latest checkpoint
    * this build cannot read is logged and left out of the registry, as [[ensureHistory]] leaves it out of the history.
    */
+  /**
+   * Version 9: the run queue (design 4.55). Every history row gets the run that committed it (`run_id`), backfilled
+   * from its JSON, indexed by `(thread_id, run_id, position)` so the run-id lookup reads one index entry per run.
+   *
+   * `llm4s_checkpoint_queue_entries` holds one row per entry: its id (`AUTOINCREMENT`, so an id is never reused, and
+   * the meta table's `last_entry` the highest issued, which tells a reclaimed id from one never issued), thread, agent,
+   * tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique while held -
+   * its `max_attempts` and `attempt_count`, the thread's deletion marker at submission (`deletion_marker`, the thread's
+   * `first_seq`), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
+   * (`open` or the outcome's), outcome JSON, close time and the trace context it carries (`trace_parent`). It is indexed
+   * by thread for the run order, by agent for `take`, and by close time for `reclaim`.
+   * `llm4s_checkpoint_queue_attempts` holds `(entry_id, attempt)` with the attempt's thread, run id, start time and
+   * holder, indexed by `(thread_id, run_id)` for `prune`'s evidence.
+   */
+  private def addRunQueue(connection: Connection): Unit =
+    ensureHistory(connection)
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_history ADD COLUMN run_id TEXT",
+      "UPDATE llm4s_checkpoint_history SET run_id = json_extract(checkpoint_json, '$.runId')",
+      "CREATE INDEX llm4s_checkpoint_history_run ON llm4s_checkpoint_history (thread_id, run_id, position)",
+      "INSERT OR IGNORE INTO llm4s_checkpoint_meta (key, value) VALUES ('last_entry', 0)",
+      "INSERT OR IGNORE INTO llm4s_checkpoint_meta (key, value) VALUES ('last_lease', 0)",
+      """CREATE TABLE llm4s_checkpoint_queue_entries (
+        |  entry_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        |  thread_id           TEXT NOT NULL,
+        |  agent_id            TEXT NOT NULL,
+        |  tenant_id           TEXT,
+        |  input_json          TEXT NOT NULL,
+        |  policy              TEXT NOT NULL,
+        |  is_interrupt        INTEGER NOT NULL,
+        |  key_scope           TEXT NOT NULL,
+        |  submission_key      TEXT,
+        |  max_attempts        INTEGER NOT NULL,
+        |  attempt_count       INTEGER NOT NULL,
+        |  submitted_nanos     INTEGER NOT NULL,
+        |  deletion_marker     INTEGER NOT NULL,
+        |  trace_parent        TEXT,
+        |  lease_holder        TEXT,
+        |  lease_token         INTEGER,
+        |  lease_expires_nanos INTEGER,
+        |  state               TEXT NOT NULL,
+        |  outcome_json        TEXT,
+        |  closed_nanos        INTEGER
+        |)""".stripMargin,
+      """CREATE UNIQUE INDEX llm4s_checkpoint_queue_entries_key
+        |ON llm4s_checkpoint_queue_entries (key_scope, submission_key) WHERE submission_key IS NOT NULL""".stripMargin,
+      """CREATE INDEX llm4s_checkpoint_queue_entries_thread
+        |ON llm4s_checkpoint_queue_entries (thread_id, entry_id) WHERE state = 'open'""".stripMargin,
+      """CREATE INDEX llm4s_checkpoint_queue_entries_agent
+        |ON llm4s_checkpoint_queue_entries (agent_id, entry_id) WHERE state = 'open'""".stripMargin,
+      """CREATE INDEX llm4s_checkpoint_queue_entries_closed
+        |ON llm4s_checkpoint_queue_entries (closed_nanos, entry_id) WHERE state <> 'open'""".stripMargin,
+      """CREATE TABLE llm4s_checkpoint_queue_attempts (
+        |  entry_id      INTEGER NOT NULL,
+        |  attempt       INTEGER NOT NULL,
+        |  thread_id     TEXT NOT NULL,
+        |  run_id        TEXT NOT NULL,
+        |  started_nanos INTEGER NOT NULL,
+        |  holder        TEXT NOT NULL,
+        |  PRIMARY KEY (entry_id, attempt)
+        |) WITHOUT ROWID""".stripMargin,
+      "CREATE INDEX llm4s_checkpoint_queue_attempts_run ON llm4s_checkpoint_queue_attempts (thread_id, run_id, entry_id)"
+    )
+
   private def addThreadRegistry(connection: Connection): Unit =
     ensureHistory(connection)
     statements(

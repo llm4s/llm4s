@@ -237,6 +237,37 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
+  /** The schema as a version-2 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionTwo(config: PostgresCheckpointerConfig): Unit = {
+    val q = s""""${config.schema}""""
+    PgCheckpointerDb.execute(
+      s"""DROP TABLE $q.checkpoint_queue_attempts, $q.checkpoint_queue_entries;
+         |DROP SEQUENCE $q.checkpoint_queue_entry_ids, $q.checkpoint_queue_lease_tokens;
+         |DROP INDEX $q.checkpoint_history_run;
+         |ALTER TABLE $q.checkpoint_history DROP COLUMN run_id;
+         |UPDATE $q.checkpoint_schema SET version = 2""".stripMargin
+    )
+  }
+
+  "A version-2 schema" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = ThreadId("v2-thread")
+    val token  = store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    store.commit(t, Commit(token, Some(checkpoint("c1", None, t).withRunId("run-a")))).value
+    store.commit(t, Commit(token, Some(checkpoint("c2", Some("c1"), t).withRunId("run-b")))).value
+    store.close()
+    asVersionTwo(config)
+
+    val reopened = PgCheckpointerDb.store(config)
+    val q        = s""""${config.schema}""""
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    reopened.latestOfRuns(t, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
+    reopened.latestOfRuns(t, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
+    reopened.runQueue.openEntries(None, t).value shouldBe empty
+    reopened.close()
+  }
+
   // ---- the thread registry (design 4.52) ----
 
   "A version-1 schema" should "fill the thread registry from each thread's latest checkpoint and its commit time" in {
@@ -256,6 +287,7 @@ class PostgresCheckpointerSpec
     committed(deleting, CheckpointStatus.Running, deleting = true)
     val before = store.threads(ThreadQuery(tenant)).value
     store.close()
+    asVersionTwo(config)
     val q = s""""${config.schema}""""
     Vector("", "_status", "_agent", "_claimed", "_metadata").foreach { suffix =>
       PgCheckpointerDb.execute(s"DROP INDEX $q.checkpoint_threads_registry$suffix")

@@ -134,6 +134,13 @@ Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s
 - **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
 - **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### The run queue (#2134)
+
+Runs can be submitted to a durable queue that workers on any machine take ([design 4.55](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md)). Code that only runs agents changes nothing; these change:
+
+- **A new abstract `Checkpointer` method.** `latestOfRuns(threadId, runIds): Result[Option[Checkpoint]]` answers the newest checkpoint any of a set of runs committed on a thread, by an index on the run. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store that also offers a `RunQueue` keeps, through `prune`, the newest checkpoint of every run an open entry recorded, and passes `RunQueueContract`.
+- **Schemas move on, with no way back.** SQLite schema 9 and PostgreSQL schema 3 add `run_id` to every history row (backfilled from its JSON when the store opens, and indexed by thread, run and position) and the queue's two tables. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

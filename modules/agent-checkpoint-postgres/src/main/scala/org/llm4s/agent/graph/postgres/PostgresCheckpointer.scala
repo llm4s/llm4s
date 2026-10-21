@@ -75,11 +75,11 @@ final class PostgresCheckpointer private (
 
   import PostgresCheckpointer.*
 
-  private val t                  = PostgresSchema.Tables(config.schema)
-  @volatile private var shut     = false
-  private given ErrorContext     = ErrorContext(config.schema)
-  private val callTimeout        = config.callTimeout
-  private val transactionSetting = settings(callTimeout)
+  private[postgres] val t                            = PostgresSchema.Tables(config.schema)
+  @volatile private var shut                         = false
+  private[postgres] given errorContext: ErrorContext = ErrorContext(config.schema)
+  private val callTimeout                            = config.callTimeout
+  private val transactionSetting                     = settings(callTimeout)
 
   /** The schema this store's tables are in. */
   def schema: String = config.schema
@@ -243,7 +243,8 @@ final class PostgresCheckpointer private (
       checkpoint.id,
       checkpoint.status.toString,
       committedAt,
-      json
+      json,
+      checkpoint.runId
     )
     update(
       c,
@@ -343,7 +344,9 @@ final class PostgresCheckpointer private (
         val (older, latest) = history.splitAt(history.size - 1)
         val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
         val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptPositions   = kept.map(_._1).toSet
+        // an open queue entry's admission evidence (rule 4): the newest checkpoint each of its runs committed
+        val evidence      = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
+        val keptPositions = kept.map(_._1).toSet ++ evidence
         history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
           update(c, Sql.deleteHistoryAt(t), threadId.value, position)
         }
@@ -379,6 +382,24 @@ final class PostgresCheckpointer private (
       else if limit <= 0 then Right(Vector.empty)
       else Right(query(c, Sql.eventsAfter(t), threadId.value, afterSeq, limit)(_.getString(1)))
     }.flatMap(rows => decoding("eventsAfter", "event")(rows.map(upickle.default.read[EventRecord](_))))
+
+  def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]] =
+    if runIds.isEmpty then Right(None)
+    else
+      reading("latestOfRuns") { c =>
+        query(c, Sql.latestOfRuns(t), runIds.toVector.map(_.value).toArray, threadId.value)(
+          _.getString(1)
+        ).headOption match
+          case None       => Right(None)
+          case Some(json) => decodeCheckpoint("latestOfRuns", json).map(Some(_))
+      }
+
+  /**
+   * The store's run queue (design 4.55), in the same schema and over the same pool as its checkpoints: its entries
+   * record each thread's deletion marker from this schema, its leases expire by the same database clock as claims, and
+   * [[prune]] keeps the newest checkpoint of every run an open entry recorded. Closing the store closes it.
+   */
+  lazy val runQueue: org.llm4s.agent.service.RunQueue = new PostgresRunQueue(this)
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = writing("compactEvents") { c =>
     lockRow(c, threadId).foreach { current =>
@@ -478,11 +499,11 @@ final class PostgresCheckpointer private (
   // ---- transactions ----
 
   /** `body` in one read-committed transaction that locks the rows it writes; see [[call]]. */
-  private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[postgres] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     call(operation, transactionSetting)(body)
 
   /** `body` in one repeatable-read, read-only transaction, so what it reads is one snapshot; see [[call]]. */
-  private def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[postgres] def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
     call(operation, s"SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; $transactionSetting")(body)
 
   /**
@@ -544,7 +565,7 @@ final class PostgresCheckpointer private (
 
   // ---- rows ----
 
-  private def clockNow(c: Connection): Instant = query(c, s"SELECT $clockSql")(instant(_, 1)).head
+  private[postgres] def clockNow(c: Connection): Instant = query(c, s"SELECT $clockSql")(instant(_, 1)).head
 
   private def readRow(c: Connection, threadId: ThreadId, sql: String): Option[Row] =
     query(c, sql, threadId.value) { rows =>
@@ -719,7 +740,7 @@ object PostgresCheckpointer:
     GraphError.StaleClaim(threadId.value, token, current.flatMap(_.claim).map(c => FencingToken(c.token)))
 
   /** PostgreSQL keeps microseconds: an instant the store hands back is one it can store exactly. */
-  private def micros(at: Instant): Instant = at.truncatedTo(ChronoUnit.MICROS)
+  private[postgres] def micros(at: Instant): Instant = at.truncatedTo(ChronoUnit.MICROS)
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
@@ -850,7 +871,7 @@ object PostgresCheckpointer:
 
   // ---- errors ----
 
-  final private case class ErrorContext(schema: String)
+  final private[postgres] case class ErrorContext(schema: String)
 
   private def failure(operation: String, message: String, cause: Option[Throwable])(using
     context: ErrorContext
@@ -866,7 +887,7 @@ object PostgresCheckpointer:
   ): LLMError =
     failure(operation, s"a stored $what does not decode: $problem", cause)
 
-  private def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
+  private[postgres] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
@@ -949,7 +970,8 @@ object PostgresCheckpointer:
 
   // ---- JDBC ----
 
-  private def instant(rows: ResultSet, index: Int): Instant = rows.getObject(index, classOf[OffsetDateTime]).toInstant
+  private[postgres] def instant(rows: ResultSet, index: Int): Instant =
+    rows.getObject(index, classOf[OffsetDateTime]).toInstant
 
   private def bind(statement: PreparedStatement, params: Any*): Unit =
     params.zipWithIndex.foreach { (param, i) =>
@@ -968,13 +990,13 @@ object PostgresCheckpointer:
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))
     case other => statement.setObject(index, other)
 
-  private def update(c: Connection, sql: String, params: Any*): Unit =
+  private[postgres] def update(c: Connection, sql: String, params: Any*): Unit =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       statement.executeUpdate(): Unit
     }
 
-  private def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
+  private[postgres] def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       Using.resource(statement.executeQuery()) { rows =>

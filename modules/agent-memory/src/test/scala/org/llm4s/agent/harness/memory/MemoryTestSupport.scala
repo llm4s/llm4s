@@ -82,6 +82,8 @@ object MemoryTestSupport:
       limit: Int
     ) =
       alive(underlying.incompleteThreads(tenantId, after, limit))
+    def latestOfRuns(threadId: ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      alive(underlying.latestOfRuns(threadId, runIds))
     def checkpoint(threadId: ThreadId, checkpointId: String) = alive(underlying.checkpoint(threadId, checkpointId))
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = alive(underlying.prune(threadId, policy))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
