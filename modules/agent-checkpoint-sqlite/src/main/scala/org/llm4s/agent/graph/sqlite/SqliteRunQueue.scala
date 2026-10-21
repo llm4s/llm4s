@@ -124,8 +124,18 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           (agents ++ Vector(now, now))*
         )(_.getLong(1)).headOption
         head match
-          case None => Right(None)
+          case None     => Right(None)
           case Some(id) =>
+            // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
+            update(
+              c,
+              """UPDATE llm4s_checkpoint_queue_entries
+                |SET lease_holder = NULL, lease_token = NULL, lease_expires_nanos = NULL
+                |WHERE thread_id = (SELECT thread_id FROM llm4s_checkpoint_queue_entries WHERE entry_id = ?)
+                |  AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin,
+              id,
+              id
+            )
             val token   = bump(c, "last_lease")
             val expires = epochNanos(clock.instant().plusNanos(request.ttl.toNanos))
             update(

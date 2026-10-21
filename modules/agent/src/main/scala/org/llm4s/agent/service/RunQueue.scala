@@ -29,8 +29,9 @@ import scala.concurrent.duration.*
  *    entries, then the rest, each by id; only a thread's first entry in that order - its head - is ever taken, and only
  *    while no other entry of the thread holds a live lease;
  *  - '''lease''' like a claim: [[take]] leases a head whose lease is absent or expired, by the store's clock, with a
- *    new [[LeaseToken]] greater than every one issued for the entry, so two workers never hold a live lease on one
- *    thread; a lease may be renewed, released, have attempts recorded under it and close its entry for as long as it is
+ *    new [[LeaseToken]] greater than every one issued for the entry, and ends the expired lease of every other entry of
+ *    the thread (a head an `Interrupt` entry displaced), so two workers never hold an actionable lease on one thread;
+ *    a lease may be renewed, released, have attempts recorded under it and close its entry for as long as it is
  *    the entry's current one, expired or not, and every such call under another token is refused
  *    ([[QueueError.LeaseLost]]), as is any on a closed entry ([[QueueError.EntryClosed]]); taking is skip-locked
  *    where the store can, so workers do not contend for one entry;

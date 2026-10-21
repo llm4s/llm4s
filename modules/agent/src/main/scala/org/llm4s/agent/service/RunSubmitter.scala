@@ -3,6 +3,7 @@ package org.llm4s.agent.service
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ Checkpointer, EventRecord, TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 import scala.concurrent.duration.FiniteDuration
@@ -61,7 +62,7 @@ final class RunSubmitter(
    * The next page of entry `entryId`'s run events after thread event `after` (`0` from the thread's first), at most
    * `limit`, waiting up to `timeout` for a commit when there is nothing yet - through `Checkpointer.awaitEventsAfter`,
    * so a run committed by a worker on another machine is followed as it lands. Pass each page's `next` to the next
-   * call until `finished`. Errors are the queue's for the ticket and the store's for the thread's log
+   * call until `finished`. `limit` below 1 is a `ValidationError`. Errors are the queue's for the ticket and the store's for the thread's log
    * (`GraphError.ReplayUnavailable`, `GraphError.ThreadDeleted`).
    */
   def follow(
@@ -71,28 +72,34 @@ final class RunSubmitter(
     limit: Int,
     timeout: FiniteDuration
   ): Result[FollowedRun] =
-    queue.entry(tenantId, entryId).flatMap { before =>
-      before.closedAtSeq match
-        // closed: every event of its runs is at or below the thread's last event at the close, so read no further
-        case Some(end) =>
-          val read =
-            if after >= end then Right(Vector.empty) else checkpointer.eventsAfter(before.threadId, after, limit)
-          read.map { raw =>
-            val runs = before.runIds.map(_.value)
-            val done = raw.size < limit || raw.lastOption.exists(_.seq >= end)
-            FollowedRun(
-              before,
-              raw.filter(e => e.seq <= end && runs(e.runId)),
-              if done then math.max(after, end) else raw.last.seq,
-              finished = done
-            )
-          }
-        case None =>
-          checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout).flatMap { read =>
-            // read again after the events: an attempt is recorded before it commits, so these attempts cover every event
-            queue.entry(tenantId, entryId).map { now =>
-              val runs = now.runIds.map(_.value)
-              FollowedRun(now, read.filter(e => runs(e.runId)), read.lastOption.fold(after)(_.seq), finished = false)
+    if limit < 1 then Left(ValidationError("limit", s"must be at least 1, was $limit"))
+    else
+      queue.entry(tenantId, entryId).flatMap { before =>
+        before.closedAtSeq match
+          // closed: every event of its runs is at or below the thread's last event at the close, so read no further
+          case Some(end) =>
+            val read =
+              if after >= end then Right(Vector.empty) else checkpointer.eventsAfter(before.threadId, after, limit)
+            read.map(page(before, after, limit, _))
+          case None =>
+            checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout).flatMap { read =>
+              // read again after the events: an attempt is recorded before it commits, so these attempts cover every
+              // event; and the entry may have closed meanwhile, which bounds the page as above
+              queue.entry(tenantId, entryId).map(page(_, after, limit, read))
             }
-          }
-    }
+      }
+
+  /** The page `raw` - the thread's events after `after`, at most `limit` - makes for `entry`. */
+  private def page(entry: QueueEntry, after: Long, limit: Int, raw: Vector[EventRecord]): FollowedRun =
+    val runs = entry.runIds.map(_.value)
+    entry.closedAtSeq match
+      case Some(end) =>
+        val done = raw.size < limit || raw.lastOption.exists(_.seq >= end)
+        FollowedRun(
+          entry,
+          raw.filter(e => e.seq <= end && runs(e.runId)),
+          if done then math.max(after, end) else raw.last.seq,
+          finished = done
+        )
+      case None =>
+        FollowedRun(entry, raw.filter(e => runs(e.runId)), raw.lastOption.fold(after)(_.seq), finished = false)

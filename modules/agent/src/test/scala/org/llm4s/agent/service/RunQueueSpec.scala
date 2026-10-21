@@ -163,9 +163,18 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     page.events.map(_.runId) shouldBe Vector("queued-run")
     page.next shouldBe 2L
     page.finished shouldBe false
+    // a follower waiting when the entry closes is told it has finished on that page
+    val waiting = new java.util.concurrent.atomic.AtomicReference[FollowedRun]()
+    val follower =
+      Thread.ofVirtual().start(() => waiting.set(submitter.follow(None, ticket.entryId, 2L, 10, 5.seconds).value))
+    Thread.sleep(50)
     store.runQueue.close(leased.lease, EntryOutcome.Done(Some("c2"), Some(CheckpointStatus.Completed))).value
-    // the thread goes on with other runs: following the closed entry stops at its close, however busy the thread
     commitAs("direct", "c3", Some("c2"))
+    follower.join(5000)
+    waiting.get.finished shouldBe true
+    waiting.get.events shouldBe empty
+    waiting.get.next shouldBe 2L
+    // the thread goes on with other runs: following the closed entry stops at its close, however busy the thread
     commitAs("direct", "c4", Some("c3"))
     submitter.entry(None, ticket.entryId).value.closedAtSeq shouldBe Some(2L)
     val last = submitter.follow(None, ticket.entryId, 2L, 1, 1.second).value
@@ -181,6 +190,7 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     rest.finished shouldBe true
     submitter.await(None, ticket.entryId, 1.second).value.outcome shouldBe
       Some(EntryOutcome.Done(Some("c2"), Some(CheckpointStatus.Completed)))
+    submitter.follow(None, ticket.entryId, 0L, 0, 10.millis).left.value shouldBe a[ValidationError]
     submitter.follow(Some(TenantId("other")), ticket.entryId, 0L, 10, 10.millis).left.value shouldBe
       QueueError.TicketExpired(ticket.entryId)
   }

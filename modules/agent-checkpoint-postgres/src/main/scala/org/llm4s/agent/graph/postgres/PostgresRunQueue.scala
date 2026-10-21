@@ -150,11 +150,19 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             id,
             now,
             now
-          )(_ => ()).nonEmpty
+          )(_ => ()).nonEmpty && siblingsFree(c, thread, id, now)
         }
         chosen match
-          case None => Right(None)
-          case Some((id, _)) =>
+          case None               => Right(None)
+          case Some((id, thread)) =>
+            // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
+            update(
+              c,
+              s"""UPDATE $entries SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL
+                 |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin,
+              thread,
+              id
+            )
             val token   = query(c, s"SELECT nextval('${t.queueLeaseTokens}')")(_.getLong(1)).head
             val expires = micros(now.plusNanos(request.ttl.toNanos))
             update(
@@ -169,6 +177,16 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
               Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires)))
             }
       }
+
+  /** Whether no other open entry of `thread` holds a live lease, its leased rows locked so none is renewed meanwhile. */
+  private def siblingsFree(c: Connection, thread: String, id: Long, now: Instant): Boolean =
+    query(
+      c,
+      s"""SELECT lease_expires_at FROM $entries
+         |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL FOR UPDATE""".stripMargin,
+      thread,
+      id
+    )(instant(_, 1)).forall(expires => !now.isBefore(expires))
 
   private def tryLock(c: Connection, name: String): Boolean =
     query(c, "SELECT pg_try_advisory_xact_lock(hashtextextended(?, 0))", lockName(name))(_.getBoolean(1)).head

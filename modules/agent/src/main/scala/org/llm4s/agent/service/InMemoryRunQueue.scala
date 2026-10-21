@@ -178,8 +178,13 @@ final class InMemoryRunQueue private[agent] (
       }
       .filter(head => request.agents.contains(head.agentId))
     heads.minByOption(_.id) match
-      case None => Right(None)
+      case None       => Right(None)
       case Some(head) =>
+        // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
+        rows.valuesIterator
+          .filter(r => r.open && r.threadId == head.threadId && r.id != head.id && r.lease.isDefined)
+          .toVector
+          .foreach(r => rows.update(r.id, r.copy(lease = None)))
         lastLease += 1
         val held = Held(request.holder, lastLease, now.plusNanos(request.ttl.toNanos))
         val row  = head.copy(lease = Some(held))

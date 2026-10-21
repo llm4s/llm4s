@@ -374,6 +374,22 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.entry(id).leaseHolder shouldBe Some("worker-2")
   }
 
+  it should "end a displaced head's expired lease when an Interrupt entry ahead of it is taken" in {
+    val c         = Case()
+    val queued    = c.submit().value.entryId
+    val displaced = c.take().value
+    val interrupt = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.take() shouldBe None
+    c.advance(31.seconds)
+    val head = c.take("worker-2").value
+    head.entry.id shouldBe interrupt
+    val lost = QueueError.LeaseLost(queued, displaced.lease.token, None)
+    c.queue.renew(displaced.lease, ttl).refused shouldBe lost
+    c.queue.recordAttempt(displaced.lease, RunId(s"run-${unique()}")).refused shouldBe lost
+    c.entry(queued).leaseHolder shouldBe None
+    c.entry(queued).isOpen shouldBe true
+  }
+
   it should "renew a lease, expired or not, while no other replaced it" in {
     val c = Case()
     c.submit().value
