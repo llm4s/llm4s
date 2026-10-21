@@ -71,6 +71,11 @@ import scala.util.Try
  *    other thread and later call (see [[awaitEventsAfter]]);
  *  - list a thread's direct children ([[children]]) - the threads whose latest checkpoint's [[RunOrigin]] names it
  *    as `parent` - in the order they were first committed, paged, and never one [[deleteThread]] removed;
+ *  - keep each thread's [[ThreadMetadata]], replaced only by a commit carrying [[Commit.metadata]] and removed only by
+ *    [[deleteThread]], and list a tenant's root threads ([[threads]]) and its incomplete ones ([[incompleteThreads]]) -
+ *    the thread registry (design 4.52) - by their latest checkpoint, their claim judged by the store's clock, and when
+ *    the store last committed a checkpoint or metadata to them, by that clock, never one of another tenant, a child
+ *    thread, one with no checkpoint, or one [[deleteThread]] removed;
  *  - return from every call within a bound it documents (#1919) - see below.
  *
  * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
@@ -245,6 +250,36 @@ trait Checkpointer:
    */
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]]
 
+  /**
+   * The thread registry (design 4.52): a page of the root threads of `query.tenantId` that pass every filter of `query`
+   * ([[ThreadQuery.matches]]), newest first by [[ThreadSummary.updatedAt]] - when the store last committed a checkpoint
+   * or metadata to the thread, by its clock - ties broken by thread id, descending; starting after `query.after`, at
+   * most `query.limit` of them, with the cursor of the next page when more match ([[ThreadPage.of]]). Each thread's
+   * [[ThreadStatus]] is judged from its latest checkpoint and whether a live claim holds it, by the store's clock, when
+   * it is read.
+   *
+   * Listed are only threads with a checkpoint whose latest checkpoint's tenant is `query.tenantId` (`None` and `Some`
+   * differ) and whose latest checkpoint names no parent ([[Checkpoint.origin]]): a child thread is read through
+   * [[children]], and a thread [[deleteThread]] removed is never listed. Paging is by position: a thread changed while
+   * a caller pages moves to the front, so a later page of that pass does not list it again, and a pass from the start,
+   * or with `updatedSince`, finds it. Needs no claim, and reads no other tenant's thread: the tenant is the query's.
+   * A store answers it within its bound however many threads it holds, by an index.
+   */
+  def threads(query: ThreadQuery): Result[ThreadPage]
+
+  /**
+   * The incomplete root threads of `tenantId` (design 4.52): those whose latest checkpoint is incomplete
+   * (`CheckpointStatus.Running`) and that no live claim holds, by the store's clock - [[ThreadStatus.Idle]] - oldest
+   * first by [[ThreadSummary.updatedAt]] (ties by thread id, ascending), starting after `after`, at most `limit` (1 to
+   * [[ThreadQuery.MaxLimit]], `ValidationError` otherwise), with the next page's cursor when more match. A thread whose
+   * claim expired without a release is listed; one whose cascade delete has begun is not ([[ThreadStatus.Deleted]]).
+   *
+   * It is for operators, not a worker's recovery query: a cancelled run, a drained one and a crashed one all look alike
+   * here, and only a run queue's entry says which should run again (Stage 5, rule 4). Tenant-scoped and bounded as
+   * [[threads]] is.
+   */
+  def incompleteThreads(tenantId: Option[TenantId], after: Option[ThreadCursor], limit: Int): Result[ThreadPage]
+
   /** Drops events with `seq < beforeSeq`; replay can then start no earlier than `beforeSeq`. */
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]
 
@@ -319,7 +354,15 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   final private case class Claim(holder: String, tenantId: Option[String], token: Long, expiresAt: Instant)
 
   /** One stored checkpoint: its JSON, with the fields the store itself reads; `committedAt` by the store's clock. */
-  final private case class Stored(id: String, status: CheckpointStatus, committedAt: Instant, json: ujson.Value)
+  final private case class Stored(
+    id: String,
+    status: CheckpointStatus,
+    committedAt: Instant,
+    json: ujson.Value,
+    tenant: Option[String],
+    graphId: String,
+    deleting: Boolean
+  )
 
   final private case class ThreadRecord(
     /** Oldest first; the last is the latest. */
@@ -335,10 +378,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     /** Effect records by key, with their task and the token of the commit that wrote them. */
     effects: Map[String, StoredEffect] = Map.empty,
     /** The parent the latest checkpoint's origin names, and the thread's place among its children; kept by a delete. */
-    child: Option[(String, Long)] = None
+    child: Option[(String, Long)] = None,
+    /** The thread's metadata (design 4.52); a delete removes it. */
+    metadata: ThreadMetadata = ThreadMetadata.empty,
+    /** When the store last committed a checkpoint or metadata to the thread, by its clock; a delete removes it. */
+    updatedAt: Instant = Instant.EPOCH
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
-    def isEmpty: Boolean         = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty
+    def isEmpty: Boolean = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty && metadata.isEmpty
 
   final private case class StoredEffect(taskId: TaskId, lineage: String, json: ujson.Value)
 
@@ -476,7 +523,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       val kept =
         if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
         else current.history
-      val added = commit.checkpoint.map(c => Stored(c.id, c.status, committedAt, Checkpoint.toJson(c)))
+      val added = commit.checkpoint.map { c =>
+        Stored(c.id, c.status, committedAt, Checkpoint.toJson(c), c.tenantId, c.snapshot.graphId, c.deleting)
+      }
       // released before this commit's own records are applied
       val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
         commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
@@ -488,7 +537,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
           events = current.events ++ stored,
           nextSeq = current.nextSeq + stored.size,
-          child = commit.checkpoint.fold(current.child)(placed(threadId, current, _))
+          child = commit.checkpoint.fold(current.child)(placed(threadId, current, _)),
+          metadata = commit.metadata.getOrElse(current.metadata),
+          updatedAt =
+            if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
         )
       )
       if stored.nonEmpty then appended.signalAll()
@@ -625,7 +677,14 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
           store(
             threadId,
-            current.copy(history = Vector.empty, pendingWrites = Vector.empty, claim = None, effects = Map.empty)
+            current.copy(
+              history = Vector.empty,
+              pendingWrites = Vector.empty,
+              claim = None,
+              effects = Map.empty,
+              metadata = ThreadMetadata.empty,
+              updatedAt = Instant.EPOCH
+            )
           )
         else
           val first = current.nextSeq + 1
@@ -658,5 +717,52 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     }
   }
 
+  def threads(query: ThreadQuery): Result[ThreadPage] = withLock(lock) {
+    val listed = registered(query.tenantId).filter(query.matches)
+    val after  = query.after.fold(listed)(cursor => listed.filter(t => RegistryOrder.before(t.cursor, cursor)))
+    Right(ThreadPage.of(after.sorted(using RegistryOrder.newestFirst).take(query.limit + 1), query.limit))
+  }
+
+  def incompleteThreads(
+    tenantId: Option[TenantId],
+    after: Option[ThreadCursor],
+    limit: Int
+  ): Result[ThreadPage] = ThreadQuery.checkLimit(limit).map { limit =>
+    withLock(lock) {
+      val idle  = registered(tenantId).filter(_.status == ThreadStatus.Idle)
+      val later = after.fold(idle)(cursor => idle.filter(t => RegistryOrder.before(cursor, t.cursor)))
+      ThreadPage.of(later.sorted(using RegistryOrder.newestFirst.reverse).take(limit + 1), limit)
+    }
+  }
+
+  /** Every root thread of `tenantId` with a checkpoint, as the registry lists it, its claim judged now; under `lock`. */
+  private def registered(tenantId: Option[TenantId]): Vector[ThreadSummary] =
+    val now    = clock.instant()
+    val tenant = tenantId.map(_.value)
+    threads.iterator.flatMap { (id, record) =>
+      record.history.lastOption.filter(latest => latest.tenant == tenant && record.child.isEmpty).map { latest =>
+        val claimed = record.claim.exists(c => now.isBefore(c.expiresAt))
+        ThreadSummary(
+          ThreadId(id),
+          latest.tenant.map(TenantId(_)),
+          latest.graphId,
+          ThreadStatus.of(latest.status, latest.deleting, claimed),
+          latest.id,
+          record.metadata,
+          record.updatedAt
+        )
+      }
+    }.toVector
+
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
+
+private object RegistryOrder:
+
+  /** The registry's order: newest first by `updatedAt`, then by thread id, descending. */
+  val newestFirst: Ordering[ThreadSummary] =
+    Ordering.by[ThreadSummary, (Instant, String)](t => (t.updatedAt, t.threadId.value)).reverse
+
+  /** Whether position `a` comes before `b` in ascending order: by `updatedAt`, then by thread id. */
+  def before(a: ThreadCursor, b: ThreadCursor): Boolean =
+    a.updatedAt.isBefore(b.updatedAt) || (a.updatedAt == b.updatedAt && a.threadId.value < b.threadId.value)

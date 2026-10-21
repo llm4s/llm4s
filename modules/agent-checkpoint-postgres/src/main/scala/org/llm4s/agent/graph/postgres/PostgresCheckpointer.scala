@@ -158,9 +158,21 @@ final class PostgresCheckpointer private (
       // a thread with a claim always has a row
       val row = current.getOrElse(throw new IllegalStateException("a claimed thread has no row"))
       // what retention judges age by: the database's clock, never the producer's timestamps (rule 1)
-      val committedAt = if commit.checkpoint.isDefined || commit.events.nonEmpty then clockNow(c) else Instant.EPOCH
+      val committedAt =
+        if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
+        else Instant.EPOCH
       commit.checkpoint.foreach(writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, _))
       appendWrites(c, threadId, commit.pendingWrites)
+      // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
+      commit.metadata.foreach { metadata =>
+        update(
+          c,
+          Sql.setMetadata(t),
+          Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
+          committedAt,
+          threadId.value
+        )
+      }
       // released before this commit's own records are applied
       if commit.checkpoint.isDefined then
         query(c, Sql.effectTasks(t), threadId.value)(rows =>
@@ -233,7 +245,17 @@ final class PostgresCheckpointer private (
       committedAt,
       json
     )
-    update(c, Sql.setLatest(t), checkpoint.id, json, threadId.value)
+    update(
+      c,
+      Sql.setLatest(t),
+      checkpoint.id,
+      json,
+      checkpoint.tenantId,
+      checkpoint.snapshot.graphId,
+      registryStatus(checkpoint),
+      committedAt,
+      threadId.value
+    )
     update(c, Sql.deletePendingWrites(t), threadId.value)
     placeChild(c, threadId, row, checkpoint, fresh)
 
@@ -380,6 +402,34 @@ final class PostgresCheckpointer private (
         else query(c, Sql.childrenPage(t), parent.value, order, limit)(_.getString(1))
       }
     }.flatMap(rows => sequence(rows.map(decodeCheckpoint("children", _))).map(_.flatMap(ChildThread.of)))
+
+  def threads(query: ThreadQuery): Result[ThreadPage] =
+    reading("threads")(c => Right(registry(c, threadsStatement(t, query, clockNow(c)))))
+      .flatMap(rows => summaries("threads", rows, query.limit))
+
+  def incompleteThreads(
+    tenantId: Option[TenantId],
+    after: Option[ThreadCursor],
+    limit: Int
+  ): Result[ThreadPage] =
+    ThreadQuery.checkLimit(limit).flatMap { limit =>
+      reading("incompleteThreads")(c => Right(registry(c, incompleteStatement(t, tenantId, after, limit, clockNow(c)))))
+        .flatMap(rows => summaries("incompleteThreads", rows, limit))
+    }
+
+  private def registry(c: Connection, statement: (String, Vector[Any])): Vector[RegistryRow] =
+    query(c, statement._1, statement._2*) { rows =>
+      RegistryRow(
+        rows.getString(1),
+        Option(rows.getString(2)),
+        rows.getString(3),
+        rows.getString(4),
+        rows.getString(5),
+        Option(rows.getString(6)),
+        instant(rows, 7),
+        rows.getBoolean(8)
+      )
+    }
 
   /**
    * Deletes the thread in one transaction, which first locks its row (and a `fence` thread's, in id order) and checks
@@ -673,6 +723,130 @@ object PostgresCheckpointer:
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
+
+  // ---- the thread registry (schema 2) ----
+
+  /** The status the registry stores for a thread whose latest checkpoint is `checkpoint`: `Deleted` once deleting. */
+  private def registryStatus(checkpoint: Checkpoint): String =
+    if checkpoint.deleting then ThreadStatus.Deleted.toString else checkpoint.status.toString
+
+  /**
+   * The registry's key for a tenant (`tenant_key`, a column the database generates from `tenant_id`): `=` and the
+   * tenant, or empty for none, so that no tenant is NULL in the indexes - PostgreSQL orders an index scan by the
+   * columns after one compared by equality, but not after one tested with `IS NULL`.
+   */
+  private[postgres] def tenantKey(tenantId: Option[TenantId]): String = tenantId.fold("")(t => "=" + t.value)
+
+  /** The statement and parameters of a page of `query`, its claims judged at `now`, the database's clock. */
+  private[postgres] def threadsStatement(
+    t: PostgresSchema.Tables,
+    query: ThreadQuery,
+    now: Instant
+  ): (String, Vector[Any]) =
+    registryStatement(t, query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+      query.status.foreach(statusFilter(where, _, now))
+      query.agent.foreach(agent => where.add("graph_id = ?", agent))
+      query.updatedSince.foreach(since => where.add("updated_at >= ?", since))
+      // containment, through the GIN index on the metadata
+      if !query.metadata.isEmpty then where.add("metadata @> CAST(? AS jsonb)", ujson.write(query.metadata.toJson))
+    }
+
+  /** The statement and parameters of a page of `tenantId`'s incomplete threads, their claims judged at `now`. */
+  private[postgres] def incompleteStatement(
+    t: PostgresSchema.Tables,
+    tenantId: Option[TenantId],
+    after: Option[ThreadCursor],
+    limit: Int,
+    now: Instant
+  ): (String, Vector[Any]) =
+    registryStatement(t, tenantId, newestFirst = false, after, limit, now)(statusFilter(_, ThreadStatus.Idle, now))
+
+  /**
+   * One page of the registry, and one row more to tell whether another follows: the root threads of `tenantId` with a
+   * checkpoint, past `after` in the page's order, narrowed by the conditions `filters` adds, through the registry's
+   * partial indexes. Each row says whether a live claim holds its thread at `now`.
+   */
+  private def registryStatement(
+    t: PostgresSchema.Tables,
+    tenantId: Option[TenantId],
+    newestFirst: Boolean,
+    after: Option[ThreadCursor],
+    limit: Int,
+    now: Instant
+  )(filters: Conditions => Unit): (String, Vector[Any]) =
+    val where = Conditions()
+    // the partial indexes' own predicate, so every one of them serves the statement
+    where.add(Sql.Registered)
+    where.add("tenant_key = ?", tenantKey(tenantId))
+    filters(where)
+    after.foreach { cursor =>
+      val direction = if newestFirst then "<" else ">"
+      where.add(s"""(updated_at, thread_id COLLATE "C") $direction (?, ?)""", cursor.updatedAt, cursor.threadId.value)
+    }
+    Sql.registryPage(t, where.sql, newestFirst) -> ((now +: where.params) :+ (limit + 1))
+
+  /**
+   * The condition a status filter adds: the stored status (`Deleted` while a cascade delete is under way) and whether
+   * a live claim holds the thread at `now`, as `ThreadStatus.of` decides.
+   */
+  private def statusFilter(where: Conditions, status: ThreadStatus, now: Instant): Unit =
+    val unclaimed = "(claim_expires_at IS NULL OR claim_expires_at <= ?)"
+    status match
+      case ThreadStatus.Deleted => where.add("thread_status = ?", ThreadStatus.Deleted.toString)
+      case ThreadStatus.Running =>
+        // through the partial index of claimed threads
+        where.add("claim_expires_at IS NOT NULL")
+        where.add(s"thread_status <> ? AND ${Sql.LiveClaim}", ThreadStatus.Deleted.toString, now)
+      case ThreadStatus.Idle => where.add(s"thread_status = ? AND $unclaimed", CheckpointStatus.Running.toString, now)
+      case other             => where.add(s"thread_status = ? AND $unclaimed", other.toString, now)
+
+  /** A `WHERE` clause built a condition at a time, with its parameters in order. */
+  final private class Conditions:
+    private val clauses = Vector.newBuilder[String]
+    private val values  = Vector.newBuilder[Any]
+    def add(clause: String, params: Any*): Unit =
+      clauses += clause
+      values ++= params
+    def sql: String         = clauses.result().mkString(" AND ")
+    def params: Vector[Any] = values.result()
+
+  /** A registry row as read: `claimed`, whether a live claim held the thread by the database's clock when read. */
+  final private case class RegistryRow(
+    threadId: String,
+    tenant: Option[String],
+    graphId: String,
+    status: String,
+    checkpointId: String,
+    metadata: Option[String],
+    updatedAt: Instant,
+    claimed: Boolean
+  )
+
+  /** The page `rows` hold, decoded; a row that does not decode is a `ProcessingError` naming the operation. */
+  private def summaries(operation: String, rows: Vector[RegistryRow], limit: Int)(using
+    ErrorContext
+  ): Result[ThreadPage] =
+    sequence(rows.map { row =>
+      for
+        metadata <- row.metadata.fold[Result[ThreadMetadata]](Right(ThreadMetadata.empty)) { json =>
+          decoding(operation, "thread metadata")(ujson.read(json)).flatMap(
+            ThreadMetadata.fromJson(_).left.map(e => undecodable(operation, "thread metadata", e.message, None))
+          )
+        }
+        status <- decoding(operation, "thread status") {
+          if row.status == ThreadStatus.Deleted.toString then ThreadStatus.Deleted
+          else ThreadStatus.of(CheckpointStatus.valueOf(row.status), deleting = false, row.claimed)
+        }
+      yield ThreadSummary(
+        ThreadId(row.threadId),
+        row.tenant.map(TenantId(_)),
+        row.graphId,
+        status,
+        row.checkpointId,
+        metadata,
+        row.updatedAt
+      )
+    }).map(ThreadPage.of(_, limit))
 
   // ---- errors ----
 

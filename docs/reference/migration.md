@@ -125,6 +125,15 @@ Not in a release yet. Stage 5 runs one agent service on several machines ([#2129
 - **`GraphError.UnsupportedStoreSchema(store, found, supported)`** is a new case, returned when a store's storage was migrated by a newer build (the PostgreSQL store's refusal of a newer schema). An exhaustive match on `GraphError` needs it.
 - **Upgrading a PostgreSQL deployment.** Instances of releases that change neither the store's schema nor the checkpoint format can be replaced one at a time. A release that changes either needs every instance stopped before the first new one starts: an old instance that meets the newer schema refuses to open with `UnsupportedStoreSchema` rather than writing anything.
 
+### The thread registry (#2132)
+
+Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md)). Code that only runs agents changes nothing; these change:
+
+- **Two new abstract `Checkpointer` methods.** `threads(query: ThreadQuery): Result[ThreadPage]` and `incompleteThreads(tenantId, after, limit): Result[ThreadPage]`. A custom store implements both (a forwarding wrapper forwards both), tenant-scoped, newest and oldest first by the time the store last committed a checkpoint or metadata to the thread, and passes `CheckpointerContract`'s new cases.
+- **`Commit.metadata: Option[ThreadMetadata]`.** A commit carrying it replaces the thread's metadata, fenced like the rest of the commit; a store keeps it until another replaces it or the thread is deleted. `Commit.apply` keeps its earlier forms.
+- **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
+- **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:
