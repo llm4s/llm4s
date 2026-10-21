@@ -20,6 +20,10 @@ A comprehensive, type-safe framework for building LLM-powered applications in Sc
 [Get Started](/getting-started/installation){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/llm4s/llm4s){: .btn .fs-5 .mb-4 .mb-md-0 }
 
+**Follow LLM4S**
+
+{% include follow-links.html style="buttons" %}
+
 ---
 
 ## Upcoming Events

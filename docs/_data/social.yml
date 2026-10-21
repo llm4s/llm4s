@@ -1,0 +1,30 @@
+# Where to follow LLM4S and its co-founder. Rendered by _includes/follow-links.html in the footer of every page,
+# on the home page and on the community page.
+foundation:
+  - name: LinkedIn
+    url: https://www.linkedin.com/company/llm4s-foundation/
+  - name: Reddit
+    url: https://www.reddit.com/user/llm4s_foundation/
+  - name: X / Twitter
+    url: https://x.com/llm4sfoundation/
+  - name: Bluesky
+    url: https://bsky.app/profile/llm4s-foundation.bsky.social
+  - name: Mastodon
+    url: https://mastodon.social/@llm4s_foundation/
+  - name: Instagram
+    url: https://www.instagram.com/llm4s/
+
+cofounder:
+  name: Kannupriya Kalra
+  links:
+    - name: X / Twitter
+      url: https://x.com/KannupriyaKalra
+    - name: Bluesky
+      url: https://bsky.app/profile/kannupriyakalra.bsky.social
+    - name: Functional Café
+      url: https://functional.cafe/@kannupriyakalra
+    - name: Reddit
+      url: https://www.reddit.com/user/kannupriyakalra/
+    - name: GitHub
+      url: https://github.com/kannupriyakalra
+  discord: kannupriyakalra_46520

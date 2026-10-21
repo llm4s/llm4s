@@ -223,6 +223,16 @@ For feature requests:
 - **Discord**: Join for real-time updates
 - **Roadmap**: [View the roadmap](/reference/roadmap)
 
+### Follow LLM4S
+
+{% include follow-links.html style="buttons" %}
+
+### Follow our co-founder, Kannupriya Kalra
+
+{% include follow-links.html style="buttons" cofounder=true %}
+
+Discord: `kannupriyakalra_46520`
+
 ### Release Notifications
 
 Get notified of new releases:

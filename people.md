@@ -18,7 +18,7 @@ liaisons with sponsors, and conference programme committees.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="docs/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra**<br>[X / Twitter](https://x.com/KannupriyaKalra) &middot; [Bluesky](https://bsky.app/profile/kannupriyakalra.bsky.social) &middot; [Functional Café](https://functional.cafe/@kannupriyakalra) &middot; [Reddit](https://www.reddit.com/user/kannupriyakalra/)<br>Discord: `kannupriyakalra_46520` | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
 | <img src="docs/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
