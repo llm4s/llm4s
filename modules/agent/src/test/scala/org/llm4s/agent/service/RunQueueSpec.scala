@@ -2,6 +2,7 @@ package org.llm4s.agent.service
 
 import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, ScriptedLLMClient }
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.ForwardingCheckpointer
 import org.llm4s.config.RunQueueConfigLoader
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.scalatest.EitherValues
@@ -193,6 +194,37 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     submitter.follow(None, ticket.entryId, 0L, 0, 10.millis).left.value shouldBe a[ValidationError]
     submitter.follow(Some(TenantId("other")), ticket.entryId, 0L, 10, 10.millis).left.value shouldBe
       QueueError.TicketExpired(ticket.entryId)
+  }
+
+  it should "read the log again when the entry closes while it waits, never finishing on a stale page" in {
+    val store  = InMemoryCheckpointer()
+    val ticket = store.runQueue.submit(Submission(thread, agent, QueuedInput.query("q"))).value
+    val leased = store.runQueue.take(TakeRequest("w", Set(agent), 30.seconds)).value.get
+    store.runQueue.recordAttempt(leased.lease, RunId("queued-run")).value
+    // the wait comes back empty just before the run commits its last event and the entry closes
+    val stale = new ForwardingCheckpointer(store) {
+      override def awaitEventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int, timeout: FiniteDuration) = {
+        val claim = store.claim(thread, ClaimRequest(RunId("queued-run"), None, 30.seconds)).value
+        val draft = EventDraft("queued-run", Some("c1"), None, None, start, RunEvent.Custom("e", 1, ujson.Obj()))
+        store
+          .commit(
+            thread,
+            Commit(
+              claim.token,
+              Some(RunQueueSpec.this.checkpoint("c1", "queued-run", CheckpointStatus.Completed)),
+              events = Vector(draft)
+            )
+          )
+          .value
+        store.release(thread, claim.token).value
+        store.runQueue.close(leased.lease, EntryOutcome.Done(Some("c1"), Some(CheckpointStatus.Completed))).value
+        Right(Vector.empty)
+      }
+    }
+    val page = new RunSubmitter(store.runQueue, stale).follow(None, ticket.entryId, 0L, 10, 1.second).value
+    page.events.map(_.runId) shouldBe Vector("queued-run")
+    page.finished shouldBe true
+    page.next shouldBe 1L
   }
 
   // ---- settings ----

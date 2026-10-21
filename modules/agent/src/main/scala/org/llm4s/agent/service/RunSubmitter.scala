@@ -84,8 +84,14 @@ final class RunSubmitter(
           case None =>
             checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout).flatMap { read =>
               // read again after the events: an attempt is recorded before it commits, so these attempts cover every
-              // event; and the entry may have closed meanwhile, which bounds the page as above
-              queue.entry(tenantId, entryId).map(page(_, after, limit, read))
+              // event. If the entry closed meanwhile, its last events may have landed after `read`: read the log again,
+              // now bounded by the close, before the page may say it is finished
+              queue.entry(tenantId, entryId).flatMap { now =>
+                now.closedAtSeq match
+                  case Some(end) if after < end =>
+                    checkpointer.eventsAfter(now.threadId, after, limit).map(page(now, after, limit, _))
+                  case _ => Right(page(now, after, limit, read))
+              }
             }
       }
 
