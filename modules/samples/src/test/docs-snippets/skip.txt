@@ -46,6 +46,7 @@ getting-started/installation.md | 425f37584b | skip | sbt build definition, not 
 getting-started/installation.md | 6b26cf14c7 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 4f8485e651 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 6ea01941b0 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6e672cfc37 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 362b0b0114 | skip | sbt build definition, not Scala source
 getting-started/installation.md | b85df8a9fb | skip | sbt build definition, not Scala source
 getting-started/installation.md | 0b97b6dcc7 | skip | sbt build definition, not Scala source
