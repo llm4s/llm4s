@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
   claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** cross-machine change notification: `PostgresCheckpointer.awaitEventsAfter` wakes on any store's commit by `LISTEN`/`NOTIFY`,
+  one listening connection per store, polling while it is down [#2131](https://github.com/llm4s/llm4s/issues/2131); [design §4.51](docs/design/typed-agent-runtime/4.51-stage-5-slice-s2-cross-machine-change-notification.md).
 
 ### Agent harness (Phase 3)
 
