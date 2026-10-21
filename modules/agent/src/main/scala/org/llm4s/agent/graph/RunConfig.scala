@@ -85,6 +85,11 @@ object RunBudgets:
  * ([[GraphError.TenantMismatch]]; `None` and `Some` differ). The principal is recorded on the run's
  * `RunStarted`, `RunRecovered` and `RunResumed` events and is never checked.
  *
+ * `metadata`, when not empty, is the thread's [[ThreadMetadata]] (design 4.52): a top-level `start` sets it in its
+ * claim commit, replacing what the thread had, and refuses metadata that breaks its limits with a `ValidationError`
+ * before it claims anything. `recover`, `resume` and a child thread's run leave it as it is; change it with
+ * [[GraphRuntime.updateMetadata]].
+ *
  * `interruptBefore` and `interruptAfter` are the run's static breakpoints ([[BreakpointPhase]]): a
  * task of a node in `interruptBefore` is held before it runs, and one of a node in `interruptAfter`
  * after it ran, each as an interrupt of its own that [[GraphRuntime.resume]] answers with

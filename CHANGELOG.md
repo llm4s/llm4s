@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- Checkpoint format 8 and SQLite schema 7: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
+  `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
 - `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
   and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
 - `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
@@ -20,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
+  `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
@@ -59,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
   claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
+  `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
 
 ### Agent harness (Phase 3)
 
@@ -133,6 +139,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).
+- **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
+  default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
+  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
 
 ### MCP
 

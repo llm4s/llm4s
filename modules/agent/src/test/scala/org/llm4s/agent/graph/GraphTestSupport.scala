@@ -123,6 +123,12 @@ private[agent] class ForwardingCheckpointer(to: Checkpointer) extends Checkpoint
   def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
     to.deleteThread(threadId, token, fence)
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = to.children(parent, after, limit)
+  def threads(query: org.llm4s.agent.graph.ThreadQuery)               = to.threads(query)
+  def incompleteThreads(
+    tenantId: Option[org.llm4s.agent.graph.TenantId],
+    after: Option[org.llm4s.agent.graph.ThreadCursor],
+    limit: Int
+  ) = to.incompleteThreads(tenantId, after, limit)
   def history(threadId: ThreadId, before: Option[String], limit: Int) = to.history(threadId, before, limit)
   def checkpoint(threadId: ThreadId, checkpointId: String)            = to.checkpoint(threadId, checkpointId)
   def prune(threadId: ThreadId, policy: RetentionPolicy)              = to.prune(threadId, policy)

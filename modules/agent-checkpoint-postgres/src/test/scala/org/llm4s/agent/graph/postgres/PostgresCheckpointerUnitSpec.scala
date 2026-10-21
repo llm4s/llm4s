@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.postgres
 
-import org.llm4s.agent.graph.GraphError
+import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadQuery, ThreadStatus }
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -61,9 +61,11 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
       GraphError.UnsupportedStoreSchema("PostgreSQL schema \"s\"", 3, 2)
     GraphError.UnsupportedStoreSchema("PostgreSQL schema \"s\"", 3, 2).message should
       (include("version 3").and(include("2 this build supports")))
-    val missing = PostgresSchema.plan("s", 0, 3, PostgresSchema.steps).left.value
+    val missing = PostgresSchema.plan("s", 0, PostgresSchema.Current + 1, PostgresSchema.steps).left.value
     missing shouldBe a[ProcessingError]
-    missing.message should include("from checkpoint schema version 1 to 2")
+    missing.message should include(
+      s"from checkpoint schema version ${PostgresSchema.Current} to ${PostgresSchema.Current + 1}"
+    )
   }
 
   it should "name every table and sequence inside the configured schema, quoted" in {
@@ -97,6 +99,28 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     Sql.nextChildOrder(t) shouldBe "SELECT nextval('\"agents\".checkpoint_child_order')"
     Sql.lockedRow(t) should endWith("FOR UPDATE")
     (Sql.row(t) should not).include("FOR UPDATE")
+  }
+
+  "The registry's statements" should "reach only the schema's threads, keyed by tenant, with a bound page" in {
+    val t      = PostgresSchema.Tables("agents")
+    val now    = java.time.Instant.parse("2026-10-21T12:00:00Z")
+    val tenant = Some(TenantId("acme"))
+    val statements = ThreadStatus.values.toVector.map(s =>
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant, status = Some(s)).withLimit(7), now)
+    ) :+ PostgresCheckpointer.incompleteStatement(t, None, None, 7, now)
+    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b)([^\s(]+)""".r
+    statements.foreach { (sql, params) =>
+      tableRef.findAllMatchIn(sql).map(_.group(1)).toVector.distinct shouldBe Vector("\"agents\".checkpoint_threads")
+      sql should include("tenant_key = ?")
+      sql should include(Sql.Registered)
+      sql.count(_ == '?') shouldBe params.size
+      // one row more than the page, to tell whether another follows
+      params.last shouldBe 8
+    }
+    // no tenant is NULL in the indexes, and no tenant's key is another's
+    PostgresCheckpointer.tenantKey(None) shouldBe ""
+    PostgresCheckpointer.tenantKey(Some(TenantId(""))) shouldBe "="
+    PostgresCheckpointer.tenantKey(tenant) shouldBe "=acme"
   }
 
   /** Every `Sql` statement built for `t`, by reflection, so a new one is checked without listing it here. */

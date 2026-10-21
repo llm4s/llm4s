@@ -237,6 +237,105 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
+  // ---- the thread registry (design 4.52) ----
+
+  "A version-1 schema" should "fill the thread registry from each thread's latest checkpoint and its commit time" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val tenant = Some(TenantId("acme"))
+    def committed(t: ThreadId, status: CheckpointStatus, deleting: Boolean = false): Unit = {
+      val token = store.claim(t, ClaimRequest(RunId("run"), tenant, 30.seconds)).value.token
+      val written =
+        checkpoint("c1", None, t).withStatus(status).withTenantId(tenant.map(_.value)).withDeleting(deleting)
+      store.commit(t, Commit(token, Some(written))).value
+      store.release(t, token).value
+    }
+    val (done, stopped, deleting) = (ThreadId("done"), ThreadId("stopped"), ThreadId("deleting"))
+    committed(done, CheckpointStatus.Completed)
+    committed(stopped, CheckpointStatus.Running)
+    committed(deleting, CheckpointStatus.Running, deleting = true)
+    val before = store.threads(ThreadQuery(tenant)).value
+    store.close()
+    val q = s""""${config.schema}""""
+    Vector("", "_status", "_agent", "_claimed", "_metadata").foreach { suffix =>
+      PgCheckpointerDb.execute(s"DROP INDEX $q.checkpoint_threads_registry$suffix")
+    }
+    PgCheckpointerDb.execute(
+      s"""ALTER TABLE $q.checkpoint_threads DROP COLUMN tenant_key, DROP COLUMN tenant_id, DROP COLUMN graph_id,
+         |  DROP COLUMN thread_status,
+         |  DROP COLUMN updated_at, DROP COLUMN metadata""".stripMargin
+    )
+    PgCheckpointerDb.execute(s"UPDATE $q.checkpoint_schema SET version = 1")
+
+    val reopened = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    val after = reopened.threads(ThreadQuery(tenant)).value
+    after shouldBe before
+    after.threads.map(t => t.threadId -> t.status).toMap shouldBe Map(
+      done     -> ThreadStatus.Completed,
+      stopped  -> ThreadStatus.Idle,
+      deleting -> ThreadStatus.Deleted
+    )
+    reopened.incompleteThreads(tenant, None, 10).value.threads.map(_.threadId) shouldBe Vector(stopped)
+    reopened.close()
+  }
+
+  "The thread registry" should "answer every query through a registry index, in its order, never scanning the threads" in {
+    val config = fresh()
+    PgCheckpointerDb.store(config).close()
+    val t   = PostgresSchema.Tables(config.schema)
+    val now = Instant.parse("2026-10-21T12:00:00Z")
+    // many threads, so the planner's choice is the one a large store gets: most of them one tenant's, a few claimed,
+    // a few of no tenant
+    PgCheckpointerDb.execute(
+      s"""INSERT INTO ${t.threads} (thread_id, next_seq, earliest_seq, first_seq, checkpoint_id, tenant_id, graph_id,
+         |  thread_status, updated_at, metadata, claim_holder, claim_token, claim_expires_at)
+         |SELECT 'thread-' || g, 1, 1, 1, 'c', CASE WHEN g % 100 = 0 THEN NULL ELSE 'acme' END, 'graph-' || (g % 7),
+         |  (ARRAY['Running', 'Completed', 'Suspended', 'Failed', 'Deleted'])[1 + g % 5],
+         |  TIMESTAMPTZ '2026-10-21 12:00:00Z' - g * INTERVAL '1 second', jsonb_build_object('team', 'team-' || (g % 13)),
+         |  CASE WHEN g % 500 = 0 THEN 'run' END, CASE WHEN g % 500 = 0 THEN g END,
+         |  CASE WHEN g % 500 = 0 THEN TIMESTAMPTZ '2026-10-21 12:00:30Z' END
+         |FROM generate_series(1, 20000) g""".stripMargin
+    )
+    PgCheckpointerDb.execute(s"ANALYZE ${t.threads}")
+    val tenant = Some(TenantId("acme"))
+    val cursor = Some(ThreadCursor(now, ThreadId("t")))
+    def plan(statement: (String, Vector[Any])): Vector[String] =
+      PgCheckpointerDb.withConnection { c =>
+        Using.resource(c.createStatement())(_.execute("SET enable_seqscan = off"): Unit)
+        Using.resource(c.prepareStatement(s"EXPLAIN ${statement._1}")) { query =>
+          statement._2.zipWithIndex.foreach {
+            case (at: Instant, i) => query.setObject(i + 1, OffsetDateTime.ofInstant(at, java.time.ZoneOffset.UTC))
+            case (value, i)       => query.setObject(i + 1, value)
+          }
+          Using.resource(query.executeQuery())(rows =>
+            Iterator.continually(rows).takeWhile(_.next()).map(_.getString(1)).toVector
+          )
+        }
+      }
+    val ordered = Vector(
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant), now),
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(None).withAfter(cursor), now),
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant).withUpdatedSince(now), now),
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant).withAgent("assistant").withAfter(cursor), now)
+    ) ++ ThreadStatus.values.toVector.map(status =>
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant, status = Some(status)).withAfter(cursor), now)
+    ) :+ PostgresCheckpointer.incompleteStatement(t, tenant, cursor, 10, now)
+    ordered.foreach { statement =>
+      val steps = plan(statement)
+      withClue(steps.mkString("\n")) {
+        steps.exists(_.matches(".*Index (Only )?Scan.* using checkpoint_threads_registry.*")) shouldBe true
+        steps.exists(_.contains("Sort")) shouldBe false
+        steps.exists(_.contains("Seq Scan")) shouldBe false
+      }
+    }
+    // metadata is found through its GIN index
+    val byMetadata = plan(
+      PostgresCheckpointer.threadsStatement(t, ThreadQuery(tenant).withMetadata(ThreadMetadata("team" -> "red")), now)
+    )
+    withClue(byMetadata.mkString("\n"))(byMetadata.mkString should include("checkpoint_threads_registry"))
+  }
+
   override def afterAll(): Unit = {
     if (PgCheckpointerDb.enabled) schemas.asScala.foreach(PgCheckpointerDb.dropSchema)
     super.afterAll()
