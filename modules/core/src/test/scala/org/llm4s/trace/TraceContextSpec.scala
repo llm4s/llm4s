@@ -71,6 +71,21 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
     an[Exception] should be thrownBy upickle.default.read[TraceContext]("\"nope\"")
   }
 
+  "TraceSpan" should "refuse a parent from another trace, however it is built" in {
+    val context = TraceContext(trace, span)
+    val other   = TraceContext("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", span)
+    val child   = context.spanFor("child")
+    TraceSpan.of(child, Some(context), Instant.EPOCH).value.parent shouldBe Some(context)
+    TraceSpan.of(child, None, Instant.EPOCH).isRight shouldBe true
+    TraceSpan.of(child, Some(other), Instant.EPOCH).left.value.message should include("not in the span's trace")
+    an[IllegalArgumentException] should be thrownBy TraceSpan(child, Some(other), Instant.EPOCH)
+    val placed = TraceSpan(child, Some(context), Instant.EPOCH)
+    an[IllegalArgumentException] should be thrownBy placed.withParent(other)
+    an[IllegalArgumentException] should be thrownBy placed.withParent(Some(other))
+    an[IllegalArgumentException] should be thrownBy placed.withContext(other.spanFor("x"))
+    placed.withParent(None).withContext(other).parent shouldBe None
+  }
+
   "TraceEvent" should "carry no span by default, and name a placed event's ids in its JSON" in {
     val context = TraceContext(trace, span)
     val placed  = TraceSpan(context.spanFor("e"), Some(context), Instant.EPOCH)

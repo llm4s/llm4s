@@ -57,6 +57,37 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     store.getTrace(collector.traceId) should not be empty
   }
 
+  it should "start a placed trace at its earliest start, and at its root's, whatever order the events arrive in" in {
+    val trace = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val run   = trace.spanFor("run")
+    val t0    = java.time.Instant.parse("2026-10-21T10:00:00Z")
+    def event(key: String, start: java.time.Instant) =
+      TraceEvent.CustomEvent(key, ujson.Obj(), start, Some(TraceSpan(run.spanFor(key), Some(run), start)))
+    def stored = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+
+    collector.traceEvent(event("late", t0.plusSeconds(5))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(5)
+    collector.traceEvent(event("earlier", t0.plusSeconds(2))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(2)
+    collector.traceEvent(event("later", t0.plusSeconds(9))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(2)
+    // the run's own span, traced last, is the root and sets the start
+    collector.traceEvent(
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        "completed",
+        Nil,
+        org.llm4s.llmconnect.model.UsageSummary(),
+        t0.plusSeconds(10),
+        span = Some(TraceSpan(run, None, t0))
+      )
+    ) shouldBe Right(())
+    stored.startTime shouldBe t0
+    stored.rootSpanId.map(_.value) shouldBe Some(run.spanId)
+  }
+
   it should "register a placed trace again after a failed registration" in {
     import scala.util.{ Failure, Success, Try }
     val inner = InMemoryTraceStore()

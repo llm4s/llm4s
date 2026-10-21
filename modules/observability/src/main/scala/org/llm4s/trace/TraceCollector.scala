@@ -32,14 +32,15 @@ class TraceCollectorTracing[F[_]](
   override def traceEvent(event: TraceEvent): Result[Unit] =
     event.span.fold[Result[Unit]](Right(()))(registered).flatMap(_ => lift(store.saveSpan(eventToSpan(event))))
 
-  // the placed traces this collector has made sure the store holds; guarded by itself
-  private val placedTraces = scala.collection.mutable.Set.empty[String]
+  // the placed traces this collector has made sure the store holds, with the start it stored; guarded by itself
+  private val placedTraces = scala.collection.mutable.Map.empty[String, java.time.Instant]
 
   /**
    * Makes sure the store holds the trace a placed event is in (design 4.58) before its span is saved, so the trace can
-   * be read, queried and deleted like the collector's own: created at the first event seen in it, started at that
-   * event's start, unless the store has it already; a root span - one without a parent, such as a top-level run's -
-   * is recorded as its root.
+   * be read, queried and deleted like the collector's own: created at the first event seen in it unless the store has
+   * it already. Events arrive in any order - a run's own span is traced after its events - so the trace's start is the
+   * earliest start seen, and a root span (one without a parent, such as a top-level run's) is recorded as its root and
+   * sets the start to its own.
    */
   private def registered(placed: TraceSpan): Result[Unit] = {
     val id   = TraceId(placed.context.traceId)
@@ -47,14 +48,20 @@ class TraceCollectorTracing[F[_]](
     // one registration at a time, so two cannot read the trace and overwrite each other's save; remembered only once
     // the store has it, so a failed read or save is tried again with the next event
     placedTraces.synchronized {
-      if (placedTraces.contains(id.value) && root.isEmpty) Right(())
-      else
-        lift(store.getTrace(id))
-          .flatMap { existing =>
-            val trace = existing.getOrElse(Trace.start(id).copy(startTime = placed.startedAt))
-            lift(store.saveTrace(root.fold(trace)(r => trace.copy(rootSpanId = Some(r)))))
-          }
-          .map(_ => placedTraces.add(id.value): Unit)
+      placedTraces.get(id.value) match {
+        case Some(start) if root.isEmpty && !placed.startedAt.isBefore(start) => Right(())
+        case _ =>
+          lift(store.getTrace(id))
+            .flatMap { existing =>
+              val found = existing.getOrElse(Trace.start(id).copy(startTime = placed.startedAt))
+              val trace = root match {
+                case Some(r) => found.copy(rootSpanId = Some(r), startTime = placed.startedAt)
+                case None    => found.copy(startTime = Seq(found.startTime, placed.startedAt).min)
+              }
+              lift(store.saveTrace(trace)).map(_ => trace.startTime)
+            }
+            .map(start => placedTraces.update(id.value, start))
+      }
     }
   }
 

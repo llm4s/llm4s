@@ -115,17 +115,35 @@ object TraceContext:
  * Where a traced event sits in a trace (design 4.58): the span it is ([[context]]), that span's parent, if any - which
  * may be a span of another process, a remote parent - and when the span started. The event's own `timestamp` is
  * when it ended. A backend that builds spans uses all three; one that does not ignores them.
+ *
+ * A span is in its parent's trace: a parent of another trace is refused, by [[TraceSpan.of]] as a `ValidationError`
+ * and by `apply` and the `with*` setters as an `IllegalArgumentException`, so no backend ever sees a span whose trace
+ * id and parent's disagree.
  */
 @Stable
 final case class TraceSpan private (context: TraceContext, parent: Option[TraceContext], startedAt: java.time.Instant):
-  def withContext(c: TraceContext): TraceSpan         = new TraceSpan(c, parent, startedAt)
-  def withParent(p: TraceContext): TraceSpan          = new TraceSpan(context, Some(p), startedAt)
-  def withParent(p: Option[TraceContext]): TraceSpan  = new TraceSpan(context, p, startedAt)
+  def withContext(c: TraceContext): TraceSpan         = TraceSpan(c, parent, startedAt)
+  def withParent(p: TraceContext): TraceSpan          = TraceSpan(context, Some(p), startedAt)
+  def withParent(p: Option[TraceContext]): TraceSpan  = TraceSpan(context, p, startedAt)
   def withStartedAt(at: java.time.Instant): TraceSpan = new TraceSpan(context, parent, at)
 
 object TraceSpan:
+
+  /** Throws `IllegalArgumentException` for a parent of another trace; use [[of]] for untrusted input. */
   def apply(context: TraceContext, parent: Option[TraceContext], startedAt: java.time.Instant): TraceSpan =
-    new TraceSpan(context, parent, startedAt)
+    of(context, parent, startedAt).fold(e => throw new IllegalArgumentException(e.message), identity)
+
+  /** A span in `context`'s trace under `parent`, or a `ValidationError` when `parent` is of another trace. */
+  def of(context: TraceContext, parent: Option[TraceContext], startedAt: java.time.Instant): Result[TraceSpan] =
+    parent.filter(_.traceId != context.traceId) match
+      case Some(other) =>
+        Left(
+          ValidationError(
+            "parent",
+            s"the parent ${other.traceParent} is not in the span's trace ${context.traceId}"
+          )
+        )
+      case None => Right(new TraceSpan(context, parent, startedAt))
 
   /** The span's ids as flat JSON fields - `trace_id`, `span_id` and, with a parent, `parent_span_id` - for `toJson`. */
   private[trace] def annotate(json: ujson.Obj, span: Option[TraceSpan]): ujson.Obj =
