@@ -547,45 +547,53 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
-      // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
-      // records handed back can alias what is durable
-      val committedAt = clock.instant()
-      val stored = commit.events.zipWithIndex.map { (draft, i) =>
-        val seq = current.nextSeq + i
-        (seq, upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft)), committedAt)
-      }
-      val records = stored.map((_, json, _) => upickle.default.read[EventRecord](json))
-      val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
-      // a blocked turn is retracted back to the newest settled checkpoint, which stays
-      val kept =
-        if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
-        else current.history
-      val position = current.history.lastOption.fold(0L)(_.position + 1)
-      val added = commit.checkpoint.map { c =>
-        val json = Checkpoint.toJson(c)
-        Stored(c.id, c.status, committedAt, json, c.tenantId, c.snapshot.graphId, c.deleting, c.runId, position)
-      }
-      // released before this commit's own records are applied
-      val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
-        commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
-      store(
-        threadId,
-        current.copy(
-          effects = effects,
-          history = kept ++ added,
-          runs = if commit.retractTurn then indexed(kept ++ added) else current.runs ++ added.map(s => s.runId -> s),
-          pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
-          events = current.events ++ stored,
-          nextSeq = current.nextSeq + stored.size,
-          child = commit.checkpoint.fold(current.child)(placed(threadId, current, _)),
-          metadata = commit.metadata.getOrElse(current.metadata),
-          updatedAt =
-            if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
+    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55)
+    val orphaned =
+      commit.checkpoint.filter(c => latestId.isEmpty && runQueue.orphaned(threadId, RunId(c.runId))).map { checkpoint =>
+        invalid(
+          s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )
-      )
-      if stored.nonEmpty then appended.signalAll()
-      records
+      }
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).orElse(orphaned).toLeft(()).map {
+      _ =>
+        // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
+        // records handed back can alias what is durable
+        val committedAt = clock.instant()
+        val stored = commit.events.zipWithIndex.map { (draft, i) =>
+          val seq = current.nextSeq + i
+          (seq, upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft)), committedAt)
+        }
+        val records = stored.map((_, json, _) => upickle.default.read[EventRecord](json))
+        val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
+        // a blocked turn is retracted back to the newest settled checkpoint, which stays
+        val kept =
+          if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
+          else current.history
+        val position = current.history.lastOption.fold(0L)(_.position + 1)
+        val added = commit.checkpoint.map { c =>
+          val json = Checkpoint.toJson(c)
+          Stored(c.id, c.status, committedAt, json, c.tenantId, c.snapshot.graphId, c.deleting, c.runId, position)
+        }
+        // released before this commit's own records are applied
+        val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
+          commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
+        store(
+          threadId,
+          current.copy(
+            effects = effects,
+            history = kept ++ added,
+            runs = if commit.retractTurn then indexed(kept ++ added) else current.runs ++ added.map(s => s.runId -> s),
+            pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
+            events = current.events ++ stored,
+            nextSeq = current.nextSeq + stored.size,
+            child = commit.checkpoint.fold(current.child)(placed(threadId, current, _)),
+            metadata = commit.metadata.getOrElse(current.metadata),
+            updatedAt =
+              if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
+          )
+        )
+        if stored.nonEmpty then appended.signalAll()
+        records
     }
   }
 

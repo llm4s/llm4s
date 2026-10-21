@@ -131,9 +131,11 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           s"""SELECT e.entry_id, e.thread_id FROM $entries e
              |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
              |  AND e.entry_id = ($HeadOf)
+             |  AND NOT EXISTS ($LiveSibling)
              |ORDER BY e.entry_id
              |FOR UPDATE OF e SKIP LOCKED LIMIT $Candidates""".stripMargin,
           agents,
+          now,
           now
         )(rows => rows.getLong(1) -> rows.getString(2))
         // the thread's lock, tried: a submission or another take on the thread is deciding its order now
@@ -143,10 +145,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             s"""SELECT 1 FROM $entries e
                |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
                |  AND e.entry_id = ($HeadOf)
-               |  AND NOT EXISTS (
-               |    SELECT 1 FROM $entries o
-               |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
-               |      AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?)""".stripMargin,
+               |  AND NOT EXISTS ($LiveSibling)""".stripMargin,
             id,
             now,
             now
@@ -377,6 +376,11 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       at(17),
       long(18)
     )
+
+  /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
+  private val LiveSibling: String =
+    s"""SELECT 1 FROM $entries o WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
+       |  AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?""".stripMargin
 
   /** The head of `e`'s thread, as a correlated subquery. */
   private val HeadOf: String =

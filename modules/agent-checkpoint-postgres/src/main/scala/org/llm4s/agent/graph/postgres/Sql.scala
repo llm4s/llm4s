@@ -127,6 +127,11 @@ private[postgres] object Sql:
   def queueThreadDeleted(t: Tables): String =
     s"UPDATE ${t.queueEntries} SET thread_deleted = true WHERE thread_id = ? AND state = 'open'"
 
+  /** An open queue entry's attempt, as run `?` on thread `?`, whose thread a delete marked. */
+  def orphanedAttempt(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueAttempts} a JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id
+       |WHERE a.thread_id = ? AND a.run_id = ? AND e.state = 'open' AND e.thread_deleted LIMIT 1""".stripMargin
+
   /** Whether a run id already names a checkpoint or a queue attempt on the thread (bound twice). */
   def runIdUsed(t: Tables): String =
     s"""SELECT EXISTS (SELECT 1 FROM ${t.queueAttempts} WHERE thread_id = ? AND run_id = ?)

@@ -503,6 +503,39 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
   }
 
+  it should "refuse the first commit of an attempt recorded before its thread was deleted, founding no new thread" in {
+    val c = Case()
+    c.commitAs("direct", "c1")
+    c.submit().value
+    val leased = c.take().value
+    val run    = s"run-${unique()}"
+    c.queue.recordAttempt(leased.lease, RunId(run)).value shouldBe a[AttemptStart.Recorded]
+    // the delete lands between the attempt's record and its admission
+    c.delete()
+    def admit(as: String, id: String): Result[Vector[EventRecord]] =
+      val claim = c.checkpointer.claim(c.thread, ClaimRequest(RunId(as), None, ttl)).value
+      val checkpoint = Checkpoint(
+        Checkpoint.CurrentFormat,
+        id,
+        None,
+        c.thread.value,
+        as,
+        CheckpointStatus.Running,
+        start,
+        GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false),
+        None,
+        Some(claim.token)
+      )
+      val result = c.checkpointer.commit(c.thread, Commit(claim.token, Some(checkpoint)))
+      c.checkpointer.release(c.thread, claim.token).value
+      result
+    admit(run, "admitted").refused shouldBe a[GraphError.InvalidCommit]
+    c.checkpointer.latest(c.thread).value shouldBe None
+    // a direct run founds the new thread as ever, and the entry still closes at its next attempt
+    admit("direct-again", "fresh").value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
+  }
+
   it should "refuse an attempt's run id that already names a run or another entry's attempt on the thread" in {
     val c = Case()
     c.commitAs("direct", "c1")

@@ -281,6 +281,14 @@ final class InMemoryRunQueue private[agent] (
     Right(expired.size)
   }
 
+  /**
+   * Whether `runId` is an attempt of an open entry of `threadId` that its thread's delete marked: such an attempt must
+   * not found a new thread of the id. Call under the lock.
+   */
+  private[agent] def orphaned(threadId: ThreadId, runId: RunId): Boolean =
+    attemptRuns.get(threadId).exists(_.contains(runId)) &&
+      queueOf(threadId).exists(r => r.threadDeleted && r.attempts.exists(_.runId == runId))
+
   /** Marks the thread's open entries as having outlived their thread: the checkpointer's `deleteThread`, under the lock. */
   private[agent] def threadDeleted(threadId: ThreadId): Unit =
     queueOf(threadId).foreach(r => rows.update(r.id, r.copy(threadDeleted = true)))

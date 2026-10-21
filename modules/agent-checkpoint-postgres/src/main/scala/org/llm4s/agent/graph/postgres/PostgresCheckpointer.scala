@@ -154,59 +154,69 @@ final class PostgresCheckpointer private (
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
-      // a thread with a claim always has a row
-      val row = current.getOrElse(throw new IllegalStateException("a claimed thread has no row"))
-      // what retention judges age by: the database's clock, never the producer's timestamps (rule 1)
-      val committedAt =
-        if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
-        else Instant.EPOCH
-      commit.checkpoint.foreach(writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, _))
-      appendWrites(c, threadId, commit.pendingWrites)
-      // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
-      commit.metadata.foreach { metadata =>
-        update(
-          c,
-          Sql.setMetadata(t),
-          Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
-          committedAt,
-          threadId.value
+    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55); the thread's row is
+    // locked, and a delete locks it too, so the delete's marks are seen
+    def orphaned = commit.checkpoint
+      .filter(c0 => latestId.isEmpty && query(c, Sql.orphanedAttempt(t), threadId.value, c0.runId)(_ => ()).nonEmpty)
+      .map(checkpoint =>
+        invalid(
+          s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )
-      }
-      // released before this commit's own records are applied
-      if commit.checkpoint.isDefined then
-        query(c, Sql.effectTasks(t), threadId.value)(rows =>
-          (rows.getString(1), TaskId(rows.getString(2)), rows.getString(3))
-        ).filter((_, task, lineage) => commit.releasesEffect(task, lineage)).foreach { (key, _, _) =>
-          update(c, Sql.deleteEffect(t), threadId.value, key)
+      )
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).orElse(orphaned).toLeft(()).map {
+      _ =>
+        // a thread with a claim always has a row
+        val row = current.getOrElse(throw new IllegalStateException("a claimed thread has no row"))
+        // what retention judges age by: the database's clock, never the producer's timestamps (rule 1)
+        val committedAt =
+          if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
+          else Instant.EPOCH
+        commit.checkpoint.foreach(writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, _))
+        appendWrites(c, threadId, commit.pendingWrites)
+        // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
+        commit.metadata.foreach { metadata =>
+          update(
+            c,
+            Sql.setMetadata(t),
+            Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
+            committedAt,
+            threadId.value
+          )
         }
-      commit.effects.foreach { record =>
-        update(
-          c,
-          Sql.upsertEffect(t),
-          threadId.value,
-          record.key.value,
-          record.taskId.value,
-          record.lineage,
-          commit.token.value,
-          ujson.write(EffectRecord.toJson(record))
-        )
-      }
-      val stored = commit.events.zipWithIndex.map { (draft, i) =>
-        val seq = row.nextSeq + i
-        (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
-      }
-      if stored.nonEmpty then
-        Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
-          stored.foreach { (seq, draft, json) =>
-            bind(insert, threadId.value, seq, draft.checkpointId, committedAt, json)
-            insert.addBatch()
+        // released before this commit's own records are applied
+        if commit.checkpoint.isDefined then
+          query(c, Sql.effectTasks(t), threadId.value)(rows =>
+            (rows.getString(1), TaskId(rows.getString(2)), rows.getString(3))
+          ).filter((_, task, lineage) => commit.releasesEffect(task, lineage)).foreach { (key, _, _) =>
+            update(c, Sql.deleteEffect(t), threadId.value, key)
           }
-          insert.executeBatch(): Unit
+        commit.effects.foreach { record =>
+          update(
+            c,
+            Sql.upsertEffect(t),
+            threadId.value,
+            record.key.value,
+            record.taskId.value,
+            record.lineage,
+            commit.token.value,
+            ujson.write(EffectRecord.toJson(record))
+          )
         }
-        update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
-      // handed back decoded from what was stored, as a later read would see them
-      stored.map((_, _, json) => upickle.default.read[EventRecord](json))
+        val stored = commit.events.zipWithIndex.map { (draft, i) =>
+          val seq = row.nextSeq + i
+          (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
+        }
+        if stored.nonEmpty then
+          Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
+            stored.foreach { (seq, draft, json) =>
+              bind(insert, threadId.value, seq, draft.checkpointId, committedAt, json)
+              insert.addBatch()
+            }
+            insert.executeBatch(): Unit
+          }
+          update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
+        // handed back decoded from what was stored, as a later read would see them
+        stored.map((_, _, json) => upickle.default.read[EventRecord](json))
     }
   }
 

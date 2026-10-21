@@ -157,128 +157,136 @@ final class SqliteCheckpointer private (
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
-      // a thread with a claim always has a row
-      val nextSeq = current.fold(1L)(_.nextSeq)
-      // what `prune` judges age by: the store's clock, never the producer's timestamps (schema 7)
-      val committedAt = clock.instant()
-      commit.checkpoint.foreach { checkpoint =>
-        val json = ujson.write(Checkpoint.toJson(checkpoint))
-        // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
-        // a retraction below empties the history but leaves the thread the same one
-        val fresh =
-          query(c, "SELECT checkpoint_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
-            Option(rows.getString(1))
-          ).headOption.flatten.isEmpty
-        // positions only grow, also across a retraction, so the history's order is its primary key's
-        val position = query(
-          c,
-          "SELECT COALESCE(MAX(position) + 1, 0) FROM llm4s_checkpoint_history WHERE thread_id = ?",
-          threadId.value
-        )(_.getLong(1)).head
-        // a blocked turn is retracted back to the newest settled checkpoint, which stays
-        if commit.retractTurn then
+    // a queued attempt recorded before a delete never founds a new thread of the id (design 4.55)
+    def orphaned =
+      commit.checkpoint.filter(c0 => latestId.isEmpty && orphanedAttempt(c, threadId, c0.runId)).map { checkpoint =>
+        invalid(
+          s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
+        )
+      }
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).orElse(orphaned).toLeft(()).map {
+      _ =>
+        // a thread with a claim always has a row
+        val nextSeq = current.fold(1L)(_.nextSeq)
+        // what `prune` judges age by: the store's clock, never the producer's timestamps (schema 7)
+        val committedAt = clock.instant()
+        commit.checkpoint.foreach { checkpoint =>
+          val json = ujson.write(Checkpoint.toJson(checkpoint))
+          // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
+          // a retraction below empties the history but leaves the thread the same one
+          val fresh =
+            query(c, "SELECT checkpoint_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
+              Option(rows.getString(1))
+            ).headOption.flatten.isEmpty
+          // positions only grow, also across a retraction, so the history's order is its primary key's
+          val position = query(
+            c,
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM llm4s_checkpoint_history WHERE thread_id = ?",
+            threadId.value
+          )(_.getLong(1)).head
+          // a blocked turn is retracted back to the newest settled checkpoint, which stays
+          if commit.retractTurn then
+            update(
+              c,
+              """DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position > COALESCE(
+              |  (SELECT MAX(position) FROM llm4s_checkpoint_history WHERE thread_id = ? AND status IN (?, ?)), -1)""".stripMargin,
+              threadId.value,
+              threadId.value,
+              CheckpointStatus.Completed.toString,
+              CheckpointStatus.Failed.toString
+            )
           update(
             c,
-            """DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position > COALESCE(
-              |  (SELECT MAX(position) FROM llm4s_checkpoint_history WHERE thread_id = ? AND status IN (?, ?)), -1)""".stripMargin,
-            threadId.value,
-            threadId.value,
-            CheckpointStatus.Completed.toString,
-            CheckpointStatus.Failed.toString
-          )
-        update(
-          c,
-          """INSERT INTO llm4s_checkpoint_history
+            """INSERT INTO llm4s_checkpoint_history
             |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json,
             | committed_second, committed_nano, run_id)
             |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin,
-          threadId.value,
-          position,
-          checkpoint.id,
-          checkpoint.status.toString,
-          checkpoint.createdAt.getEpochSecond,
-          checkpoint.createdAt.getNano.toLong,
-          json,
-          committedAt.getEpochSecond,
-          committedAt.getNano.toLong,
-          checkpoint.runId
-        )
-        // the registry's columns (schema 8) follow the latest checkpoint
-        update(
-          c,
-          """UPDATE llm4s_checkpoint_threads
+            threadId.value,
+            position,
+            checkpoint.id,
+            checkpoint.status.toString,
+            checkpoint.createdAt.getEpochSecond,
+            checkpoint.createdAt.getNano.toLong,
+            json,
+            committedAt.getEpochSecond,
+            committedAt.getNano.toLong,
+            checkpoint.runId
+          )
+          // the registry's columns (schema 8) follow the latest checkpoint
+          update(
+            c,
+            """UPDATE llm4s_checkpoint_threads
             |SET checkpoint_id = ?, checkpoint_json = ?, tenant_id = ?, graph_id = ?, thread_status = ?, updated_nanos = ?
             |WHERE thread_id = ?""".stripMargin,
-          checkpoint.id,
-          json,
-          checkpoint.tenantId,
-          checkpoint.snapshot.graphId,
-          registryStatus(checkpoint),
-          epochNanos(committedAt),
-          threadId.value
-        )
-        update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-        placeChild(c, threadId, checkpoint, fresh)
-      }
-      appendWrites(c, threadId, commit.pendingWrites)
-      commit.metadata.foreach(writeMetadata(c, threadId, _, committedAt))
-      // released before this commit's own records are applied
-      if commit.checkpoint.isDefined then
-        query(
-          c,
-          "SELECT effect_key, task_id, task_lineage FROM llm4s_checkpoint_effects WHERE thread_id = ?",
-          threadId.value
-        )(row => (row.getString(1), TaskId(row.getString(2)), row.getString(3)))
-          .filter((_, task, lineage) => commit.releasesEffect(task, lineage))
-          .foreach { (key, _, _) =>
-            update(
-              c,
-              "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
-              threadId.value,
-              key
-            )
-          }
-      commit.effects.foreach { record =>
-        update(
-          c,
-          """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, task_lineage, writer_token, record_json)
+            checkpoint.id,
+            json,
+            checkpoint.tenantId,
+            checkpoint.snapshot.graphId,
+            registryStatus(checkpoint),
+            epochNanos(committedAt),
+            threadId.value
+          )
+          update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+          placeChild(c, threadId, checkpoint, fresh)
+        }
+        appendWrites(c, threadId, commit.pendingWrites)
+        commit.metadata.foreach(writeMetadata(c, threadId, _, committedAt))
+        // released before this commit's own records are applied
+        if commit.checkpoint.isDefined then
+          query(
+            c,
+            "SELECT effect_key, task_id, task_lineage FROM llm4s_checkpoint_effects WHERE thread_id = ?",
+            threadId.value
+          )(row => (row.getString(1), TaskId(row.getString(2)), row.getString(3)))
+            .filter((_, task, lineage) => commit.releasesEffect(task, lineage))
+            .foreach { (key, _, _) =>
+              update(
+                c,
+                "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ? AND effect_key = ?",
+                threadId.value,
+                key
+              )
+            }
+        commit.effects.foreach { record =>
+          update(
+            c,
+            """INSERT INTO llm4s_checkpoint_effects (thread_id, effect_key, task_id, task_lineage, writer_token, record_json)
             |VALUES (?, ?, ?, ?, ?, ?)
             |ON CONFLICT (thread_id, effect_key) DO UPDATE SET
             |  task_id = excluded.task_id, task_lineage = excluded.task_lineage, writer_token = excluded.writer_token,
             |  record_json = excluded.record_json""".stripMargin,
-          threadId.value,
-          record.key.value,
-          record.taskId.value,
-          record.lineage,
-          commit.token.value,
-          ujson.write(EffectRecord.toJson(record))
-        )
-      }
-      val stored = commit.events.zipWithIndex.map { (draft, i) =>
-        val seq = nextSeq + i
-        seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft))
-      }
-      Using.resource(
-        c.prepareStatement(
-          """INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json, committed_second, committed_nano)
-            |VALUES (?, ?, ?, ?, ?)""".stripMargin
-        )
-      ) { insert =>
-        stored.foreach { (seq, json) =>
-          bind(insert, threadId.value, seq, json, committedAt.getEpochSecond, committedAt.getNano.toLong)
-          insert.executeUpdate(): Unit
+            threadId.value,
+            record.key.value,
+            record.taskId.value,
+            record.lineage,
+            commit.token.value,
+            ujson.write(EffectRecord.toJson(record))
+          )
         }
-      }
-      if stored.nonEmpty then
-        update(
-          c,
-          "UPDATE llm4s_checkpoint_threads SET next_seq = ? WHERE thread_id = ?",
-          nextSeq + stored.size,
-          threadId.value
-        )
-      // handed back decoded from what was stored, as a later read would see them
-      stored.map((_, json) => upickle.default.read[EventRecord](json))
+        val stored = commit.events.zipWithIndex.map { (draft, i) =>
+          val seq = nextSeq + i
+          seq -> upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft))
+        }
+        Using.resource(
+          c.prepareStatement(
+            """INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json, committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?)""".stripMargin
+          )
+        ) { insert =>
+          stored.foreach { (seq, json) =>
+            bind(insert, threadId.value, seq, json, committedAt.getEpochSecond, committedAt.getNano.toLong)
+            insert.executeUpdate(): Unit
+          }
+        }
+        if stored.nonEmpty then
+          update(
+            c,
+            "UPDATE llm4s_checkpoint_threads SET next_seq = ? WHERE thread_id = ?",
+            nextSeq + stored.size,
+            threadId.value
+          )
+        // handed back decoded from what was stored, as a later read would see them
+        stored.map((_, json) => upickle.default.read[EventRecord](json))
     }
   }
 
@@ -1101,6 +1109,16 @@ object SqliteCheckpointer:
     "SELECT position FROM llm4s_checkpoint_history WHERE thread_id = ? AND checkpoint_id = ?"
 
   /** Whether checkpoint `id` is in the thread's history; by the `(thread, checkpoint id)` index. */
+  private def orphanedAttempt(c: Connection, threadId: ThreadId, runId: String): Boolean =
+    query(
+      c,
+      """SELECT 1 FROM llm4s_checkpoint_queue_attempts a
+        |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = a.entry_id
+        |WHERE a.thread_id = ? AND a.run_id = ? AND e.state = 'open' AND e.thread_deleted = 1 LIMIT 1""".stripMargin,
+      threadId.value,
+      runId
+    )(_ => ()).nonEmpty
+
   private def inHistory(c: Connection, threadId: ThreadId, id: String): Boolean =
     positionOf(c, threadId, id).isDefined
 
