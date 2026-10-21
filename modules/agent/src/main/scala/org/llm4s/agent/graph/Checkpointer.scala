@@ -252,14 +252,14 @@ trait Checkpointer:
 
   /**
    * The thread registry (design 4.52): a page of the root threads of `query.tenantId` that pass every filter of `query`
-   * ([[ThreadQuery.matches]]), newest first by [[ThreadSummary.updatedAt]] - when the store last committed a checkpoint
+   * ([[org.llm4s.agent.graph.ThreadQuery!.matches ThreadQuery.matches]]), newest first by [[org.llm4s.agent.graph.ThreadSummary!.updatedAt ThreadSummary.updatedAt]] - when the store last committed a checkpoint
    * or metadata to the thread, by its clock - ties broken by thread id, descending; starting after `query.after`, at
-   * most `query.limit` of them, with the cursor of the next page when more match ([[ThreadPage.of]]). Each thread's
-   * [[ThreadStatus]] is judged from its latest checkpoint and whether a live claim holds it, by the store's clock, when
+   * most `query.limit` of them, with the cursor of the next page when more match ([[org.llm4s.agent.graph.ThreadPage.of ThreadPage.of]]). Each thread's
+   * [[org.llm4s.agent.graph.ThreadStatus ThreadStatus]] is judged from its latest checkpoint and whether a live claim holds it, by the store's clock, when
    * it is read.
    *
    * Listed are only threads with a checkpoint whose latest checkpoint's tenant is `query.tenantId` (`None` and `Some`
-   * differ) and whose latest checkpoint names no parent ([[Checkpoint.origin]]): a child thread is read through
+   * differ) and whose latest checkpoint names no parent ([[org.llm4s.agent.graph.Checkpoint!.origin Checkpoint.origin]]): a child thread is read through
    * [[children]], and a thread [[deleteThread]] removed is never listed. Paging is by position: a thread changed while
    * a caller pages moves to the front, so a later page of that pass does not list it again, and a pass from the start,
    * or with `updatedSince`, finds it. Needs no claim, and reads no other tenant's thread: the tenant is the query's.
@@ -269,10 +269,10 @@ trait Checkpointer:
 
   /**
    * The incomplete root threads of `tenantId` (design 4.52): those whose latest checkpoint is incomplete
-   * (`CheckpointStatus.Running`) and that no live claim holds, by the store's clock - [[ThreadStatus.Idle]] - oldest
-   * first by [[ThreadSummary.updatedAt]] (ties by thread id, ascending), starting after `after`, at most `limit` (1 to
-   * [[ThreadQuery.MaxLimit]], `ValidationError` otherwise), with the next page's cursor when more match. A thread whose
-   * claim expired without a release is listed; one whose cascade delete has begun is not ([[ThreadStatus.Deleted]]).
+   * (`CheckpointStatus.Running`) and that no live claim holds, by the store's clock - [[org.llm4s.agent.graph.ThreadStatus.Idle ThreadStatus.Idle]] - oldest
+   * first by [[org.llm4s.agent.graph.ThreadSummary!.updatedAt ThreadSummary.updatedAt]] (ties by thread id, ascending), starting after `after`, at most `limit` (1 to
+   * [[org.llm4s.agent.graph.ThreadQuery.MaxLimit ThreadQuery.MaxLimit]], `ValidationError` otherwise), with the next page's cursor when more match. A thread whose
+   * claim expired without a release is listed; one whose cascade delete has begun is not ([[org.llm4s.agent.graph.ThreadStatus.Deleted ThreadStatus.Deleted]]).
    *
    * It is for operators, not a worker's recovery query: a cancelled run, a drained one and a crashed one all look alike
    * here, and only a run queue's entry says which should run again (Stage 5, rule 4). Tenant-scoped and bounded as
