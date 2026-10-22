@@ -344,11 +344,13 @@ class AgentWorkerSpec
     entry.attempts shouldBe empty
   }
 
-  it should "close an entry for another tenant's thread at once, judging nothing of that thread" in {
+  it should "close an entry for another tenant's thread at once, busy or not, judging nothing of that thread" in {
     val store = InMemoryCheckpointer()
     val other = thread()
     // tenant b's thread, of a graph this worker's agent cannot take on
     agentOver(store, answering("x"), "writer").run(other, "hi", RunConfig().withTenantId(TenantId("b"))).value
+    // and busy: the entry must not defer to b's run, which a would then learn of
+    store.claim(other, ClaimRequest(RunId("b-run"), Some(TenantId("b")), 30.seconds)).value
     val id = store.runQueue
       .submit(
         Submission(other, agentId, QueuedInput.query("q"), Some(TenantId("a")), BusyThreadPolicy.Enqueue)

@@ -101,6 +101,9 @@ final class AgentWorker private (
   private val skipped  = new ConcurrentHashMap[EntryId, java.lang.Long]()
   private val threads  = new AtomicReference[Vector[Thread]](Vector.empty)
 
+  /** Held by a launch and by the drain's start: a slot is launched before the drain reads the slots, or not at all. */
+  private val launching = new java.util.concurrent.locks.ReentrantLock()
+
   @volatile private var loopBeat: Long              = System.nanoTime()
   @volatile private var takeProblem: Option[String] = None
 
@@ -135,7 +138,7 @@ final class AgentWorker private (
     else if !state.compareAndSet(WorkerState.Running, WorkerState.Draining) then
       DrainReport(Vector.empty, Vector.empty, Vector.empty)
     else
-      stopping.countDown()
+      withLock(launching)(stopping.countDown())
       // the slots running as the drain began, read before a run that ends meanwhile removes its own
       val running = slots.values.asScala.toVector
       // the loop's take in flight lands before the slots are read again; the sweep's page is bounded by the store
@@ -195,7 +198,16 @@ final class AgentWorker private (
           queue.take(TakeRequest(holder, agents.keySet, lease.ttl, passedOver())) match
             case Right(Some(leased)) =>
               takeProblem = None
-              launch(leased)
+              // a take that outlived the drain's join gives its entry back rather than run it untracked; the check
+              // and the launch are atomic with the drain's start, so a launched slot is always in the drain's read
+              val launched = withLock(launching)(!stopRequested && launch(leased))
+              if !launched then
+                queue.release(leased.lease).left.foreach { e =>
+                  logger.debug(
+                    s"Worker $holder: releasing entry ${leased.entry.id.value} taken during drain: ${e.message}"
+                  )
+                }
+                permits.release()
             case Right(None) =>
               takeProblem = None
               permits.release()
@@ -218,7 +230,8 @@ final class AgentWorker private (
   private def passOver(id: EntryId, d: FiniteDuration): Unit =
     skipped.put(id, java.lang.Long.valueOf(System.nanoTime() + d.toNanos))
 
-  private def launch(leased: LeasedEntry): Unit =
+  /** Starts `leased`'s slot: its lease's renewal and its run. Always `true`, for the launch's check. */
+  private def launch(leased: LeasedEntry): Boolean =
     val slot = new Slot(leased, System.nanoTime())
     slots.put(slot.entryId, slot)
     Thread.ofVirtual().name(s"llm4s-worker-lease-${leased.entry.id.value}").start(() => renewLoop(slot))
@@ -232,6 +245,7 @@ final class AgentWorker private (
       slot.ended.countDown()
       permits.release()
     }
+    true
 
   // ---- the lease ----
 
@@ -295,7 +309,10 @@ final class AgentWorker private (
     if slot.leaseLost.get then Next.Leave
     else if slot.drained.get then Next.Release
     else
-      liveClaim(entry) match
+      // the tenant first (rule 9): probing another tenant's busy thread would defer to its run, which the entry's
+      // tenant could then time
+      read(entry).flatMap(_ => liveClaim(entry)) match
+        case Left(mismatch: GraphError.TenantMismatch) => unread(entry, mismatch)
         case Left(error) =>
           logger.warn(s"Worker $holder: reading the claim of entry ${entry.id.value}'s thread failed: ${error.message}")
           Next.Expire
