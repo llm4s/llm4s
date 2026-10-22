@@ -185,6 +185,10 @@ flags:
     paths:
       - modules/deploy-service/src/main/scala
     carryforward: true
+  examples-http:
+    paths:
+      - modules/examples-http/src/main/scala
+    carryforward: true
   spring-boot-starter:
     paths:
       - modules/spring-boot-starter/src/main/scala

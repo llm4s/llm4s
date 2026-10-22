@@ -110,6 +110,12 @@ client.complete(conversation).handleErrorWith {
 }
 ```
 
+## Serving an agent over HTTP
+
+[Serving an Agent over HTTP](http-reference-apps) is a tested http4s (Ember) app over `AgentIO[IO]`: `POST /chat`
+answers as JSON and `POST /chat/stream` streams the answer as server-sent events, with errors mapped to HTTP statuses
+and the run cancelled when the client disconnects. Run it with `sbt "examplesHttp/run --fake"`.
+
 ## Environment variables
 
 The variables llm4s reads, such as `OPENAI_API_KEY`, are listed in

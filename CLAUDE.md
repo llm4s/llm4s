@@ -118,6 +118,7 @@ llm4s/
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
+│   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s (unpublished)
 │   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI

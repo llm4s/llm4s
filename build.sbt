@@ -72,6 +72,9 @@ inThisBuild(
       // The deploy service's entry point starts a server and exits; the routes, the check and the
       // configuration behind it are measured, and the image smoke test in deploy-staged.yml runs it.
       "org\\.llm4s\\.deploy\\.DeployServiceMain",
+      // The reference apps' entry points read the command line, load the provider and serve until stopped; the
+      // routes and servers behind them are measured on ephemeral ports.
+      "org\\.llm4s\\.examples\\.http\\..*Main",
       "org\\.llm4s\\.samples\\..*",
       "org\\.llm4s\\.workspace\\..*"
     ).mkString(";"),
@@ -337,6 +340,7 @@ lazy val llm4s = (project in file("."))
     gradleDemo,
     benchmarks,
     deployService,
+    examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
@@ -1364,6 +1368,46 @@ lazy val deployService = (project in file("modules/deploy-service"))
     coverageFloor(90)
   )
   .settings(DeployServiceDocker.settings)
+
+// Reference apps that serve an llm4s agent over HTTP, `POST /chat` and `POST /chat/stream` (#1459): http4s over
+// `llm4s-effect` so far; ZIO HTTP and Tapir follow. Its own module, not part of `samples`, so the HTTP stacks stay
+// off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
+// service would, and it is in neither the published artifacts nor the `docs` Scaladoc aggregate.
+lazy val examplesHttp = (project in file("modules/examples-http"))
+  .dependsOn(
+    core,
+    agent,
+    llm4sEffect,
+    // `--fake` serves a scripted client, so the app runs with no model and no key.
+    testkit,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible
+  )
+  .settings(
+    name := "llm4s-examples-http",
+    commonSettings,
+    Compile / mainClass := Some("org.llm4s.examples.http.http4s.Http4sChatServerMain"),
+    // Forked, so `sbt examplesHttp/run` serves until stopped instead of sharing sbt's JVM.
+    run / fork         := true,
+    run / connectInput := true,
+    libraryDependencies ++= Seq(
+      Deps.catsEffect,
+      Deps.fs2,
+      Deps.http4sEmberServer,
+      Deps.http4sDsl,
+      Deps.http4sEmberClient % Test,
+      Deps.scalatest         % Test
+    ),
+    appLogging,
+    publish / skip := true,
+    // Measured 98.79% statement coverage (`sbt coverage examplesHttp/test examplesHttp/coverageReport`), by the
+    // routes in memory and the server on an ephemeral port. The entry point is excluded via
+    // ThisBuild / coverageExcludedPackages. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95)
+  )
 
 lazy val docSnippetsReport = taskKey[Unit](
   "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"

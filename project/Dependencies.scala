@@ -45,6 +45,10 @@ object Versions {
   val catsEffect = "3.5.7"
   val fs2        = "3.11.0"
 
+  // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
+  // cats-effect and fs2 versions above.
+  val http4s = "0.23.30"
+
   // ZIO
   val zio = "2.1.16"
 
@@ -130,6 +134,11 @@ object Deps {
   // cats-effect + fs2
   val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
   val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
+
+  // http4s (unpublished modules/examples-http only; see Versions)
+  val http4sEmberServer = "org.http4s" %% "http4s-ember-server" % Versions.http4s
+  val http4sEmberClient = "org.http4s" %% "http4s-ember-client" % Versions.http4s
+  val http4sDsl         = "org.http4s" %% "http4s-dsl"          % Versions.http4s
 
   // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
   // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.

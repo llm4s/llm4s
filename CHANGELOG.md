@@ -189,6 +189,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** an http4s reference app, the unpublished `modules/examples-http`: an Ember server over `llm4s-effect`'s
+  `AgentIO[IO]` with `POST /chat` (JSON) and `POST /chat/stream` (server-sent events of the answer), the provider from
+  `Llm4sConfig` at startup or `--fake`, `LLMError` mapped to HTTP statuses (400, 429 with `Retry-After`, 504, 502, 503),
+  and the run cancelled when a streaming client disconnects. Tested on an ephemeral port against scripted clients;
+  guide: `docs/guide/http-reference-apps.md`. ZIO HTTP and Tapir apps follow [#1459](https://github.com/llm4s/llm4s/issues/1459).
 - **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
   `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
   the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).
