@@ -77,3 +77,4 @@ guide/basic-usage.md | dd07d6089e | with | import org.llm4s.llmconnect.model._; 
 guide/basic-usage.md | 90dff515d7 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
 guide/basic-usage.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
+getting-started/installation.md | acebca2c40 | skip | sbt build definition, not Scala source

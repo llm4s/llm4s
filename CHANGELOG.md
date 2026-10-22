@@ -230,6 +230,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
 
+### Embeddings & RAG
+
+- **Added** `llm4s-vectorstore-elasticsearch` (Experimental): `ElasticsearchVectorStore`, a `VectorStore` over the
+  Elasticsearch REST API with no client library - a `dense_vector` index created on the first upsert with the configured
+  similarity, kNN search with every `MetadataFilter` applied inside it, `_bulk` writes, API-key or basic authentication,
+  configured from `llm4s.vectorstore.elasticsearch` (`ELASTICSEARCH_URL`, ...) by `ElasticsearchVectorStoreConfigLoader`
+  [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#elasticsearch).
+
 ### Memory
 
 - **Changed** `MemoryManagerConfig` to a private constructor with `with*` setters (`.copy` is private) [#1847](https://github.com/llm4s/llm4s/issues/1847).

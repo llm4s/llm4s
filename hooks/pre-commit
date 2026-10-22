@@ -102,6 +102,7 @@ map_file_to_project() {
     modules/llm4s-pekko/*)                echo "llm4sPekko" ;;
     modules/java-api/*)                   echo "javaApi" ;;
     modules/java-rag/*)                   echo "javaRag" ;;
+    modules/vectorstore-elasticsearch/*)  echo "vectorstoreElasticsearch" ;;
     modules/reactor/*)                    echo "reactor" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
     modules/observability-micrometer/*)   echo "observabilityMicrometer" ;;
@@ -201,6 +202,9 @@ DOWNSTREAM_COMPILE=""
 propagate_downstream() {
   local proj="$1"
   case "$proj" in
+    vectorstoreElasticsearch)
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     javaRag)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -235,6 +239,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       ;;
     core)
       set_add DOWNSTREAM_COMPILE knowledgegraph
@@ -284,6 +289,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       ;;
     knowledgegraph)
       set_add DOWNSTREAM_COMPILE rag
@@ -293,6 +299,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       ;;
     rag)
       set_add DOWNSTREAM_COMPILE samples
@@ -300,6 +307,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       ;;
     memory)
       set_add DOWNSTREAM_COMPILE memoryPostgres
@@ -442,6 +450,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
       ;;
     observabilityPrometheus)
       set_add DOWNSTREAM_COMPILE observabilityMicrometer
