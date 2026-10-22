@@ -1,0 +1,21 @@
+{
+  "name": "scala-cli",
+  "argv": [
+    "/Users/kannupriyakalra/Library/Application Support/Coursier/bin/.scala-cli.aux",
+    "bsp",
+    "--json-options",
+    "/private/tmp/claude-501/-Users-kannupriyakalra-intellijCodes-llm4s/9366fde7-0cc7-48fd-8243-b8d9b5ee15ef/scratchpad/s213/common/.scala-build/ide-options-v2.json",
+    "--json-launcher-options",
+    "/private/tmp/claude-501/-Users-kannupriyakalra-intellijCodes-llm4s/9366fde7-0cc7-48fd-8243-b8d9b5ee15ef/scratchpad/s213/common/.scala-build/ide-launcher-options.json",
+    "--envs-file",
+    "/private/tmp/claude-501/-Users-kannupriyakalra-intellijCodes-llm4s/9366fde7-0cc7-48fd-8243-b8d9b5ee15ef/scratchpad/s213/common/.scala-build/ide-envs.json",
+    "/private/tmp/claude-501/-Users-kannupriyakalra-intellijCodes-llm4s/9366fde7-0cc7-48fd-8243-b8d9b5ee15ef/scratchpad/s213/common",
+    "/private/tmp/claude-501/-Users-kannupriyakalra-intellijCodes-llm4s/9366fde7-0cc7-48fd-8243-b8d9b5ee15ef/scratchpad/s213/probes/A_conversation.scala"
+  ],
+  "version": "1.4.1",
+  "bspVersion": "2.1.1",
+  "languages": [
+    "scala",
+    "java"
+  ]
+}

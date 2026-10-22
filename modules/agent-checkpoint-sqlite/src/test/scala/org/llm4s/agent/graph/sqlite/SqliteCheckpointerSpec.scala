@@ -44,8 +44,20 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-7 build left it: no thread registry (design 4.52). */
+  private def asVersionSeven(path: Path): Unit =
+    exec(
+      path,
+      (Vector("", "_status", "_agent", "_claimed").map(s => s"DROP INDEX llm4s_checkpoint_threads_registry$s") ++
+        Vector("DROP TABLE llm4s_checkpoint_thread_metadata") ++
+        Vector("tenant_id", "graph_id", "thread_status", "updated_nanos", "metadata_json").map(column =>
+          s"ALTER TABLE llm4s_checkpoint_threads DROP COLUMN $column"
+        ) :+ "UPDATE llm4s_checkpoint_schema SET version = 7")*
+    )
+
   /** The file as a version-5 build left it: threads without a parent (#2045). */
   private def asVersionFive(path: Path): Unit =
+    asVersionSeven(path)
     exec(
       path,
       "DROP INDEX llm4s_checkpoint_threads_parent",
@@ -322,6 +334,88 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.commit(thread, Commit(token, events = Vector(event("e6")))).value.map(_.seq) shouldBe Vector(6L)
     reopened.compactEvents(thread, 2L).value
     reopened.eventsAfter(thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L, 6L)
+    reopened.close()
+  }
+
+  "A version-7 file" should "fill the thread registry from each thread's latest checkpoint and its commit time" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val store  = SqliteFiles.opened(db, clock)
+    val tenant = Some(TenantId("acme"))
+    def committed(thread: ThreadId, status: CheckpointStatus, origin: Option[RunOrigin] = None): Unit =
+      val token = store.claim(thread, ClaimRequest(RunId("run"), tenant, ttl)).value.token
+      val written = checkpoint(thread, "c1", None, token)
+        .withStatus(status)
+        .withTenantId(tenant.map(_.value))
+        .withOrigin(origin)
+        // the producer's clock says next year: the registry orders by the commit time
+        .withCreatedAt(start.plusSeconds(365 * 86400))
+      store.commit(thread, Commit(token, Some(written))).value
+      store.release(thread, token).value
+    committed(ThreadId("done"), CheckpointStatus.Completed)
+    clock.advance(1.second)
+    committed(ThreadId("stopped"), CheckpointStatus.Running)
+    val origin = RunOrigin(ThreadId("done"), IdempotencyKey("call"), org.llm4s.agent.AgentId.unsafe("w"), start, 1)
+    committed(ThreadId("done/~task/w/1"), CheckpointStatus.Running, Some(origin))
+    store.close()
+    asVersionSeven(db)
+
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    val listed = reopened.threads(ThreadQuery(tenant)).value.threads
+    listed.map(t => (t.threadId.value, t.status, t.agent, t.updatedAt)) shouldBe Vector(
+      ("stopped", ThreadStatus.Idle, "g", start.plusSeconds(1)),
+      ("done", ThreadStatus.Completed, "g", start)
+    )
+    listed.map(_.metadata).distinct shouldBe Vector(ThreadMetadata.empty)
+    reopened.incompleteThreads(tenant, None, 10).value.threads.map(_.threadId.value) shouldBe Vector("stopped")
+    reopened.close()
+  }
+
+  "A version-6 file" should "keep judging its rows' age by their producer's timestamps, and new rows' by their commit time" in {
+    val db     = SqliteFiles.fresh()
+    val clock  = ManualClock(start)
+    val store  = SqliteFiles.opened(db, clock)
+    val thread = ThreadId("before-commit-times")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    // written by a version-6 build: no commit time, a producer that says it is an hour old
+    val hourAgo = start.minusSeconds(3600)
+    store
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c1", None, token).withCreatedAt(hourAgo)),
+          events = Vector(event("old").copy(timestamp = hourAgo))
+        )
+      )
+      .value: Unit
+    store.close()
+    asVersionSeven(db)
+    exec(
+      db,
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN committed_second",
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN committed_nano",
+      "ALTER TABLE llm4s_checkpoint_events DROP COLUMN committed_second",
+      "ALTER TABLE llm4s_checkpoint_events DROP COLUMN committed_nano",
+      "UPDATE llm4s_checkpoint_schema SET version = 6"
+    )
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    // a new row, whose producer says it is from long ago, is as young as its commit
+    reopened
+      .commit(
+        thread,
+        Commit(
+          token,
+          Some(checkpoint(thread, "c2", Some("c1"), token).withCreatedAt(start.minusSeconds(86400))),
+          events = Vector(event("new").copy(timestamp = start.minusSeconds(86400)))
+        )
+      )
+      .value: Unit
+    reopened.prune(thread, RetentionPolicy(maxAge = Some(30.minutes))).value
+    reopened.history(thread, None, 10).value.map(_.id) shouldBe Vector("c2")
+    reopened.eventsAfter(thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
     reopened.close()
   }
 
@@ -1006,5 +1100,41 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     SqliteCheckpointerConfig.of((Int.MaxValue.toLong + 1).millis).left.value shouldBe a[ValidationError]
     an[IllegalArgumentException] should be thrownBy SqliteCheckpointerConfig(Duration.Zero)
     an[IllegalArgumentException] should be thrownBy SqliteCheckpointerConfig.default.withBusyTimeout(-1.milli)
+  }
+
+  /** SQLite's plan for `statement` on `db`, one line per step. */
+  private def plan(db: Path, statement: (String, Vector[Any])): Vector[String] =
+    Using.resource(jdbc(db)) { c =>
+      Using.resource(c.prepareStatement(s"EXPLAIN QUERY PLAN ${statement._1}")) { query =>
+        statement._2.zipWithIndex.foreach((param, i) => query.setObject(i + 1, param))
+        Using.resource(query.executeQuery()) { rows =>
+          Iterator.continually(rows).takeWhile(_.next()).map(_.getString(4)).toVector
+        }
+      }
+    }
+
+  "The thread registry" should "answer every query through a registry index, in its order, never scanning the threads" in {
+    val db = SqliteFiles.fresh()
+    SqliteCheckpointer.open(db).value.close()
+    val tenant = Some(TenantId("acme"))
+    val cursor = Some(ThreadCursor(start, ThreadId("t")))
+    val statements = Vector(
+      SqliteCheckpointer.threadsStatement(ThreadQuery(tenant), start),
+      SqliteCheckpointer.threadsStatement(ThreadQuery(None).withAfter(cursor), start),
+      SqliteCheckpointer.threadsStatement(ThreadQuery(tenant).withUpdatedSince(start), start),
+      SqliteCheckpointer.threadsStatement(ThreadQuery(tenant).withAgent("assistant").withAfter(cursor), start),
+      SqliteCheckpointer.threadsStatement(ThreadQuery(tenant).withMetadata(ThreadMetadata("team" -> "red")), start)
+    ) ++ ThreadStatus.values.toVector.map(status =>
+      SqliteCheckpointer.threadsStatement(ThreadQuery(tenant, status = Some(status)).withAfter(cursor), start)
+    ) :+ SqliteCheckpointer.incompleteStatement(tenant, cursor, 10, start)
+    statements.foreach { statement =>
+      val steps = plan(db, statement)
+      withClue(steps.mkString("\n")) {
+        steps.exists(
+          _.matches(".*llm4s_checkpoint_threads USING (COVERING )?INDEX llm4s_checkpoint_threads_registry.*")
+        ) shouldBe true
+        steps.exists(_.contains("TEMP B-TREE")) shouldBe false
+      }
+    }
   }
 }

@@ -126,6 +126,18 @@ object GraphError:
   final case class UnsupportedCheckpointFormat(found: Int, supported: Int) extends GraphError with NonRecoverableError:
     override val message: String = s"Checkpoint format $found is not supported; this build reads up to $supported"
 
+  /**
+   * A store's storage was migrated by a newer build: its schema is at version `found`, and this build knows up to
+   * `supported`. The store refuses to open rather than read or write tables it does not know; `store` names the
+   * storage (for PostgreSQL, the database schema). Stop every instance of the older build before a release that
+   * changes the schema starts (design 4.50).
+   */
+  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String =
+      s"$store is at checkpoint schema version $found, newer than the $supported this build supports"
+
   /** A new checkpoint's parent is not the thread's latest: another writer advanced the thread. */
   final case class CheckpointConflict(threadId: String, expected: Option[String], actual: Option[String])
       extends GraphError

@@ -170,6 +170,9 @@ because the section binds it.
 `CompletionOptions.reasoning` is sent as `reasoning_effort` to OpenAI's reasoning models:
 
 ```scala
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+
+// client: LLMClient, conversation: Conversation
 client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.High))
 ```
 
@@ -280,6 +283,24 @@ Claude models generally score higher on reasoning benchmarks.
 - Exceptional at writing and analysis tasks
 - Excellent vision capabilities
 - Supports prompt caching for repeated queries
+
+### Web search
+
+Set `webSearch = true` in an `anthropic` section and every request carries Anthropic's server-side web search
+tool (`web_search_20250305`). The model then decides per request whether to search, and the sources its answer
+cites arrive on `Completion.citations` (see [Citations and grounding sources](#citations-and-grounding-sources)):
+
+```hocon
+llm4s.providers.claude-search {
+  provider  = "anthropic"
+  model     = "claude-sonnet-4-5"
+  webSearch = true
+}
+```
+
+It is off by default. Anthropic bills each search on top of tokens, and an organization administrator has to
+allow web search in the Console first. The tool is sent beside your own tools; Anthropic runs the search itself,
+so it never reaches a `ToolRegistry` and the completion's `toolCalls` do not include it.
 
 ---
 
@@ -484,10 +505,18 @@ Behaviour to know about:
   Whether a model supports tools depends on the model; a model that does not is answered by the service,
   and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
   given a generated one.
-- **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
-  `budgetTokens` are dropped without error; the chat API documents some of them, and this client does
-  not expose them yet. `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
-  1.0) when set.
+- **Sampling options.** `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
+  1.0) when set. `presencePenalty` and `frequencyPenalty` go as `presence_penalty` and `frequency_penalty`
+  when not 0.0, their default, so leaving them alone sends nothing new; the service checks their range.
+- **Structured output.** `responseFormat` goes as `response_format`: `ResponseFormat.Json` as
+  `{"type": "json_object"}`, and `ResponseFormat.JsonSchema(schema, name, strict)` as
+  `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": ...}}`, the shapes IBM's
+  Python SDK and LangChain integration send (IBM's Node.js SDK names only `json_object`). JSON mode needs
+  the prompt to ask for JSON too; the client adds no instruction. Whether a model honours either format
+  depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
+- **Ignored options.** `reasoning` and `budgetTokens` are dropped without error. The chat API has
+  `reasoning_effort` and `include_reasoning`, which this client does not send yet, and it does not read a
+  reply's `reasoning_content`.
 - **Abnormal endings.** A stream that ends without a `finish_reason`, or whose `finish_reason` is
   `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
   partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`
@@ -851,6 +880,10 @@ separates the provider, so `LLM_MODEL=openai-compatible/openai/gpt-oss-120b` nam
 Then load it by name, or as the default:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.types.Result
+
 val groq: Result[ProviderConfig]  = Llm4sConfig.provider("groq-main")
 val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 ```
@@ -1278,6 +1311,8 @@ Fireworks), and hosted catalogues retire models regularly. List what the endpoin
 the section's key and headers:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 Llm4sConfig.listModels("groq-main")   // GET <baseUrl>/models
 ```
 
@@ -1677,12 +1712,22 @@ it is. Thinking also counts toward token estimates (`ConversationTokenCounter`),
 resend it.
 
 ```scala
-for {
-  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
-  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
-  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
-  answer <- client.complete(next, options)             // the provider gets it back
-} yield answer
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, ToolCall, ToolMessage }
+import org.llm4s.types.Result
+
+def toolTurn(
+  client: LLMClient,
+  conversation: Conversation,
+  options: CompletionOptions,
+  runTools: Seq[ToolCall] => Seq[ToolMessage]          // your tool execution
+): Result[Completion] =
+  for {
+    first <- client.complete(conversation, options)   // a tool-call turn, with thinking
+    results = runTools(first.message.toolCalls)
+    next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+    answer <- client.complete(next, options)           // the provider gets it back
+  } yield answer
 ```
 
 ---
@@ -1717,13 +1762,15 @@ provider's call). `hasSpan` says whether both are present.
 | OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
 | Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
-| Anthropic, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, which llm4s cannot yet request. |
+| Anthropic | With `webSearch = true` in the section (see [Web search](#web-search)): one citation per source a text block cites - for a `web_search_result_location` its `url`, `title` and `cited_text`, for a `search_result_location` its `source` as `url`. Document citations (`char_location`, `page_location`, `content_block_location`) name a document, not a URL, and are skipped. No indices: Anthropic attaches a citation to a text block, not to a position in it. Read from `complete` and from a stream (`citations_delta`). |
+| Ollama, Bedrock, watsonx | Empty. |
 
 Things to know:
 
 - **Streaming.** For OpenAI and OpenRouter, a completion assembled from streamed chunks has no citations:
   neither documents where a stream carries them, so streamed chunks are not read. Gemini and Vertex AI send
-  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. (A model that does not
+  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. Anthropic
+  streams each citation as a `citations_delta`, and the streamed completion carries them. (A model that does not
   stream natively is answered with one ordinary call, and that completion keeps its citations.)
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
@@ -1781,6 +1828,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 **Good:**
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 // Keys come from the vendor's variable or the section's own ${?VAR} binding - never hardcoded
 val providerConfig = Llm4sConfig.defaultProvider()
 ```
@@ -1879,6 +1928,11 @@ place. Defaults when `baseUrl` is omitted:
 Configure one named section per provider, then load the default or any section by name:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
+
+// conversation: the Conversation to send
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry

@@ -215,9 +215,11 @@ private[graph] trait Dispatched extends Subscription:
  * then (orphans, which may hang in the store), once the last of them returns - so the hub keeps no state
  * for idle threads. A mark kept for an orphan is still the top of a hand-over that has finished, and
  * the orphan is above it, so a subscription made meanwhile joins with it and never waits for the
- * orphan. A live event sent on a thread with no mark - only a node's own thread outliving its run
- * sends one - is held unmarked until the next commit is handed to the subscription, and placed just
- * before it.
+ * orphan. The runtime sends no live event on a thread with no mark: a run's claim is handed over before
+ * any of its nodes runs, and progress sent once the run has released the thread - by a node that keeps
+ * its context, or a thread of its own, past its run - is dropped ([[live]]'s `current`, #1737). One that
+ * reaches the hub anyway is held unmarked until the next commit is handed to the subscription, and
+ * placed just before it.
  *
  * '''Commits made elsewhere''' ([[WatchPolicy]]). Another runtime or process sharing the store
  * commits without this hub knowing, so the hub hands over only this runtime's commits. While `watch`
@@ -522,11 +524,12 @@ final private[graph] class EventHub(
 
   /**
    * Offers live progress to the thread's subscribers, if `current` - whether the sending run still holds
-   * its claim, as far as it knows - is true; never blocks on a listener. `current` is read holding
-   * `hubLock`, which every hand-over holds, so the event is either queued everywhere ahead of a later
-   * run's claim or not at all: a run of this runtime is admitted to a thread only once an earlier run's
-   * loss has been found, so a node of the lost run that ignores the interrupt and outlives it sends
-   * nothing after the next run's claim (#1918). `current` must not block, nor take a lock.
+   * its claim, as far as it knows: it has neither found it lost nor released it - is true; never blocks on
+   * a listener. `current` is read holding `hubLock`, which every hand-over holds, so the event is either
+   * queued everywhere ahead of a later run's claim or not at all: a run of this runtime is admitted to a
+   * thread only once an earlier run's loss has been found or its claim released, so a node of the lost
+   * run that ignores the interrupt and outlives it (#1918), or one that keeps its context past its run
+   * (#1737), sends nothing after the next run's claim. `current` must not block, nor take a lock.
    */
   def live(threadId: ThreadId, event: StreamEvent.Live, current: () => Boolean = () => true): Unit =
     withLock(hubLock) {

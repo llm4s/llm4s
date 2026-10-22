@@ -79,6 +79,12 @@ object Versions {
   // tested at both ends; nothing else reads the property.
   val springBootBaseline = "3.3.6"
   val springBoot         = sys.props.getOrElse("llm4s.springBootVersion", springBootBaseline)
+
+  // Spring Boot 4: the same artifact, compiled against Boot 3 above, also carries a Boot 4 health indicator, compiled
+  // against this release's spring-boot-health. `springBootStarterBoot4` runs the starter's specs on Boot 4: on this
+  // release by default, and CI's "Spring Boot 4.x" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
+  val springBoot4Baseline = "4.0.8"
+  val springBoot4         = sys.props.getOrElse("llm4s.springBoot4Version", springBoot4Baseline)
 }
 
 object Deps {
@@ -165,6 +171,20 @@ object Deps {
     "org.springframework.boot" % "spring-boot-actuator-autoconfigure" % Versions.springBoot
   val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
   val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
+  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Intransitive: the starter compiles against
+  // Boot 3, and this jar's own dependencies are Boot 4's.
+  val springBoot4HealthApi =
+    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).intransitive()
+  // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
+  val springBoot4: Seq[ModuleID] = Seq(
+    "spring-boot-autoconfigure",
+    "spring-boot-actuator",
+    "spring-boot-actuator-autoconfigure",
+    "spring-boot-health",
+    "spring-boot-micrometer-metrics",
+    "spring-boot-starter-test",
+    "spring-boot-test-autoconfigure"
+  ).map(name => "org.springframework.boot" % name % Versions.springBoot4)
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().

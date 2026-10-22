@@ -9,9 +9,10 @@ import scala.concurrent.duration.FiniteDuration
  * How much of a thread's history [[Checkpointer.prune]] keeps, by age or by size. Every limit is
  * optional, and one that is not set removes nothing, so `RetentionPolicy()` keeps everything.
  *
- *  - `maxAge`: a checkpoint created more than `maxAge` ago, and an event recorded more than `maxAge`
- *    ago, is removed - by the store's clock, against the checkpoint's `createdAt` and the event's
- *    `timestamp`.
+ *  - `maxAge`: a checkpoint, and an event, that the store committed more than `maxAge` ago is
+ *    removed - by the store's clock, against the commit time the store recorded with it, never the
+ *    checkpoint's `createdAt` or the event's `timestamp`: those are the producer's record, and a
+ *    producer whose clock is skewed would make them too old or too young.
  *  - `maxCheckpoints`: only the newest `maxCheckpoints` checkpoints are kept.
  *  - `maxEvents`: only the newest `maxEvents` events are kept.
  *

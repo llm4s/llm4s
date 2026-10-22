@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentStatus, CompletionFixture }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentOutputSpec, AgentResult, AgentStatus, CompletionFixture }
 import org.llm4s.agent.{ ScriptedLLMClient, SpecTools }
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.delegation.{ ChildEnd, ChildRunner, DelegationKeys, PriorUsage }
@@ -540,6 +540,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
     val child = onlyChild(runtime, thread)
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
+    // a parent cancel is no timeout of the call: the child stays Running, for recover to reattach (#2098)
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Running
+    open().latest(child.threadId).ok.flatMap(_.checkpoint.outcome) shouldBe None
     blocking.set(false)
     val recovered = new AtomicReference[Option[org.llm4s.agent.AgentResult]](None)
     eventually("the parent recovers") {
@@ -553,7 +556,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
   behavior.of("A timeout on the delegating call")
 
-  it should "cancel the child" in {
+  it should "cancel the child and settle it timed-out before the call commits, announcing the settlement (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)
     val setup = new Setup(
@@ -564,13 +567,321 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     )
     val runtime = new GraphRuntime(open())
     val thread  = ThreadId("timed-out-call")
-    val result  = family(runtime, setup)._1.run(thread, "go").ok
+    val seen    = new CopyOnWriteArrayList[StreamEvent]()
+    val result  = family(runtime, setup)._1.stream(thread, "go", nested = true)(seen.add(_): Unit).ok.await().ok
     result.answer shouldBe Some("moved on")
     val child = onlyChild(runtime, thread)
-    eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
-    child.status shouldBe CheckpointStatus.Running
+    events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]) shouldBe true
+    // settled, so prunable: the call that started it committed and never runs again
+    child.status shouldBe CheckpointStatus.Failed
+    val settled = open().latest(child.threadId).ok.get.checkpoint
+    settled.outcome match {
+      case Some(RunOutcome.Failed("timed-out", _)) => ()
+      case other                                   => fail(s"expected the child settled timed-out, got $other")
+    }
+    val (started, gaps) = announced(seen.asScala.toVector)
+    started should contain(RunId(settled.runId))
+    gaps shouldBe Vector(RunId(settled.runId))
     // the timed-out call committed the child's call with its error: the parent's two calls and the child's one
     tokens(result.usage) shouldBe ((3L, 30L, 60L))
+  }
+
+  it should "leave the child Running for a wrapper that retries after the timeout, which reattaches it (#2098)" in {
+    val open     = storage()
+    val blocking = new AtomicBoolean(true)
+    val entered  = new CountDownLatch(1)
+    val retrying = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("retry")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome =
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") =>
+            blocking.set(false)
+            next()
+          case other => other
+        }
+    }
+    val setup = new Setup(
+      delegating(),
+      ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
+      childTools = Seq(hanging(blocking, entered)),
+      delegateTimeout = Some(300.millis),
+      parentMiddleware = Seq(retrying)
+    )
+    val runtime = new GraphRuntime(open())
+    val thread  = ThreadId("timed-out-retried")
+    family(runtime, setup)._1.run(thread, "go").ok.answer shouldBe Some("composed")
+    setup.allEnds.head.left.toOption.get shouldBe a[CancelledError]
+    setup.allEnds.last.ok match {
+      case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.Completed("report")
+      case other                => fail(s"unexpected $other")
+    }
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Completed
+  }
+
+  /** A wrapper that asks for approval when the call timed out; approved, it runs the call again or gives up. */
+  private def approvingRetry(rerun: Boolean, blocking: AtomicBoolean): AgentMiddleware = new AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("approve-retry")
+    override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+      next: () => ToolOutcome
+    ): ToolOutcome =
+      if (!context.approved)
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") => ToolOutcome.NeedsApproval("retry?")
+          case other                                                       => other
+        }
+      else if (rerun) {
+        blocking.set(false)
+        next()
+      } else ToolOutcome.Error("gave up after the timeout")
+  }
+
+  Seq(false -> "gives up without running it", true -> "runs it again").foreach { case (rerun, how) =>
+    it should s"settle or reattach the child of a timed-out call a wrapper suspended, when approved it $how (#2098)" in {
+      val open     = storage()
+      val blocking = new AtomicBoolean(true)
+      val setup = new Setup(
+        ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+        ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
+        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        delegateTimeout = Some(300.millis),
+        parentMiddleware = Seq(approvingRetry(rerun, blocking))
+      )
+      val runtime = new GraphRuntime(open())
+      val parent  = family(runtime, setup)._1
+      val thread  = ThreadId(s"timed-out-suspended-$rerun")
+      val parked  = parent.run(thread, "go").ok
+      val id = parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+        case other                                        => fail(s"unexpected $other")
+      }
+      val childId = onlyChild(runtime, thread).threadId
+      // suspended: the call may run again, so its child is not settled yet
+      open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+      parent.resume(thread, Map(parked.approve(id))).ok.answer shouldBe Some("moved on")
+      val latest = open().latest(childId).ok.get.checkpoint
+      if (rerun) {
+        latest.status shouldBe CheckpointStatus.Completed
+        setup.allEnds.last.ok match {
+          case ChildEnd.Ended(r, _) => r.status shouldBe AgentStatus.Completed("report")
+          case other                => fail(s"unexpected $other")
+        }
+      } else
+        latest.outcome match {
+          case Some(RunOutcome.Failed("timed-out", _)) => ()
+          case other                                   => fail(s"expected the child settled timed-out, got $other")
+        }
+    }
+  }
+
+  private def settledTimedOut(store: Checkpointer, child: ThreadId): Unit =
+    store.latest(child).ok.get.checkpoint.outcome match {
+      case Some(RunOutcome.Failed("timed-out", _)) => ()
+      case other                                   => fail(s"expected the child settled timed-out, got $other")
+    }
+
+  private def unsettled(store: Checkpointer, child: ThreadId): Unit =
+    store.latest(child).ok.map(c => (c.checkpoint.status, c.checkpoint.outcome)) shouldBe
+      Some((CheckpointStatus.Running, None))
+
+  it should "settle the child when a resumed timed-out call asks for approval again, committed as its error (#2098)" in {
+    val open     = storage()
+    val blocking = new AtomicBoolean(true)
+    val again = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("ask-again")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome =
+        if (!context.approved) next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") => ToolOutcome.NeedsApproval("retry?")
+          case other                                                       => other
+        }
+        else ToolOutcome.NeedsApproval("still unsure")
+    }
+    val setup = new Setup(
+      ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+      ScriptedLLMClient.of(calling(call("k1", "hang"))),
+      childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+      delegateTimeout = Some(300.millis),
+      parentMiddleware = Seq(again)
+    )
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId("timed-out-asked-again")
+    val parked  = parent.run(thread, "go").ok
+    val id = parked.status match {
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+      case other                                        => fail(s"unexpected $other")
+    }
+    val childId = onlyChild(runtime, thread).threadId
+    unsettled(open(), childId)
+    parent.resume(thread, Map(parked.approve(id))).ok.answer shouldBe Some("moved on")
+    settledTimedOut(open(), childId)
+  }
+
+  Seq[(String, (AgentResult, InterruptId) => (InterruptId, ujson.Value))](
+    "rejected"                      -> ((parked, id) => parked.reject(id, "no")),
+    "edited to arguments that fail" -> ((parked, id) => parked.edit(id, ujson.Obj("text" -> 5)))
+  ).foreach { case (how, decide) =>
+    it should s"settle the child of a suspended timed-out call $how, and clear its record (#2105)" in {
+      val open     = storage()
+      val blocking = new AtomicBoolean(true)
+      val setup = new Setup(
+        ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+        ScriptedLLMClient.of(calling(call("k1", "hang"))),
+        childTools = Seq(hanging(blocking, new CountDownLatch(1))),
+        delegateTimeout = Some(300.millis),
+        parentMiddleware = Seq(approvingRetry(rerun = true, blocking))
+      )
+      val runtime = new GraphRuntime(open())
+      val parent  = family(runtime, setup)._1
+      val thread  = ThreadId(s"timed-out-refused-on-resume-${how.takeWhile(_ != ' ')}")
+      def recorded: Set[String] =
+        runtime
+          .childAtRest(thread, parent.loop.graph, RunConfig())
+          .ok
+          .get
+          ._2
+          .state
+          .get(DelegationKeys.timedOut)
+          .ok
+          .keySet
+      val parked = parent.run(thread, "go").ok
+      val id = parked.status match {
+        case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.head._1
+        case other                                        => fail(s"unexpected $other")
+      }
+      val childId = onlyChild(runtime, thread).threadId
+      unsettled(open(), childId)
+      recorded shouldBe Set("c1")
+
+      // the call is refused before it runs, and never runs again
+      parent.resume(thread, Map(decide(parked, id))).ok.answer shouldBe Some("moved on")
+      settledTimedOut(open(), childId)
+      recorded shouldBe empty
+    }
+  }
+
+  it should "settle the child when a middleware asks while a tool question's resume timed out, committed as its error (#2098)" in {
+    final case class Confirm(prompt: String) derives upickle.default.ReadWriter
+    final case class Need(what: String) derives upickle.default.ReadWriter
+    val open        = storage()
+    val runtime     = new GraphRuntime(open())
+    val blocking    = new AtomicBoolean(true)
+    val childClient = ScriptedLLMClient.of(calling(call("k1", "hang")))
+    val child = Agent
+      .builder("worker", childClient)
+      .withRuntime(runtime)
+      .withTools(SpecTools.set(hanging(blocking, new CountDownLatch(1))))
+      .build()
+      .ok
+    // asks first; its resume delegates, and times out
+    val confirm = new AgentTool.Asking[SpecTools.Text, Confirm, Boolean](
+      SpecTools.spec("delegate").withTimeout(300.millis)
+    ) {
+      def execute(args: SpecTools.Text, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
+      def resume(args: SpecTools.Text, question: Confirm, answer: Boolean, ctx: ToolContext): ToolOutcome = {
+        val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
+        ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx) match {
+          case Right(_)    => ToolOutcome.Success(ToolContent.Json(ujson.Str("report")))
+          case Left(error) => ToolOutcome.Fatal(error)
+        }
+      }
+    }
+    val late = new AgentMiddleware.Asking[Need, String] {
+      val id: MiddlewareId = MiddlewareId("late")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome =
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") => askAbout(Need("retry?"))
+          case other                                                       => other
+        }
+    }
+    val parent = Agent
+      .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
+      .withRuntime(runtime)
+      .withTools(SpecTools.set(confirm))
+      .withMiddleware(late)
+      .build()
+      .ok
+    val thread = ThreadId("timed-out-tool-question")
+    val parked = parent.run(thread, "go").ok
+    val id = parked.status match {
+      case AgentStatus.Suspended(_, Vector((id, _)), _, _, _) => id
+      case other                                              => fail(s"expected a tool question, got $other")
+    }
+    val done = parent.resume(thread, Map(parked.reply(id, true))).ok
+    done.answer shouldBe Some("moved on")
+    settledTimedOut(open(), onlyChild(runtime, thread).threadId)
+  }
+
+  it should "leave the child Running when a timed-out call's result is refused, committing nothing (#2098)" in {
+    val open       = storage()
+    val undeclared = StateKey.replace[String]("undeclared-by-anyone", "")
+    val swallow = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("swallow")
+      override def wrapToolCall(request: org.llm4s.agent.graph.middleware.ToolCallRequest, context: ToolContext)(
+        next: () => ToolOutcome
+      ): ToolOutcome =
+        next() match {
+          case ToolOutcome.Error(message) if message.contains("timed out") =>
+            ToolOutcome.Success(ToolContent.Json(ujson.Str("fine")), StateUpdate.update(undeclared, "x"))
+          case other => other
+        }
+    }
+    val setup = new Setup(
+      ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+      ScriptedLLMClient.of(calling(call("k1", "hang"))),
+      childTools = Seq(hanging(new AtomicBoolean(true), new CountDownLatch(1))),
+      delegateTimeout = Some(300.millis),
+      parentMiddleware = Seq(swallow)
+    )
+    val runtime = new GraphRuntime(open())
+    val thread  = ThreadId("timed-out-refused")
+    family(runtime, setup)._1.run(thread, "go").isLeft shouldBe true
+    unsettled(open(), onlyChild(runtime, thread).threadId)
+  }
+
+  it should "fail the parent run when the child is still busy after the drain, and settle it on recover (#2098)" in {
+    val open    = storage()
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val calls   = new AtomicInteger(0)
+    // ignores its interrupt until released, holding the child's claim past AgentRun.Drain
+    val stubborn = SpecTools.tool("stubborn") { (_, _) =>
+      if (calls.getAndIncrement() == 0) {
+        entered.countDown()
+        var waiting = true
+        while (waiting)
+          try waiting = !release.await(30, TimeUnit.SECONDS)
+          catch { case _: InterruptedException => () }
+      }
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
+    }
+    val setup = new Setup(
+      ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
+      ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")),
+      childTools = Seq(stubborn),
+      delegateTimeout = Some(300.millis)
+    )
+    val runtime = new GraphRuntime(open())
+    val parent  = family(runtime, setup)._1
+    val thread  = ThreadId("timed-out-busy")
+    val run     = parent.start(thread, "go").ok
+    entered.await(10, TimeUnit.SECONDS) shouldBe true
+    val failed = run.await()
+    release.countDown()
+    // the timed-out call committed nothing: its child is still unsettled, for recover to reattach
+    failed.isLeft shouldBe true
+    failed.left.toOption.get.message should include("busy")
+    val childId = onlyChild(runtime, thread).threadId
+    open().latest(childId).ok.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+    eventually("the parent recovers")(parent.recover(thread).toOption.flatMap(_.answer).contains("moved on"))
+    onlyChild(runtime, thread).status should (be(CheckpointStatus.Completed).or(be(CheckpointStatus.Failed)))
   }
 
   behavior.of("A parent that loses its claim during a child")
@@ -599,6 +910,9 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     eventually("the child is cancelled")(events(open(), child.threadId).exists(_.isInstanceOf[RunEvent.RunCancelled]))
     eventually("the child's end is recorded")(!setup.ends.isEmpty)
     setup.allEnds.head.left.toOption.get shouldBe a[CancelledError]
+    // a lost claim is no timeout of the call: the child stays Running (#2098)
+    onlyChild(runtime, thread).status shouldBe CheckpointStatus.Running
+    open().latest(child.threadId).ok.flatMap(_.checkpoint.outcome) shouldBe None
   }
 
   behavior.of("A child's deadline")

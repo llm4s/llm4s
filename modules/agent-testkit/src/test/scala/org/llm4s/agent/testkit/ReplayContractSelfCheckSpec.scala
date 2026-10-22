@@ -127,6 +127,12 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
     def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
       underlying.deleteThread(threadId, token, fence)
     def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
   }
 
   "ReplayContract" should "fail a target that performs its effect without a guard" in {

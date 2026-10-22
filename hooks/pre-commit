@@ -101,6 +101,7 @@ map_file_to_project() {
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
     modules/llm4s-pekko/*)                echo "llm4sPekko" ;;
     modules/java-api/*)                   echo "javaApi" ;;
+    modules/java-rag/*)                   echo "javaRag" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
     modules/observability-micrometer/*)   echo "observabilityMicrometer" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
@@ -123,6 +124,7 @@ map_file_to_project() {
     modules/agent-tools/*)                echo "agentTools" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
+    modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
     modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
@@ -198,8 +200,15 @@ DOWNSTREAM_COMPILE=""
 propagate_downstream() {
   local proj="$1"
   case "$proj" in
+    javaRag)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
     javaApi)
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE javaRag
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     observabilityMicrometer)
       set_add DOWNSTREAM_COMPILE springBootStarter
@@ -223,6 +232,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     core)
       set_add DOWNSTREAM_COMPILE knowledgegraph
@@ -254,6 +264,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentCheckpointPostgres
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
@@ -269,6 +280,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     knowledgegraph)
       set_add DOWNSTREAM_COMPILE rag
@@ -277,12 +289,14 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     rag)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     memory)
       set_add DOWNSTREAM_COMPILE memoryPostgres
@@ -319,6 +333,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     gemini)
       set_add DOWNSTREAM_COMPILE samples
@@ -328,6 +343,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     anthropic)
       set_add DOWNSTREAM_COMPILE samples
@@ -337,6 +353,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
@@ -349,6 +366,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     bedrock)
       set_add DOWNSTREAM_COMPILE samples
@@ -391,6 +409,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     workspaceShared)
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -414,6 +433,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     observabilityPrometheus)
       set_add DOWNSTREAM_COMPILE observabilityMicrometer
@@ -428,6 +448,7 @@ propagate_downstream() {
     agent)
       set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentCheckpointSqlite
+      set_add DOWNSTREAM_COMPILE agentCheckpointPostgres
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -441,6 +462,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sZio
       set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     agentTools)
       set_add DOWNSTREAM_COMPILE samples
@@ -472,6 +494,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
+      set_add DOWNSTREAM_COMPILE javaRag
       ;;
     knowledgegraphNeo4j)
       set_add DOWNSTREAM_COMPILE samples

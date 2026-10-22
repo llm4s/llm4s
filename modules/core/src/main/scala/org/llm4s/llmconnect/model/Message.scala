@@ -685,7 +685,8 @@ object ToolMessage {
  * the agent framework forwards `id` unchanged when constructing [[ToolMessage]] values,
  * so do not modify it.
  *
- * `arguments` is a parsed `ujson.Value` (typically a JSON object), not a raw string.
+ * `arguments` is a parsed `ujson.Value` (typically a JSON object), not a raw string. Its numbers are doubles, so
+ * a whole number above 2^53 is already rounded; a tool that takes large identifiers declares them as strings.
  * Use `arguments.obj` to access fields or pass it directly to
  * [[org.llm4s.toolapi.ToolRegistry.execute]] via a [[org.llm4s.toolapi.ToolCallRequest]].
  *

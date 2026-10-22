@@ -47,6 +47,7 @@ object AnthropicProvider extends ProviderDescriptor:
           ProviderConfigKey.optional(WorkspaceIdKey, "the Anthropic workspace id (wrkspc_...)")
         )
       )
+      .withExtras(Seq(AnthropicWebSearch.WebSearchConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(AnthropicModelLister)
 
@@ -58,12 +59,13 @@ object AnthropicProvider extends ProviderDescriptor:
       apiKey <-
         if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      search  <- AnthropicWebSearch.webSearch(providerName, section)
       // `fromValues` holds the rules (an https baseUrl with workload identity, ...); a refusal names the section key.
       config <- AnthropicConfig
         .fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
         .left
         .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
-    yield config
+    yield config.withWebSearch(search)
 
   private def workloadIdentityOf(
     providerName: String,

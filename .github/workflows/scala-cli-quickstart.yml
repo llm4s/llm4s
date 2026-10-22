@@ -1,0 +1,46 @@
+name: Scala CLI quick start
+
+# Compiles the Scala CLI quick start (modules/samples/scala-cli/hello.scala, #1456) against the llm4s release it pins,
+# and checks that release is the latest on Maven Central. sbt never builds the script, and ScalaCliQuickstartSpec
+# checks only what it calls against the code on the branch, so without this a release that forgets to bump the script,
+# or a published artifact the script no longer compiles against, goes unnoticed until a reader copies it. It needs
+# the network (Maven Central), so it runs weekly and when the script changes, not on every pull request; the offline
+# parts of the check (the script and docs/_data/project.yml agree) are tested in ci.yml.
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"  # 04:17 UTC every Monday
+  push:
+    branches: [main]
+    paths:
+      - modules/samples/scala-cli/**
+      - docs/_data/project.yml
+      - scripts/check-scala-cli-quickstart.sh
+      - .github/workflows/scala-cli-quickstart.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart:
+    name: Compile hello.scala against the latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - uses: VirtusLab/scala-cli-setup@v1
+
+      - name: Check the script's version against Maven Central, and compile it
+        run: scripts/check-scala-cli-quickstart.sh --central --compile
