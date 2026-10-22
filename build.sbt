@@ -1696,8 +1696,8 @@ lazy val agentCheckpointPostgres = (project in file("modules/agent-checkpoint-po
     // agentCheckpointPostgres/coverageReport`) on its first version: the in-module suite is the server-free part. The
     // real signal is `modules/it`'s contract, concurrency, clock, schema and cross-process suites, which run on every
     // PR against the pgvector service container and are not counted here. Floor is the measured value rounded down
-    // to the nearest 5. Never lower it.
-    coverageFloor(30),
+    // to the nearest 5. Raised to 40 with S2's change notification (#2131, measured 42.94%). Never lower it.
+    coverageFloor(40),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,

@@ -7,7 +7,7 @@ import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationEr
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
-import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException }
+import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet, SQLException }
 import java.time.{ Instant, OffsetDateTime, ZoneOffset }
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,8 +42,16 @@ import scala.util.{ Try, Using }
  *    tombstone of its event numbering; a parent's children are listed in the order their first commits landed.
  *  - '''Data only.''' Checkpoints, pending writes, events and effect records are stored as JSON text and decoded on
  *    read, so nothing executable is stored.
- *  - '''Change notification by polling''' for now: a subscription reads the log once per `WatchPolicy.pollInterval`
- *    (the `Checkpointer.awaitEventsAfter` default). `LISTEN`/`NOTIFY` replaces it in a later slice.
+ *  - '''Change notification by `LISTEN`/`NOTIFY`''' (design 4.51). A commit that stores events, and a delete, `NOTIFY`s the
+ *    schema's channel inside its transaction, so the notification is delivered only if it commits; its payload is a
+ *    hash of the thread id, nothing of the thread's content. One dedicated connection per store, opened by the first
+ *    [[awaitEventsAfter]] and kept until [[close]], `LISTEN`s and wakes the store's waiting calls, so a commit through
+ *    any store over the same database and schema wakes them as soon as it is delivered: within a second, tested, on a
+ *    healthy database. A notification is only a hint: a woken call reads the log again, so a missed or duplicated one
+ *    loses nothing. While the listening connection is down - not yet open, lost, or found dead by its heartbeat - a
+ *    call waits out its `timeout` and its caller reads again, polling under its `WatchPolicy`; the connection is
+ *    reopened in the background and, once it listens, every waiting call reads again. A wait never depends on that
+ *    connection, so every call keeps its bound.
  *
  * Reads run in a `REPEATABLE READ`, read-only transaction, so what one call reads is one snapshot; they never wait for
  * a writer.
@@ -80,6 +88,12 @@ final class PostgresCheckpointer private (
   private given ErrorContext     = ErrorContext(config.schema)
   private val callTimeout        = config.callTimeout
   private val transactionSetting = settings(callTimeout)
+  private val notifier = new ChangeNotifier(
+    ChangeNotifier.channelFor(config.schema),
+    listenerConnection(dataSource, config),
+    callTimeout,
+    config.schema
+  )
 
   /** The schema this store's tables are in. */
   def schema: String = config.schema
@@ -205,6 +219,7 @@ final class PostgresCheckpointer private (
           insert.executeBatch(): Unit
         }
         update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
+        notifyCommit(c, threadId)
       // handed back decoded from what was stored, as a later read would see them
       stored.map((_, _, json) => upickle.default.read[EventRecord](json))
     }
@@ -380,6 +395,40 @@ final class PostgresCheckpointer private (
       else Right(query(c, Sql.eventsAfter(t), threadId.value, afterSeq, limit)(_.getString(1)))
     }.flatMap(rows => decoding("eventsAfter", "event")(rows.map(upickle.default.read[EventRecord](_))))
 
+  /**
+   * [[eventsAfter]], waiting for a commit when there is nothing to return yet (see `Checkpointer.awaitEventsAfter`). The
+   * call registers its wait before it reads, so a commit that lands after the read wakes it; a wake reads the log
+   * again and returns what it finds, or waits on for what is left of `timeout` if a notification brought nothing (a
+   * hash collision, or a commit that stored nothing past `afterSeq`). It waits only on its own `timeout`, never on the
+   * listening connection: while that is down, the call returns empty once `timeout` passes, and its caller's next call
+   * reads again, so it polls. It returns within `timeout` plus the bound of each read it makes.
+   */
+  override def awaitEventsAfter(
+    threadId: ThreadId,
+    afterSeq: Long,
+    limit: Int,
+    timeout: FiniteDuration
+  ): Result[Vector[EventRecord]] =
+    Using.resource(notifier.register(threadId)) { waiter =>
+      ChangeNotifier.readUntilWoken(threadId, waiter, timeout)(eventsAfter(threadId, afterSeq, limit))
+    }
+
+  /** Whether this store's listening connection is up: for tests. */
+  private[postgres] def listening: Boolean = notifier.listening
+
+  /** The listening connection's backend process id while it is up: for tests that kill it. */
+  private[postgres] def listenerPid: Option[Int] = notifier.listenerPid
+
+  /** How many listening connections this store has opened: one, unless one was lost. For tests. */
+  private[postgres] def listenerConnections: Int = notifier.connectionsOpened
+
+  /** The channel this store's commits notify and its listener listens on. */
+  private[postgres] def channel: String = notifier.channel
+
+  /** Tells every store listening on the schema's channel that `threadId` changed, when this transaction commits. */
+  private def notifyCommit(c: Connection, threadId: ThreadId): Unit =
+    query(c, ChangeNotifier.NotifySql, notifier.channel, ChangeNotifier.payload(threadId))(_ => ()): Unit
+
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = writing("compactEvents") { c =>
     lockRow(c, threadId).foreach { current =>
       val floor = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
@@ -457,6 +506,8 @@ final class PostgresCheckpointer private (
         }
         update(c, Sql.tombstone(t), threadId.value)
         dropIfEmpty(c, threadId)
+        // a reader waiting inside the deleted log is told at once
+        notifyCommit(c, threadId)
         Right(())
   }
 
@@ -467,6 +518,7 @@ final class PostgresCheckpointer private (
   def close(): Unit =
     if !shut then
       shut = true
+      notifier.close()
       if ownsDataSource then
         dataSource match
           case closeable: AutoCloseable => Try(closeable.close()): Unit
@@ -668,6 +720,44 @@ object PostgresCheckpointer:
     ownsDataSource: Boolean,
     config: PostgresCheckpointerConfig = PostgresCheckpointerConfig.default
   ): Result[PostgresCheckpointer] = createWith(dataSource, ownsDataSource, config, ServerClock)
+
+  /** The `ApplicationName` of a store's listening connection, as `pg_stat_activity` shows it. */
+  private[postgres] val ListenerApplicationName: String = "llm4s-agent-checkpoint-postgres-listener"
+
+  /**
+   * How a store opens its listening connection: outside the pool where the pool says how to connect (a HikariCP pool
+   * with a JDBC URL, as [[open]] builds), bounded by the store's connection and call timeouts; otherwise from
+   * `dataSource`, holding one of its connections for as long as the store listens.
+   */
+  private[postgres] def listenerConnection(
+    dataSource: DataSource,
+    config: PostgresCheckpointerConfig
+  ): () => Connection =
+    dataSource match
+      case hikari: HikariDataSource if hikari.getJdbcUrl != null =>
+        () => DriverManager.getConnection(hikari.getJdbcUrl, listenerProperties(hikari, config))
+      case other => () => other.getConnection()
+
+  /**
+   * The driver properties of a listening connection opened outside `hikari`: the pool's own driver properties and
+   * credentials, with the store's connection and call timeouts and the listener's `ApplicationName`.
+   */
+  private[postgres] def listenerProperties(
+    hikari: HikariDataSource,
+    config: PostgresCheckpointerConfig
+  ): java.util.Properties =
+    val properties = new java.util.Properties()
+    properties.putAll(hikari.getDataSourceProperties)
+    Option(hikari.getUsername).foreach(properties.setProperty("user", _))
+    Option(hikari.getPassword).foreach(properties.setProperty("password", _))
+    // whole seconds, rounded up: the driver reads 0 as no timeout
+    val connectSeconds = math.max(1L, (config.connectionTimeout.toMillis + 999) / 1000)
+    properties.setProperty("connectTimeout", connectSeconds.toString)
+    properties.setProperty("loginTimeout", connectSeconds.toString)
+    properties.setProperty("socketTimeout", socketTimeoutSeconds(config.callTimeout).toString)
+    properties.setProperty("tcpKeepAlive", "true")
+    properties.setProperty("ApplicationName", ListenerApplicationName)
+    properties
 
   /** The database server's clock, read once a call holds its locks. */
   private[postgres] val ServerClock: String = "clock_timestamp()"

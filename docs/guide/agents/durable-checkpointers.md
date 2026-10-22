@@ -352,8 +352,8 @@ only through its own: durable events in `seq` order, without gap or duplicate, a
 (Where another runtime's commit falls among this runtime's live events is not fixed: it depends on whether the
 subscription's initial replay, its store watch or a hand-over's gap read delivers it first; see
 [Ordering across runtimes](streaming#ordering-across-runtimes).) Each live subscription
-watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits returns at once. A store that
-is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
+watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits, such as PostgreSQL's (by
+`LISTEN`/`NOTIFY`, [below](#the-postgresql-store)), returns at once. A store that is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
 
 ```scala
 val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
@@ -543,7 +543,19 @@ yield store.close()
 - **Every call returns within `connectionTimeout + callTimeout`** (5 + 5 seconds by default): the call timeout is set
   on the server for each transaction and enforced on the client, which discards a connection whose call overran it.
   A caller-supplied pool's own connection timeout stands in for `connectionTimeout`; set a driver socket timeout on it.
-- **Subscriptions poll**, as with SQLite, once per `WatchPolicy.pollInterval`.
+- **Subscriptions are told of commits** by `LISTEN`/`NOTIFY`. A commit that stores events, and a delete, notifies the
+  schema's channel (`llm4s_checkpoint_<schema>`) inside its transaction, so only a commit that lands is announced;
+  the payload is a hash of the thread id, nothing of its content. Each store opens one more connection, outside its
+  pool, on its first watch (`ApplicationName` `llm4s-agent-checkpoint-postgres-listener`), and keeps it until
+  `close`: count it when sizing `max_connections`. Over a `DataSource` that is not a HikariCP pool with a JDBC URL,
+  that connection is taken from the `DataSource` instead, and held. A commit through any store over the schema wakes
+  a waiting subscription within a second on a healthy database, whatever its `pollInterval`.
+- **A lost listening connection degrades to polling.** While it is down - before it first opens, after the server or
+  network drops it, or once its heartbeat (a `SELECT 1` whenever `callTimeout` passes quietly) fails - each watch
+  reads once per `WatchPolicy.pollInterval`, as with SQLite, and the store reconnects in the background. A
+  notification is only a wake-up: the watch always reads the log, so a missed or repeated one loses nothing. Each
+  watch still reads once per `pollInterval` while it waits, so where many subscriptions watch one database, a longer
+  `pollInterval` cuts reads without slowing delivery.
 
 ### Upgrades
 
