@@ -1082,8 +1082,13 @@ class HostFileBackendSpec
     reopen(move = move, contendedReplace = _ => true).value
     val error = backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call()).left.value
     error shouldBe a[BackendRefused]
-    error.message should include("permission denied")
-    calls.get shouldBe 1
+    onDisk("f.txt") shouldBe "one\n"
+    // POSIX reaches the move and refuses its denial without a retry; Windows refuses a read-only target
+    // (its DOS flag) before any move
+    if (posix) {
+      error.message should include("permission denied")
+      calls.get shouldBe 1
+    } else calls.get should be <= 1
   }
 
   it should "not retry a failure that is not contention" in {
