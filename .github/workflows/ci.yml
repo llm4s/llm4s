@@ -1231,6 +1231,11 @@ jobs:
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
 
+      # The Maven sample (docs/getting-started/maven.md), compiled the same way, with its enforcer rules.
+      - name: Build the Maven sample
+        working-directory: modules/samples/maven-java
+        run: mvn -q -B compile
+
       # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
       # against the library just published, and a Gradle project without the BOM must not (#1462).
       - name: Build a Gradle and a Maven project against llm4s-bom

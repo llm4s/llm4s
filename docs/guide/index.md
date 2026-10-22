@@ -48,6 +48,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 
 ### RAG & Semantic Search
 
+- **[Embeddings](embeddings)** - Choose a provider and model, create an `EmbeddingClient`, embed documents and queries, and keep dimensions in step with the store
 - **[Vector Store](vector-store)** - Complete RAG toolkit for semantic search and retrieval
   - **Vector Backends**: SQLite (in-memory/file), PostgreSQL/pgvector, Qdrant
   - **Keyword Backends**: SQLite FTS5, PostgreSQL native full-text search

@@ -35,6 +35,7 @@ object DocSnippets {
     "getting-started/testing-guide.md",
     "guide/basic-usage.md",
     "guide/custom-tools.md",
+    "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/providers.md"
   )

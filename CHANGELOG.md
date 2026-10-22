@@ -136,6 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
   `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
   sample `TypedCalculatorExample`.
+- **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
+  of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
+  [#1514](https://github.com/llm4s/llm4s/issues/1514).
 - **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
   default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
   not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
