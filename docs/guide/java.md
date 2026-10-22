@@ -832,6 +832,7 @@ available from Java yet, each with the issue that tracks it:
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.
 - [Java Reactor](java-reactor): a streamed reply as a Reactor `Flux<String>`, with `llm4s-reactor`.
 - [Spring Boot](spring-boot): auto-configuration, a template bean and a health indicator on top of this module.
+- [Quarkus](quarkus): the client as a CDI bean, configured from `application.properties`, behind a REST endpoint.
 - [Basic usage](basic-usage) and [providers](providers): the same concepts in Scala, and every provider's configuration.
 - [Gradle integration](../getting-started/gradle): dependency recipes for Gradle builds.
 - The [`gradle-java` sample](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java): a Java project you

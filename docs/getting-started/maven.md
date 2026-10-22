@@ -220,4 +220,5 @@ You should see one sentence; the wording depends on the model. With a local Olla
 
 - [Java guide](/guide/java): conversations, options, agents and errors from Java
 - [Gradle Integration](gradle): the same project in Gradle
+- [Quarkus](/guide/quarkus): a Quarkus application built the same way, with a CDI producer and a REST endpoint
 - [Configuration](configuration): all providers and how keys are found

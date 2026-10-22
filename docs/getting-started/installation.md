@@ -516,7 +516,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
-[`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
+[`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java), and a Quarkus
+application with a CDI producer in [`modules/samples/quarkus-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/quarkus-java),
+see [Quarkus](../guide/quarkus)) and the base of the Spring starter, which adds the
 `llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-java-rag` puts `llm4s-rag`'s
 pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a separate artifact so that a Java
 facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-reactor` turns

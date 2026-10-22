@@ -1258,6 +1258,14 @@ jobs:
         working-directory: modules/samples/maven-java
         run: mvn -q -B compile
 
+      # The Quarkus sample (docs/guide/quarkus.md): built and tested against the library just published. Its
+      # @QuarkusTest runs the real client against a stub Ollama server, so it needs no model and no key (#1468).
+      - name: Build and test the Quarkus sample
+        working-directory: modules/samples/quarkus-java
+        run: |
+          ../../../scripts/check-quarkus-guide-snippets.sh
+          mvn -q -B verify
+
       # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
       # against the library just published, and a Gradle project without the BOM must not (#1462).
       - name: Build a Gradle and a Maven project against llm4s-bom
