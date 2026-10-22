@@ -115,7 +115,7 @@ llm4s/
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.1
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
 │   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution
