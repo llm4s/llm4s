@@ -8,6 +8,8 @@ import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 
+import scala.jdk.CollectionConverters.*
+
 import java.util.{ Objects, OptionalInt }
 
 /**
@@ -171,6 +173,29 @@ object Llm4s {
     val builder = Agent.builder("assistant", client.underlying).withTools(tools)
     new JAgent(FacadeToken.INSTANCE, (if (streaming) builder.withStreaming() else builder).build())
   }
+
+  /**
+   * Wraps a [[JLlmClient]] in a [[JAgent]] that can call `tools`, defined from Java with [[JTool.builder]] or
+   * [[JTool.fromAnnotated]] (#1484). A `null` argument, a tool listed twice, two tools with one name, or tools the
+   * agent cannot offer together is a failed result, not an agent that fails every run.
+   *
+   * {{{
+   * JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather)).get();
+   * }}}
+   */
+  def createAgentWithTools(client: JLlmClient, tools: java.util.List[JTool]): LlmResult[JAgent] =
+    FacadeInternals.result(for {
+      c  <- Option(client).toRight(org.llm4s.error.ValidationError.required("client"))
+      ts <- Option(tools).map(_.asScala.toVector).toRight(org.llm4s.error.ValidationError.required("tools"))
+      _  <- Either.cond(!ts.contains(null), (), org.llm4s.error.ValidationError("tools", "a tool is null"))
+      _ <- ts
+        .groupBy(_.name())
+        .collectFirst { case (n, same) if same.size > 1 => n }
+        .toLeft(())
+        .left
+        .map(n => org.llm4s.error.ValidationError("tools", s"two tools are named '$n'"))
+      agent <- Agent.builder("assistant", c.underlying).withTools(new ToolRegistry(ts.map(_.function))).build()
+    } yield new JAgent(FacadeToken.INSTANCE, Right(agent)))
 
   /**
    * Wraps an `Agent` built with `Agent.builder`, for what the factories above do not set: its

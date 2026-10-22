@@ -43,10 +43,12 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
   - **[Streaming Events](agents/streaming)** - Real-time execution feedback for responsive UIs
 - **[Context Window Pruning](context-window-pruning)** - Keep a long conversation within the model's context window
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
+- **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`.
 
 ### RAG & Semantic Search
 
+- **[Embeddings](embeddings)** - Choose a provider and model, create an `EmbeddingClient`, embed documents and queries, and keep dimensions in step with the store
 - **[Vector Store](vector-store)** - Complete RAG toolkit for semantic search and retrieval
   - **Vector Backends**: SQLite (in-memory/file), PostgreSQL/pgvector, Qdrant
   - **Keyword Backends**: SQLite FTS5, PostgreSQL native full-text search

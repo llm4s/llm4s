@@ -279,8 +279,11 @@ The snippets below leave out their imports. Together they use these:
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
+import org.llm4s.javaapi.CompletionStream;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JEmbeddingClient;
@@ -288,15 +291,23 @@ import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JTool;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
+import org.llm4s.javaapi.LlmErrorKind;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
 import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 ```
 
 ## A conversation
@@ -377,6 +388,58 @@ it reported one. A `JCompletion` is a value with `equals`, `hashCode` and a `toS
 The method is `completion`, a noun, because it returns the reply rather than performs a request for its text; `complete`
 keeps returning a `String`. There is no `completion` overload for core's Scala `CompletionOptions`, so
 `client.completion(conversation, null)` compiles, and returns a failed result like any other `null` argument.
+
+## Streaming the reply
+
+`stream` sends the same arguments as `complete` - a query, a conversation, or a conversation and `JCompletionOptions` -
+with a `CompletionStreamListener`, and returns at once. The listener receives each piece of the reply's text as it
+arrives (`onPartial`), then the whole reply (`onComplete`, a `JCompletion`) or the error (`onError`); only `onPartial` is
+abstract, so a lambda or a method reference is a listener:
+
+```java
+JCompletion reply;
+try (CompletionStream stream = client.stream(conversation, System.out::print).get()) {
+    reply = stream.await().get();
+}
+System.out.println();
+
+Flow.Publisher<String> pieces = client.streamAsPublisher(conversation);
+```
+
+The returned `CompletionStream` awaits the reply (`await()`, the same outcome the listener heard) and cancels the call
+(`cancel()`, or `close()`, so try-with-resources stops a call its block leaves). Cancelling interrupts the provider's
+thread, which is how llm4s providers stop, and the listener then hears `onError` with a `CANCELLED` error. Listener calls
+are made one at a time, never on your thread; one that throws stops the call, and `onError` receives what it threw.
+
+`streamAsPublisher` returns the text as a `java.util.concurrent.Flow.Publisher<String>` instead: it is in the JDK, so
+Reactor (`JdkFlowAdapter`), RxJava and Mutiny adapt it without another llm4s dependency. Each subscription makes its own
+call. A subscriber slower than the model holds the provider's thread rather than losing text, and cancelling the
+subscription cancels the call. Streaming yields text only; tool-call deltas are not streamed.
+
+## Structured output
+
+Pass a record class after the query, or after the conversation (and options), and `complete` returns an instance of
+it instead of text. The record's components become a JSON Schema that is sent as the structured-output format, and
+the answer is read back into the record:
+
+```java
+record City(String name, String country, int population) {}
+
+City city = client.complete("The largest city in Japan, with its population", City.class).get();
+System.out.println(city.name() + ", " + city.country() + ": " + city.population());
+```
+
+A component can be a `String`, an `int`, `long`, `short` or `byte` (boxed or not), a `double` or `float`, a
+`boolean`, an enum (the model answers with a constant's name), another record, a `java.util.List` of any of these, or an
+`Optional` of any of these. `Optional` is the only way to let the model answer `null` or leave a field out; every other
+field is required. A `Map`, an array, a raw `List`, an interface or a record that contains itself is refused before
+any call, and an answer that does not fit - a missing field, the wrong JSON type, a fraction for an `int`, an unknown
+enum name - is a failed result whose message names the field, such as `field 'previous[0].city': expected a string,
+got a number`. Numbers pass through a `double`, so ask for an identifier above 2^53 as a `String`.
+
+How firmly the schema binds the model is the provider's: OpenAI-style providers send it as a native JSON Schema,
+Anthropic adds it to the system prompt, and watsonx and Bedrock ignore it, so the answer is still checked when it comes
+back. See [Structured output](structured-output) for each provider.
 
 ## Reading a result
 
@@ -501,6 +564,44 @@ literal), and the `toolCallId()` a tool message answers. `usage()` counts tokens
 These types are values, but not `Serializable`. Their `toString` prints the full text - a message's content, a tool
 call's arguments, an answer or a guardrail's reason - as the Scala types do, so mind what you log.
 
+## Tools
+
+An agent can call tools you write in Java, in either of two styles. Annotate the public methods of a class with `@Tool`,
+and each parameter with `@Param` (its `name` is what the model passes; without one, the compiled name is used, which
+needs `javac -parameters`):
+
+```java
+class WeatherTools {
+    @Tool(description = "The current weather in a city")
+    public String weather(@Param(name = "city", description = "City name") String city) {
+        return "Sunny in " + city;
+    }
+}
+```
+
+or build one from a lambda with `JTool.builder`, then give the tools to `Llm4s.createAgentWithTools`:
+
+```java
+List<JTool> weather = JTool.fromAnnotated(new WeatherTools()).get();
+LlmResult<JTool> add = JTool.builder("add", "Adds two numbers")
+    .param("a", long.class, "First")
+    .param("b", long.class, "Second")
+    .handler(args -> args.getLong("a") + args.getLong("b"))
+    .build();
+
+JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather.get(0), add.get())).get();
+JAgentResult result = agent.run("What is the weather in Paris?").get();
+```
+
+A parameter is a `String`, an `int`, `long`, `short` or `byte` (boxed or not), a `double` or `float`, a `boolean`, or an
+enum (the model passes a constant's name); its JSON Schema is derived from the type, and `optionalParam` (or
+`@Param(required = false)`, with a boxed type) lets the model leave it out. The model's arguments are read into those Java
+values before your code runs, with no JSON library: a missing or mistyped argument is a tool error the model sees, and so
+is an exception your method or lambda throws - the agent keeps running and the model can try again. A result is passed to
+the model as text if it is a `String`; a number, boolean, enum, `Map` or `Collection` becomes JSON. A tool that cannot be
+built (no handler, an unsupported parameter type, a parameter declared twice) and an agent given two tools with one name
+are failed results, not exceptions.
+
 ## Embeddings
 
 An embedding model turns a text into a vector, a `float[]`, and texts that mean similar things get vectors that point
@@ -593,6 +694,49 @@ that does not answer in time `TIMEOUT`; any other failure with no status, such a
 `OTHER`. To keep the vectors in a store, search them and answer questions from what they find, see
 [Java RAG](java-rag) (`llm4s-java-rag`).
 
+## Testing your code
+
+`FakeLlmClient` is a fake model for your own tests: it answers from a script, records every prompt your code sent, and
+needs no network or API key. Its `client()` is a real `JLlmClient`, so the code under test needs no interface or mock -
+give it the fake's client wherever it takes one:
+
+```java
+class CalculatorTest {
+
+    @Test
+    void answersFromTheModel() {
+        FakeLlmClient fake = FakeLlmClient.replying("4");
+
+        String answer = new Calculator(fake.client()).ask("What is 2+2?");
+
+        assertEquals("4", answer);
+        assertEquals(List.of("What is 2+2?"), fake.prompts());
+    }
+
+    @Test
+    void reportsAProviderFailure() {
+        FakeLlmClient fake = FakeLlmClient.builder()
+            .failWith(LlmErrorKind.RATE_LIMIT, "slow down")
+            .build();
+
+        LlmResult<String> result = fake.client().complete("What is 2+2?");
+
+        assertTrue(result.isFailure());
+        assertEquals(LlmErrorKind.RATE_LIMIT, result.getError().getKind());
+    }
+}
+```
+
+`Calculator` stands for your own class: here, one whose `ask` returns `client.complete(question).getOrNull()`.
+`FakeLlmClient.replying("a", "b")` answers the first call with `a` and the second with `b`; `builder()` mixes replies
+(`reply`) and failures (`failWith`, with the `LlmErrorKind` that `getKind()` then reports). A call beyond the script is a
+failed result whose message names the call and its prompt, so a test that makes more calls than it scripted says why.
+`callCount()`, `prompts()` (the last user message of each call, in order) and `lastPrompt()` show what your code sent.
+
+The fake is in `llm4s-java-api` itself, so a test needs no other dependency. It answers `complete`, `completion` and
+structured output; for an agent with tools from Scala, `llm4s-testkit`'s `ScriptedLLMClient` scripts tool calls too
+([Testing with the Testkit](testing-with-the-testkit)), and `Llm4s.wrapClient` turns it into a `JLlmClient`.
+
 ## What is not here yet
 
 `llm4s-java-api` covers a client, a conversation, the whole reply, the kind of a failure and embeddings. These are not
@@ -600,12 +744,8 @@ available from Java yet, each with the issue that tracks it:
 
 | You may expect | State today |
 |---|---|
-| Streaming tokens | `JLlmClient` has blocking `complete` calls only: [#1485](https://github.com/llm4s/llm4s/issues/1485) |
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
-| Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
-| Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
-| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
-| A fake client for your own tests | [#1497](https://github.com/llm4s/llm4s/issues/1497) |
+| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools are defined from Java in [Tools](#tools) |
 
 ## Where next
 
