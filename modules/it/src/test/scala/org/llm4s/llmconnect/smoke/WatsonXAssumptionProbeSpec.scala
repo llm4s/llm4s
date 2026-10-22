@@ -40,6 +40,7 @@ import scala.util.{ Try, Using }
  * export WATSONX_BASE_URL=https://eu-de.ml.cloud.ibm.com   # optional; default us-south
  * export WATSONX_MODEL=ibm/granite-4-h-small               # optional; must support tool calling
  * export WATSONX_API_VERSION=2026-09-25                     # optional; default WatsonXConfig.DEFAULT_API_VERSION
+ * export WATSONX_REASONING_MODEL=openai/gpt-oss-120b        # optional; for the reasoning probes, default as shown
  * sbt "it/testOnly org.llm4s.llmconnect.smoke.WatsonXAssumptionProbeSpec"
  * }}}
  *
@@ -64,6 +65,9 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val model = env("WATSONX_MODEL").getOrElse("ibm/granite-4-h-small")
   // The `version` query parameter; the client's default unless a run pins another to compare.
   private val apiVersion = env("WATSONX_API_VERSION").getOrElse(WatsonXConfig.DEFAULT_API_VERSION)
+  // A model WatsonXClient sends `reasoning_effort` to (WatsonXClient.takesReasoningEffort); IBM's own reasoning
+  // examples use this one (langchain-ibm chat_models.py, "Reasoning output"; watsonx-ai-java-sdk test resources).
+  private val reasoningModel = env("WATSONX_REASONING_MODEL").getOrElse("openai/gpt-oss-120b")
 
   private val PlainCompletion     = "plain completion returns text and token usage"
   private val Roles               = "system and user messages are accepted in `messages`"
@@ -81,8 +85,14 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val JsonSchemaFormat =
     "`response_format: {type: json_schema, json_schema: {name, schema, strict}}` is accepted and the reply matches"
   private val StreamOptions = "`chat_stream` accepts the penalties and `response_format` too"
-  private val BadKey        = "a wrong API key is an AuthenticationError that never contains the key"
-  private val BadRequest    = "a malformed request is a 400 that the client reports as a ValidationError"
+  private val ReasoningEffortSent =
+    "`reasoning_effort` is accepted by the reasoning model and `message.reasoning_content` comes back"
+  private val StreamReasoning = "`chat_stream` sends the reasoning as `delta.reasoning_content` pieces"
+  private val ReasoningUsage  = "(info) the usage reports no reasoning token count"
+  private val ReasoningEffortElsewhere =
+    "(info) `reasoning_effort` sent to the default model, which the client never sends it to, is rejected"
+  private val BadKey     = "a wrong API key is an AuthenticationError that never contains the key"
+  private val BadRequest = "a malformed request is a 400 that the client reports as a ValidationError"
 
   private val report = new ProbeReport(
     s"watsonx ($model, version=$apiVersion)",
@@ -102,6 +112,10 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       JsonObject,
       JsonSchemaFormat,
       StreamOptions,
+      ReasoningEffortSent,
+      StreamReasoning,
+      ReasoningUsage,
+      ReasoningEffortElsewhere,
       BadKey,
       BadRequest
     )
@@ -118,10 +132,10 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       "WATSONX_API_KEY and WATSONX_PROJECT_ID (or WATSONX_SPACE_ID) not set"
     )
 
-  private def config(key: String): WatsonXConfig =
+  private def config(key: String, modelName: String = model): WatsonXConfig =
     WatsonXConfig
       .fromValues(
-        modelName = model,
+        modelName = modelName,
         apiKey = key,
         projectId = projectId,
         spaceId = spaceId,
@@ -132,6 +146,9 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
 
   private def withClient[A](key: String = apiKey.getOrElse(""))(f: WatsonXClient => A): A =
     Using.resource(new WatsonXClient(config(key)))(f)
+
+  private def withReasoningClient[A](f: WatsonXClient => A): A =
+    Using.resource(new WatsonXClient(config(apiKey.getOrElse(""), reasoningModel)))(f)
 
   private def say(text: String): Conversation = Conversation(Seq(UserMessage(text)))
 
@@ -425,6 +442,62 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
         .withFrequencyPenalty(0.5)
         .withResponseFormat(ResponseFormat.Json)
       jsonReply(withClient()(_.streamComplete(askForJson, options, _ => ())).value)
+    }
+  }
+
+  it should s"probe: $ReasoningEffortSent" in {
+    report.probe(ReasoningEffortSent, "WatsonXClient.takesReasoningEffort / reasoningEffortValue / reasoningText") {
+      requireAccount()
+      val options    = CompletionOptions().withMaxTokens(400).withReasoning(ReasoningEffort.Low)
+      val completion = withReasoningClient(_.complete(say("What is 3^3?"), options)).value
+      completion.content should not be empty
+      withClue(s"no reasoning came back from $reasoningModel\n")(completion.thinking should not be empty)
+    }
+  }
+
+  it should s"probe: $StreamReasoning" in {
+    report.probe(StreamReasoning, "WatsonXClient.readStream: the delta field it reads the reasoning from") {
+      requireAccount()
+      val thinking = scala.collection.mutable.ListBuffer.empty[String]
+      val options  = CompletionOptions().withMaxTokens(400).withReasoning(ReasoningEffort.Low)
+      val completion =
+        withReasoningClient(
+          _.streamComplete(say("What is 3^3?"), options, _.thinkingDelta.foreach(thinking += _))
+        ).value
+      completion.content should not be empty
+      withClue(s"no streamed reasoning from $reasoningModel\n")(thinking.mkString should not be empty)
+    }
+  }
+
+  it should s"probe: $ReasoningUsage" in {
+    report.probe(ReasoningUsage, "none needed: the client reads no reasoning token count; only correct the docs") {
+      requireAccount()
+      withRaw { raw =>
+        val request =
+          raw.body(userMessage("What is 3^3?"), "max_tokens" -> ujson.Num(400), "reasoning_effort" -> ujson.Str("low"))
+        request("model_id") = reasoningModel
+        val usage = ok(raw, raw.chat(request))("usage")
+        withClue(s"the usage reports more than the three counts: ${usage.render()}\n") {
+          usage.obj.keySet.filterNot(Set("prompt_tokens", "completion_tokens", "total_tokens")) shouldBe empty
+        }
+      }
+    }
+  }
+
+  it should s"probe: $ReasoningEffortElsewhere" in {
+    report.probe(ReasoningEffortElsewhere, "WatsonXClient.takesReasoningEffort: send it to more models") {
+      requireAccount()
+      withRaw { raw =>
+        val response =
+          raw.chat(
+            raw.body(
+              userMessage("Say hi in one word"),
+              "max_tokens"       -> ujson.Num(20),
+              "reasoning_effort" -> ujson.Str("low")
+            )
+          )
+        withClue(s"HTTP ${response.statusCode}: ${raw.scrub(response.body)}\n")(response.statusCode shouldBe 400)
+      }
     }
   }
 

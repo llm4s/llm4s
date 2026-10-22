@@ -136,7 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
-  (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
+  (`json_object`, `json_schema`) on the chat API instead of dropping them, to send `reasoning` as `reasoning_effort` to
+  the `openai/gpt-oss-*` models (other models get nothing and a one-time warning), and to read a reply's
+  `reasoning_content` as thinking, on `complete` and streamed [#1314](https://github.com/llm4s/llm4s/issues/1314).
 - **Fixed** the `openai`, `azure`, `requesty` and `anthropic` clients returning a request that hit its `timeouts.request`
   as a non-retryable `UnknownError` (OkHttp's call timeout, `InterruptedIOException("timeout")`): it is now a recoverable
   `NetworkError("Request timeout")`, as a socket timeout already was, so `ReliableClient` retries it. The `anthropic` client

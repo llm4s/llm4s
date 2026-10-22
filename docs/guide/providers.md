@@ -515,9 +515,21 @@ Behaviour to know about:
   Python SDK and LangChain integration send (IBM's Node.js SDK names only `json_object`). JSON mode needs
   the prompt to ask for JSON too; the client adds no instruction. Whether a model honours either format
   depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
-- **Ignored options.** `reasoning` and `budgetTokens` are dropped without error. The chat API has
-  `reasoning_effort` and `include_reasoning`, which this client does not send yet, and it does not read a
-  reply's `reasoning_content`.
+- **Reasoning.** `CompletionOptions.reasoning` goes as `reasoning_effort` (`Low`, `Medium` and `High` as
+  `low`, `medium` and `high`) to OpenAI's gpt-oss models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b` and
+  their variants), the models IBM's own clients send it to. The chat API has no value that turns reasoning
+  off, so `ReasoningEffort.None` goes as `low`, and a warning is logged once per process. Any other model
+  is sent nothing for `reasoning`, again with a warning logged once per process: IBM's Model Gateway
+  rejects the field for models without it, and whether the chat API does is unconfirmed.
+  `include_reasoning` is not sent; the service defaults it to true.
+- **Thinking.** A reply's `reasoning_content` (or `reasoning`) is read as thinking from any model:
+  `Completion.thinking` on `complete`, and `StreamedChunk.thinkingDelta` on a stream, with the whole
+  text on the final completion. It is not sent back on later turns. The chat API reports no reasoning
+  token count, so `TokenUsage.thinkingTokens` stays empty (IBM's recorded replies suggest the
+  reasoning is counted in `completion_tokens`). `budgetTokens` has no counterpart and is ignored. Granite models that put their
+  reasoning inside the content between tags (`<think>...</think>`) are not split: that text stays in
+  `content`. The field names come from IBM's SDKs and from replies IBM's Java SDK recorded from
+  `openai/gpt-oss-120b`; like the rest of this section, they are unconfirmed until the probe suite runs.
 - **Abnormal endings.** A stream that ends without a `finish_reason`, or whose `finish_reason` is
   `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
   partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`
@@ -1660,6 +1672,7 @@ tool calls do, and each client sends it back where its provider takes it:
 | Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
 | Gemini API, Vertex AI | a `thoughtSignature` on a part: the `functionCall` part, or the last text part (and thought summaries, `thought: true`, as text) | the signature, on the same part ([below](#gemini-and-vertex-ai-thought-signatures)) |
 | OpenAI, Azure, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+| IBM watsonx.ai | `reasoning_content` (or `reasoning`) | not sent: the chat API's assistant message has no field for it |
 
 Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
 calls, and reject a thinking block without a signature, so unsigned thinking - from another

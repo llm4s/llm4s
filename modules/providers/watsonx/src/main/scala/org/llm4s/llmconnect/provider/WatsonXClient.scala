@@ -16,7 +16,7 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.concurrent.duration.*
@@ -39,7 +39,9 @@ import scala.util.{ Try, Using }
  *  - `NODE`: https://github.com/IBM/watsonx-ai-node-sdk at 47a4a0c (2026-08-05), IBM's Node.js SDK;
  *  - `LCIBM`: https://github.com/langchain-ai/langchain-ibm at 6c32b1d (2026-10-05), IBM's LangChain integration,
  *    `libs/ibm/langchain_ibm/chat_models.py`;
- *  - `PY`: IBM's Python SDK, `ibm-watsonx-ai` 1.8.0 on PyPI.
+ *  - `PY`: IBM's Python SDK, `ibm-watsonx-ai` 1.8.0 on PyPI;
+ *  - `JAVA`: https://github.com/IBM/watsonx-ai-java-sdk at 02246d5 (2026-10-22), IBM's Java SDK, whose test
+ *    resources include replies recorded from the service (`modules/watsonx-ai/src/test/...`).
  *
  * The `@Cloud` suite `WatsonXAssumptionProbeSpec` (modules/it) re-checks each of these against a real account and
  * prints which held.
@@ -85,13 +87,26 @@ import scala.util.{ Try, Using }
  * IBM's SDK notes that JSON mode needs the prompt to ask for JSON as well (NODE types/vml_v1.ts:3284-3292); this
  * client adds no instruction. Whether a model honours either format depends on the model.
  *
- * == Unsupported options ==
+ * == Reasoning ==
  *
- * Ignored without error: `reasoning` and `budgetTokens`, as an OpenAI-compatible dialect without a reasoning
- * mapping ignores them. The chat API has `reasoning_effort` (`low`, `medium`, `high`) and `include_reasoning`
- * (NODE types/vml_v1.ts:858-864; PY `schema/_api.py:289-290`), with `reasoning_content` in a reply (NODE
- * types/vml_v1.ts:3384); sending them, and reading the reasoning back, is not done yet. Budget tokens have no
- * counterpart.
+ * `CompletionOptions.reasoning` is sent as `reasoning_effort` (`low`, `medium` or `high`; SDK-evidenced: NODE
+ * types/vml_v1.ts:860-864 and vml_v1.ts:2828,3053 for `textChat` and `textChatStream`; PY `schema/_api.py:289`;
+ * LCIBM chat_models.py:1010), but only to the models known to take it ([[WatsonXClient.takesReasoningEffort]]):
+ * OpenAI's gpt-oss models, `openai/gpt-oss-*`, which IBM's clients send it to (`JAVA` ChatServiceThinkingTest;
+ * LCIBM chat_models.py:657-690). Any other model is sent nothing, and a warning is logged once per process: IBM's
+ * Model Gateway rejects the parameter for models without it (`JAVA` ModelGatewayChatServiceIT), and whether the
+ * chat API does is unchecked. The chat API has no value that turns reasoning off, so `ReasoningEffort.None` is
+ * sent as `low`, the least, with a warning logged once per process ([[WatsonXClient.reasoningEffortValue]]).
+ * `include_reasoning` is not sent: it defaults to true (NODE types/vml_v1.ts:858).
+ *
+ * A reply's reasoning is read as thinking, from any model: `message.reasoning_content` on `complete` (NODE
+ * types/vml_v1.ts:3383-3384) and `delta.reasoning_content` on a stream, passed on as `StreamedChunk.thinkingDelta`
+ * (`JAVA` gpt_oss_thinking_response.txt and gpt_oss_thinking_streaming_response.txt, recorded replies of
+ * `openai/gpt-oss-120b`); `reasoning`, which IBM's LangChain integration also reads (LCIBM chat_models.py:150-153,
+ * 332-335), when `reasoning_content` is absent. Thinking is not sent back on a later turn: the chat API's assistant
+ * message has no field for it. Reasoning tokens are not reported: the chat API's usage has only `prompt_tokens`,
+ * `completion_tokens` and `total_tokens` (NODE types/vml_v1.ts:3496-3503, and the recorded replies above), so
+ * `TokenUsage.thinkingTokens` stays empty. `budgetTokens` has no counterpart and is ignored.
  *
  * == Finish reasons and stream endings ==
  *
@@ -338,6 +353,17 @@ class WatsonXClient(
               }
               chunk.get("choices").flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt).foreach { choice =>
                 val delta = choice.get("delta").flatMap(_.objOpt)
+                delta.flatMap(reasoningText).foreach { thinking =>
+                  emit(
+                    StreamedChunk(
+                      id = responseId,
+                      content = None,
+                      toolCall = None,
+                      finishReason = None,
+                      thinkingDelta = Some(thinking)
+                    )
+                  )
+                }
                 delta.flatMap(_.get("content")).flatMap(_.strOpt).filter(_.nonEmpty).foreach { text =>
                   emit(StreamedChunk(id = responseId, content = Some(text), toolCall = None, finishReason = None))
                 }
@@ -462,6 +488,11 @@ class WatsonXClient(
     if (options.presencePenalty != 0.0) body("presence_penalty") = options.presencePenalty
     if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
+    // see "Reasoning" in the class Scaladoc
+    options.reasoning.foreach { effort =>
+      if (takesReasoningEffort(config.model)) body("reasoning_effort") = reasoningEffortValue(config.model, effort)
+      else warnReasoningNotSent(config.model)
+    }
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
       // SDK-evidenced: IBM's LangChain integration sends "auto" by default (LCIBM chat_models.py:1764). The Node
@@ -517,8 +548,9 @@ class WatsonXClient(
               choice.get("finish_reason").flatMap(_.strOpt).map(normalizeFinishReason).getOrElse("")
             )
           } yield {
-            val text  = message.flatMap(_.get("content")).flatMap(_.strOpt).getOrElse("")
-            val usage = parseUsage(json.objOpt.flatMap(_.get("usage")))
+            val text     = message.flatMap(_.get("content")).flatMap(_.strOpt).getOrElse("")
+            val thinking = message.flatMap(reasoningText).getOrElse("")
+            val usage    = parseUsage(json.objOpt.flatMap(_.get("usage")))
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = nowSeconds(),
@@ -526,7 +558,7 @@ class WatsonXClient(
               toolCalls = toolCalls,
               usage = usage,
               model = config.model,
-              message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls),
+              message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
               estimatedCost = usage.flatMap(estimateCost)
             )
           }
@@ -631,6 +663,63 @@ object WatsonXClient {
         "json_schema" -> ujson.Obj("name" -> js.name, "schema" -> js.schema, "strict" -> js.strict)
       )
   }
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(classOf[WatsonXClient])
+
+  private val GptOss = """openai/gpt-oss-.+""".r
+
+  /**
+   * Whether `model` is sent `reasoning_effort`: OpenAI's gpt-oss models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`
+   * and their variants, such as `-curated`), matched case-insensitively. They are the models IBM's own clients send
+   * it to (see "Reasoning" in the class Scaladoc); any other model is sent nothing.
+   */
+  private[provider] def takesReasoningEffort(model: String): Boolean =
+    GptOss.matches(model.trim.toLowerCase(java.util.Locale.ROOT))
+
+  /**
+   * A [[ReasoningEffort]] as the chat API's `reasoning_effort`, which takes `low`, `medium` and `high` (NODE
+   * types/vml_v1.ts:860-864). `None` has no counterpart, since the models that take the field always reason: it is
+   * sent as `low`, the least, and a warning naming `model` is logged once per process.
+   */
+  private[provider] def reasoningEffortValue(model: String, effort: ReasoningEffort): String = effort match {
+    case ReasoningEffort.None =>
+      warnReasoningNotDisabled(model)
+      "low"
+    case ReasoningEffort.Low    => "low"
+    case ReasoningEffort.Medium => "medium"
+    case ReasoningEffort.High   => "high"
+  }
+
+  /** Whether the `ReasoningEffort.None` warning has been logged in this process. */
+  private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
+
+  /** Whether the warning that a model is not sent `reasoning_effort` has been logged in this process. */
+  private[provider] val warnedReasoningNotSent = new AtomicBoolean(false)
+
+  private def warnReasoningNotDisabled(model: String): Unit =
+    if (warnedReasoningNotDisabled.compareAndSet(false, true))
+      logger.warn(
+        s"watsonx model $model cannot turn reasoning off: ReasoningEffort.None is sent as reasoning_effort=low, " +
+          "and the model still reasons. Logged once per process."
+      )
+
+  private def warnReasoningNotSent(model: String): Unit =
+    if (warnedReasoningNotSent.compareAndSet(false, true))
+      logger.warn(
+        s"watsonx model $model is not known to take reasoning_effort (only openai/gpt-oss-* models are sent it): " +
+          "CompletionOptions.reasoning is not sent. Logged once per process."
+      )
+
+  /**
+   * The reasoning in a reply's `message` or a stream's `delta`: `reasoning_content`, else `reasoning`, when a
+   * non-empty string; a stream sends empty `reasoning_content` pieces, which are skipped.
+   */
+  private def reasoningText(fields: collection.Map[String, ujson.Value]): Option[String] =
+    fields
+      .get("reasoning_content")
+      .flatMap(_.strOpt)
+      .filter(_.nonEmpty)
+      .orElse(fields.get("reasoning").flatMap(_.strOpt).filter(_.nonEmpty))
 
   /**
    * The `arguments` of a call as the chat API takes them: a JSON string (SDK-evidenced: NODE types/messages.ts:19-24). An object is rendered; a string

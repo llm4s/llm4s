@@ -168,10 +168,61 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     freq("frequency_penalty").num shouldBe 2.0
   }
 
-  test("reasoning and budgetTokens are ignored without error (documented): the body is unchanged") {
-    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High).withBudgetTokens(Some(1000))
-    body(x, reasoning) shouldBe body(x)
-    ujson.read(body(x, reasoning)).obj.keySet.filter(_.contains("reasoning")) shouldBe empty
+  // ---- reasoning_effort
+
+  private val gptOss = config.copy(model = "openai/gpt-oss-120b")
+
+  private def gptOssBody(opts: CompletionOptions, cfg: org.llm4s.llmconnect.config.WatsonXConfig = gptOss): String =
+    new WatsonXClient(cfg, httpClient = routed(_ => Right(iamToken()), _ => Right(chatReply)))
+      .createRequestBody(x, opts)
+      .toOption
+      .get
+      .render()
+
+  test("golden: a gpt-oss model is sent reasoning_effort low, medium and high for Low, Medium and High") {
+    Seq(ReasoningEffort.Low -> "low", ReasoningEffort.Medium -> "medium", ReasoningEffort.High -> "high").foreach { (effort, wire) =>
+      gptOssBody(CompletionOptions().withReasoning(effort)) shouldBe
+        s"""{"model_id":"openai/gpt-oss-120b","messages":[{"role":"user","content":"x"}],"temperature":0.7,"project_id":"project-1","reasoning_effort":"$wire"}"""
+    }
+  }
+
+  test("ReasoningEffort.None is sent to a gpt-oss model as low, the least, with a warning logged once") {
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.None)).should(include(""""reasoning_effort":"low""""))
+    WatsonXClient.warnedReasoningNotDisabled.get() shouldBe true
+    // a second request logs nothing new and sends the same
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.None)).should(include(""""reasoning_effort":"low""""))
+  }
+
+  test("include_reasoning is never sent: it defaults to true") {
+    ujson.read(gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.High))).obj.keySet should not contain
+      "include_reasoning"
+  }
+
+  test("gpt-oss variants and any case take reasoning_effort; other models do not") {
+    Seq("openai/gpt-oss-120b", "openai/gpt-oss-20b", "OpenAI/GPT-OSS-120b-curated", " openai/gpt-oss-20b ").foreach {
+      model => withClue(model)(WatsonXClient.takesReasoningEffort(model) shouldBe true)
+    }
+    Seq(
+      "ibm/granite-4-h-small",
+      "ibm/granite-3-3-8b-instruct",
+      "meta-llama/llama-3-3-70b-instruct",
+      "mistralai/mistral-medium-2505",
+      "openai/gpt-oss-",
+      "gpt-oss-120b"
+    ).foreach(model => withClue(model)(WatsonXClient.takesReasoningEffort(model) shouldBe false))
+  }
+
+  test("a model that does not take reasoning_effort is sent nothing for reasoning, with a warning logged once") {
+    ReasoningEffort.values.foreach(effort => body(x, CompletionOptions().withReasoning(effort)) shouldBe body(x))
+    WatsonXClient.warnedReasoningNotSent.get() shouldBe true
+  }
+
+  test("reasoning unset sends no reasoning_effort, and budgetTokens is ignored, on a gpt-oss model too") {
+    val plain = gptOssBody(CompletionOptions())
+    ujson.read(plain).obj.keySet.filter(_.contains("reasoning")) shouldBe empty
+    gptOssBody(CompletionOptions().withBudgetTokens(Some(1000))) shouldBe plain
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Low).withBudgetTokens(Some(1000))) shouldBe
+      gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Low))
   }
 
   private val streamed =
@@ -261,4 +312,15 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     messages(1)("tool_calls").arr.map(_("id").str) shouldBe Seq("c1", "c2")
     messages.drop(2).map(m => (m("role").str, m("tool_call_id").str, m("content").str)) shouldBe
       Seq(("tool", "c2", "r2"), ("tool", "c1", "r1"))
+  }
+
+  test("a streamed request and the body complete posts carry reasoning_effort for a gpt-oss model") {
+    val opts     = CompletionOptions().withReasoning(ReasoningEffort.Medium)
+    val expected = gptOssBody(opts)
+    val stream   = streaming(streamOf(bytes(streamed)))
+    new WatsonXClient(gptOss, httpClient = stream).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    stream.modelRequests.loneElement.body shouldBe expected
+    val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
+    new WatsonXClient(gptOss, httpClient = http).complete(x, opts) shouldBe a[Right[?, ?]]
+    http.modelRequests.loneElement.body shouldBe expected
   }
