@@ -21,8 +21,9 @@ getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.L
 getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
 getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
 getting-started/ollama-quickstart.md | 36e396831d | with | import org.llm4s.llmconnect.model.CompletionOptions
-getting-started/testing-guide.md | cf30f353e7 | skip | conceptual pseudocode by its own comment: InMemoryVectorStore, embedder and RAGPipeline are stand-ins, not llm4s classes
+getting-started/testing-guide.md | 2da8240d29 | skip | conceptual pseudocode by its own comment: InMemoryVectorStore, embedder and RAGPipeline are stand-ins, not llm4s classes
 getting-started/first-example.md | dc23df3294 | with | import org.llm4s.llmconnect.model._
+getting-started/testing-guide.md | 76552d46c3 | skip | sbt build definition, not Scala source
 getting-started/installation.md | f4504f50ef | skip | sbt build definition, not Scala source
 getting-started/installation.md | 9a7b01aa6f | skip | sbt build definition, not Scala source
 getting-started/installation.md | 8288e4a556 | skip | sbt build definition, not Scala source
