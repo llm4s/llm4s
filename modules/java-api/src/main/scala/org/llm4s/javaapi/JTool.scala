@@ -19,6 +19,10 @@ import org.llm4s.toolapi.ToolFunction
  * into those Java values before the handler runs, without a JSON library: a missing required argument, or one of the
  * wrong type, is a tool error the model sees, and the handler is not called. So is an exception the handler throws -
  * the agent keeps running.
+ *
+ * When an agent runs the tool, [[JToolArgs.idempotencyKey]] and [[JToolArgs.toolCallId]] describe the call (#1740): a
+ * lambda reads them from its `args`, and an annotated method from a parameter of type [[JToolArgs]], which the model
+ * does not see. They are empty outside an agent run.
  */
 final class JTool private[javaapi] (token: FacadeToken, private[javaapi] val function: ToolFunction[?, ?]) {
 

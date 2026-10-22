@@ -359,8 +359,60 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
         "JEmbeddings.cosineSimilarity(vectors.get(0), vectors.get(1))",
         "JEmbeddingPurpose.QUERY",
         "OllamaConfig.apply(",
+        "args.idempotencyKey()",
+        "call.idempotencyKey()",
         "import org.llm4s.llmconnect.model.Conversation;"
       ).foreach(marker => all should include(marker))
+    }
+
+    "include the agents guide's Java tool block word for word (#1740)" in {
+      val agents = GuideDocs.blocksIn(GuideDocs.read(GuideFile, "docs/guide/agents/index.md"), "java")
+      val keyed  = agents.filter(_.contains("idempotencyKey()"))
+      keyed should not be empty
+      keyed.foreach(block => javaSources should include(squash(block)))
+    }
+  }
+
+  "The tools' idempotency-key blocks" should {
+
+    "hand an annotated and a lambda tool each call's key when an agent runs them (#1740)" in {
+      val seen = new java.util.concurrent.CopyOnWriteArrayList[String]()
+      val billing = new GuideSnippets.Billing {
+        def charge(cents: Long, idempotencyKey: String): String = { seen.add(s"charge:$cents:$idempotencyKey"); "ch_1" }
+        def refund(charge: String, idempotencyKey: String): String = {
+          seen.add(s"refund:$charge:$idempotencyKey"); "re_1"
+        }
+      }
+      val calls = List(
+        ToolCall("c1", "charge", ujson.Obj("cents" -> 5)),
+        ToolCall("c2", "refund", ujson.Obj("charge" -> "ch_1"))
+      )
+      val n = new java.util.concurrent.atomic.AtomicInteger(0)
+      val model = new Recording("done") {
+        override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+          if (n.getAndIncrement() == 0)
+            Right(
+              Completion("id", 0L, "", "m", AssistantMessage(contentOpt = None, toolCalls = calls), toolCalls = calls)
+            )
+          else super.complete(c, o)
+      }
+      GuideSnippets.idempotentTools(client(model), billing).answer().orElseThrow() shouldBe "done"
+      val recorded = seen.asScala.toList.sorted
+      recorded.map(_.split(":").take(2).mkString(":")) shouldBe List("charge:5", "refund:ch_1")
+      val keys = recorded.map(_.split(":")(2))
+      keys.foreach(_ should fullyMatch regex "[0-9a-f]{64}")
+      keys.distinct should have size 2
+    }
+
+    "leave the key empty when the tool runs outside an agent" in {
+      val seen = new java.util.concurrent.atomic.AtomicReference[String]("unset")
+      val billing = new GuideSnippets.Billing {
+        def charge(cents: Long, idempotencyKey: String): String    = { seen.set(idempotencyKey); "ch_1" }
+        def refund(charge: String, idempotencyKey: String): String = "re_1"
+      }
+      val charge = JTool.fromAnnotated(new GuideSnippets.Payments(billing)).get().get(0)
+      charge.function.execute(ujson.Obj("cents" -> 5)) shouldBe Right(ujson.Str("ch_1"))
+      seen.get() shouldBe null
     }
   }
 

@@ -18,6 +18,7 @@ import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JTool;
+import org.llm4s.javaapi.JToolArgs;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmErrorKind;
@@ -190,6 +191,39 @@ final class GuideSnippets {
         JAgentResult result = agent.run("What is the weather in Paris?").get();
 
         return result;
+    }
+
+    /** The system the "Tools" section's side effects reach: it de-duplicates by idempotency key (#1740). */
+    interface Billing {
+        String charge(long cents, String idempotencyKey);
+
+        String refund(String charge, String idempotencyKey);
+    }
+
+    /** The "Tools" section's annotated method that reads the call's idempotency key (#1740). */
+    public static final class Payments {
+        private final Billing billing;
+
+        Payments(Billing billing) {
+            this.billing = billing;
+        }
+
+        @Tool(description = "Charges a card once")
+        public String charge(@Param(name = "cents", description = "Amount in cents") long cents, JToolArgs call) {
+            return billing.charge(cents, call.idempotencyKey().orElse(null));   // empty outside an agent run
+        }
+    }
+
+    /** The "Tools" section's lambda that reads the call's idempotency key (#1740), and an agent with both tools. */
+    static JAgentResult idempotentTools(JLlmClient client, Billing billing) {
+        LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
+            .param("charge", String.class, "The charge to refund")
+            .handler(args -> billing.refund(args.getString("charge"), args.idempotencyKey().orElse(null)))
+            .build();
+
+        List<JTool> tools = new java.util.ArrayList<>(JTool.fromAnnotated(new Payments(billing)).get());
+        tools.add(refund.get());
+        return Llm4s.createAgentWithTools(client, tools).get().run("Charge 5 cents, then refund it").get();
     }
 
     /** The "Streaming the reply" block (#1485). */

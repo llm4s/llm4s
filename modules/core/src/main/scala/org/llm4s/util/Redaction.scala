@@ -554,9 +554,10 @@ private[llm4s] object Redaction {
    * (`addedReadingEdits`): the passes again, with a query value that ends before JSON and a `Bearer` or `Basic` word
    * that leaves the pair after it alone; the pairs after the JSON escape of a line break; and the rest of a value
    * after a literal `&`. A fourth (#1707) adds, wherever no edit is, the content of a value in quotes written behind
-   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way, and a fifth (#1706) the
-   * strings, numbers and words of the value of a sensitive key of a Python literal, read as Python writes it
-   * (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
+   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way, and the rest of the line
+   * after a sensitive key at the start of a line held in a JSON string (`\n  password: ...`, #1765), and a fifth
+   * (#1706) the strings, numbers and words of the value of a sensitive key of a Python literal, read as Python writes
+   * it (`pythonValues`): a `pytest` diff, a notebook's line array, a dict cut off after a comma, `str(dict)` inside a
    * `repr`, `\'` inside a JSON string, a keyword argument holding a list or a call (`token=SecretStr('...')`, #1813).
    * A sixth (#1816) adds the password of a URL's userinfo, `https://alice:[REDACTED]@host`, also with the slashes
    * escaped as JSON writes them. Last (#1646), every reading again, of the input with each plural credential key
@@ -678,7 +679,9 @@ private[llm4s] object Redaction {
    * the same way (`escapedQuotedValues`, #1707): where an edit is there already, only the parts no edit covers are
    * added (`uncoveredEdits`), since the passes replace the start of such a value and stop at its `&`, and a reading
    * added only where nothing touches it would add nothing. No part overlaps an edit, so here too every edit is made as
-   * it is without the reading.
+   * it is without the reading. Then the rest of the line after a sensitive key at the start of a line of TOML, YAML or
+   * dotenv text held in a JSON string (`escapedLineValues`, #1765), whole and only where it touches no edit, so that
+   * a value a pass read already is left as that pass wrote it.
    *
    * Then, the same way, the strings, numbers and words of the value of a sensitive key of a Python literal
    * (`pythonValues`, #1706), less every `"` that delimits a JSON string and every escape a part would split
@@ -711,6 +714,7 @@ private[llm4s] object Redaction {
     if (input.indexOf('\\') >= 0) {
       val added = uncoveredEdits(input, kept, escapedQuotedValues(input), placeholder)
       if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+      add(escapedLineValues(input).map { case (start, end) => Edit(start, end, placeholder, 0, placeholder.length) })
     }
     if (input.indexOf('\'') >= 0 || input.indexOf('=') >= 0) {
       Seq(false, true).foreach { calls =>
@@ -1697,6 +1701,70 @@ private[llm4s] object Redaction {
       (text: String) =>
         redactEscapedQuoted(pairs.escapedQuote, text, placeholder, key = 1, slashes = 2, hex = 3, pair = true)
     )
+  }
+
+  /**
+   * A key at the start of a line of text held in a JSON string (#1765): right after the JSON escape of a line break or
+   * a tab (`\n`, `\r`, `\t`, `\u000a`, `\u000d`, `\u0009`, behind any run of backslashes, so at any depth), after any
+   * spaces or tabs and an optional YAML list marker, and before `:` (YAML, a header) or `=` with spaces or tabs around
+   * it (TOML, dotenv). Group 1 is the run of backslashes of the escape, group 2 the key; the match ends where the value
+   * starts.
+   */
+  private val EscapedLineKey: Regex =
+    s"""(?<!\\\\)(\\\\++)(?:[nrt]|[u]000[9aAdD])[ \\t]*+(?:-[ \\t]++)?($Key)(?::|[ \\t]*+$PairEquals)[ \\t]*+""".r
+
+  /**
+   * The value of every sensitive key that `EscapedLineKey` finds, as `(start, end)` spans of the input (#1765): a
+   * TOML, YAML or dotenv text in a JSON string has its line breaks escaped, so the key of each line follows the letter
+   * or the digit an escape ends with, and the passes that want a key at the start of a line, or after a character no
+   * key holds, read none: `{"config":"[server]\ntoken = \"S\""}`, `{"config":"db:\n  password: S"}`,
+   * `{"log":"x\ntoken='S'"}` (#1799). The value is the rest of the line in any style (plain, quoted, escaped
+   * quotes), less trailing spaces and tabs. It ends at the escape of a line break or a tab written behind no more
+   * backslashes than the one before the key, at a quote written behind fewer (the end of the string the line sits in:
+   * a bare `"` at depth 1, `\"` at depth 2), at a bare line break, or at the end of the input, so it never takes a
+   * quote or an escape of the JSON around it, and the document parses as before. A loop that reads each character of
+   * a value once; the search goes on after the value.
+   */
+  private def escapedLineValues(input: String): Vector[(Int, Int)] = {
+    val length  = input.length
+    val matcher = EscapedLineKey.pattern.matcher(input)
+    val found   = Vector.newBuilder[(Int, Int)]
+
+    def lineBreakAt(at: Int): Boolean =
+      at < length && ("nrt".indexOf(input.charAt(at).toInt) >= 0 ||
+        (at + 5 <= length && input.startsWith("u000", at) && "9aAdD".indexOf(input.charAt(at + 4).toInt) >= 0))
+
+    def valueEnd(from: Int, run: Int): Int = {
+      var i   = from
+      var end = -1
+      while (end < 0 && i < length) {
+        val c = input.charAt(i)
+        if (c == '"' || c == '\n' || c == '\r') end = i
+        else if (c == '\\') {
+          val after = afterBackslashes(input, i)
+          val depth = after - i
+          if ((depth <= run && lineBreakAt(after)) || (depth < run && after < length && input.charAt(after) == '"'))
+            end = i
+          else i = after + 1
+        } else i += 1
+      }
+      if (end < 0) length else end
+    }
+
+    var searchFrom = 0
+    while (searchFrom < length && matcher.find(searchFrom)) {
+      val key  = matcher.group(2)
+      val from = matcher.end
+      searchFrom = from
+      if (isSensitiveKey(key)) {
+        val stop = valueEnd(from, matcher.end(1) - matcher.start(1))
+        var end  = math.min(stop, length)
+        while (end > from && (input.charAt(end - 1) == ' ' || input.charAt(end - 1) == '\t')) end -= 1
+        if (end > from && !isProseAssertion(key, input, from, end)) found += (from -> end)
+        searchFrom = math.max(stop, from)
+      }
+    }
+    found.result()
   }
 
   /** `key=`, or `key` and the escape of `=`, where `AnyKeyStart` lets a key start: group 1 is the key. */

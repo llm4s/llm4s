@@ -18,6 +18,9 @@ import java.lang.annotation.Target;
  *     }
  * }
  * }</pre>
+ *
+ * <p>A parameter of type {@link JToolArgs} is not one the model passes: it receives the call itself, so the method can
+ * read {@link JToolArgs#idempotencyKey()} and {@link JToolArgs#toolCallId()} when an agent runs it (#1740).
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)

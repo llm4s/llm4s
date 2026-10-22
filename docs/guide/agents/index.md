@@ -367,8 +367,22 @@ Two tools pass it on by themselves. `HTTPTool` adds `Idempotency-Key: <key>` to 
 sends as an agent's call, unless the call's own headers set one. An MCP tool sends it to its server in the
 `tools/call` request's `_meta`, as `llm4s.org/idempotencyKey` (with `llm4s.org/toolCallId`), never among the
 arguments; an llm4s `MCPServer` hands it to its tool as `params.call`, and another server can read it there or
-ignore it. Tools defined from Java (`llm4s-java-api`) and Kotlin (`llm4s-kotlin-api`) do not see it yet
-([#1740](https://github.com/llm4s/llm4s/issues/1740)).
+ignore it.
+
+A tool defined from Java (`llm4s-java-api`) reads the same call from its `JToolArgs`: `idempotencyKey()` and
+`toolCallId()` are `Optional<String>`s, empty outside an agent run. A `JTool.builder` lambda reads them from its
+`args`, and a `@Tool` method from a parameter of type `JToolArgs`, which the model does not see (see the Java guide's
+[Tools](../java#tools)):
+
+```java
+LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
+    .param("charge", String.class, "The charge to refund")
+    .handler(args -> billing.refund(args.getString("charge"), args.idempotencyKey().orElse(null)))
+    .build();
+```
+
+Tools defined from Kotlin (`llm4s-kotlin-api`) do not see it yet
+([#1495](https://github.com/llm4s/llm4s/issues/1495)).
 
 The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
 issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
@@ -378,12 +392,10 @@ model request made again because the first response was never stored. The bounda
 
 - The key de-duplicates only where the external system honours it. Without one, a side effect can
   happen more than once; the runtime never promises exactly-once execution.
-- Only an `AgentTool` sees the key. A tool added through `ToolRegistry` or
-  `AgentTool.fromToolFunction` - the built-in tools, MCP tools, and tools written with the Java or
-  Kotlin API - runs at least once like any other, but its `ToolFunction` handler has no
-  `ToolContext` to read the key from
-  ([#1740](https://github.com/llm4s/llm4s/issues/1740)). Write a tool with a side effect that must
-  not repeat as an `AgentTool`.
+- A tool sees the key only when it reads it: `ToolContext.idempotencyKey` in an `AgentTool`,
+  `params.call` in a `ToolFunction`, `idempotencyKey()` in a Java tool's `JToolArgs`. One that
+  ignores it - and a tool written with the Kotlin API, which cannot read it yet
+  ([#1495](https://github.com/llm4s/llm4s/issues/1495)) - runs at least once like any other.
 - An approved or edited call keeps the key it was proposed with, and a call that asked a question
   keeps it when it resumes. Make a tool's first run, before approval or an answer, free of side
   effects.

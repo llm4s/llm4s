@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.{ ObjectSchema, Schema, SchemaDefinition, ToolBuilder }
+import org.llm4s.toolapi.{ ObjectSchema, Schema, SchemaDefinition, ToolBuilder, ToolCallInfo }
 import org.llm4s.types.Result
 
 import java.lang.reflect.{ InvocationTargetException, Method, Modifier }
@@ -30,7 +30,7 @@ private[javaapi] object JTools {
         .map(n => ValidationError("param", s"tool '$name' declares parameter '$n' twice"))
       schema <- schemaOf(name, spec)
       function <- ToolBuilder[Map[String, Any], ujson.Value](name, Option(spec.description).getOrElse(""), schema)
-        .withHandler(extractor => call(name, spec.params, handler, extractor.params))
+        .withHandler(extractor => call(name, spec.params, handler, extractor.params, extractor.call))
         .buildSafe()
     } yield new JTool(FacadeToken.INSTANCE, function)
 
@@ -74,12 +74,13 @@ private[javaapi] object JTools {
     tool: String,
     params: Vector[ParamSpec],
     handler: JToolHandler,
-    json: ujson.Value
+    json: ujson.Value,
+    info: Option[ToolCallInfo]
   ): Either[String, ujson.Value] =
     for {
       obj    <- json.objOpt.toRight(s"tool '$tool' expects an object of arguments")
       values <- read(params, obj)
-      result <- Try(handler.call(new JToolArgs(FacadeToken.INSTANCE, values))).toEither.left.map(described)
+      result <- Try(handler.call(new JToolArgs(FacadeToken.INSTANCE, values, info))).toEither.left.map(described)
     } yield toJson(result)
 
   private def read(
@@ -182,28 +183,36 @@ private[javaapi] object JTools {
       )
     } yield java.util.List.copyOf(tools.asJava))
 
+  /**
+   * A tool for one annotated method. A parameter of type [[JToolArgs]] is not shown to the model: it receives the call's
+   * arguments, id and idempotency key (#1740). Every other parameter is one the model passes.
+   */
   private def annotated(target: Object, method: Method): Result[JTool] = {
     val tool = method.getAnnotation(classOf[Tool])
     val name = if (tool.name.trim.nonEmpty) tool.name else method.getName
     method.getParameters.toList
-      .foldLeft[Result[Vector[ParamSpec]]](Right(Vector.empty)) { (acc, p) =>
-        acc.flatMap { specs =>
-          val ann       = Option(p.getAnnotation(classOf[Param]))
-          val paramName = ann.map(_.name).filter(_.trim.nonEmpty).orElse(Option.when(p.isNamePresent)(p.getName))
-          paramName
-            .toRight(
-              ValidationError(
-                "param",
-                s"tool '$name', parameter ${specs.size + 1} of ${method.getName}: give it @Param(name = ...) or compile with javac -parameters"
+      .foldLeft[Result[Vector[Option[ParamSpec]]]](Right(Vector.empty)) { (acc, p) =>
+        acc.flatMap { slots =>
+          if (p.getType == classOf[JToolArgs]) Right(slots :+ None)
+          else {
+            val ann       = Option(p.getAnnotation(classOf[Param]))
+            val paramName = ann.map(_.name).filter(_.trim.nonEmpty).orElse(Option.when(p.isNamePresent)(p.getName))
+            paramName
+              .toRight(
+                ValidationError(
+                  "param",
+                  s"tool '$name', parameter ${slots.size + 1} of ${method.getName}: give it @Param(name = ...) or compile with javac -parameters"
+                )
               )
-            )
-            .map(n => specs :+ ParamSpec(n, p.getType, ann.fold("")(_.description), ann.forall(_.required)))
+              .map(n => slots :+ Some(ParamSpec(n, p.getType, ann.fold("")(_.description), ann.forall(_.required))))
+          }
         }
       }
-      .flatMap { specs =>
-        val receiver              = if (Modifier.isStatic(method.getModifiers)) null else target
-        val handler: JToolHandler = args => method.invoke(receiver, specs.map(s => args.asMap().get(s.name)).toArray*)
-        build(Spec(name, tool.description, specs, Some(handler)))
+      .flatMap { slots =>
+        val receiver = if (Modifier.isStatic(method.getModifiers)) null else target
+        val handler: JToolHandler =
+          args => method.invoke(receiver, slots.map(_.fold[AnyRef](args)(s => args.asMap().get(s.name))).toArray*)
+        build(Spec(name, tool.description, slots.flatten, Some(handler)))
       }
   }
 }

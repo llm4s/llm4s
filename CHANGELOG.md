@@ -129,6 +129,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** the call's id and idempotency key for Java tools run by an agent: `JToolArgs.toolCallId()` and
+  `JToolArgs.idempotencyKey()` (`Optional<String>`, empty outside an agent run), read by a `JTool.builder` lambda from
+  its `args` and by a `@Tool` method from a `JToolArgs` parameter the model does not see; Kotlin tools follow with
+  [#1495](https://github.com/llm4s/llm4s/issues/1495) [#1740](https://github.com/llm4s/llm4s/issues/1740).
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
@@ -209,6 +213,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project runners (`ipython`, `pydoc`, `jupyter`, `npx`, `uv`, `poetry`, `conda`, ...; `npm`, `yarn`, `pnpm` stay
   allowed build tools), and musl's loader as
   `libc.musl-*.so.1` [#1845](https://github.com/llm4s/llm4s/issues/1845); [sandbox](docs/reference/workspace-sandbox.md).
+- **Fixed** (security) `Redaction` left the value of a sensitive key in the clear where TOML, YAML or dotenv text sits
+  in a JSON string and the key starts a line after an escaped line break or tab (`\n`, `\r`, `\t`, `\u000a`, `\u000d`,
+  also doubly escaped in JSON inside a JSON string): `token = "..."`, `password: ...`, `token='...'`. The rest of such
+  a line is now replaced, and the JSON still parses [#1765](https://github.com/llm4s/llm4s/issues/1765),
+  [#1799](https://github.com/llm4s/llm4s/issues/1799).
 
 ### Build & tooling
 

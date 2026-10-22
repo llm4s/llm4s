@@ -43,6 +43,28 @@ final class ToolsCheck {
         }
     }
 
+    /** An annotated tool that reads the call it runs as (#1740): its JToolArgs parameter is not shown to the model. */
+    public static final class KeyedTools {
+
+        @Tool(description = "Charges an amount once")
+        public String charge(JToolArgs call, @Param(name = "cents", description = "Amount in cents") long cents) {
+            CALLS.add("charge:" + cents + "," + call.toolCallId().orElse("none") + "," + call.idempotencyKey().orElse("none"));
+            return call.idempotencyKey().orElse("none");
+        }
+    }
+
+    /** A lambda tool that reads the call it runs as (#1740). */
+    static LlmResult<JTool> refund() {
+        return JTool.builder("refund", "Refunds an amount once")
+            .param("cents", long.class, "Amount in cents")
+            .handler(args -> {
+                CALLS.add("refund:" + args.getLong("cents") + "," + args.toolCallId().orElse("none") + ","
+                    + args.idempotencyKey().orElse("none"));
+                return args.idempotencyKey().orElse("none");
+            })
+            .build();
+    }
+
     /** A class with no tool. */
     public static final class NoTools {
         public String notATool() {
@@ -64,10 +86,12 @@ final class ToolsCheck {
             .build();
     }
 
-    /** The agent the spec runs: the annotated tools and the lambda tool together. */
+    /** The agent the spec runs: the annotated tools and the lambda tools together. */
     static LlmResult<JAgent> agent(JLlmClient client) {
         List<JTool> tools = new ArrayList<>(JTool.fromAnnotated(new WeatherTools()).get());
         tools.add(calculator().get());
+        tools.addAll(JTool.fromAnnotated(new KeyedTools()).get());
+        tools.add(refund().get());
         return Llm4s.createAgentWithTools(client, tools);
     }
 }
