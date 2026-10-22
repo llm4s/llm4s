@@ -211,6 +211,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
+  directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
+  extractor used, character and line counts, metadata, a preview and any extraction error
+  [#478](https://github.com/llm4s/llm4s/issues/478).
 - **Added** an http4s reference app, the unpublished `modules/examples-http`: an Ember server over `llm4s-effect`'s
   `AgentIO[IO]` with `POST /chat` (JSON) and `POST /chat/stream` (server-sent events of the answer), the provider from
   `Llm4sConfig` at startup or `--fake`, `LLMError` mapped to HTTP statuses (400, 429 with `Retry-After`, 504, 502, 503),

@@ -55,7 +55,7 @@ and is run in CI:
 | [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
 | [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
-| [Embeddings](#embeddings) | 6 | Vector search, RAG |
+| [Embeddings](#embeddings) | 7 | Vector search, RAG, document extraction |
 | [RAG in a Box](#rag-in-a-box) | - | Production RAG server (external project) |
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
 | [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
@@ -1101,6 +1101,48 @@ Skipping the example query: the index was not synced.
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/S3LoaderExample.scala)
+
+---
+
+### DocumentExtractionInspector {#document-extraction-inspector}
+
+**File:** [`DocumentExtractionInspector.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/DocumentExtractionInspector.scala)
+
+Shows what `llm4s-rag`'s `TikaDocumentExtractor` makes of a file or a directory of files, so you can check
+extraction quality before indexing. For each file it prints the MIME type Tika detects, the `MediaType` it resolves
+to, the extractor used (PDFBox, POI, UTF-8 text or the Tika fallback), the character and line counts, the extractor's
+metadata and a 200-character preview. A file that cannot be extracted is reported with its error and the run carries
+on. Fully offline: no API key or network.
+
+```bash
+# No argument: writes sample .txt, .md, .html, .docx and .pdf files (and one corrupt PDF) to a temp dir
+sbt "samples/runMain org.llm4s.samples.rag.DocumentExtractionInspector"
+
+# A single file, or every file under a directory
+sbt "samples/runMain org.llm4s.samples.rag.DocumentExtractionInspector /path/to/report.pdf"
+sbt "samples/runMain org.llm4s.samples.rag.DocumentExtractionInspector /path/to/docs"
+```
+
+**What it demonstrates:**
+- `TikaDocumentExtractor.detectMimeType` and `extract`, and `MediaType.fromMimeType` from `llm4s-media`
+- That detection reads content before the file name: a `.pdf` holding plain text is detected as `text/plain`
+- Extraction failures surfacing as `Result` values rather than exceptions
+
+Sample output for the generated DOCX:
+
+```text
+== /tmp/llm4s-extraction-.../report.docx
+   MIME type : application/vnd.openxmlformats-officedocument.wordprocessingml.document
+   Media type: unrecognised
+   Extractor : Apache POI (XWPF)
+   Format    : application/vnd.openxmlformats-officedocument.wordprocessingml.document
+   Characters: 46
+   Lines     : 2
+   Metadata  : byteLength=2294, filename=report.docx, mimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document
+   Preview   : Quarterly report Revenue grew in every region.
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/DocumentExtractionInspector.scala)
 
 ---
 
