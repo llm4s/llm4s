@@ -37,7 +37,8 @@ import scala.jdk.CollectionConverters.*
  * replaced lease refused; attempts - recorded with their run ids, a reused run id refused, `maxAttempts` bounding
  * them, and a thread deleted since submission closing its entry `Cancelled(ThreadDeleted)`; closes, their outcomes read
  * back, `awaitClosed` and reclamation by ticket lifetime; rule 4's evidence - `Checkpointer.prune` keeping the newest
- * checkpoint of an open entry's runs; and one lease of many takes raced at once from as many queues over the storage.
+ * checkpoint of an open entry's runs; one lease of many takes raced at once from as many queues over the storage; and,
+ * for metrics (design 4.59), a take's `expiredLease` mark and each agent's `depth`.
  *
  * Lease expiry and close times are judged by the store's clock. By default the store must use the `clock` it is given,
  * and the suite moves a [[ManualClock]]; a store that judges time by a database server's clock overrides
@@ -871,6 +872,56 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.openRuns(Vector(c.thread, quiet, waiting, closed)).value shouldBe
       Map(c.thread -> Set(run), waiting -> Set.empty[RunId])
     c.queue.openRuns(Vector.empty).value shouldBe Map.empty
+  }
+
+  it should "say whether a take replaced an expired lease, never for a fresh or a given-back entry" in {
+    val c = Case()
+    c.submit().value
+    val first = c.take().value
+    first.expiredLease shouldBe false
+    c.queue.release(first.lease).value
+    val again = c.take().value
+    again.expiredLease shouldBe false
+    c.advance(31.seconds)
+    val takeover = c.take("worker-2").value
+    takeover.expiredLease shouldBe true
+    takeover.entry.id shouldBe first.entry.id
+  }
+
+  it should "count each agent's waiting and leased open entries, and the oldest waiting one's age, by its clock" in {
+    val c     = Case()
+    val none  = AgentId.of(s"c-${unique()}").toOption.get
+    val other = c.newThread()
+    val third = c.newThread()
+    c.submit().value
+    c.submit().value
+    c.advance(5.seconds)
+    c.submit(on = other).value
+    c.submit(on = third, by = c.other).value
+    c.queue.depth(Set.empty).value shouldBe Map.empty
+    val before = c.queue.depth(Set(c.agent, c.other, none)).value
+    before.keySet shouldBe Set(c.agent, c.other)
+    (before(c.agent).waiting, before(c.agent).leased) shouldBe (3L, 0L)
+    (before(c.other).waiting, before(c.other).leased) shouldBe (1L, 0L)
+    if exactExpiry then
+      before(c.agent).oldestWaiting shouldBe Some(5.seconds)
+      before(c.other).oldestWaiting shouldBe Some(Duration.Zero)
+    // the oldest head leased: the thread's second entry, submitted with it, is now the oldest waiting
+    c.advance(5.seconds)
+    val leased = c.take().value
+    val during = c.queue.depth(Set(c.agent)).value(c.agent)
+    (during.waiting, during.leased) shouldBe (2L, 1L)
+    if exactExpiry then during.oldestWaiting shouldBe Some(10.seconds)
+    else during.oldestWaiting.value should be >= 10.seconds
+    // an expired lease waits again; a closed entry is not counted
+    c.advance(31.seconds)
+    val lapsed = c.queue.depth(Set(c.agent)).value(c.agent)
+    (lapsed.waiting, lapsed.leased) shouldBe (3L, 0L)
+    val retaken = c.take().value
+    retaken.entry.id shouldBe leased.entry.id
+    c.queue.close(retaken.lease, EntryOutcome.Done(None, None)).value
+    val after = c.queue.depth(Set(c.agent)).value(c.agent)
+    (after.waiting, after.leased) shouldBe (2L, 0L)
   }
 
   it should "keep refusing a deleted entry's attempt once a sweep has reclaimed the thread's tombstone" in {

@@ -12,8 +12,9 @@ import scala.concurrent.duration.FiniteDuration
  *
  * The name is lower-case words separated by dots, such as `llm4s.agent.runs.started`, the Micrometer convention. A
  * Prometheus backend turns the dots into underscores and adds the unit suffix: a counter is exposed as
- * `llm4s_agent_runs_started_total`, a timer as `<name>_seconds`, a gauge under its name. So a name must not end in a
- * unit or `total`: the backends add them.
+ * `llm4s_agent_runs_started_total`, a timer as `<name>_seconds`, a gauge under its name. So no name ends in `total`,
+ * nor a timer's in `seconds`: the backend adds them. A gauge names its own unit, such as
+ * `llm4s.agent.queue.oldest.seconds`.
  *
  * Label values must come from a bounded set - an outcome, a status, an agent id fixed by the code - and carry no
  * content. Never a thread, run, request or tenant id, a prompt or a message: each distinct value is a series kept for
@@ -60,14 +61,13 @@ object Metric {
   private val NamePattern  = "[a-z][a-z0-9]*(\\.[a-z0-9]+)*".r
   private val LabelPattern = "[a-z][a-z0-9_]*".r
   private val Reserved     = Set("le", "quantile")
-  private val UnitSuffixes = Vector(".total", ".seconds", ".milliseconds", ".bytes", ".count")
 
-  private def problems(name: String, help: String, labelNames: Seq[String]): List[String] = {
+  /** `added` are the suffixes a Prometheus backend adds to the metric's kind, which its name must not repeat. */
+  private def problems(name: String, help: String, labelNames: Seq[String], added: Seq[String]): List[String] = {
     val badName =
       if (name == null || !NamePattern.matches(name))
         Some(s"name must be dot-separated lower-case words, such as llm4s.agent.runs.started, was '$name'")
-      else
-        UnitSuffixes.find(name.endsWith).map(s => s"name must not end in '$s': the backends add the unit, was '$name'")
+      else added.find(name.endsWith).map(s => s"name must not end in '$s': the backend adds it, was '$name'")
     val badHelp   = Option.when(help == null || help.isBlank)(s"help of $name must not be blank")
     val badLabels = labelNames.filter(l => l == null || !LabelPattern.matches(l) || Reserved(l))
     val repeated  = labelNames.groupBy(identity).collect { case (l, ls) if ls.size > 1 => l }
@@ -96,16 +96,16 @@ object Metric {
 
   /** A counter; throws `IllegalArgumentException` for an invalid name or label name. */
   def counter(name: String, help: String, labelNames: String*): Counter =
-    checked(problems(name, help, labelNames))(Counter(name, help, labelNames.toVector))
+    checked(problems(name, help, labelNames, Vector(".total")))(Counter(name, help, labelNames.toVector))
 
   /** A timer with `buckets` as its upper bounds; throws `IllegalArgumentException` for an invalid one. */
   def timer(name: String, help: String, buckets: Seq[FiniteDuration], labelNames: String*): Timer =
-    checked(problems(name, help, labelNames) ++ bucketProblems(name, buckets))(
+    checked(problems(name, help, labelNames, Vector(".seconds", ".total")) ++ bucketProblems(name, buckets))(
       Timer(name, help, labelNames.toVector, buckets.toVector)
     )
 
   /** A gauge; throws `IllegalArgumentException` for an invalid name or label name. */
   def gauge(name: String, help: String, labelNames: String*): Gauge =
-    checked(problems(name, help, labelNames))(Gauge(name, help, labelNames.toVector))
+    checked(problems(name, help, labelNames, Vector(".total")))(Gauge(name, help, labelNames.toVector))
 
 }

@@ -1,6 +1,6 @@
 package org.llm4s.metrics
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -181,15 +181,18 @@ trait MetricsCollector {
    * negative or not finite, logging it, and records a null or blank value as `unknown` and values past
    * [[MetricsCollector.MaxLabelValues]] distinct ones per label as `other`.
    */
+  @Experimental
   def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double = 1.0): Unit = () // Default no-op
 
   /** Record one `duration` in timer `metric`, with `labelValues` for its label names; see [[increment]]. */
+  @Experimental
   def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit = () // Default no-op
 
   /**
    * Set gauge `metric`, with `labelValues` for its label names, to `value`, its latest reading; see [[increment]]. A
    * non-finite value is dropped.
    */
+  @Experimental
   def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit = () // Default no-op
 }
 

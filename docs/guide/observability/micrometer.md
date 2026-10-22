@@ -98,6 +98,10 @@ The last column is what a Micrometer `PrometheusMeterRegistry` exposes for the m
 The request timer is published with the same bucket boundaries as the Prometheus module (0.1, 0.5, 1, 2, 5, 10, 30, 60
 and 120 seconds, and 1, 2, 5, 10, 30, 60, 120 and 300 seconds for image generation), so `_bucket` series line up.
 
+The agent runtime's run, claim, commit, child-task and run-queue metrics (`llm4s.agent.*`) are recorded through the
+collector's generic `increment`, `observe` and `set` and land in the registry under their own names, with the same
+series the Prometheus module exposes: see [Agent runtime metrics](index#agent-runtime-metrics).
+
 ## Dashboards built for the Prometheus module
 
 If you exported `llm4s_*` series with `llm4s-observability-prometheus` and switch to this module with a Micrometer

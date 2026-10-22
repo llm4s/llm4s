@@ -25,6 +25,9 @@ class MetricSpec extends AnyFlatSpec with Matchers {
   it should "refuse a name ending in a unit the backends add" in {
     an[IllegalArgumentException] should be thrownBy Metric.counter("llm4s.runs.total", "x")
     an[IllegalArgumentException] should be thrownBy Metric.timer("llm4s.run.seconds", "x", Seq(1.second))
+    an[IllegalArgumentException] should be thrownBy Metric.gauge("llm4s.runs.total", "x")
+    // a gauge keeps its name, so it names its own unit
+    Metric.gauge("llm4s.queue.oldest.seconds", "x").name shouldBe "llm4s.queue.oldest.seconds"
   }
 
   it should "refuse blank help, bad, reserved or repeated label names" in {

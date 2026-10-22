@@ -510,7 +510,7 @@ tracing.traceRAGOperation(
 
 Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
 
-The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation, and the generic `increment`, `observe` and `set` through which other modules record metrics of their own ([below](#agent-runtime-metrics)). Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`. If your application already has a Micrometer `MeterRegistry` (Spring Boot Actuator, Quarkus), use `llm4s-observability-micrometer` instead: its `MicrometerMetrics` records the same series into that registry, and the Spring Boot starter wires it with no code. See [Micrometer metrics](micrometer).
 
 ### Add the module
 
@@ -675,6 +675,52 @@ import org.llm4s.metrics.MetricsCollector
 val both = MetricsCollector.compose(metrics, myCollector)
 // LLMConnect.getClient(providerConfig, both)
 ```
+
+### Agent runtime metrics
+
+The agent runtime (`llm4s-agent`) reports runs, claims, commits, child tasks and its run queue through the same
+collector, as generic `Metric`s (`MetricsCollector.increment`, `observe` and `set`), so `PrometheusMetrics` and
+`MicrometerMetrics` export them without depending on `llm4s-agent` ([design 4.59](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md)).
+Two things record them: a `MeteredCheckpointer` wrapped around the store every runtime and worker of the process
+shares, and an `AgentWorker` given the collector.
+
+```scala
+import org.llm4s.agent.metrics.MeteredCheckpointer
+
+val metered = MeteredCheckpointer(store.checkpointer, metrics) // every GraphRuntime and the worker use `metered`
+// AgentWorker(queue, metered, agents, metrics = metrics)
+```
+
+| Metric (Prometheus series) | Type | Labels | Recorded by |
+|---|---|---|---|
+| `llm4s_agent_runs_started_total` | counter | `graph`, `trigger` (`start`, `resume`, `recover`) | checkpointer |
+| `llm4s_agent_runs_ended_total` | counter | `graph`, `status` (`completed`, `suspended`, `failed`, `cancelled`, `timed_out`) | checkpointer |
+| `llm4s_agent_run_duration_seconds` | histogram | `graph`, `status` | checkpointer |
+| `llm4s_agent_claims_total` | counter | `result` (`acquired`, `taken_over`, `busy`, `failed`) | checkpointer |
+| `llm4s_agent_claim_renewals_total` | counter | `result` (`renewed`, `lost`, `failed`) | checkpointer |
+| `llm4s_agent_commit_duration_seconds` | histogram | `result` (`ok`, `conflict`, `claim_lost`, `failed`) | checkpointer |
+| `llm4s_agent_tasks_started_total` | counter | `agent` | checkpointer |
+| `llm4s_agent_tasks_ended_total` | counter | `agent`, `status` | checkpointer |
+| `llm4s_agent_task_duration_seconds` | histogram | `agent`, `status` | checkpointer |
+| `llm4s_agent_queue_depth` | gauge | `agent`, `state` (`waiting`, `leased`) | worker |
+| `llm4s_agent_queue_oldest_seconds` | gauge | `agent` | worker |
+| `llm4s_agent_queue_wait_seconds` | histogram | `agent` | worker |
+| `llm4s_agent_queue_attempts_total` | counter | `agent`, `result` (`recorded`, `exhausted`, `thread_deleted`) | worker |
+| `llm4s_agent_queue_plans_total` | counter | `agent`, `plan` (`start`, `recover`, `close`) | worker |
+| `llm4s_agent_queue_deferrals_total` | counter | `agent`, `reason` (`busy`, `unrunnable`) | worker |
+| `llm4s_agent_queue_lease_expiries_total` | counter | `agent` | worker |
+| `llm4s_agent_queue_lease_lapses_total` | counter | `agent` | worker |
+| `llm4s_agent_queue_lease_losses_total` | counter | `agent`, `reason` (`refused`, `unrenewed`) | worker |
+| `llm4s_agent_queue_closed_total` | counter | `agent`, `outcome`, `reason` | worker |
+| `llm4s_agent_sweep_passes_total` | counter | `result` (`done`, `skipped`, `failed`) | worker |
+| `llm4s_agent_sweep_threads_examined_total`, `..._tombstones_reclaimed_total`, `..._entries_reclaimed_total` | counter | none | worker |
+| `llm4s_agent_worker_drained_total` | counter | `result` (`finished`, `cancelled`, `abandoned`) | worker |
+
+Dead letters are `llm4s_agent_queue_closed_total{outcome="failed",reason="attempts_exhausted"}`. The queue gauges are
+store-wide: every worker of a fleet reports the same numbers, every `llm4s.agent.worker.metrics.queueDepthEvery`
+(15 seconds), so aggregate them with `max`. `graph` and `agent` are ids your code fixes; no thread, run, entry or
+tenant id is ever a label, and no metric carries message content. Every backend caps a label at
+`MetricsCollector.MaxLabelValues` (256) distinct values and records the rest as `other`.
 
 ### Limits
 

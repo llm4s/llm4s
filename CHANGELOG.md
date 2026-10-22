@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
+- **Added** run, claim, commit, child-task and run-queue metrics (`org.llm4s.agent.metrics`: `MeteredCheckpointer`, `AgentWorker(metrics = ...)`,
+  `RunQueue.depth`), exported by Prometheus and Micrometer through core's new generic `Metric` and `MetricsCollector.increment`/`observe`/`set` ([#2138](https://github.com/llm4s/llm4s/issues/2138), [design 4.59](docs/design/typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md)).
 
 ### Agent harness (Phase 3)
 

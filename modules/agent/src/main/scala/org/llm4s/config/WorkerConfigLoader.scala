@@ -17,7 +17,7 @@ import scala.util.Try
  * Loads a run queue worker's settings (Stage 5 W2, design 4.56) from `llm4s.agent.worker`: `concurrency`,
  * `pollInterval`, `unrunnableAfter`, the `drain` block (`grace`, `exitTimeout`), the `sweep` block (`enabled`, `every`,
  * `batchSize`, an optional `tombstoneAge` and an optional `retention` block of `maxAge`, `maxCheckpoints` and
- * `maxEvents`) and an optional `label`, with the defaults of `llm4s-agent`'s `reference.conf`. The queue's own settings
+ * `maxEvents`), an optional `label` and the `metrics` block (`queueDepthEvery`, design 4.59), with the defaults of `llm4s-agent`'s `reference.conf`. The queue's own settings
  * - the lease, `maxAttempts`, the ticket lifetime - are [[RunQueueConfigLoader]]'s; the store is
  * [[CheckpointerConfigLoader]]'s.
  */
@@ -51,10 +51,21 @@ object WorkerConfigLoader:
       maxCheckpoints  <- optional(c, "sweep.retention.maxCheckpoints")(p => field(p)(c.getInt(p)))
       maxEvents       <- optional(c, "sweep.retention.maxEvents")(p => field(p)(c.getInt(p)))
       label           <- optional(c, "label")(p => field(p)(c.getString(p)))
+      depthEvery      <- duration(c, "metrics.queueDepthEvery")
       retention <- RetentionPolicy.of(maxAge, maxCheckpoints, maxEvents).left.map(invalid(s"$Path.sweep.retention"))
       sweep     <- SweepPolicy.of(retention, tombstoneAge, batchSize).left.map(invalid(s"$Path.sweep"))
       settings <- WorkerSettings
-        .of(concurrency, pollInterval, unrunnableAfter, grace, exitTimeout, Option.when(enabled)(every), sweep, label)
+        .of(
+          concurrency,
+          pollInterval,
+          unrunnableAfter,
+          grace,
+          exitTimeout,
+          Option.when(enabled)(every),
+          sweep,
+          label,
+          depthEvery
+        )
         .left
         .map(invalid(Path))
     yield settings

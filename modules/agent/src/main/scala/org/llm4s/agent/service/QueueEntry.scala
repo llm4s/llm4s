@@ -6,6 +6,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.trace.TraceContext
 
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 /**
@@ -234,9 +235,35 @@ object QueueEntry:
 @Experimental
 final case class Lease(entryId: EntryId, token: LeaseToken, holder: String, expiresAt: Instant)
 
-/** An entry [[RunQueue.take]] leased, with its lease. */
+/**
+ * An entry [[RunQueue.take]] leased, with its lease. `expiredLease` is whether the take replaced a lease of the entry
+ * that had expired, by the store's clock, without being released or closed: its worker died, lost the store, or let the
+ * lease lapse after a failed run so that the entry came back later (W2's backoff). A worker counts it as a lease expiry
+ * (design 4.59); `false` for an entry never leased, or given back.
+ */
 @Experimental
-final case class LeasedEntry(entry: QueueEntry, lease: Lease)
+final case class LeasedEntry(entry: QueueEntry, lease: Lease, expiredLease: Boolean = false)
+
+/**
+ * How many of an agent's open entries are waiting and leased, by the store's clock when [[RunQueue.depth]] read them:
+ * `leased` hold a live lease - a worker is running or deciding them - and `waiting` do not (queued behind their thread's
+ * running entry, or for a worker). `oldestWaiting` is how long the oldest waiting entry has been open since its
+ * submission, by the store's clock; `None` when none waits.
+ */
+@Experimental
+final case class QueueDepth private (waiting: Long, leased: Long, oldestWaiting: Option[FiniteDuration])
+
+@Experimental
+object QueueDepth:
+  def apply(waiting: Long, leased: Long, oldestWaiting: Option[FiniteDuration]): QueueDepth =
+    new QueueDepth(waiting, leased, oldestWaiting)
+
+  /** No open entries. */
+  val empty: QueueDepth = QueueDepth(0L, 0L, None)
+
+  /** How long an entry submitted `at` has been open `now`, both by the store's clock; never negative. */
+  private[agent] def age(at: Instant, now: Instant): FiniteDuration =
+    scala.concurrent.duration.Duration.fromNanos(math.max(0L, java.time.Duration.between(at, now).toNanos))
 
 /**
  * What [[RunQueue.recordAttempt]] did (Stage 5 rule 4).

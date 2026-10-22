@@ -28,6 +28,9 @@ import scala.concurrent.duration.*
  *    so the sweep only reclaims expired queue entries).
  *  - `label`: names the worker in its lease holder and its logs, such as a host or pod name; a random suffix keeps two
  *    workers with one label apart.
+ *  - `queueDepthEvery`: how often a worker given a `MetricsCollector` samples its agents' queue depth
+ *    (`RunQueue.depth`) for the `llm4s.agent.queue.depth` and `llm4s.agent.queue.oldest.seconds` gauges (default 15
+ *    seconds; design 4.59). A worker with no collector never samples.
  *
  * Every duration must be positive, `concurrency` at least 1 and a label not blank: `apply` and the `with*` setters throw
  * `IllegalArgumentException` otherwise, and [[WorkerSettings.of]] returns a `ValidationError`.
@@ -41,7 +44,8 @@ final case class WorkerSettings private (
   exitTimeout: FiniteDuration,
   sweepEvery: Option[FiniteDuration],
   sweep: SweepPolicy,
-  label: Option[String]
+  label: Option[String],
+  queueDepthEvery: FiniteDuration
 ):
   private def changed(
     concurrency: Int = concurrency,
@@ -51,9 +55,20 @@ final case class WorkerSettings private (
     exitTimeout: FiniteDuration = exitTimeout,
     sweepEvery: Option[FiniteDuration] = sweepEvery,
     sweep: SweepPolicy = sweep,
-    label: Option[String] = label
+    label: Option[String] = label,
+    queueDepthEvery: FiniteDuration = queueDepthEvery
   ): WorkerSettings =
-    WorkerSettings(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, sweep, label)
+    WorkerSettings(
+      concurrency,
+      pollInterval,
+      unrunnableAfter,
+      drainGrace,
+      exitTimeout,
+      sweepEvery,
+      sweep,
+      label,
+      queueDepthEvery
+    )
 
   def withConcurrency(n: Int): WorkerSettings                   = changed(concurrency = n)
   def withPollInterval(d: FiniteDuration): WorkerSettings       = changed(pollInterval = d)
@@ -65,6 +80,7 @@ final case class WorkerSettings private (
   def withSweep(policy: SweepPolicy): WorkerSettings            = changed(sweep = policy)
   def withLabel(l: String): WorkerSettings                      = changed(label = Some(l))
   def withLabel(l: Option[String]): WorkerSettings              = changed(label = l)
+  def withQueueDepthEvery(d: FiniteDuration): WorkerSettings    = changed(queueDepthEvery = d)
 
 @Experimental
 object WorkerSettings:
@@ -75,6 +91,7 @@ object WorkerSettings:
   val DefaultDrainGrace: FiniteDuration      = 30.seconds
   val DefaultExitTimeout: FiniteDuration     = 10.seconds
   val DefaultSweepEvery: FiniteDuration      = 5.minutes
+  val DefaultQueueDepthEvery: FiniteDuration = 15.seconds
 
   private def problems(
     concurrency: Int,
@@ -83,7 +100,8 @@ object WorkerSettings:
     drainGrace: FiniteDuration,
     exitTimeout: FiniteDuration,
     sweepEvery: Option[FiniteDuration],
-    label: Option[String]
+    label: Option[String],
+    queueDepthEvery: FiniteDuration
   ): List[String] =
     def positive(name: String, d: FiniteDuration) = Option.when(d.length <= 0)(s"$name must be positive, was $d")
     List(
@@ -93,6 +111,7 @@ object WorkerSettings:
       positive("drainGrace", drainGrace),
       positive("exitTimeout", exitTimeout),
       sweepEvery.flatMap(positive("sweepEvery", _)),
+      positive("queueDepthEvery", queueDepthEvery),
       Option.when(label.exists(_.isBlank))("label must not be blank")
     ).flatten
 
@@ -105,11 +124,23 @@ object WorkerSettings:
     exitTimeout: FiniteDuration = DefaultExitTimeout,
     sweepEvery: Option[FiniteDuration] = Some(DefaultSweepEvery),
     sweep: SweepPolicy = SweepPolicy.keepAll,
-    label: Option[String] = None
+    label: Option[String] = None,
+    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery
   ): WorkerSettings =
-    val found = problems(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, label)
+    val found =
+      problems(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, label, queueDepthEvery)
     require(found.isEmpty, found.mkString("; "))
-    new WorkerSettings(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, sweep, label)
+    new WorkerSettings(
+      concurrency,
+      pollInterval,
+      unrunnableAfter,
+      drainGrace,
+      exitTimeout,
+      sweepEvery,
+      sweep,
+      label,
+      queueDepthEvery
+    )
 
   def of(
     concurrency: Int = DefaultConcurrency,
@@ -119,9 +150,19 @@ object WorkerSettings:
     exitTimeout: FiniteDuration = DefaultExitTimeout,
     sweepEvery: Option[FiniteDuration] = Some(DefaultSweepEvery),
     sweep: SweepPolicy = SweepPolicy.keepAll,
-    label: Option[String] = None
+    label: Option[String] = None,
+    queueDepthEvery: FiniteDuration = DefaultQueueDepthEvery
   ): Result[WorkerSettings] =
-    problems(concurrency, pollInterval, unrunnableAfter, drainGrace, exitTimeout, sweepEvery, label) match
+    problems(
+      concurrency,
+      pollInterval,
+      unrunnableAfter,
+      drainGrace,
+      exitTimeout,
+      sweepEvery,
+      label,
+      queueDepthEvery
+    ) match
       case Nil =>
         Right(
           new WorkerSettings(
@@ -132,7 +173,8 @@ object WorkerSettings:
             exitTimeout,
             sweepEvery,
             sweep,
-            label
+            label,
+            queueDepthEvery
           )
         )
       case found => Left(ValidationError("worker", found))

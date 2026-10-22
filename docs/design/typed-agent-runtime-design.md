@@ -452,6 +452,7 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.55 | [Stage 5 slice W1: run submission and the durable run queue](typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md) ([#2134](https://github.com/llm4s/llm4s/issues/2134)) |
 | 4.56 | [Stage 5 slice W2: workers](typed-agent-runtime/4.56-stage-5-slice-w2-workers.md) ([#2135](https://github.com/llm4s/llm4s/issues/2135)) |
 | 4.58 | [Stage 5 slice O1: one trace per run, across machines and child runs](typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md) ([#2137](https://github.com/llm4s/llm4s/issues/2137)) |
+| 4.59 | [Stage 5 slice O2: run, claim, queue and child-task metrics](typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md) ([#2138](https://github.com/llm4s/llm4s/issues/2138)) |
 
 ### 4.9 Stage 0 carry-forward
 

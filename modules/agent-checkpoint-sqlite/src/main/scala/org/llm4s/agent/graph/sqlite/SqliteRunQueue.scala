@@ -114,7 +114,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           if skip.isEmpty then "" else s"AND e.entry_id NOT IN (${skip.map(_ => "?").mkString(", ")})"
         val head = query(
           c,
-          s"""SELECT e.entry_id FROM llm4s_checkpoint_queue_entries e
+          s"""SELECT e.entry_id, e.lease_token FROM llm4s_checkpoint_queue_entries e
              |WHERE e.state = 'open' AND e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed
              |  AND (e.lease_token IS NULL OR e.lease_expires_nanos <= ?)
              |  AND e.entry_id = (
@@ -127,10 +127,11 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
              |      AND o.lease_token IS NOT NULL AND o.lease_expires_nanos > ?)
              |ORDER BY e.entry_id LIMIT 1""".stripMargin,
           (agents ++ skip ++ Vector(now, now))*
-        )(_.getLong(1)).headOption
+          // a takeable head still holding a lease token holds an expired lease, never released
+        )(r => r.getLong(1) -> (r.getObject(2) != null)).headOption
         head match
-          case None     => Right(None)
-          case Some(id) =>
+          case None                => Right(None)
+          case Some((id, expired)) =>
             // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
             update(
               c,
@@ -154,8 +155,31 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             )
             val row = rowOf(c, id).get
             view(c, row).map { e =>
-              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, fromEpochNanos(expires))))
+              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, fromEpochNanos(expires)), expired))
             }
+      }
+
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] =
+    if agents.isEmpty then Right(Map.empty)
+    else
+      store.reading("queue.depth") { c =>
+        val now = clock.instant()
+        val ids = agents.toVector.map(_.value)
+        val rows = query(
+          c,
+          s"""SELECT agent_id,
+             |  SUM(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN 0 ELSE 1 END),
+             |  SUM(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN 1 ELSE 0 END),
+             |  MIN(CASE WHEN lease_token IS NOT NULL AND lease_expires_nanos > ? THEN NULL ELSE submitted_nanos END)
+             |FROM llm4s_checkpoint_queue_entries
+             |WHERE state = 'open' AND agent_id IN (${ids.map(_ => "?").mkString(", ")})
+             |GROUP BY agent_id""".stripMargin,
+          (Vector(epochNanos(now), epochNanos(now), epochNanos(now)) ++ ids)*
+        ) { r =>
+          val oldest = Option(r.getObject(4)).map(_ => fromEpochNanos(r.getLong(4)))
+          AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+        }
+        Right(rows.toMap)
       }
 
   /** `lease`'s entry, if `lease` is its current lease and it is open. */

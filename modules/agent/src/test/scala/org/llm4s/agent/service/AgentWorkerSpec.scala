@@ -408,6 +408,7 @@ class AgentWorkerSpec
       def close(l: Lease, o: EntryOutcome)               = { closes.incrementAndGet(); inner.close(l, o) }
       def reclaim(d: FiniteDuration, n: Int)             = inner.reclaim(d, n)
       def openRuns(ts: Vector[ThreadId])                 = inner.openRuns(ts)
+      def depth(as: Set[org.llm4s.agent.AgentId])        = inner.depth(as)
       def renew(l: Lease, ttl: FiniteDuration): Result[Lease] =
         if (refuse.get) Left(QueueError.LeaseLost(l.entryId, l.token, None)) else inner.renew(l, ttl)
     }

@@ -1,5 +1,6 @@
 package org.llm4s.agent.service
 
+import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ RunId, TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.CancelledError
@@ -100,9 +101,18 @@ trait RunQueue:
 
   /**
    * Leases the oldest takeable head - see the class doc - whose agent is one of `request.agents`, to
-   * `request.holder` for `request.ttl` from now, by the store's clock; `None` if there is none.
+   * `request.holder` for `request.ttl` from now, by the store's clock; `None` if there is none. The answer's
+   * [[LeasedEntry.expiredLease]] says whether the head still held a lease, expired, that this take replaced.
    */
   def take(request: TakeRequest): Result[Option[LeasedEntry]]
+
+  /**
+   * For each of `agents` that has open entries, of any tenant, how many wait and how many are leased, and how long the
+   * oldest waiting one has been open, by the store's clock ([[QueueDepth]]); an agent with none is absent. The
+   * operator's, store-wide, as [[openRuns]] is: a worker samples it for its agents' queue-depth gauges (design 4.59).
+   * It counts entries by an index on the agent, within the store's bound.
+   */
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]]
 
   /** Extends `lease` to `ttl` from now, by the store's clock; refused unless it is the entry's current lease. */
   def renew(lease: Lease, ttl: FiniteDuration): Result[Lease]

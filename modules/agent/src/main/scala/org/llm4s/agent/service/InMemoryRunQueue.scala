@@ -203,7 +203,20 @@ final class InMemoryRunQueue private[agent] (
         val held = Held(request.holder, lastLease, now.plusNanos(request.ttl.toNanos))
         val row  = head.copy(lease = Some(held))
         rows.update(row.id, row)
-        Right(Some(LeasedEntry(view(row), leaseOf(row, held))))
+        // a takeable head still holding a lease holds an expired one, never released
+        Right(Some(LeasedEntry(view(row), leaseOf(row, held), expiredLease = head.lease.isDefined)))
+  }
+
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] = withLock(lock) {
+    val now  = clock.instant()
+    val open = openByThread.valuesIterator.flatMap(_.iterator.map(rows)).filter(r => agents.contains(r.agentId))
+    Right(
+      open.toVector.groupBy(_.agentId).map { (agent, entries) =>
+        val (leased, waiting) = entries.partition(live(_, now))
+        val oldest            = waiting.map(_.submittedAt).minOption
+        agent -> QueueDepth(waiting.size.toLong, leased.size.toLong, oldest.map(QueueDepth.age(_, now)))
+      }
+    )
   }
 
   private def leaseOf(row: Row, held: Held): Lease =

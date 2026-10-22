@@ -323,6 +323,19 @@ private[postgres] object Sql:
        |ORDER BY e.entry_id
        |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
 
+  /**
+   * Per agent of `?` (an array), its open entries waiting and leased at the time bound three times, and the oldest
+   * waiting one's submission time.
+   */
+  def queueDepth(t: Tables): String =
+    s"""SELECT agent_id,
+       |  COUNT(*) FILTER (WHERE NOT (lease_token IS NOT NULL AND lease_expires_at > ?)),
+       |  COUNT(*) FILTER (WHERE lease_token IS NOT NULL AND lease_expires_at > ?),
+       |  MIN(submitted_at) FILTER (WHERE NOT (lease_token IS NOT NULL AND lease_expires_at > ?))
+       |FROM ${t.queueEntries}
+       |WHERE state = 'open' AND agent_id = ANY(?)
+       |GROUP BY agent_id""".stripMargin
+
   /** The attempts' run ids of the open entries of the threads `?` (an array), one row per entry or attempt. */
   def queueOpenRuns(t: Tables): String =
     s"""SELECT e.thread_id, a.run_id FROM ${t.queueEntries} e

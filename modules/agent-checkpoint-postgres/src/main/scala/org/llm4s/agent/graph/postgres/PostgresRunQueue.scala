@@ -155,6 +155,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         scan(0L) match
           case None               => Right(None)
           case Some((id, thread)) =>
+            // a takeable head still holding a lease token holds an expired lease, never released
+            val expired = rowOf(c, id).exists(_.leaseToken.isDefined)
             // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
             update(
               c,
@@ -173,7 +175,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
               id
             )
             view(c, rowOf(c, id).get).map { e =>
-              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires)))
+              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires), expired))
             }
       }
 
@@ -275,6 +277,18 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       micros(at),
       id
     )
+
+  def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] =
+    if agents.isEmpty then Right(Map.empty)
+    else
+      store.reading("queue.depth") { c =>
+        val now = store.clockNow(c)
+        val rows = query(c, Sql.queueDepth(t), now, now, now, agents.toVector.map(_.value).toArray) { r =>
+          val oldest = Option(r.getObject(4)).map(_ => instant(r, 4))
+          AgentId.unsafe(r.getString(1)) -> QueueDepth(r.getLong(2), r.getLong(3), oldest.map(QueueDepth.age(_, now)))
+        }
+        Right(rows.toMap)
+      }
 
   def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] =
     if threads.isEmpty then Right(Map.empty)

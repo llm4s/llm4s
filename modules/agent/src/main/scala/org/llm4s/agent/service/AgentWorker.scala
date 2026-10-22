@@ -2,8 +2,10 @@ package org.llm4s.agent.service
 
 import org.llm4s.agent.{ AgentId, AgentRun }
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
+import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -77,6 +79,11 @@ final case class SweepReport(examined: Int, tombstones: Int, entries: Int, skipp
  * With `settings.sweepEvery` set it also runs the store-wide retention sweep (`Checkpointer.sweep`, with a guard that
  * keeps every open entry's runs and its thread's tombstone) and reclaims closed entries past their ticket lifetime, one
  * instance of the fleet at a time: the sweep holds a store claim on a reserved thread id while it runs.
+ *
+ * Built with a `MetricsCollector`, it records the run queue's and its own metrics (`org.llm4s.agent.metrics.AgentMetrics`,
+ * design 4.59): lease expiries, waits, attempts and what they did, deferrals, lease lapses and losses, closes by
+ * outcome, sweep passes and drains, and every `settings.queueDepthEvery` its agents' queue depth. The runs, claims and
+ * commits its agents make are a `MeteredCheckpointer`'s to record.
  */
 @Experimental
 final class AgentWorker private (
@@ -84,7 +91,8 @@ final class AgentWorker private (
   val checkpointer: Checkpointer,
   agents: Map[AgentId, QueuedAgent],
   val settings: WorkerSettings,
-  val queueSettings: RunQueueSettings
+  val queueSettings: RunQueueSettings,
+  meter: QueueMetrics
 ):
   import AgentWorker.*
 
@@ -120,7 +128,11 @@ final class AgentWorker private (
       val sweep = settings.sweepEvery.map(every =>
         Thread.ofVirtual().name(s"llm4s-worker-sweep-$holder").start(() => sweepLoop(every))
       )
-      threads.set(Vector(loop) ++ sweep)
+      val depth = Option.when(meter.enabled)(
+        Thread.ofVirtual().name(s"llm4s-worker-depth-$holder").start(() => depthLoop())
+      )
+      // the take loop first: health reads it as the head
+      threads.set(Vector(loop) ++ sweep ++ depth)
       logger.info(s"Worker $holder started: agents ${agents.keys.map(_.value).toVector.sorted.mkString(", ")}")
 
   /**
@@ -158,7 +170,9 @@ final class AgentWorker private (
         )
       }
       state.set(WorkerState.Stopped)
-      DrainReport(finished.map(_.entryId), exited.map(_.entryId), abandoned.map(_.entryId))
+      val report = DrainReport(finished.map(_.entryId), exited.map(_.entryId), abandoned.map(_.entryId))
+      meter.drained(report)
+      report
 
   /** Where the worker is in its life. */
   def currentState: WorkerState = state.get
@@ -198,6 +212,7 @@ final class AgentWorker private (
           queue.take(TakeRequest(holder, agents.keySet, lease.ttl, passedOver())) match
             case Right(Some(leased)) =>
               takeProblem = None
+              meter.taken(leased)
               // a take that outlived the drain's join gives its entry back rather than run it untracked; the check
               // and the launch are atomic with the drain's start, so a launched slot is always in the drain's read
               val launched = withLock(launching)(!stopRequested && launch(leased))
@@ -217,6 +232,14 @@ final class AgentWorker private (
               logger.warn(s"Worker $holder could not take an entry: ${error.message}")
               permits.release()
               pause(settings.pollInterval)
+
+  /** Samples the queue's depth for the worker's agents every `settings.queueDepthEvery`, until shutdown begins. */
+  private def depthLoop(): Unit =
+    while !stopRequested do
+      queue.depth(agents.keySet) match
+        case Right(depths) => meter.depths(agents.keySet, depths)
+        case Left(error)   => logger.debug(s"Worker $holder could not read the queue's depth: ${error.message}")
+      pause(settings.queueDepthEvery)
 
   /** Waits `d`, or until shutdown begins. */
   private def pause(d: FiniteDuration): Unit = Try(stopping.await(d.toNanos, TimeUnit.NANOSECONDS))
@@ -263,9 +286,11 @@ final class AgentWorker private (
             slot.lease.set(renewed)
             beat(sent)
           case Left(error @ (_: QueueError.LeaseLost | _: QueueError.EntryClosed)) =>
+            meter.leaseLost(slot.entry.agentId, "refused")
             slot.lost(s"its lease renewal was refused: ${error.message}")
           case Left(error) =>
             if System.nanoTime() - lastSent >= lease.ttl.toNanos then
+              meter.leaseLost(slot.entry.agentId, "unrenewed")
               slot.lost(s"no lease renewal landed within ${lease.ttl}: ${error.message}")
             else
               logger.warn(s"Worker $holder: renewing the lease of entry ${slot.entryId.value} failed: ${error.message}")
@@ -294,14 +319,15 @@ final class AgentWorker private (
     else
       next match
         case Next.Close(outcome) =>
-          queue.close(slot.lease.get, outcome).left.foreach { e =>
-            logger.warn(s"Worker $holder: closing entry ${slot.entryId.value} failed: ${e.message}")
-          }
+          queue.close(slot.lease.get, outcome) match
+            case Right(_) => meter.closed(slot.entry.agentId, outcome)
+            case Left(e)  => logger.warn(s"Worker $holder: closing entry ${slot.entryId.value} failed: ${e.message}")
         case Next.Release =>
           queue.release(slot.lease.get).left.foreach { e =>
             logger.debug(s"Worker $holder: releasing entry ${slot.entryId.value}: ${e.message}")
           }
-        case Next.Expire | Next.Leave => ()
+        case Next.Expire => meter.lapsed(slot.entry.agentId)
+        case Next.Leave  => ()
 
   private def decide(slot: Slot): Next =
     val entry = slot.entry
@@ -318,6 +344,7 @@ final class AgentWorker private (
           Next.Expire
         case Right(true) =>
           // a live run holds the thread: defer to it, recording no attempt (W2)
+          meter.deferred(entry.agentId, "busy")
           passOver(entry.id, settings.pollInterval)
           Next.Release
         case Right(false) =>
@@ -394,13 +421,16 @@ final class AgentWorker private (
         )
       )
     else
+      meter.deferred(entry.agentId, "unrunnable")
       passOver(entry.id, lease.ttl)
       Next.Release
 
   private def attempt(slot: Slot, agent: QueuedAgent): Next =
     beforeAttempt(slot.entry)
-    val runId = RunId.random()
-    queue.recordAttempt(slot.lease.get, runId) match
+    val runId    = RunId.random()
+    val recorded = queue.recordAttempt(slot.lease.get, runId)
+    recorded.foreach(meter.attempted(agent.id, _))
+    recorded match
       case Left(_: QueueError) => Next.Leave
       case Left(error) =>
         logger.warn(s"Worker $holder: recording an attempt at entry ${slot.entryId.value} failed: ${error.message}")
@@ -447,7 +477,9 @@ final class AgentWorker private (
       case Right((admitted, latest)) =>
         // its run id, the entry's tenant and the submitter's trace context, so every attempt is in one trace
         val config = entry.attemptConfig(runId)
-        val begun: Either[EntryOutcome, Result[AgentRun]] = AttemptPlan.of(entry, admitted, latest) match
+        val plan   = AttemptPlan.of(entry, admitted, latest)
+        meter.planned(entry.agentId, plan)
+        val begun: Either[EntryOutcome, Result[AgentRun]] = plan match
           case AttemptPlan.Close(outcome) => Left(outcome)
           case AttemptPlan.Recover        => Right(agent.agent.startRecover(entry.threadId, config))
           case AttemptPlan.Start =>
@@ -515,6 +547,11 @@ final class AgentWorker private (
    * claim on a reserved thread id, held and renewed while the pass runs; a pass that loses it stops.
    */
   private[service] def sweepOnce(): Result[SweepReport] =
+    val pass = sweepPass()
+    meter.swept(pass)
+    pass
+
+  private def sweepPass(): Result[SweepReport] =
     checkpointer.claim(SweepLock, ClaimRequest(RunId.random(), None, lease.ttl)) match
       case Left(_: GraphError.ThreadBusy) => Right(SweepReport(0, 0, 0, skipped = true))
       case Left(error)                    => Left(error)
@@ -591,19 +628,31 @@ object AgentWorker:
   /**
    * A worker that runs `queue`'s entries for `agents` - each an id the entries name, its runtime over `checkpointer`,
    * the store `queue` is in - with `settings`, holding leases by `queueSettings.lease` and reclaiming closed entries
-   * after `queueSettings.ticketLifetime`. Refuses no agents, and two with one id (`ValidationError`).
+   * after `queueSettings.ticketLifetime`, recording its metrics into `metrics` (none by default). Refuses no agents,
+   * and two with one id (`ValidationError`).
    */
   def apply(
     queue: RunQueue,
     checkpointer: Checkpointer,
     agents: Seq[QueuedAgent],
     settings: WorkerSettings = WorkerSettings.default,
-    queueSettings: RunQueueSettings = RunQueueSettings.default
+    queueSettings: RunQueueSettings = RunQueueSettings.default,
+    metrics: MetricsCollector = MetricsCollector.noop
   ): Result[AgentWorker] =
     val repeated = agents.groupBy(_.id).collect { case (id, as) if as.size > 1 => id.value }.toVector.sorted
     if agents.isEmpty then Left(ValidationError("agents", "a worker needs at least one agent"))
     else if repeated.nonEmpty then Left(ValidationError("agents", s"agent ids given twice: ${repeated.mkString(", ")}"))
-    else Right(new AgentWorker(queue, checkpointer, agents.map(a => a.id -> a).toMap, settings, queueSettings))
+    else
+      Right(
+        new AgentWorker(
+          queue,
+          checkpointer,
+          agents.map(a => a.id -> a).toMap,
+          settings,
+          queueSettings,
+          new QueueMetrics(metrics)
+        )
+      )
 
   private def awaitLatch(latch: CountDownLatch, deadline: Long): Boolean =
     Try(latch.await(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)).getOrElse(false)
