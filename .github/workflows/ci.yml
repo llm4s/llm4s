@@ -329,7 +329,9 @@ jobs:
         # disappearing from the published Scaladoc.
         #
         # Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` is only a `[warn]` line and `doc` still
-        # succeeds. The log is checked instead: a Scaladoc warning in an llm4s source fails the job (#1967).
+        # succeeds. The log is checked instead: a Scaladoc warning in an llm4s source fails the job, and so does one in a
+        # third-party source that scripts/scaladoc-third-party-warnings.txt does not list (#1967). The release's publish
+        # job runs the same check before `sbt ci-release`.
         run: |
           set -o pipefail
           scripts/test-check-scaladoc-warnings.sh

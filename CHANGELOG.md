@@ -255,6 +255,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** the release's `publish` job checks the Scaladoc log before `sbt ci-release`, as CI's ScalaDoc job does, so
+  a release cannot package a new Scaladoc warning; and `scripts/check-scaladoc-warnings.sh` now fails on a third-party
+  warning (a doc comment inherited from ScalaTest or cats-effect that Scaladoc cannot resolve) unless
+  `scripts/scaladoc-third-party-warnings.txt` lists it with its reason. That file holds the ones that cannot be silenced
+  from sbt, since Scaladoc ignores `-Wconf` [#1967](https://github.com/llm4s/llm4s/issues/1967).
+- **Fixed** sbt's `Found intransitive dependency (spring-boot-health)` warning on every resolution: the starter's
+  provided Spring Boot 4 health API now drops its dependencies with a `*:*` exclusion, which the published POM states,
+  instead of `.intransitive()`, which a POM cannot; the classpath is unchanged [#1967](https://github.com/llm4s/llm4s/issues/1967).
 - **Added** `ProviderSwitchingFailoverSpec`, a `@Local` suite in `modules/it` (part of `sbt test`): OpenAI, Anthropic and
   Ollama clients built from named sections switch in one JVM against local mock servers, with streaming, tool calls, token
   usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,
