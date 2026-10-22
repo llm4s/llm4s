@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
+  from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
+  [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
 - `Completion.created` is a `java.time.Instant`, not epoch seconds as a `Long`; `withCreated` and
   `StreamingAccumulator.toCompletion(created)` take one, and the wire's epoch seconds are converted in each provider
   client; [migration](docs/reference/migration.md#completioncreated-is-an-instant-2262).

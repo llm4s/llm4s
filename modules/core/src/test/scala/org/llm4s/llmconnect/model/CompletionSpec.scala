@@ -218,42 +218,4 @@ class CompletionSpec extends AnyFunSuite with Matchers {
 
     chunk.hasContent shouldBe false
   }
-
-  // ================================= COMPLETION CHUNK =================================
-
-  test("CompletionChunk.isComplete returns true when finishReason is set") {
-    val chunk = CompletionChunk(
-      id = "chunk-1",
-      finishReason = Some("stop")
-    )
-
-    chunk.isComplete shouldBe true
-  }
-
-  test("CompletionChunk.isComplete returns false when finishReason is None") {
-    val chunk = CompletionChunk(
-      id = "chunk-1",
-      content = Some("Hello")
-    )
-
-    chunk.isComplete shouldBe false
-  }
-
-  test("CompletionChunk.asText returns content or empty string") {
-    val chunkWithContent    = CompletionChunk(id = "chunk-1", content = Some("Hello"))
-    val chunkWithoutContent = CompletionChunk(id = "chunk-2")
-
-    chunkWithContent.asText shouldBe "Hello"
-    chunkWithoutContent.asText shouldBe ""
-  }
-
-  // ================================= CHUNK DELTA =================================
-
-  test("ChunkDelta.empty creates empty delta") {
-    val delta = ChunkDelta.empty
-
-    delta.content shouldBe None
-    delta.role shouldBe None
-    delta.toolCalls shouldBe empty
-  }
 }

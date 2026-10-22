@@ -249,6 +249,18 @@ val seconds: Long = completion.created.getEpochSecond   // where code needs the 
 
 Test fixtures that passed `0L` pass `Instant.EPOCH`.
 
+### Unused speculative core types removed (#2345)
+
+Three groups of public types in `llm4s-core` had no user in any llm4s module and are deleted before the 1.0
+baseline ([#2345](https://github.com/llm4s/llm4s/issues/2345)), rather than frozen into it:
+
+- `org.llm4s.types.typeclass.Encoder` and its implicit `EncoderOps`: encode to JSON with upickle directly
+  (`upickle.default.writeJs(value)` given a `ReadWriter`), or keep a one-method trait of your own.
+- `org.llm4s.types.typeclass.LLMCapable` (with `LLMCapableOps` and its `String` / `Conversation` instances): build a
+  `Conversation` with `Conversation.create(UserMessage(text))` and read a reply with `completion.content`.
+- `org.llm4s.llmconnect.model.CompletionChunk` and `ChunkDelta`: no client ever produced them. Streaming delivers
+  `StreamedChunk` (`content`, `toolCall`, `finishReason`, `thinkingDelta`) to `streamComplete`'s `onChunk`.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last
