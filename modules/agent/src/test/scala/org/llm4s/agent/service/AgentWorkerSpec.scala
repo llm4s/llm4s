@@ -328,6 +328,49 @@ class AgentWorkerSpec
     entry.attempts shouldBe empty
   }
 
+  it should "close an entry for another tenant's thread at once, judging nothing of that thread" in {
+    val store = InMemoryCheckpointer()
+    val other = thread()
+    // tenant b's thread, of a graph this worker's agent cannot take on
+    agentOver(store, answering("x"), "writer").run(other, "hi", RunConfig().withTenantId(TenantId("b"))).value
+    val id = store.runQueue
+      .submit(
+        Submission(other, agentId, QueuedInput.query("q"), Some(TenantId("a")), BusyThreadPolicy.Enqueue)
+      )
+      .value
+      .entryId
+    val worker = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("y")))))
+    worker.start()
+    val entry = store.runQueue.awaitClosed(Some(TenantId("a")), id, 10.seconds).value
+    entry.outcome.value shouldBe EntryOutcome.Failed(
+      FailureReason.RunFailed(GraphError.TenantMismatch(other.value, Some("a")).message)
+    )
+    entry.attempts shouldBe empty
+  }
+
+  it should "record no attempt while the probe claim cannot be given back" in {
+    val store   = InMemoryCheckpointer()
+    val failing = new AtomicBoolean(true)
+    val sticky = new ForwardingCheckpointer(store) {
+      override def release(threadId: ThreadId, token: FencingToken): Result[Unit] =
+        if (failing.get) Left(ValidationError("store", "release failed")) else super.release(threadId, token)
+    }
+    val worker = AgentWorker(
+      store.runQueue,
+      sticky,
+      Seq(QueuedAgent(agentOver(store, answering("x")))),
+      fast,
+      RunQueueSettings(lease = LeasePolicy(ttl = 300.millis, renewEvery = 100.millis))
+    ).value
+    started.add(worker)
+    val id = submit(store, thread())
+    worker.start()
+    Thread.sleep(500)
+    store.runQueue.entry(None, id).value.attempts shouldBe empty
+    failing.set(false)
+    closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
+  }
+
   // ---- the lease ----
 
   it should "cancel a run whose lease renewal is refused, and write nothing more under the lease" in {

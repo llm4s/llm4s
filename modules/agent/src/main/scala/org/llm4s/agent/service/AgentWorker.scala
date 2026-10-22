@@ -136,10 +136,12 @@ final class AgentWorker private (
       DrainReport(Vector.empty, Vector.empty, Vector.empty)
     else
       stopping.countDown()
-      // the loop's take in flight lands before the slots are read; the sweep's page is bounded by the store
+      // the slots running as the drain began, read before a run that ends meanwhile removes its own
+      val running = slots.values.asScala.toVector
+      // the loop's take in flight lands before the slots are read again; the sweep's page is bounded by the store
       threads.get.foreach(t => Try(t.join(java.time.Duration.ofNanos((settings.pollInterval + lease.ttl).toNanos))))
       val graceEnd         = System.nanoTime() + settings.drainGrace.toNanos
-      val draining         = slots.values.asScala.toVector
+      val draining         = (running ++ slots.values.asScala).distinctBy(_.entryId)
       val (finished, late) = draining.partition(s => awaitLatch(s.ended, graceEnd))
       late.foreach(_.cancelForDrain())
       val exitEnd             = System.nanoTime() + settings.exitTimeout.toNanos
@@ -303,9 +305,7 @@ final class AgentWorker private (
           Next.Release
         case Right(false) =>
           read(entry) match
-            case Left(error) =>
-              logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
-              Next.Expire
+            case Left(error) => unread(entry, error)
             case Right((admitted, latest)) =>
               val continues = AttemptPlan.of(entry, admitted, latest) match
                 case AttemptPlan.Close(_) => Right(())
@@ -325,18 +325,36 @@ final class AgentWorker private (
     checkpointer.claim(entry.threadId, ClaimRequest(RunId.random(), entry.tenantId, ProbeTtl)) match
       case Left(_: GraphError.ThreadBusy) => Right(true)
       case Left(error)                    => Left(error)
-      case Right(probe) =>
-        checkpointer.release(entry.threadId, probe.token).left.foreach { e =>
-          logger.debug(s"Worker $holder: releasing the probe claim on entry ${entry.id.value}'s thread: ${e.message}")
-        }
-        Right(false)
+      // a probe whose release failed may still hold the thread: the run would meet it as ThreadBusy, spending an
+      // attempt, so the slot goes on only once the probe is given back
+      case Right(probe) => checkpointer.release(entry.threadId, probe.token).map(_ => false)
 
-  /** The run-id lookup of `entry`'s runs, and the thread's latest checkpoint (rule 4). */
+  /**
+   * The run-id lookup of `entry`'s runs, and the thread's latest checkpoint (rule 4) - only if the thread is the
+   * entry's tenant's: another tenant's thread is `GraphError.TenantMismatch` naming only the entry's tenant, as the
+   * runtime answers it, so nothing of that thread - its graph, its checkpoints - is judged or reaches the entry's
+   * outcome (rule 9).
+   */
   private def read(entry: QueueEntry): Result[(Option[Checkpoint], Option[Checkpoint])] =
     for
+      latest <- checkpointer.latest(entry.threadId).map(_.map(_.checkpoint))
+      _ <- latest match
+        case Some(c) if c.tenantId != entry.tenantId.map(_.value) =>
+          Left(GraphError.TenantMismatch(entry.threadId.value, entry.tenantId.map(_.value)))
+        case _ => Right(())
       admitted <- checkpointer.latestOfRuns(entry.threadId, entry.runIds)
-      latest   <- checkpointer.latest(entry.threadId)
-    yield admitted -> latest.map(_.checkpoint)
+    yield admitted -> latest
+
+  /**
+   * What a slot does when [[read]] fails: another tenant's thread closes the entry `Failed(RunFailed)` at once, with the
+   * tenant-safe refusal; a store error lets the lease lapse, for a later attempt.
+   */
+  private def unread(entry: QueueEntry, error: LLMError): Next = error match
+    case mismatch: GraphError.TenantMismatch =>
+      Next.Close(EntryOutcome.Failed(FailureReason.RunFailed(mismatch.message)))
+    case _ =>
+      logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
+      Next.Expire
 
   /**
    * An entry whose thread this worker's graph cannot take on: left for a worker whose graph can, passed over for a
@@ -381,9 +399,7 @@ final class AgentWorker private (
   private def exhausted(entry: QueueEntry, agent: QueuedAgent): Next =
     val dead = EntryOutcome.Failed(FailureReason.AttemptsExhausted(entry.attempts.size))
     read(entry) match
-      case Left(error) =>
-        logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
-        Next.Expire
+      case Left(error) => unread(entry, error)
       case Right((admitted, latest)) =>
         AttemptPlan.of(entry, admitted, latest) match
           case AttemptPlan.Close(outcome) => Next.Close(outcome)
@@ -410,9 +426,7 @@ final class AgentWorker private (
   /** The attempt `runId` at `entry`, recorded: acts on [[AttemptPlan]], and on how the run it starts ends. */
   private def run(slot: Slot, entry: QueueEntry, agent: QueuedAgent, runId: RunId): Next =
     read(entry) match
-      case Left(error) =>
-        logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
-        Next.Expire
+      case Left(error) => unread(entry, error)
       case Right((admitted, latest)) =>
         val config = attemptConfig(entry, runId)
         val begun: Either[EntryOutcome, Result[AgentRun]] = AttemptPlan.of(entry, admitted, latest) match
@@ -453,9 +467,7 @@ final class AgentWorker private (
       // read the entry again: its `admitted` mark may have been set by the run's commit and its checkpoint retracted
       val now = queue.entry(entry.tenantId, entry.id).toOption.getOrElse(entry)
       read(now) match
-        case Left(error) =>
-          logger.warn(s"Worker $holder: reading entry ${entry.id.value}'s thread failed: ${error.message}")
-          Next.Expire
+        case Left(error) => unread(now, error)
         case Right((admitted, latest)) =>
           AttemptPlan.of(now, admitted, latest) match
             case AttemptPlan.Close(outcome) => Next.Close(outcome)
