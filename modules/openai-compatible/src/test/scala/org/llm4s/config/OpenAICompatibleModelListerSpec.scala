@@ -299,3 +299,20 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
 
     lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp).isLeft shouldBe true
   }
+
+  test("openAICompatible lister keeps a failed listing's request id and Retry-After on its ServiceError (#2266)") {
+    val config = namedConfig(ProviderId("meta"), "m", apiKey = Some("k"))
+    val response = HttpResponse(
+      503,
+      """{"error":"overloaded"}""",
+      Map("x-request-id" -> Seq("req-2266"), "retry-after" -> Seq("12"))
+    )
+    ProviderModelListers
+      .openAICompatible(ProviderId("meta"), "https://meta.invalid")
+      .listModels(config, MockHttpClient(response)) match
+      case Left(err: org.llm4s.error.ServiceError) =>
+        err.httpStatus shouldBe 503
+        err.requestId shouldBe Some("req-2266")
+        err.retryAfter shouldBe Some(scala.concurrent.duration.DurationInt(12).seconds)
+      case other => fail(s"Expected a ServiceError, got $other")
+  }

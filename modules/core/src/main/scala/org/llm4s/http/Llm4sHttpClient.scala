@@ -26,7 +26,8 @@ import java.net.http.{
 }
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
-import java.time.Duration
+import java.time.{ Clock, Duration, ZonedDateTime }
+import java.time.format.DateTimeFormatter
 import java.util.{ Locale, UUID }
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -51,6 +52,40 @@ object HttpHeaders {
       case Some(values) => values.headOption
       case None         => headers.collectFirst { case (k, v) if k.equalsIgnoreCase(name) && v.nonEmpty => v.head }
     }
+
+  /**
+   * The headers a provider names its request id in, most common first: `x-request-id` (OpenAI and most
+   * OpenAI-compatible APIs), `request-id` (Anthropic), `x-amzn-requestid` (AWS) and `apim-request-id` (Azure).
+   */
+  private[llm4s] val RequestIdHeaders: Seq[String] =
+    Seq("x-request-id", "request-id", "x-amzn-requestid", "apim-request-id")
+
+  /** The first non-blank request id among [[RequestIdHeaders]], trimmed. */
+  private[llm4s] def requestId(headers: Map[String, Seq[String]]): Option[String] =
+    RequestIdHeaders.iterator.flatMap(first(headers, _)).map(_.trim).find(_.nonEmpty)
+
+  /**
+   * The delay a `Retry-After` header asks for.
+   *
+   * Accepts delta-seconds (`"120"`) or an RFC 1123 HTTP-date, which is measured against
+   * `clock` (a date already past gives zero), to millisecond precision. Returns `None` when
+   * the header is absent, unparseable, negative, or too large to represent as a
+   * `FiniteDuration`.
+   */
+  private[llm4s] def retryAfter(headers: Map[String, Seq[String]], clock: Clock): Option[FiniteDuration] =
+    first(headers, "Retry-After").map(_.trim).flatMap { value =>
+      val millis =
+        if value.nonEmpty && value.forall(_.isDigit) then
+          value.toLongOption.filter(_ <= MaxRetryAfterMillis / 1000L).map(_ * 1000L)
+        else
+          Try(ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)).toOption
+            .flatMap(date => Try(Duration.between(clock.instant(), date.toInstant).toMillis).toOption)
+            .map(math.max(0L, _))
+      millis.filter(_ <= MaxRetryAfterMillis).map(FiniteDuration(_, MILLISECONDS))
+    }
+
+  /** The longest delay a `FiniteDuration` (nanosecond-backed) holds, in whole milliseconds. */
+  private val MaxRetryAfterMillis = Long.MaxValue / 1000000L
 }
 
 /**
@@ -83,15 +118,34 @@ final case class JsonHttpResponse(
 }
 
 object HttpResponse:
+
+  /**
+   * A `ServiceError` for a non-2xx `response`, carrying its status, the request id from the first of
+   * [[HttpHeaders.RequestIdHeaders]] it sent, and the delay its `Retry-After` asks for. `details` is the
+   * already-redacted body, or whatever the caller wants in the message.
+   */
+  private[llm4s] def serviceError(
+    response: HttpResponse,
+    provider: String,
+    details: String,
+    clock: Clock = Clock.systemUTC()
+  ): ServiceError =
+    val error = HttpHeaders.requestId(response.headers) match
+      case Some(id) => ServiceError(response.statusCode, provider, details, id)
+      case None     => ServiceError(response.statusCode, provider, details)
+    HttpHeaders.retryAfter(response.headers, clock).fold(error)(error.withRetryAfter)
+
   extension (response: HttpResponse)
     /**
      * The response when its status is 2xx, else a `ServiceError` carrying the status and the body. The body in the
      * error is redacted and capped (`Redaction.safeBody`, 2048 characters), since a provider's error body can echo
-     * the request's credentials.
+     * the request's credentials. The error also carries the response's request id (`x-request-id`, `request-id`,
+     * `x-amzn-requestid` or `apim-request-id`) and its `Retry-After` delay (delta-seconds or an HTTP-date), when
+     * it sent them.
      */
     def ensureSuccess(provider: String): Result[HttpResponse] =
       if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
-      else Left(ServiceError(response.statusCode, provider, Redaction.safeBody(response.body)))
+      else Left(HttpResponse.serviceError(response, provider, Redaction.safeBody(response.body)))
 
     def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
       Try(ujson.read(response.body)).toResult.left
@@ -105,7 +159,7 @@ object HttpResponse:
     ): Result[A] =
       result.left.map:
         case service: ServiceError =>
-          ServiceError(service.httpStatus, provider, s"$message: ${service.message}")
+          ServiceError.rewrapped(service, provider, s"$message: ${service.message}")
         case other =>
           other
 

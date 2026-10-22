@@ -911,17 +911,53 @@ final class GraphRuntime(
     amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
     owns: Checkpoint => Boolean = _ => true,
     parentClaim: Option[FencingToken] = None
+  ): Result[Unit] = settling(threadId, graph, outcome, message, config, amend, owns, parentClaim, child = true)
+
+  /**
+   * Settles the top-level thread `threadId` as `outcome`, a failure, as [[settleChild]] settles a child: a `Failed`
+   * checkpoint over its incomplete latest, with the update `amend` makes to its state and a [[RunEvent.RunFailed]]
+   * carrying `message`, as run `config.runId`, under the thread's claim - so the thread is at rest and its next `start`
+   * runs normally rather than meeting [[GraphError.IncompleteRun]]. For a run queue's worker (Stage 5 W2, design 4.56):
+   * an entry whose attempts ran out after its input was admitted settles its thread before it is closed, and W3's
+   * cancel settles a cancelled queued run the same way. `owns` must hold of the latest checkpoint, read under the
+   * claim, or nothing is written (`ValidationError`): the worker passes "is the entry's own run's", so a thread a
+   * direct run moved on meanwhile is never settled.
+   *
+   * A thread already at rest (`Completed` or `Failed`) is left as it is; a busy one is [[GraphError.ThreadBusy]], one
+   * with no checkpoint [[GraphError.NothingToRecover]], a child thread [[GraphError.ChildThread]].
+   */
+  private[agent] def settleQueued[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig,
+    amend: ThreadState => Result[StateUpdate],
+    owns: Checkpoint => Boolean
+  ): Result[Unit] = settling(threadId, graph, outcome, message, config, amend, owns, None, child = false)
+
+  private def settling[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig,
+    amend: ThreadState => Result[StateUpdate],
+    owns: Checkpoint => Boolean,
+    parentClaim: Option[FencingToken],
+    child: Boolean
   ): Result[Unit] =
     def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(threadId)
     // checked before the claim, and again under it: the thread may have been deleted and recreated in between
     def valid(stored: StoredCheckpoint): Result[Unit] =
       checkTenant(threadId, stored, config)
-        .flatMap(_ => childAs(threadId, stored, child = true))
+        .flatMap(_ => childAs(threadId, stored, child))
+        .flatMap(_ => if child then Right(()) else notDeleting(threadId, stored))
         .flatMap(_ =>
           Either.cond(
             owns(stored.checkpoint),
             (),
-            ValidationError("threadId", s"'${threadId.value}' is not the child thread being settled")
+            ValidationError("threadId", s"'${threadId.value}' is not the thread being settled")
           )
         )
     val checked = latest.flatMap {

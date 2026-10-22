@@ -747,7 +747,7 @@ def logProviderFailure(error: LLMError): Unit = error match {
   case rle: RateLimitError =>
     logger.warn(s"Rate limited: ${rle.message}, retry after: ${rle.retryAfter.fold("unknown")(_.toString)}")
     
-  case ServiceError(message, httpStatus, provider, requestId) =>
+  case ServiceError(message, httpStatus, provider, requestId, retryAfter) =>
     logger.error(s"Provider API error [$httpStatus]: $message")
     
   case NetworkError(message, cause, endpoint) =>
