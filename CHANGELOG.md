@@ -116,6 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- **Added** token streaming to the Java facade: `JLlmClient.stream(..., CompletionStreamListener)` returns a
+  cancellable `CompletionStream` (`onPartial`, then `onComplete` or `onError` once), and `streamAsPublisher` a cold
+  `Flow.Publisher<String>` that holds the provider for a slow subscriber [#1485](https://github.com/llm4s/llm4s/issues/1485).
 - **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
   overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
 - **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
