@@ -17,11 +17,14 @@ import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JTool;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmErrorKind;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
 import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
@@ -164,6 +167,29 @@ final class GuideSnippets {
             assertTrue(result.isFailure());
             assertEquals(LlmErrorKind.RATE_LIMIT, result.getError().getKind());
         }
+    }
+
+    /** The "Tools" section's annotated class (#1484). */
+    public static final class WeatherTools {
+        @Tool(description = "The current weather in a city")
+        public String weather(@Param(name = "city", description = "City name") String city) {
+            return "Sunny in " + city;
+        }
+    }
+
+    /** The "Tools" section's agent block (#1484). */
+    static JAgentResult tools(JLlmClient client) {
+        List<JTool> weather = JTool.fromAnnotated(new WeatherTools()).get();
+        LlmResult<JTool> add = JTool.builder("add", "Adds two numbers")
+            .param("a", long.class, "First")
+            .param("b", long.class, "Second")
+            .handler(args -> args.getLong("a") + args.getLong("b"))
+            .build();
+
+        JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather.get(0), add.get())).get();
+        JAgentResult result = agent.run("What is the weather in Paris?").get();
+
+        return result;
     }
 
     /** The "Streaming the reply" block (#1485). */

@@ -291,11 +291,14 @@ import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JTool;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmErrorKind;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
 import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
@@ -561,6 +564,44 @@ literal), and the `toolCallId()` a tool message answers. `usage()` counts tokens
 These types are values, but not `Serializable`. Their `toString` prints the full text - a message's content, a tool
 call's arguments, an answer or a guardrail's reason - as the Scala types do, so mind what you log.
 
+## Tools
+
+An agent can call tools you write in Java, in either of two styles. Annotate the public methods of a class with `@Tool`,
+and each parameter with `@Param` (its `name` is what the model passes; without one, the compiled name is used, which
+needs `javac -parameters`):
+
+```java
+class WeatherTools {
+    @Tool(description = "The current weather in a city")
+    public String weather(@Param(name = "city", description = "City name") String city) {
+        return "Sunny in " + city;
+    }
+}
+```
+
+or build one from a lambda with `JTool.builder`, then give the tools to `Llm4s.createAgentWithTools`:
+
+```java
+List<JTool> weather = JTool.fromAnnotated(new WeatherTools()).get();
+LlmResult<JTool> add = JTool.builder("add", "Adds two numbers")
+    .param("a", long.class, "First")
+    .param("b", long.class, "Second")
+    .handler(args -> args.getLong("a") + args.getLong("b"))
+    .build();
+
+JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather.get(0), add.get())).get();
+JAgentResult result = agent.run("What is the weather in Paris?").get();
+```
+
+A parameter is a `String`, an `int`, `long`, `short` or `byte` (boxed or not), a `double` or `float`, a `boolean`, or an
+enum (the model passes a constant's name); its JSON Schema is derived from the type, and `optionalParam` (or
+`@Param(required = false)`, with a boxed type) lets the model leave it out. The model's arguments are read into those Java
+values before your code runs, with no JSON library: a missing or mistyped argument is a tool error the model sees, and so
+is an exception your method or lambda throws - the agent keeps running and the model can try again. A result is passed to
+the model as text if it is a `String`; a number, boolean, enum, `Map` or `Collection` becomes JSON. A tool that cannot be
+built (no handler, an unsupported parameter type, a parameter declared twice) and an agent given two tools with one name
+are failed results, not exceptions.
+
 ## Embeddings
 
 An embedding model turns a text into a vector, a `float[]`, and texts that mean similar things get vectors that point
@@ -704,8 +745,7 @@ available from Java yet, each with the issue that tracks it:
 | You may expect | State today |
 |---|---|
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
-| Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
-| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
+| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools are defined from Java in [Tools](#tools) |
 
 ## Where next
 
