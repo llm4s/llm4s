@@ -487,7 +487,8 @@ The file records its schema version: 2 since the fenced delete (which added `fir
 continues its event numbering), 3 and 4 for effect records, and 5 since claims record their tenant (`claim_tenant`,
 with `claim_tenant_token`, the token of the claim the tenant belongs to), 6 for child threads, and 7 since each
 checkpoint and event records when the store committed it, which retention judges age by (rows from before 7 are judged
-by their producer's timestamps). A claim a version-4 file holds when it is
+by their producer's timestamps), and 8 for the thread registry (see [Finding threads](#finding-threads)), filled from
+each thread's latest checkpoint when a version-7 file is opened. A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one: an
@@ -676,6 +677,45 @@ that same clock - never with the `createdAt` and event timestamps the committing
 as the producer's record. So a host whose clock is skewed makes nothing too old or too young. The SQLite and in-memory
 stores judge by the clock they were opened with; the PostgreSQL store by the database server's.
 
+## Finding threads
+
+Every store keeps a thread registry (design 4.52): a tenant's root threads can be listed and searched, and the
+threads a run left unfinished found, without knowing their ids. A thread's **metadata** is a small map of strings for
+finding it again - not for content - set by the `start` that brings it and replaced with `updateMetadata`:
+
+```scala
+val config = RunConfig().withTenantId(TenantId("acme")).withMetadata(Map("customer" -> "c-42", "channel" -> "web"))
+runtime.start(threadId, graph, input, config)
+runtime.updateMetadata(threadId, ThreadMetadata("customer" -> "c-42", "channel" -> "email"), config)
+
+val page = store.threads(
+  ThreadQuery(Some(TenantId("acme")))
+    .withStatus(ThreadStatus.Suspended)
+    .withMetadata(ThreadMetadata("customer" -> "c-42"))
+)
+page.threads.foreach(t => println(s"${t.threadId.value} ${t.status} ${t.updatedAt}"))
+val next = page.next.map(cursor => store.threads(ThreadQuery(Some(TenantId("acme"))).withAfter(cursor)))
+```
+
+- **Tenant-scoped.** Every query names one tenant (`None` finds only threads of no tenant) and never sees another's.
+- **Newest first** by `updatedAt`, when the store last committed a checkpoint or metadata to the thread, by its clock;
+  paged by a cursor, at most `ThreadQuery.MaxLimit` (500) a page. A thread changed while you page moves to the front:
+  a later page of the same pass does not list it again, and the next pass (or `updatedSince`) finds it.
+- **Filters**: status, agent (the graph id; an `Agent`'s is its id), metadata entries (all must match) and
+  `updatedSince`.
+- **Root threads only.** A child thread is read through `children`; a deleted thread is not listed.
+- **Status** is judged when the store is read: `Running` while a live claim holds the thread, wherever its run is;
+  otherwise `Idle` (the latest checkpoint is incomplete: a run stopped - crashed, cancelled or drained - and `recover`
+  would continue it), `Suspended`, `Completed` or `Failed`; `Deleted` while a cascade delete is under way.
+
+`store.incompleteThreads(tenantId, after, limit)` lists the `Idle` threads oldest first, for an operator to look at.
+It is not how a service recovers work: a cancelled run, a drained one and a crashed one all look alike here, and only
+a run queue's entry says which should run again.
+
+Metadata is limited to 32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters and values up to 256
+(`ThreadMetadata.of` returns a `ValidationError` past them). The SQLite and PostgreSQL stores index every query, so a
+page costs the same however many threads the store holds.
+
 ## Writing a store
 
 A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `history`,
@@ -722,6 +762,10 @@ the contract. In short:
   `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`) closes the channel when the thread is
   interrupted mid-read, so a store sharing one such connection between threads must read on a connection of its own
   for the watch, or replace a connection an interrupt closed;
+- keep each thread's metadata, replaced only by a commit carrying `Commit.metadata` and removed by `deleteThread`, and
+  answer `threads` and `incompleteThreads` from the latest checkpoint (its tenant, graph id, status and `deleting`),
+  the claim judged by your clock, and when you last committed a checkpoint or metadata to the thread - tenant-scoped,
+  root threads only, by an index, within your bound;
 - return from every call within a bound you document - a configured timeout - whatever the storage is doing:
   waiting for a lock, another connection's write, the store's own earlier calls or the network. A call that reaches
   it fails, changing nothing; `awaitEventsAfter` returns within its `timeout` plus the bound. Say which calls, if

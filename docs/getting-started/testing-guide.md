@@ -30,170 +30,88 @@ Testing LLM applications requires a different approach than traditional software
 
 ---
 
-## Unit Testing with Mock Clients
+## Unit Testing with a Scripted Client
 
-For pure logic tests, mock the LLM client:
-
-{: .note }
-> For a ready-made scriptable client - canned replies, tool calls, injected errors and recorded requests - see [Testing with the Testkit](../guide/testing-with-the-testkit) (`llm4s-testkit`). The hand-written mocks below still work for a one-off.
-
-### Basic Mock
+For pure logic tests, give your code a scripted client instead of a real one. `llm4s-testkit` provides
+`ScriptedLLMClient`: it answers from a script you write, records every request your code sent, and never touches the
+network. Add it as a test dependency:
 
 ```scala
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+[Testing with the Testkit](../guide/testing-with-the-testkit) covers the whole API; the examples below show the common
+cases.
+
+### Canned replies
+
+```scala
+import org.llm4s.error.NetworkError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.types.Result
-import org.llm4s.error.NetworkError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 
-  // Mock client that returns canned responses
-  class MockLLMClient extends LLMClient {
-    override def getContextWindow(): Int     = 128000
-    override def getReserveCompletion(): Int = 4096
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions = CompletionOptions()
-    ): Result[Completion] = {
-      Right(Completion(
-        id = "mock-1",
-        created = System.currentTimeMillis(),
-        content = "The weather in London is 15°C and cloudy.",
-        model = "mock-model",
-        message = AssistantMessage("The weather in London is 15°C and cloudy."),
-        usage = Some(TokenUsage(promptTokens = 10, completionTokens = 15, totalTokens = 25))
-      ))
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions = CompletionOptions(),
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = {
-      val chunks = List(
-        StreamedChunk(id = "mock-1", content = Some("The weather"), finishReason = None),
-        StreamedChunk(id = "mock-1", content = Some(" is sunny"), finishReason = Some("stop"))
-      )
-      chunks.foreach(onChunk)
-      Right(Completion(
-        id = "mock-1",
-        created = System.currentTimeMillis(),
-        content = "The weather is sunny",
-        model = "mock-model",
-        message = AssistantMessage("The weather is sunny")
-      ))
-    }
-  }
-
-  // Example agent that uses the LLM client
+  // Example code under test: it takes any LLMClient
   class WeatherAgent(client: LLMClient) {
-    def run(query: String): Result[Completion] = {
+    def run(query: String): Result[Completion] =
       client.complete(Conversation(Seq(UserMessage(query))))
-    }
   }
 
-  "WeatherAgent" should "extract city from user query" in {
-    val agent = new WeatherAgent(new MockLLMClient)
-    val result = agent.run("What's the weather in London?")
-    
-    result match {
-      case Right(response) =>
-        response.content should include("London")
-        response.content should include("°C")
-      case Left(error) =>
-        fail(s"Expected success but got: $error")
-    }
+  "WeatherAgent" should "return the model's answer" in {
+    val client = ScriptedLLMClient.always(
+      Reply
+        .text("The weather in London is 15°C and cloudy.")
+        .withUsage(TokenUsage(promptTokens = 10, completionTokens = 15, totalTokens = 25))
+    )
+
+    val result = new WeatherAgent(client).run("What's the weather in London?")
+
+    result.map(_.content) shouldBe Right("The weather in London is 15°C and cloudy.")
+    client.callCount shouldBe 1
+    client.lastCall.flatMap(_.lastUserText) shouldBe Some("What's the weather in London?")
   }
 
-  it should "handle errors gracefully" in {
-    class FailingMockClient extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
+  it should "pass a provider error on" in {
+    val client = ScriptedLLMClient.always(
+      Reply.failure(NetworkError("Connection timeout", None, "https://api.example.com"))
+    )
 
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        Left(NetworkError("Connection timeout", None, "https://api.example.com"))
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        Left(NetworkError("Connection timeout", None, "https://api.example.com"))
-      }
-    }
-
-    val agent = new WeatherAgent(new FailingMockClient)
-    val result = agent.run("What's the weather?")
-    
-    result match {
+    new WeatherAgent(client).run("What's the weather?") match {
       case Left(_: NetworkError) => succeed
-      case other => fail(s"Expected NetworkError but got: $other")
+      case other                 => fail(s"Expected NetworkError but got: $other")
     }
   }
 }
 ```
 
-### Parameterized Mock
+`streamComplete` replays the same reply as chunks (the text in pieces, then any tool calls, then a chunk with the
+finish reason), so code that streams is tested with the same script.
 
-For more complex scenarios:
+### A reply chosen by the request
+
+`ScriptedLLMClient.respondingTo` picks the reply from the conversation, so the answer does not depend on how many calls
+came before. A request no rule matches fails with an `UnscriptedCallError` that shows the last message, instead of
+hanging or throwing:
 
 ```scala
-import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 
-class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
-  override def getContextWindow(): Int     = 128000
-  override def getReserveCompletion(): Int = 4096
+def lastUser(conversation: Conversation): String =
+  conversation.messages.collect { case u: UserMessage => u.content }.lastOption.getOrElse("")
 
-  override def complete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions()
-  ): Result[Completion] = {
-    val userMessage = conversation.messages
-      .collectFirst { case u: UserMessage => u.content }
-      .getOrElse("")
-    
-    responses.get(userMessage) match {
-      case Some(responseText) =>
-        Right(Completion(
-          id = "mock-1",
-          created = System.currentTimeMillis(),
-          content = responseText,
-          model = "mock-model",
-          message = AssistantMessage(responseText)
-        ))
-      case None =>
-        Left(ValidationError("prompt", s"No mock response for: $userMessage"))
-    }
-  }
-
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    complete(conversation, options).map { completion =>
-      onChunk(StreamedChunk(id = "mock-1", content = Some(completion.content), finishReason = Some("stop")))
-      completion
-    }
-  }
+val client = ScriptedLLMClient.respondingTo {
+  case c if lastUser(c) == "What is 2+2?"                    => Reply.text("2+2 equals 4")
+  case c if lastUser(c) == "What is the capital of France?" => Reply.text("The capital of France is Paris")
 }
 
-// Usage in tests
-val mockResponses = Map(
-  "What is 2+2?" -> "2+2 equals 4",
-  "What is the capital of France?" -> "The capital of France is Paris"
-)
-
-val client = new ConfigurableMockClient(mockResponses)
+val answer     = client.complete(Conversation(Seq(UserMessage("What is 2+2?"))))      // Right, "2+2 equals 4"
+val unexpected = client.complete(Conversation(Seq(UserMessage("Something else"))))    // Left(UnscriptedCallError)
 ```
 
 ---
@@ -311,100 +229,42 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
 
 ## Testing Error Handling
 
-Always test error paths:
+Always test error paths. `Reply.failure` makes the client return the real `LLMError` types, so your code sees exactly
+what a provider would give it:
 
 ```scala
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
-import org.llm4s.error.{RateLimitError, AuthenticationError, NetworkError}
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
+import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
+  private def runWith(reply: Reply) =
+    Agent.builder("test-agent", ScriptedLLMClient.always(reply)).build().flatMap(_.run("test query"))
+
   "Agent" should "handle rate limiting" in {
-    class RateLimitedClient extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        Left(RateLimitError("Rate limit exceeded"))
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        Left(RateLimitError("Rate limit exceeded"))
-      }
-    }
-
     // A provider error ends the run as GraphError.NodeFailed, carrying the client's error as its cause
-    val result = Agent.builder("test-agent", new RateLimitedClient).build().flatMap(_.run("test query"))
-
-    result match {
+    runWith(Reply.failure(RateLimitError("Rate limit exceeded"))) match {
       case Left(GraphError.NodeFailed(_, _, _: RateLimitError)) => succeed
-      case other => fail(s"Expected RateLimitError but got: $other")
+      case other                                               => fail(s"Expected RateLimitError but got: $other")
     }
   }
 
   it should "handle authentication errors" in {
-    class UnauthorizedClient extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        Left(AuthenticationError("openai", "Invalid API key", "401"))
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        Left(AuthenticationError("openai", "Invalid API key", "401"))
-      }
+    runWith(Reply.failure(AuthenticationError("openai", "Invalid API key", "401"))) match {
+      case Left(GraphError.NodeFailed(_, _, _: AuthenticationError)) => succeed
+      case other => fail(s"Expected AuthenticationError but got: $other")
     }
-
-    val result = Agent.builder("test-agent", new UnauthorizedClient).build().flatMap(_.run("test"))
-
-    result.isLeft shouldBe true
   }
 
   it should "handle network timeouts" in {
-    class TimeoutClient extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        Thread.sleep(5000)  // Simulate timeout
-        Left(NetworkError("Request timeout", None, "https://api.example.com"))
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        Left(NetworkError("Request timeout", None, "https://api.example.com"))
-      }
-    }
-
-    val result = Agent.builder("test-agent", new TimeoutClient).build().flatMap(_.run("test"))
-
-    result match {
+    // No need to sleep: the error a timed-out call returns is what the code under test sees
+    runWith(Reply.failure(NetworkError("Request timeout", None, "https://api.example.com"))) match {
       case Left(GraphError.NodeFailed(_, _, _: NetworkError)) => succeed
-      case other => fail(s"Expected NetworkError but got: $other")
+      case other                                             => fail(s"Expected NetworkError but got: $other")
     }
   }
 }
@@ -414,23 +274,21 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
 ## Testing Tool Calling
 
-Test that tools are invoked correctly.
-
-> **Note**: This example uses simplified Tool API for clarity. In production, use `ToolBuilder` and `ToolFunction` from the `org.llm4s.toolapi` package. See the [Tools documentation](../agents/tools.md) for actual API.
+Script the model's tool call and then its answer with `ScriptedLLMClient.sequence`: the first call gets the first
+reply, the second call the second. The agent runs your real tool in between, and the recorded calls show what it sent
+back to the model:
 
 ```scala
 import org.llm4s.agent.Agent
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
-import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class ToolCallingSpec extends AnyFlatSpec with Matchers {
 
-  "Agent" should "invoke weather tool" in {
-    var toolWasCalled = false
+  "Agent" should "invoke the weather tool with the model's arguments" in {
     var capturedCity: Option[String] = None
 
     // A tool that records the arguments it was called with
@@ -441,57 +299,28 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
         .`object`[Map[String, Any]]("Weather query parameters")
         .withProperty(Schema.property("city", Schema.string("City name")))
     ).withHandler { extractor =>
-      toolWasCalled = true
       extractor.getString("city").map { city =>
         capturedCity = Some(city)
         s"Weather in $city: 20°C"
       }
     }.buildSafe()
 
-    // Mock client that calls the tool
-    class ToolCallingMock extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        val message = if (conversation.messages.exists(_.isInstanceOf[ToolMessage])) {
-          AssistantMessage("Weather in London: 20°C")
-        } else {
-          AssistantMessage(
-            contentOpt = None,
-            toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))
-          )
-        }
-        Right(Completion(
-          id = "mock-1",
-          created = System.currentTimeMillis(),
-          content = message.content,
-          model = "mock-model",
-          message = message,
-          toolCalls = message.toolCalls.toList
-        ))
-      }
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        complete(conversation, options)
-      }
-    }
+    val client = ScriptedLLMClient.sequence(
+      Reply.toolCall("get_weather", """{"city": "London"}"""),
+      Reply.text("It is 20°C in London.")
+    )
 
     val outcome = for {
       tool  <- weatherTool
-      agent <- Agent.builder("test-agent", new ToolCallingMock).withTools(new ToolRegistry(Seq(tool))).build()
+      agent <- Agent.builder("test-agent", client).withTools(new ToolRegistry(Seq(tool))).build()
       _     <- agent.run("What's the weather in London?")
     } yield ()
 
     outcome.isRight shouldBe true
-    toolWasCalled shouldBe true
     capturedCity shouldBe Some("London")
+    client.callCount shouldBe 2
+    // the second request carries the tool's result back to the model
+    client.calls(1).messages.collect { case t: ToolMessage => t.content } shouldBe Seq("Weather in London: 20°C")
   }
 }
 ```
@@ -527,42 +356,13 @@ class RAGSpec extends AnyFlatSpec with Matchers {
   }
 
   "RAG pipeline" should "include context in LLM prompt" in {
-    class RAGMockClient extends LLMClient {
-      override def getContextWindow(): Int     = 128000
-      override def getReserveCompletion(): Int = 4096
-
-      var lastPrompt: Option[String] = None
-
-      override def complete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions()
-      ): Result[Completion] = {
-        lastPrompt = conversation.messages
-          .collectFirst { case u: UserMessage => u.content }
-        Right(Completion(
-          id = "mock-1",
-          created = System.currentTimeMillis(),
-          content = "Based on the context, Scala is functional.",
-          model = "mock-model",
-          message = AssistantMessage("Based on the context, Scala is functional.")
-        ))
-      }
-
-      override def streamComplete(
-        conversation: Conversation,
-        options: CompletionOptions = CompletionOptions(),
-        onChunk: StreamedChunk => Unit
-      ): Result[Completion] = {
-        complete(conversation, options)
-      }
-    }
-
-    val mockClient = new RAGMockClient
-    val rag = new RAGPipeline(mockClient, vectorStore, embedder)
+    // a scripted client from llm4s-testkit: it records the prompt the pipeline sent
+    val client = ScriptedLLMClient.always(Reply.text("Based on the context, Scala is functional."))
+    val rag    = new RAGPipeline(client, vectorStore, embedder)
     rag.query("What is Scala?")
 
-    mockClient.lastPrompt.get should include("context")
-    mockClient.lastPrompt.get should include("functional")
+    client.lastCall.flatMap(_.lastUserText).get should include("context")
+    client.lastCall.flatMap(_.lastUserText).get should include("functional")
   }
 }
 ```

@@ -4,7 +4,7 @@ import org.llm4s.agent.delegation.TimedOutChild
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.ContentPart
-import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
+import org.llm4s.toolapi.{ SchemaDefinition, ToolCallInfo, ToolFunction, ToolHints }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -380,8 +380,9 @@ object AgentTool:
       )
       .withHints(hints)
 
+    // the call's id and idempotency key reach the handler as `SafeParameterExtractor.call` (#1740)
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
-      function.execute(args) match
+      function.execute(args, ToolCallInfo(context.toolCallId.value, context.idempotencyKey.value)) match
         case Right(json) => ToolOutcome.Success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
 

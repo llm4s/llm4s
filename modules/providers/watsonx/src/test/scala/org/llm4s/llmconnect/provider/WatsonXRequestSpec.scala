@@ -3,11 +3,12 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
+import org.scalatest.LoneElement
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 /** Chat request bodies: exact JSON, escaping, the role structure, tools, and option mapping. */
-class WatsonXRequestSpec extends AnyFunSuite with Matchers:
+class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   import StubHttp.*
   import WatsonXTestConfig.config
@@ -116,15 +117,85 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
     p1("temperature").num shouldBe 1.2
   }
 
-  test("options the client does not expose yet (penalties, response format, reasoning) are ignored (documented)") {
-    val ignored = CompletionOptions()
-      .withPresencePenalty(0.5)
-      .withFrequencyPenalty(0.5)
-      .withReasoning(ReasoningEffort.High)
-      .withBudgetTokens(Some(1000))
-      .withResponseFormat(Some(ResponseFormat.Json))
-    val plain = ujson.read(body(Conversation(Seq(UserMessage("x"))), CompletionOptions()))
-    ujson.read(body(Conversation(Seq(UserMessage("x"))), ignored)) shouldBe plain
+  // ---- penalties and response_format
+
+  private val x = Conversation(Seq(UserMessage("x")))
+
+  private val schema = ujson.Obj(
+    "type"       -> "object",
+    "properties" -> ujson.Obj("a" -> ujson.Obj("type" -> "integer")),
+    "required"   -> ujson.Arr("a")
+  )
+
+  private val tuned = options
+    .withPresencePenalty(0.5)
+    .withFrequencyPenalty(-0.25)
+    .withResponseFormat(ResponseFormat.Json)
+
+  private val tunedGolden =
+    """{"model_id":"ibm/granite-13b-instruct-v2","messages":[{"role":"user","content":"x"}],"temperature":0.5,"project_id":"project-1","max_tokens":64,"presence_penalty":0.5,"frequency_penalty":-0.25,"response_format":{"type":"json_object"}}"""
+
+  test("golden: penalties as presence_penalty and frequency_penalty, JSON mode as response_format json_object") {
+    body(x, tuned) shouldBe tunedGolden
+  }
+
+  test("golden: a JSON schema as response_format json_schema with name, schema and strict") {
+    val format = ResponseFormat.JsonSchema(schema, name = "add_result", strict = false)
+    body(x, options.withResponseFormat(format)) shouldBe
+      """{"model_id":"ibm/granite-13b-instruct-v2","messages":[{"role":"user","content":"x"}],"temperature":0.5,"project_id":"project-1","max_tokens":64,"response_format":{"type":"json_schema","json_schema":{"name":"add_result","schema":{"type":"object","properties":{"a":{"type":"integer"}},"required":["a"]},"strict":false}}}"""
+  }
+
+  test("a JSON schema's default name and strict flag are sent as they are: response and true") {
+    val json = ujson.read(body(x, CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))))
+    json("response_format") shouldBe ujson.Obj(
+      "type"        -> "json_schema",
+      "json_schema" -> ujson.Obj("name" -> "response", "schema" -> schema, "strict" -> true)
+    )
+  }
+
+  test("defaulted options send no penalty and no response_format: the body is unchanged") {
+    ujson.read(body(x)).obj.keySet shouldBe Set("model_id", "messages", "temperature", "project_id")
+    val zeroed = CompletionOptions().withPresencePenalty(0.0).withFrequencyPenalty(0.0).withResponseFormat(None)
+    body(x, zeroed) shouldBe body(x)
+  }
+
+  test("each penalty is sent on its own when only it is set, and a negative one too") {
+    ujson.read(body(x, CompletionOptions().withPresencePenalty(-1.5))).obj.keySet should (contain(
+      "presence_penalty"
+    ).and(not) contain "frequency_penalty")
+    val freq = ujson.read(body(x, CompletionOptions().withFrequencyPenalty(2.0)))
+    freq.obj.keySet should (contain("frequency_penalty").and(not) contain "presence_penalty")
+    freq("frequency_penalty").num shouldBe 2.0
+  }
+
+  test("reasoning and budgetTokens are ignored without error (documented): the body is unchanged") {
+    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High).withBudgetTokens(Some(1000))
+    body(x, reasoning) shouldBe body(x)
+    ujson.read(body(x, reasoning)).obj.keySet.filter(_.contains("reasoning")) shouldBe empty
+  }
+
+  private val streamed =
+    "data: {\"id\":\"s-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n\n"
+
+  private def streamedBody(opts: CompletionOptions): String =
+    val http = streaming(streamOf(bytes(streamed)))
+    new WatsonXClient(config, httpClient = http).streamComplete(x, opts, _ => ()) shouldBe a[Right[?, ?]]
+    val sent = http.modelRequests.loneElement
+    sent.url should include("/ml/v1/text/chat_stream")
+    sent.body
+
+  test("a streamed request carries the same penalties and response_format") {
+    streamedBody(tuned) shouldBe tunedGolden
+  }
+
+  test("a streamed request with defaulted options sends no penalty and no response_format") {
+    streamedBody(CompletionOptions()) shouldBe body(x)
+  }
+
+  test("the body complete actually posts carries the penalties and response_format") {
+    val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
+    new WatsonXClient(config, httpClient = http).complete(x, tuned) shouldBe a[Right[?, ?]]
+    http.modelRequests.loneElement.body shouldBe tunedGolden
   }
 
   test("a space id replaces the project id and never both are sent") {

@@ -25,11 +25,30 @@ final case class TTSConfig(
       s"baseUrl=$baseUrl, region=$region)"
 }
 
+/**
+ * Default values for [[TTSConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
+ * when the corresponding setting is absent.
+ *
+ * `TTSConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ */
 object TTSConfig {
-  val DEFAULT_OPENAI_BASE_URL: String     = "https://api.openai.com"
+
+  /** OpenAI: the base URL [[SpeechConfigLoader.tts]] uses when `llm4s.speech.openai.baseUrl` is not set. */
+  val DEFAULT_OPENAI_BASE_URL: String = "https://api.openai.com"
+
+  /** ElevenLabs: the base URL [[SpeechConfigLoader.tts]] uses when `llm4s.speech.elevenlabs.baseUrl` is not set. */
   val DEFAULT_ELEVENLABS_BASE_URL: String = "https://api.elevenlabs.io"
-  val DEFAULT_OPENAI_MODEL: String        = "tts-1"
-  val DEFAULT_OPENAI_VOICE: String        = "alloy"
+
+  /**
+   * OpenAI: the TTS model name for `TTSConfig#model`. Not applied by [[SpeechConfigLoader]], which takes the
+   * model from the `provider/model` spec; it is a reference value for callers building a [[TTSConfig]] by hand.
+   */
+  val DEFAULT_OPENAI_MODEL: String = "tts-1"
+
+  /** OpenAI: the voice [[SpeechConfigLoader.tts]] uses when `llm4s.speech.tts.voice` is not set. */
+  val DEFAULT_OPENAI_VOICE: String = "alloy"
+
+  /** ElevenLabs: the `model_id` [[SpeechConfigLoader.tts]] uses when `llm4s.speech.elevenlabs.modelId` is blank. */
   val DEFAULT_ELEVENLABS_MODEL_ID: String = "eleven_multilingual_v2"
 }
 
@@ -54,8 +73,27 @@ final case class STTConfig(
       s"baseUrl=$baseUrl, region=$region)"
 }
 
+/**
+ * Default values for [[STTConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
+ * when the corresponding setting is absent.
+ *
+ * `STTConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ */
 object STTConfig {
+
+  /** OpenAI: the base URL [[SpeechConfigLoader.stt]] uses when `llm4s.speech.openai.baseUrl` is not set. */
   val DEFAULT_OPENAI_BASE_URL: String = "https://api.openai.com"
-  val DEFAULT_OPENAI_MODEL: String    = "whisper-1"
-  val DEFAULT_AZURE_LANGUAGE: String  = "en-US"
+
+  /**
+   * OpenAI: the STT model name for `STTConfig#model`. Not applied by [[SpeechConfigLoader]], which takes the
+   * model from the `provider/model` spec; it is a reference value for callers building an [[STTConfig]] by hand.
+   */
+  val DEFAULT_OPENAI_MODEL: String = "whisper-1"
+
+  /**
+   * Azure: the recognition language that `STTConfig#model` carries for Azure. Not applied by
+   * [[SpeechConfigLoader]], which takes the language from the `azure/<language>` spec; it is a reference value
+   * for callers building an [[STTConfig]] by hand.
+   */
+  val DEFAULT_AZURE_LANGUAGE: String = "en-US"
 }

@@ -391,7 +391,8 @@ The built-in tools are built with `ToolBuilder`, the same way you build yours, a
 val registry = BuiltinTools.coreSafe.map(core => new ToolRegistry(core :+ myTool))
 ```
 
-See [Agents](agents/#agent-with-tools) for how a tool is defined and used, and
+[Build Your Own Tool](custom-tools) walks through writing one: the `Schema` DSL, reading arguments, returning
+errors and testing it. See [Agents](agents/#agent-with-tools) for how a tool is used in a run, and
 [Error Handling](error-handling) for working with the `Result` these methods return.
 
 ## Related

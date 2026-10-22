@@ -1,6 +1,6 @@
 # llm4s-schema-derivation
 
-The JSON schema for `completeStructured`, derived from a case class so that the type and its schema cannot drift apart.
+The JSON schema for `completeStructured`, and typed tools, derived from a case class so that the type and its schema cannot drift apart.
 
 **Experimental.** A new module, not part of the 1.0 frozen surface. It depends on `llm4s-core` only and adds no
 dependency.
@@ -29,6 +29,7 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 | `@description("...")` | the description the model sees, on a field or a type |
 | `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema |
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
+| `Tool.of[A, R](name, description)(a => Either[String, R])` | a `ToolFunction` from a function over a case class: the schema derived from `A`, the arguments decoded into it, argument errors as `SafeParameterExtractor`'s `ToolParameterError`s |
 
 ## Supported and not
 
@@ -54,4 +55,4 @@ schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writ
 schema-conformant documents back, and reads every sample `SchemaSamples` generates from each golden schema; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
 terminate); `RecursionGuardSpec` pins the run-time refusal of a recursion through hand-written givens, under a
 timeout so that a deadlock fails it instead of hanging the build; `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
-`DerivedSchemasGuideSpec` compiles the guide.
+`TypedToolSpec` checks that a typed tool sends the hand-built calculator's and `add` tool's schemas and reports the argument errors a hand-written tool does; `DerivedSchemasGuideSpec` compiles the guide.

@@ -299,6 +299,9 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *    child thread - its first commit, which writes its [[Checkpoint.origin]], a reattachment's, a resume's and a
  *    settlement's - by the parent's claim (design 4.41), so a stale task of a parent taken over never registers or
  *    runs a child after a successor took the parent.
+ *  - `metadata`, if present, replaces the thread's [[ThreadMetadata]] (design 4.52), fenced like the rest of the
+ *    commit; `None` leaves it as it is. A thread keeps its metadata across commits until another replaces it, and
+ *    loses it only with the thread ([[Checkpointer.deleteThread]]).
  */
 final case class Commit private (
   token: FencingToken,
@@ -307,7 +310,8 @@ final case class Commit private (
   events: Vector[EventDraft],
   retractTurn: Boolean,
   effects: Vector[EffectRecord],
-  fence: Option[(ThreadId, FencingToken)]
+  fence: Option[(ThreadId, FencingToken)],
+  metadata: Option[ThreadMetadata]
 ):
   def withToken(t: FencingToken): Commit                     = copy(token = t)
   def withCheckpoint(c: Checkpoint): Commit                  = copy(checkpoint = Some(c))
@@ -318,6 +322,8 @@ final case class Commit private (
   def withEffects(e: Vector[EffectRecord]): Commit           = copy(effects = e)
   def withFence(f: (ThreadId, FencingToken)): Commit         = copy(fence = Some(f))
   def withFence(f: Option[(ThreadId, FencingToken)]): Commit = copy(fence = f)
+  def withMetadata(m: ThreadMetadata): Commit                = copy(metadata = Some(m))
+  def withMetadata(m: Option[ThreadMetadata]): Commit        = copy(metadata = m)
 
   /**
    * The tasks the new checkpoint can still run. A settled checkpoint (`Completed`, or `Failed`, which a Block
@@ -361,8 +367,19 @@ object Commit:
     events: Vector[EventDraft] = Vector.empty,
     retractTurn: Boolean = false,
     effects: Vector[EffectRecord] = Vector.empty,
-    fence: Option[(ThreadId, FencingToken)] = None
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence)
+    fence: Option[(ThreadId, FencingToken)] = None,
+    metadata: Option[ThreadMetadata] = None
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, metadata)
+
+  def apply(
+    token: FencingToken,
+    checkpoint: Option[Checkpoint],
+    pendingWrites: Vector[PendingWrite],
+    events: Vector[EventDraft],
+    retractTurn: Boolean,
+    effects: Vector[EffectRecord],
+    fence: Option[(ThreadId, FencingToken)]
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, None)
 
   def apply(
     token: FencingToken,
@@ -371,7 +388,7 @@ object Commit:
     events: Vector[EventDraft],
     retractTurn: Boolean,
     effects: Vector[EffectRecord]
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, None)
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, None, None)
 
   /** The superstep that scheduled a task: its id is `"<superstep>.<ordinal>"`; another id reads as long past. */
   private def scheduledAt(taskId: TaskId): Int =

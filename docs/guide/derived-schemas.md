@@ -8,7 +8,7 @@ nav_order: 28
 # Derived Schemas
 {: .no_toc }
 
-Write the type once and let `llm4s-schema-derivation` build the JSON schema for structured output from it.
+Write the type once and let `llm4s-schema-derivation` build the JSON schema for structured output, and typed tools, from it.
 {: .fs-6 .fw-300 }
 
 > **Experimental.** The module is new and not part of the 1.0 frozen surface. It is published from `0.5.0` on.
@@ -135,6 +135,49 @@ val weatherTool: Result[ToolFunction[WeatherQuery, String]] =
 ```
 
 The tool is sent in strict mode, so every parameter is required and `unit` is a property that may be `null`. The module's tests check that the parameters the tool sends are the derived schema, and that the handler reads a call.
+
+The handler above still reads the arguments itself, and a call it cannot read reaches the model as uPickle's message. [Typed tools](#typed-tools) do the reading for you.
+
+## Typed tools
+
+`Tool.of` builds the tool from a function over the arguments' case class: the schema is derived from the type, the call's arguments are decoded into it before your function runs, and the result is written with its uPickle `ReadWriter`. The name of a parameter is written once, in the case class, so the schema, the parsing and the function cannot drift apart.
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.ToolFunction
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+@description("A forecast request")
+case class ForecastQuery(
+  @description("City name, for example Paris") city: String,
+  @description("How many days ahead, from 1 to 7") days: Int
+) derives SchemaOf, ReadWriter
+
+case class Forecast(city: String, days: Int, summary: String) derives ReadWriter
+
+val forecastTool: Result[ToolFunction[ForecastQuery, Forecast]] =
+  Tool.of[ForecastQuery, Forecast]("get_forecast", "Weather forecast for a city") { query =>
+    if (query.days < 1 || query.days > 7) Left("days must be between 1 and 7")
+    else Right(Forecast(query.city, query.days, "Sunny"))
+  }
+```
+
+The result is the same `ToolFunction` that `ToolBuilder` builds, so it goes into a `ToolRegistry`, an agent or an MCP server like any other tool; nothing in `llm4s-core` changes. The function returns `Either[String, R]`, as a `ToolBuilder` handler does: a `Left` is the error the model sees. `Tool.of` itself returns a `Result`, as `buildSafe()` does, because the arguments must be a JSON object: an enum or another type that is not a case class is refused with a `Left`, as is a schema that cannot be built (see [Recursion](#recursion)). The result type needs a `ReadWriter`, not only a writer, because `ToolFunction` requires one.
+
+A call whose arguments do not match the type never reaches your function. Each problem is reported as the `ToolParameterError` that `SafeParameterExtractor` reports for a hand-written tool, and the module's tests compare the two:
+
+| The call sends | The error |
+|---|---|
+| no `days` | `MissingParameter("days", "integer", <the keys that were sent>)` |
+| `"days": null` | `NullParameter("days", "integer")` |
+| `"days": "three"`, `2.5` or a number beyond the `Int` range | `TypeMismatch("days", "integer", <the JSON type sent>)`, as `getInt` refuses them |
+| arguments that are not an object | `InvalidNesting(<field>, "root", <the JSON type sent>)` for each field |
+| a key `ForecastQuery` has no field for | nothing: it is ignored, as a hand-written tool ignores it |
+
+The problems are collected, every field at once, in declaration order: one is reported as its own message, as a hand-written handler's `Left` would be, several as `ToolParameterError.MultipleErrors`'s. A nested field is named by its path (`address.city`, `lines[0].quantity`), as a dotted `getString("address.city")` names it; a nested object or an array that is not one is a `TypeMismatch` naming the object, as `getObject` reports it. A value outside an enum's cases is a `TypeMismatch` that lists the cases, and a value of the right JSON type that the reader still refuses (`"abc"` for a `BigDecimal`) is a `TypeMismatch` with the reader's reason. An `Option` field may be absent or `null`, and is `None`; every other field is required, including one with a default value, as the schema says.
+
+The built-in calculator, re-expressed this way next to the hand-built original, is the `TypedCalculatorExample` sample (`sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"`).
 
 ## An agent's answer
 
