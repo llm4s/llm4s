@@ -8,6 +8,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import java.time.Instant
 
 /**
  * Tests for Tracing trait and implementations
@@ -307,7 +308,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   private def createTestCompletion(): Completion =
     Completion(
       id = "comp-123",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty),

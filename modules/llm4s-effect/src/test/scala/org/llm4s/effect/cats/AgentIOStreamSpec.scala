@@ -30,6 +30,7 @@ import org.scalatest.time.{ Millis, Seconds, Span }
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.concurrent.duration.*
+import java.time.Instant
 
 class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
 
@@ -37,7 +38,7 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = 0L, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))

@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * Compiles and runs the recipes of `docs/guide/json-libraries.md` against the real circe, play-json and zio-json.
@@ -39,7 +40,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       Right(
         Completion(
           id = "script",
-          created = 0L,
+          created = Instant.EPOCH,
           content = reply,
           model = "script",
           message = AssistantMessage(reply)

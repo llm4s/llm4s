@@ -26,6 +26,7 @@ import scala.util.Left
 import scala.util.Right
 import java.math.BigDecimal
 import java.time.Duration
+import java.time.Instant
 import java.util.Optional
 import java.util.OptionalInt
 import java.util.concurrent.TimeUnit
@@ -56,7 +57,7 @@ internal class RecordingClient(private val reply: Either<LLMError, Completion>) 
 /** A reply with text, a model, usage, a cost and a tool call; Scala types appear only in building it. */
 internal fun reply(text: String = "Let me check.", cost: Option<Any> = Option.apply(0.0015)): Completion =
     Completion.apply(
-        "reply-1", 0L, text, "gpt-4o-2024-08-06", AssistantMessage.apply(text),
+        "reply-1", Instant.EPOCH, text, "gpt-4o-2024-08-06", AssistantMessage.apply(text),
         scala.jdk.javaapi.CollectionConverters.asScala(listOf(ToolCall("c1", "weather", ujson.Str("Paris")))).toList(),
         Option.apply(TokenUsage.apply(12, 5, 17, Option.empty(), Option.apply<Any>(8), Option.apply<Any>(3))),
         cost,

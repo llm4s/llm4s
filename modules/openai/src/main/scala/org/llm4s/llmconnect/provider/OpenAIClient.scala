@@ -674,7 +674,9 @@ class OpenAIClient private[provider] (
 
     Completion(
       id = known(response._id()).getOrElse(""),
-      created = known(response._created()).fold(0L)(_.longValue),
+      created = known(response._created())
+        .flatMap(s => Try(Instant.ofEpochSecond(s.longValue)).toOption)
+        .getOrElse(Instant.EPOCH),
       content = content,
       model = known(response._model()).getOrElse(model),
       message = assistantMessage,

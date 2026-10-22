@@ -18,6 +18,7 @@ import upickle.default.{ macroRW, ReadWriter }
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch }
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /** The tool and guardrail events of an agent run, and what the durable ones may carry. */
 class AgentEventsSpec extends AnyFlatSpec with Matchers:
@@ -40,10 +41,10 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private def answer(text: String): Completion =
-    Completion("answer", 0L, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
 
   private def calling(call: ToolCall): Completion =
-    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
 
   private val toolCall                       = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion = calling(toolCall)
@@ -155,7 +156,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val handoff = ToolCall("call-h", "handoff_to_physics", ujson.Obj())
     val mixed = Completion(
       "turn-1",
-      0L,
+      Instant.EPOCH,
       "",
       "test-model",
       AssistantMessage(None, Seq(handoff, toolCall)),
@@ -326,7 +327,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val runtime = GraphRuntime(store)
     val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> marker))
     val client = Scripted(
-      Right(Completion("c1", 0L, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)),
+      Right(Completion("c1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)),
       Right(answer(s"the answer is $marker"))
     )
     val agent = Agent

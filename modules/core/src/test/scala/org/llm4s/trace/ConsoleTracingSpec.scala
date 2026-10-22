@@ -6,6 +6,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.io.ByteArrayOutputStream
 import scala.concurrent.duration.*
+import java.time.Instant
 
 /**
  * Tests for ConsoleTracing.
@@ -117,7 +118,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
     val completion = Completion(
       id = "cmpl-123456",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "Hello, I'm an AI assistant.",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello, I'm an AI assistant."), Seq.empty),
@@ -131,7 +132,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
     val completion = Completion(
       id = "cmpl-789",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "Response without usage",
       model = "gpt-4",
       message = AssistantMessage(Some("Response without usage"), Seq.empty),
@@ -146,7 +147,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val toolCall = ToolCall("call-456", "web_search", ujson.Obj("query" -> "test"))
     val completion = Completion(
       id = "cmpl-tools",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "I'll search for that.",
       model = "gpt-4",
       message = AssistantMessage(Some("I'll search for that."), Seq(toolCall)),
@@ -198,7 +199,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val longContent = "A" * 1000
     val completion = Completion(
       id = "cmpl-long",
-      created = 0L,
+      created = Instant.EPOCH,
       content = longContent,
       model = "gpt-4",
       message = AssistantMessage(Some(longContent), Seq.empty),
@@ -292,7 +293,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hi"))
     val completion = Completion(
       id = "completion-7",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "Calling echo",
       model = "model-in-completion",
       message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.copy(id = "call-2")))

@@ -36,6 +36,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 import org.llm4s.javaapi.Llm4s as JLlm4s
+import java.time.Instant
 
 /**
  * The Kotlin tool DSL (#1495): [tool] and [tools] build the Java facade's [JTool]s, a scripted agent calls them with
@@ -55,7 +56,7 @@ class ToolDslTest {
     private fun completion(text: String, calls: List<ToolCall> = emptyList()): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", 0L, text, "m",
+                "id", Instant.EPOCH, text, "m",
                 AssistantMessage.apply(if (calls.isEmpty()) Option.apply(text) else Option.empty(), seq(calls), AssistantMessage.`apply$default$3`()),
                 CollectionConverters.asScala(calls).toList(),
                 Option.empty(), Option.empty(),

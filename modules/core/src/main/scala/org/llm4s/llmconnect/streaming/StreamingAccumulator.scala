@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
+import java.time.Instant
 import scala.collection.mutable
 
 /**
@@ -124,14 +125,14 @@ final class StreamingAccumulator private () {
   /**
    * Convert accumulated data to a Completion, stamped with the current time
    */
-  def toCompletion: Result[Completion] = toCompletion(System.currentTimeMillis() / 1000)
+  def toCompletion: Result[Completion] = toCompletion(Instant.now())
 
   /**
    * Convert accumulated data to a Completion, stamped with the given creation time.
    * Pure given the accumulator's current state - split out from the no-arg overload
    * so the conversion itself is testable without a real clock.
    */
-  def toCompletion(created: Long): Result[Completion] = {
+  def toCompletion(created: Instant): Result[Completion] = {
     val finalToolCalls = currentToolCalls
 
     // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks

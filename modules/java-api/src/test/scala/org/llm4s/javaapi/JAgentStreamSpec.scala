@@ -21,6 +21,7 @@ import scala.jdk.OptionConverters.*
 import scala.concurrent.duration.*
 
 import StreamFixtures.*
+import java.time.Instant
 
 final private case class EchoResult(echo: String)
 private object EchoResult {
@@ -39,7 +40,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
 
   private def calling: Completion = {
     val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
-    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
   }
 
   private def echoTool = ToolBuilder[Map[String, Any], EchoResult](

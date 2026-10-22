@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+import java.time.Instant
 
 class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderModuleChecks:
 
@@ -42,7 +43,7 @@ class ContentPartContractSpec extends AnyFlatSpec with Matchers with ProviderMod
           .POST(HttpRequest.BodyPublishers.ofString(ujson.Arr.from(messages).render()))
           .build()
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()): Unit
-        Completion(id = "x", created = 0L, content = "ok", model = "m", message = AssistantMessage("ok"))
+        Completion(id = "x", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage("ok"))
     def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     def getContextWindow(): Int     = 1000

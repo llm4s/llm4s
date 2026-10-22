@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.model
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class ReasoningModesSpec extends AnyFlatSpec with Matchers {
 
@@ -133,7 +134,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
   "Completion" should "detect when thinking content is present" in {
     val withoutThinking = Completion(
       id = "1",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "response",
       model = "test",
       message = AssistantMessage(Some("response"), Seq.empty)
@@ -151,7 +152,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
   it should "generate fullContent correctly" in {
     val completion = Completion(
       id = "1",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty).withThinking("Let me calculate this...")
@@ -166,7 +167,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
   it should "return just content when no thinking" in {
     val completion = Completion(
       id = "1",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "The answer is 42.",
       model = "test",
       message = AssistantMessage(Some("The answer is 42."), Seq.empty)

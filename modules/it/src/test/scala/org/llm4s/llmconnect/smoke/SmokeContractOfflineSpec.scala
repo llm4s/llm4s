@@ -23,6 +23,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ListBuffer
+import java.time.Instant
 
 /**
  * Proves the shared smoke contract without any provider (issue #1212).
@@ -260,7 +261,7 @@ class SmokeContractOfflineSpec
   ): Completion =
     Completion(
       id = "stub",
-      created = 0L,
+      created = Instant.EPOCH,
       content = content,
       model = "stub",
       message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),

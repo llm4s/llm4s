@@ -2446,7 +2446,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       val client = new org.llm4s.llmconnect.LLMClient {
         import org.llm4s.llmconnect.model.*
         override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-          Right(Completion("answer", 0L, "done", "test-model", AssistantMessage("done")))
+          Right(Completion("answer", Instant.EPOCH, "done", "test-model", AssistantMessage("done")))
         override def streamComplete(
           conversation: Conversation,
           options: CompletionOptions,
@@ -2576,7 +2576,7 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       val watching = new CountDownLatch(1)
       val client = new org.llm4s.llmconnect.LLMClient {
         import org.llm4s.llmconnect.model.*
-        private def done = Completion("answer", 0L, "done", "test-model", AssistantMessage("done"))
+        private def done = Completion("answer", Instant.EPOCH, "done", "test-model", AssistantMessage("done"))
         override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
           Right(done)
         override def streamComplete(

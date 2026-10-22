@@ -24,6 +24,7 @@ import java.util.Optional
 import scala.jdk.CollectionConverters.*
 
 import StreamFixtures.*
+import java.time.Instant
 
 /**
  * [[JAgentResult]] and what it reaches - [[JAgentStatus]], [[JMessage]], [[JToolCall]],
@@ -258,7 +259,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   private def costing(text: String): Completion =
     Completion(
       "id",
-      0L,
+      Instant.EPOCH,
       text,
       "m",
       AssistantMessage(Some(text)),
@@ -352,7 +353,7 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
 
   private def toolCall: Completion = {
     val call = ToolCall("call-1", "echo", ujson.Obj("input" -> "hi"))
-    Completion("id", 0L, "", "m", AssistantMessage(None, Seq(call)), List(call))
+    Completion("id", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), List(call))
   }
 
   private def echoTools: ToolRegistry =

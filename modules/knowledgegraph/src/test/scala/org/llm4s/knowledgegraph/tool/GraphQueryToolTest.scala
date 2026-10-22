@@ -9,6 +9,7 @@ import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
 import org.llm4s.toolapi.{ ToolCallRequest, ToolRegistry }
+import java.time.Instant
 
 class GraphQueryToolTest extends AnyFunSuite with Matchers with MockFactory {
 
@@ -27,7 +28,7 @@ class GraphQueryToolTest extends AnyFunSuite with Matchers with MockFactory {
     content = content,
     model = "test-model",
     toolCalls = Nil,
-    created = 1234567890L,
+    created = Instant.ofEpochSecond(1234567890L),
     message = AssistantMessage(Some(content), Nil),
     usage = None
   )

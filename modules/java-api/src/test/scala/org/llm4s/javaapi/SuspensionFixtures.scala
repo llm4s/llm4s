@@ -11,6 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 import StreamFixtures.*
+import java.time.Instant
 
 /**
  * Agents whose turns suspend, for the pending-interrupt specs: `deploy` needs approval (an
@@ -39,7 +40,7 @@ private[javaapi] object SuspensionFixtures {
   def call(id: String, name: String, text: String): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
 
   def calling(calls: ToolCall*): Completion =
-    Completion("turn", 0L, "", "m", AssistantMessage(None, calls), calls.toList)
+    Completion("turn", Instant.EPOCH, "", "m", AssistantMessage(None, calls), calls.toList)
 
   /** A model answering each call with the next of `replies`, then `done`. */
   def scripted(replies: Either[LLMError, Completion]*): Scripted = {

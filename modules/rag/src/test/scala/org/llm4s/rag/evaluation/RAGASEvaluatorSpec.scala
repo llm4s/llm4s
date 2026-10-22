@@ -8,6 +8,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
 
@@ -15,7 +16,7 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
 
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
-    created = System.currentTimeMillis(),
+    created = Instant.now(),
     content = content,
     model = "test-model",
     message = AssistantMessage(content)

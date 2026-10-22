@@ -12,6 +12,7 @@ import org.llm4s.types.{ SessionId, DirectoryPath, Result }
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
@@ -29,7 +30,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
       responses(calls.getAndIncrement().min(responses.size - 1)).map { response =>
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "test-model",
           message = AssistantMessage(response, toolCalls = List.empty)
@@ -175,7 +176,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val looping = new LLMClient {
       private val call = ToolCall("c", "missing_tool", ujson.Obj())
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("loop", 0L, "", "test-model", AssistantMessage(None, Seq(call)), List(call)))
+        Right(Completion("loop", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call)))
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions,

@@ -13,6 +13,7 @@ import org.scalatest.matchers.should.Matchers
 import java.net.{ InetSocketAddress, Socket, URI }
 import scala.concurrent.duration._
 import scala.util.{ Try, Using }
+import java.time.Instant
 
 /**
  * The MCP client against a server llm4s did not write: the official MCP reference server
@@ -204,7 +205,7 @@ class MCPReferenceServerSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = s"scripted-$calls",
-          created = 0L,
+          created = Instant.EPOCH,
           content = message.content,
           model = "scripted-model",
           message = message,

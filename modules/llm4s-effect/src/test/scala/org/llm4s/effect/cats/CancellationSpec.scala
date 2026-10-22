@@ -25,6 +25,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration.*
+import java.time.Instant
 
 /**
  * Core's contract is that cancellation is by interrupt: providers preserve the interrupt and return
@@ -120,8 +121,8 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
     val scripted: LLMClient = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-          Right(Completion("t", 0L, "finished", "m", AssistantMessage(Some("finished"))))
-        else Right(Completion("t", 0L, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
+          Right(Completion("t", Instant.EPOCH, "finished", "m", AssistantMessage(Some("finished"))))
+        else Right(Completion("t", Instant.EPOCH, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
       def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       def getContextWindow(): Int     = 4096

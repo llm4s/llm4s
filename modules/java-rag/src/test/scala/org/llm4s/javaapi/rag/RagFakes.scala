@@ -10,6 +10,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
 import scala.collection.mutable.ArrayBuffer
+import java.time.Instant
 
 /** A deterministic embedding provider and chat client, so the pipeline runs end to end with no network. */
 object RagFakes {
@@ -63,7 +64,7 @@ object RagFakes {
         val answer = prompt.linesIterator
           .collectFirst { case l if l.startsWith("[1] ") => l.stripPrefix("[1] ") }
           .getOrElse(NoContext)
-        Completion("id", 0L, answer, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
+        Completion("id", Instant.EPOCH, answer, "echo", AssistantMessage(answer)).withUsage(TokenUsage(12, 3, 15))
       }
     }
 

@@ -2,15 +2,51 @@ package org.llm4s.llmconnect.model
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class CompletionSpec extends AnyFunSuite with Matchers {
 
   // ================================= COMPLETION =================================
 
+  test("Completion.created is an Instant that round-trips the wire's epoch seconds") {
+    val completion = Completion(
+      id = "test-id",
+      created = Instant.ofEpochSecond(1677652288L),
+      content = "hi",
+      model = "gpt-4",
+      message = AssistantMessage("hi")
+    )
+
+    completion.created shouldBe Instant.parse("2023-03-01T06:31:28Z")
+    completion.created.getEpochSecond shouldBe 1677652288L
+  }
+
+  test("Completion.withCreated replaces only the creation time") {
+    val base = Completion(
+      id = "test-id",
+      created = Instant.EPOCH,
+      content = "hi",
+      model = "gpt-4",
+      message = AssistantMessage("hi")
+    )
+    val at      = Instant.parse("2026-10-23T12:00:00Z")
+    val updated = base.withCreated(at)
+
+    updated.created shouldBe at
+    updated shouldBe Completion(
+      id = "test-id",
+      created = at,
+      content = "hi",
+      model = "gpt-4",
+      message = AssistantMessage("hi")
+    )
+    base.created shouldBe Instant.EPOCH
+  }
+
   test("Completion.asText returns content") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "Hello, world!",
       model = "gpt-4",
       message = AssistantMessage("Hello, world!")
@@ -23,7 +59,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     val toolCall = ToolCall("call-1", "get_weather", ujson.Obj("location" -> "NYC"))
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "",
       model = "gpt-4",
       message = AssistantMessage(None, Seq(toolCall)),
@@ -36,7 +72,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.hasToolCalls returns false when no tool calls") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello")
@@ -48,7 +84,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.hasThinking returns true when thinking content present") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking("Let me calculate 2 + 2...")
@@ -60,7 +96,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.hasThinking returns true when the only thinking is redacted") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking(Seq(ThinkingBlock.Redacted("opaque")))
@@ -73,7 +109,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.hasThinking returns false when thinking is empty") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello").withThinking("")
@@ -85,7 +121,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.fullContent includes thinking when present") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "The answer is 4",
       model = "claude-3",
       message = AssistantMessage("The answer is 4").withThinking("Let me think...")
@@ -99,7 +135,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
   test("Completion.fullContent returns only content when no thinking") {
     val completion = Completion(
       id = "test-id",
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       content = "Hello",
       model = "gpt-4",
       message = AssistantMessage("Hello")

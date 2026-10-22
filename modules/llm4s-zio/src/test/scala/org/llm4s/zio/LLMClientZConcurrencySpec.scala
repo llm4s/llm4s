@@ -17,6 +17,7 @@ import org.llm4s.types.Result
 import zio.{ Chunk, Promise, Ref, ZIO, durationInt }
 import zio.stream.ZStream
 import zio.test.*
+import java.time.Instant
 
 /**
  * Real-concurrency behaviour of the streaming bridge. Every wait is a latch, a Promise or a spin on
@@ -188,7 +189,13 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
             val key = c.messages.head.content
             Right(
-              Completion(id = "id", created = 0L, content = key, model = "m", message = AssistantMessage(Some(key)))
+              Completion(
+                id = "id",
+                created = Instant.EPOCH,
+                content = key,
+                model = "m",
+                message = AssistantMessage(Some(key))
+              )
             )
           }
           def streamComplete(

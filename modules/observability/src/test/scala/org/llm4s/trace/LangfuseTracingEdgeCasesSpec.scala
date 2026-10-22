@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration.*
+import java.time.Instant
 
 class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -377,7 +378,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     val completion = Completion(
       id = "comp-test",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "test response",
       model = "gpt-4",
       message = AssistantMessage(Some("test response"), Seq.empty)
@@ -400,7 +401,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1))
     val completion = Completion(
       id = "comp-tools",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "Let me calculate",
       model = "gpt-4",
       message = AssistantMessage(Some("Let me calculate"), Seq(toolCall))

@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.{ List as JList, Optional }
 import java.util.concurrent.atomic.AtomicReference
+import java.time.Instant
 
 /** `JLlmClient.complete(prompt, Record.class)` (#1486): a Java record's schema out, the record back. */
 class JStructuredOutputSpec extends AnyFlatSpec with Matchers {
@@ -18,7 +19,7 @@ class JStructuredOutputSpec extends AnyFlatSpec with Matchers {
     val options = new AtomicReference[CompletionOptions]()
     override def complete(conversation: Conversation, opts: CompletionOptions): Result[Completion] = {
       options.set(opts)
-      Right(Completion("id", 0L, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
     }
     override def streamComplete(
       c: Conversation,

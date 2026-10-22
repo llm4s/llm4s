@@ -12,6 +12,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration.*
 import scala.util.Try
+import java.time.Instant
 
 class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModuleChecks:
 
@@ -83,7 +84,7 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     intercept[TestFailedException](check).getMessage
 
   private def completion =
-    Completion("c", 0L, "late", "m", AssistantMessage("late"))
+    Completion("c", Instant.EPOCH, "late", "m", AssistantMessage("late"))
 
   "assertCancelsWhenInterrupted" should "say so when a client clears the interrupt flag" in {
     failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Left(CancelledError("stub"))))) should include(

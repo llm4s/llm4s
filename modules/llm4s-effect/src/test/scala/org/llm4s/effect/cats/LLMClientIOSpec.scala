@@ -16,12 +16,13 @@ import org.llm4s.llmconnect.model.{
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class LLMClientIOSpec extends AnyFlatSpec with Matchers {
 
   private val testCompletion = Completion(
     id = "test-id",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "hello",
     model = "test-model",
     message = AssistantMessage(Some("hello"))

@@ -8,6 +8,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Edge case tests for RAGASEvaluator.
@@ -27,7 +28,7 @@ class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "test",
           message = AssistantMessage(response)

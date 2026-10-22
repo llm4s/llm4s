@@ -18,6 +18,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -153,7 +154,7 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     private val n = new AtomicInteger()
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val s = scores(n.getAndIncrement())
-      Right(Completion("id", 0L, s, "test", AssistantMessage(s)))
+      Right(Completion("id", Instant.EPOCH, s, "test", AssistantMessage(s)))
     }
     override def streamComplete(
       conversation: Conversation,

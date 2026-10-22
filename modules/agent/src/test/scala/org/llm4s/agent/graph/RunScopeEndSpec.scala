@@ -14,6 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /**
  * A stream or a late subscription to a run that ends without a terminal durable event still ends -
@@ -27,7 +28,7 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
 
   private object Answering extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("answer", 0L, "hi", "test-model", AssistantMessage("hi")))
+      Right(Completion("answer", Instant.EPOCH, "hi", "test-model", AssistantMessage("hi")))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,

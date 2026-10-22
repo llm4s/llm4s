@@ -20,6 +20,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import zio.{ ZIO, durationInt }
 import zio.test.*
+import java.time.Instant
 
 /**
  * Core's contract is that cancellation is by interrupt: providers preserve the interrupt and return
@@ -126,8 +127,8 @@ object CancellationSpec extends ZIOSpecDefault {
         val scripted: LLMClient = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
             if (c.messages.exists(_.isInstanceOf[ToolMessage]))
-              Right(Completion("t", 0L, "finished", "m", AssistantMessage(Some("finished"))))
-            else Right(Completion("t", 0L, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
+              Right(Completion("t", Instant.EPOCH, "finished", "m", AssistantMessage(Some("finished"))))
+            else Right(Completion("t", Instant.EPOCH, "", "m", AssistantMessage("", Seq(call)), toolCalls = List(call)))
           def streamComplete(
             c: Conversation,
             o: CompletionOptions,

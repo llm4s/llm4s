@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.util.Using
+import java.time.Instant
 
 /**
  * The threading facts that `docs/guide/java-threading-and-cancellation.md` states, one test per
@@ -42,7 +43,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   private def concurrentCallers: Int = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
 
   private def completion(text: String): Completion =
-    Completion("id", 0L, text, "test-model", AssistantMessage(text))
+    Completion("id", Instant.EPOCH, text, "test-model", AssistantMessage(text))
 
   private def lastUser(conversation: Conversation): String =
     conversation.messages.collect { case u: UserMessage => u.content }.lastOption.getOrElse("")

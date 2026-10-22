@@ -23,11 +23,12 @@ import zio.test.*
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 object AgentZStreamSpec extends ZIOSpecDefault {
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = 0L, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))

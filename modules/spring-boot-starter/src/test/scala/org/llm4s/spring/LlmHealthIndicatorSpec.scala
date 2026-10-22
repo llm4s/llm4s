@@ -7,14 +7,15 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import BootLine.Status
+import java.time.Instant
 
 class LlmHealthIndicatorSpec extends AnyFlatSpec with Matchers {
 
   private val stubLlmClient: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, "ok", "m", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
-      Right(Completion("id", 0L, "ok", "m", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   }

@@ -8,6 +8,7 @@ import org.llm4s.types.Result
 import org.llm4s.vectorstore.HybridSearchResult
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class GraphRAGSpec extends AnyFunSuite with Matchers {
 
@@ -25,7 +26,7 @@ class GraphRAGSpec extends AnyFunSuite with Matchers {
       Right(
         Completion(
           id = "test",
-          created = 1L,
+          created = Instant.ofEpochSecond(1L),
           content = content,
           model = "test-model",
           message = AssistantMessage(contentOpt = Some(content)),

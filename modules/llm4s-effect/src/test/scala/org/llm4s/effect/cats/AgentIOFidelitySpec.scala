@@ -18,6 +18,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.*
+import java.time.Instant
 
 /** Proves that what `AgentIO` is given reaches the underlying `Agent` unchanged, and what the agent reports comes back. */
 class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
@@ -52,13 +53,13 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = 0L, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
     Completion(
       id = s"t$i",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "",
       model = "m",
       message = AssistantMessage("", calls),

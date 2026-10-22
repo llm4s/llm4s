@@ -25,6 +25,7 @@ import java.util.concurrent.{
 }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference }
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 object AsyncAndHealthSpec {
 
@@ -68,7 +69,7 @@ object AsyncAndHealthSpec {
     def client: JLlmClient = JLlmClientTestFactory.create(llm)
   }
 
-  def ok(text: String): Result[Completion] = Right(Completion("id", 0L, text, "m", AssistantMessage(text)))
+  def ok(text: String): Result[Completion] = Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
 
   def echo: FakeProvider = new FakeProvider(_ => ok("echo"))
 

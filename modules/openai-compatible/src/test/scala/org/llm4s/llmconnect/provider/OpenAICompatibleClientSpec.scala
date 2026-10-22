@@ -16,6 +16,7 @@ import java.net.ServerSocket
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * The shared `OpenAICompatibleClient`, driven through the generic `openai-compatible`
@@ -170,11 +171,23 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
       )
     )
     completion.id shouldBe ""
-    completion.created shouldBe 0L
+    completion.created shouldBe Instant.EPOCH
     completion.model shouldBe "local-model"
     completion.content shouldBe ""
     completion.message.contentOpt shouldBe None
     completion.usage shouldBe Some(TokenUsage(3, 4, 7))
+  }
+
+  it should "read created as an Instant from the wire's epoch seconds, and an out-of-range one as the epoch" in {
+    val c = new OpenAICompatibleClient(
+      OpenAICompatibleClient.settings(config("http://localhost:1/v1")),
+      OpenAICompatibleDialect.Standard
+    )
+    def created(value: String): Instant =
+      c.parseCompletion(ujson.read(s"""{"created":$value,"choices":[{"message":{"content":"a"}}]}""")).created
+
+    created("1677652288") shouldBe Instant.parse("2023-03-01T06:31:28Z")
+    created("1e300") shouldBe Instant.EPOCH
   }
 
   it should "parse tool calls leniently" in {

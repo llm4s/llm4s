@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.Graph
+import java.time.Instant
 
 class SchemaGuidedExtractorTest extends AnyFunSuite with Matchers with MockFactory {
 
@@ -21,7 +22,7 @@ class SchemaGuidedExtractorTest extends AnyFunSuite with Matchers with MockFacto
     content = content,
     model = "test-model",
     toolCalls = Nil,
-    created = 1234567890L,
+    created = Instant.ofEpochSecond(1234567890L),
     message = org.llm4s.llmconnect.model.AssistantMessage(Some(content), Nil),
     usage = None
   )

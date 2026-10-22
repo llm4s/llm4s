@@ -15,6 +15,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
 import zio.test.*
+import java.time.Instant
 
 /** Proves that what `AgentZ` is given reaches the underlying `Agent` unchanged, and what the agent reports comes back. */
 object AgentZFidelitySpec extends ZIOSpecDefault {
@@ -51,13 +52,13 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = 0L, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
 
   private def toolCall(i: Int): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
     Completion(
       id = s"t$i",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "",
       model = "m",
       message = AssistantMessage("", calls),

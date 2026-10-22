@@ -3,6 +3,7 @@ package org.llm4s.testkit
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.types.Result
+import java.time.Instant
 
 /**
  * An [[org.llm4s.llmconnect.LLMClient]] that answers from a script, for testing code that calls LLM4S without a
@@ -113,7 +114,7 @@ final class ScriptedLLMClient private (
     }
     Completion(
       id = s"scripted-${index + 1}",
-      created = 0L,
+      created = Instant.EPOCH,
       content = reply.content,
       model = reply.model,
       message = AssistantMessage(

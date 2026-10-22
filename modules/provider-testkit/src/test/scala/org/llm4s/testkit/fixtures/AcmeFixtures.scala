@@ -24,6 +24,7 @@ import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import java.time.Instant
 
 /**
  * A provider module written the way an external author would: a chat and an embedding
@@ -61,7 +62,7 @@ final case class AcmeConfig(apiKey: String, model: String, baseUrl: String) exte
 
 final case class AcmeClient(config: AcmeConfig) extends LLMClient:
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    Right(Completion("acme-1", 0L, "hi", config.model, AssistantMessage("hi")))
+    Right(Completion("acme-1", Instant.EPOCH, "hi", config.model, AssistantMessage("hi")))
 
   def streamComplete(
     conversation: Conversation,

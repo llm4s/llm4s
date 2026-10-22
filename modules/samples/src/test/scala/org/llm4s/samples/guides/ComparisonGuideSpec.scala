@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * Compiles and runs the llm4s snippets of `docs/guide/migrating-from-langchain4j.md`.
@@ -34,7 +35,7 @@ class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def completionOf(message: AssistantMessage): Completion =
     Completion(
       id = "script",
-      created = 0L,
+      created = Instant.EPOCH,
       content = message.content,
       model = "script",
       message = message,

@@ -21,6 +21,7 @@ import java.io.{ ByteArrayOutputStream, PrintStream }
 import java.util.concurrent.{ ConcurrentLinkedQueue, TimeUnit }
 import scala.jdk.CollectionConverters._
 import scala.util.Using
+import java.time.Instant
 
 object SpringBootGuideSpec {
 
@@ -29,7 +30,7 @@ object SpringBootGuideSpec {
     val sent: ConcurrentLinkedQueue[Conversation] = new ConcurrentLinkedQueue[Conversation]()
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       sent.add(c)
-      Right(Completion("id", 0L, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

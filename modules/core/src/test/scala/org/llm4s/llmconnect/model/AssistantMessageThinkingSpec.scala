@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.model
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
+import java.time.Instant
 
 class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
 
@@ -109,7 +110,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be what Completion.thinking reports" in {
-    val completion = Completion("id", 0L, "Checking.", "m", signed, signed.toolCalls.toList)
+    val completion = Completion("id", Instant.EPOCH, "Checking.", "m", signed, signed.toolCalls.toList)
     completion.thinking shouldBe signed.thinkingText
     completion.hasThinking shouldBe true
   }

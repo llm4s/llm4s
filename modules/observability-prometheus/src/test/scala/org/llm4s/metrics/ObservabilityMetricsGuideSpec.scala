@@ -16,6 +16,7 @@ import pureconfig.ConfigSource
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import scala.concurrent.duration.*
+import java.time.Instant
 
 /**
  * Runs what the "Metrics" section of `docs/guide/observability/index.md` states: the configuration
@@ -77,7 +78,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     Right(
       Completion(
         id = "c1",
-        created = 0L,
+        created = Instant.EPOCH,
         content = "ok",
         model = "gpt-4o",
         message = AssistantMessage("ok"),

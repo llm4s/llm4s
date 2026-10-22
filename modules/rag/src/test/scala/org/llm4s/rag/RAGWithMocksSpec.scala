@@ -20,6 +20,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.File
 import java.nio.file.Files
 import scala.collection.mutable
+import java.time.Instant
 
 /**
  * Comprehensive tests for the RAG class using mock implementations.
@@ -87,7 +88,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       Right(
         Completion(
           id = s"mock-completion-${System.currentTimeMillis()}",
-          created = System.currentTimeMillis() / 1000,
+          created = Instant.now(),
           content = content,
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some(content)),

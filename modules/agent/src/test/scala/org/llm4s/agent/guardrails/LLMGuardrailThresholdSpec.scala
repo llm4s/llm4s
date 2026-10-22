@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 /**
  * The `threshold` of a judge guardrail must be between 0.0 and 1.0 (#1520).
@@ -28,7 +29,7 @@ class LLMGuardrailThresholdSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = reply,
           model = "test-model",
           message = AssistantMessage(reply),

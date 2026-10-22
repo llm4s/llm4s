@@ -431,7 +431,7 @@ class VertexAIClient(
               content = textContent,
               model = config.model,
               toolCalls = toolCalls.toList,
-              created = System.currentTimeMillis() / 1000,
+              created = Instant.now(),
               message = message,
               usage = usageOpt,
               estimatedCost = cost,

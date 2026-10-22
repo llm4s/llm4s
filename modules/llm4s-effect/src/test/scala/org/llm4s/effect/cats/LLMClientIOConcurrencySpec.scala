@@ -16,6 +16,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.Await
 import scala.concurrent.duration.*
+import java.time.Instant
 
 /**
  * Real-concurrency behaviour of the streaming bridge. Every wait is a latch, a Deferred or a spin on
@@ -210,7 +211,15 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with Matchers {
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
         val key = c.messages.head.content
-        Right(Completion(id = "id", created = 0L, content = key, model = "m", message = AssistantMessage(Some(key))))
+        Right(
+          Completion(
+            id = "id",
+            created = Instant.EPOCH,
+            content = key,
+            model = "m",
+            message = AssistantMessage(Some(key))
+          )
+        )
       }
       def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
         val key = c.messages.head.content

@@ -50,6 +50,7 @@ import scala.util.Either
 import scala.util.Left
 import scala.util.Right
 import java.time.Clock
+import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -93,7 +94,7 @@ class AgentKtStreamTest {
     private fun completion(text: String): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", 0L, text, "m", AssistantMessage.apply(text),
+                "id", Instant.EPOCH, text, "m", AssistantMessage.apply(text),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                 Option.empty(), Option.empty(),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
@@ -140,7 +141,7 @@ class AgentKtStreamTest {
                 } else {
                     Right(
                         Completion.apply(
-                            "id", 0L, "recovered", "m", AssistantMessage.apply("recovered"),
+                            "id", Instant.EPOCH, "recovered", "m", AssistantMessage.apply("recovered"),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                             Option.empty(), Option.empty(),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),

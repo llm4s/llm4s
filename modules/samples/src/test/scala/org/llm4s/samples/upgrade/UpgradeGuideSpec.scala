@@ -20,6 +20,7 @@ import java.util.concurrent.{ ArrayBlockingQueue, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 import scala.util.Try
+import java.time.Instant
 
 /**
  * Compiles and runs the snippets of `docs/migrations/0-4-1-to-0-5-0.md`, and checks the facts its tables state
@@ -91,7 +92,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     private def reply: Completion = {
       calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
-      Completion(id = "script", created = 0L, content = message.content, model = "script", message = message)
+      Completion(id = "script", created = Instant.EPOCH, content = message.content, model = "script", message = message)
     }
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = Right(reply)

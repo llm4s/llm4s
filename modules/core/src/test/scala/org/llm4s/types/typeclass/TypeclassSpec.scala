@@ -3,6 +3,7 @@ package org.llm4s.types.typeclass
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, Conversation, UserMessage }
+import java.time.Instant
 
 /**
  * Tests for typeclass implementations in org.llm4s.types.typeclass package.
@@ -57,7 +58,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
   it should "extract string from completion" in {
     val completion = Completion(
       id = "test-id",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = "Response text",
       model = "test-model",
       message = AssistantMessage("Response text"),
@@ -93,7 +94,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
   it should "extract conversation from completion" in {
     val completion = Completion(
       id = "test-id",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = "Response",
       model = "test-model",
       message = AssistantMessage("Response"),

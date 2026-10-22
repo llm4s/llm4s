@@ -8,6 +8,7 @@ import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Unit tests for RAG guardrails.
@@ -32,7 +33,7 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test-id",
-          created = System.currentTimeMillis(),
+          created = Instant.now(),
           content = response,
           model = "test-model",
           message = AssistantMessage(response),

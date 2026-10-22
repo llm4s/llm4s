@@ -7,6 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.{ Files, Path, Paths }
+import java.time.Instant
 
 /**
  * The code of `docs/guide/derived-schemas.md`, compiled and run as written.
@@ -178,7 +179,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   private class Scripted(reply: String) extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,

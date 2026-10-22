@@ -6,6 +6,7 @@ import org.llm4s.toolapi.{ ObjectSchema, Schema }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
+import java.time.Instant
 
 class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
@@ -22,7 +23,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
   def makeCompletion(content: String): Completion =
     Completion(
       id = "test-id",
-      created = 0L,
+      created = Instant.EPOCH,
       content = content,
       model = "test-model",
       message = AssistantMessage(Some(content))

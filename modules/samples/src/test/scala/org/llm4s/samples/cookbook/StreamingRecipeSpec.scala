@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /** Runs the streaming recipe against the scripted client, and against a client that streams more than text. */
 class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -45,7 +46,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
         Right(
           Completion(
             id = "s",
-            created = 0L,
+            created = Instant.EPOCH,
             content = "Hello world",
             model = "m",
             message = AssistantMessage("Hello world")

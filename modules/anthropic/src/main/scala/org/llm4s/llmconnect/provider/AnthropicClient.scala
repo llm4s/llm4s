@@ -763,7 +763,7 @@ curl https://api.anthropic.com/v1/messages \
         content = message.content,
         model = response.model().asString(),
         toolCalls = toolCalls.toList,
-        created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
+        created = Instant.now(),
         message = message,
         usage = Some(tokenUsage),
         estimatedCost = cost,

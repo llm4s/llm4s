@@ -11,6 +11,7 @@ import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
+import java.time.Instant
 
 /**
  * The chat provider tests use when they need "some provider" and not a particular one.
@@ -90,7 +91,7 @@ final case class FixtureChatClient(config: FixtureChatConfig) extends LLMClient:
     Right(
       Completion(
         id = "fixturechat-completion",
-        created = 0L,
+        created = Instant.EPOCH,
         content = FixtureChatClient.Reply,
         model = config.model,
         message = AssistantMessage(FixtureChatClient.Reply)

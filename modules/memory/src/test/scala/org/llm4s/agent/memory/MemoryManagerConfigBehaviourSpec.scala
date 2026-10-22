@@ -9,6 +9,7 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.slf4j.LoggerFactory
+import java.time.Instant
 
 /**
  * Each [[MemoryManagerConfig]] option changes what a manager does (#1579).
@@ -126,7 +127,7 @@ class MemoryManagerConfigBehaviourSpec extends AnyFlatSpec with Matchers with Ei
       Right(
         Completion(
           id = "extract",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "mock-model",
           message = AssistantMessage(response),

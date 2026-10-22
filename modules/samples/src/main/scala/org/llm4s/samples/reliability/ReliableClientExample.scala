@@ -9,6 +9,7 @@ import org.llm4s.error._
 import org.slf4j.LoggerFactory
 import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 /**
  * Example demonstrating how to configure and use ReliableClient.
@@ -49,7 +50,7 @@ object ReliableClientExample {
   private val testConversation = Conversation(List(UserMessage("Hello")))
   private val dummyCompletion = Completion(
     id = "dummy-id",
-    created = System.currentTimeMillis(),
+    created = Instant.now(),
     content = "Hello! I am a reliable assistant.",
     model = "mock-model",
     message = AssistantMessage(content = "Hello! I am a reliable assistant.", toolCalls = List.empty)

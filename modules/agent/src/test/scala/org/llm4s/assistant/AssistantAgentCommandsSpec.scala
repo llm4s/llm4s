@@ -12,6 +12,7 @@ import org.llm4s.types.{ SessionId, DirectoryPath, Result }
 
 import java.nio.file.Files
 import java.util.UUID
+import java.time.Instant
 
 class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -31,7 +32,7 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
       Right(
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "test-model",
           message = AssistantMessage(response, toolCalls = List.empty)

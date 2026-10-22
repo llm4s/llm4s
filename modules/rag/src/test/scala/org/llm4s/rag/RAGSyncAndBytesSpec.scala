@@ -8,6 +8,7 @@ import org.llm4s.rag.loader._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Tests for RAG sync, byte ingestion, and async operations.
@@ -33,7 +34,7 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock",
-          created = 0L,
+          created = Instant.EPOCH,
           content = responseOverride.getOrElse("Mock answer."),
           model = "mock",
           message = AssistantMessage(responseOverride.getOrElse("Mock answer.")),

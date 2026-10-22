@@ -10,6 +10,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ListBuffer
+import java.time.Instant
 
 /** The benchmark pipeline embeds what it indexes as documents and a search as a query. */
 class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
@@ -31,7 +32,7 @@ class RAGPipelinePurposeSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "noop",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "",
           model = "noop",
           message = AssistantMessage(contentOpt = Some("")),

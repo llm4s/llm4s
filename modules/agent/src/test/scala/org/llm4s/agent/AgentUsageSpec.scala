@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolFunction, ToolRegistry }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Usage accumulated on the thread: over a turn's model calls, across turns, and across the agents
@@ -21,7 +22,7 @@ class AgentUsageSpec extends AnyFlatSpec with Matchers {
   ): Completion =
     Completion(
       id = s"$model-${message.content}",
-      created = 1L,
+      created = Instant.ofEpochSecond(1L),
       content = message.content,
       model = model,
       message = message,

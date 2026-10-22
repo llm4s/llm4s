@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import java.time.Instant
 
 /**
  * Static breakpoints and middleware questions (#1704) through [AgentKt]: [AgentKt.pending] lists them as
@@ -93,7 +94,7 @@ class AgentKtHumanReviewTest {
     private fun completion(text: String, calls: List<ToolCall> = emptyList()): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", 0L, text, "m",
+                "id", Instant.EPOCH, text, "m",
                 AssistantMessage.apply(if (calls.isEmpty()) Option.apply(text) else Option.empty(), seq(*calls.toTypedArray()), AssistantMessage.`apply$default$3`()),
                 CollectionConverters.asScala(calls).toList(),
                 Option.empty(), Option.empty(),

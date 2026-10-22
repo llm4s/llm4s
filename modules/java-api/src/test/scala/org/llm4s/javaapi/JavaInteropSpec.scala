@@ -8,6 +8,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.lang.reflect.{ GenericArrayType, Method, Modifier, ParameterizedType, Type, TypeVariable, WildcardType }
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * Exercises the public API from real Java source (`src/test/java/.../JavaInteropCheck.java`) and
@@ -30,7 +31,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   private def answering(answer: String): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, answer, "m", AssistantMessage(answer)))
+      Right(Completion("id", Instant.EPOCH, answer, "m", AssistantMessage(answer)))
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
@@ -58,9 +59,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     val streaming = StreamFixtures.Scripted(
       onChunk => {
         onChunk(StreamedChunk(id = "c", content = Some("4")))
-        Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+        Right(Completion("id", Instant.EPOCH, "4", "m", AssistantMessage("4")))
       },
-      () => Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+      () => Right(Completion("id", Instant.EPOCH, "4", "m", AssistantMessage("4")))
     )
     val log = JavaInteropCheck
       .streaming(StreamFixtures.jAgentOf(streaming)(_.withStreaming()), new java.util.concurrent.CountDownLatch(0))

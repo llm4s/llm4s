@@ -25,6 +25,7 @@ import org.llm4s.types.Result
 
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /** What [[FakeLlmClient]] is made of: its script entries and the scripted `LLMClient` behind it (#1497). */
 private[javaapi] object FakeLlmClients {
@@ -48,7 +49,8 @@ private[javaapi] object FakeLlmClients {
       val prompt = lastUserText(conversation)
       val index  = lock.synchronized { recorded = recorded :+ prompt; recorded.size - 1 }
       script.lift(index) match {
-        case Some(Right(text)) => Right(Completion(s"fake-${index + 1}", 0L, text, "fake", AssistantMessage(text)))
+        case Some(Right(text)) =>
+          Right(Completion(s"fake-${index + 1}", Instant.EPOCH, text, "fake", AssistantMessage(text)))
         case Some(Left(error)) => Left(error)
         case None =>
           Left(

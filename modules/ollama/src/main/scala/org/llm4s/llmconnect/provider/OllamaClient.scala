@@ -354,7 +354,7 @@ class OllamaClient(
 
   private def parseCompletion(json: ujson.Value): Result[Completion] = {
     val id      = json.obj.get("id").flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString)
-    val created = System.currentTimeMillis() / 1000
+    val created = Instant.now()
     val content = json.obj
       .get("message")
       .flatMap(_.obj.get("content"))

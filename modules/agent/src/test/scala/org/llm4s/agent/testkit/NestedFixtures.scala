@@ -7,13 +7,14 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
 
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import java.time.Instant
 
 /** A delegating agent for the effect modules' nested-stream specs (design 4.47). */
 object NestedFixtures {
 
   def completion(text: String, calls: Seq[ToolCall] = Nil): Completion = {
     val message = if (calls.isEmpty) AssistantMessage(text, Seq.empty) else AssistantMessage(None, calls)
-    Completion("n", 0L, message.content, "m", message, calls.toList, Some(TokenUsage(1, 1, 2)))
+    Completion("n", Instant.EPOCH, message.content, "m", message, calls.toList, Some(TokenUsage(1, 1, 2)))
   }
 
   /**

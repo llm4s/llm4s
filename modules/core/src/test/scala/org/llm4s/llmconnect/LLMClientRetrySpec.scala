@@ -16,6 +16,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration._
+import java.time.Instant
 
 /**
  * Deterministic unit tests for [[LLMClientRetry]].
@@ -25,7 +26,7 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
 
   private val stubCompletion = Completion(
     id = "test-1",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "ok",
     model = "test",
     message = AssistantMessage("ok")

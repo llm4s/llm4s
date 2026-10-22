@@ -33,6 +33,7 @@ import org.llm4s.agent.graph.GraphRuntime
 import org.llm4s.agent.graph.InMemoryCheckpointer
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.assertFalse
 import org.llm4s.agent.graph.StateUpdate
@@ -133,7 +134,7 @@ class AgentKtPendingTest {
     private fun completion(text: String, calls: List<ToolCall> = emptyList()): Either<LLMError, Completion> =
         Right(
             Completion.apply(
-                "id", 0L, text, "m",
+                "id", Instant.EPOCH, text, "m",
                 AssistantMessage.apply(if (calls.isEmpty()) Option.apply(text) else Option.empty(), seq(*calls.toTypedArray()), AssistantMessage.`apply$default$3`()),
                 CollectionConverters.asScala(calls).toList(),
                 Option.empty(), Option.empty(),

@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
 import scala.collection.mutable
+import java.time.Instant
 
 /**
  * What `LangfuseTracing` sends for a whole agent run, which the agent traces as `graph.*` custom
@@ -85,7 +86,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
       Seq(
         Completion(
           "turn-1",
-          0L,
+          Instant.EPOCH,
           "",
           "test-model",
           AssistantMessage("", Seq(toolCall)),
@@ -94,7 +95,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         ),
         Completion(
           "turn-2",
-          0L,
+          Instant.EPOCH,
           "Echoed.",
           "test-model",
           AssistantMessage("Echoed."),

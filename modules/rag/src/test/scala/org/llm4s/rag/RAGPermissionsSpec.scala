@@ -10,6 +10,7 @@ import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Tests for RAG permission-aware operations using a mock SearchIndex.
@@ -37,7 +38,7 @@ class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "Mock answer.",
           model = "mock",
           message = AssistantMessage("Mock answer."),

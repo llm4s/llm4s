@@ -89,7 +89,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private val testConversation = Conversation(List(UserMessage("test")))
   private val testCompletion = Completion(
     id = "test-id",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "response",
     model = "test-model",
     message = AssistantMessage(content = "response")
