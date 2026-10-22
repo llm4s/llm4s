@@ -1993,6 +1993,9 @@ lazy val javaApi = (project in file("modules/java-api"))
     // Measured 100.00% statement coverage (with the integration spec) (`sbt coverage javaApi/test javaApi/coverageReport`);
     // floor is the measured value rounded down to the nearest 5.
     coverageFloor(100),
+    // JavaGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
+    // process-wide. Run the suites one at a time, so another suite's snippets and stream threads cannot print into it.
+    Test / parallelExecution := false,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
