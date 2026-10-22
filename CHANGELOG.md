@@ -216,6 +216,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Llm4sConfig` at startup or `--fake`, `LLMError` mapped to HTTP statuses (400, 429 with `Retry-After`, 504, 502, 503),
   and the run cancelled when a streaming client disconnects. Tested on an ephemeral port against scripted clients;
   guide: `docs/guide/http-reference-apps.md`. ZIO HTTP and Tapir apps follow [#1459](https://github.com/llm4s/llm4s/issues/1459).
+- **Added** a ZIO HTTP reference app to `modules/examples-http`: a ZIO HTTP 3.2 (Netty) server over `llm4s-zio`'s
+  `AgentZ` with the http4s app's API and behaviour - `POST /chat` (JSON), `POST /chat/stream` (`delta`, `tool_call`,
+  `done`/`error` events and a keep-alive comment), the shared error-to-status mapping, `--fake`, and the run cancelled
+  when a streaming client disconnects. Run it with
+  `sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"`; the ZIO guide links it.
+  Tapir follows [#1459](https://github.com/llm4s/llm4s/issues/1459).
 - **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
   `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
   the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).

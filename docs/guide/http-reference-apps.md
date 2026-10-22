@@ -18,10 +18,12 @@ serves the same two endpoints, so they can be compared:
 | App | Built on | Status |
 |---|---|---|
 | http4s (Ember) | [`llm4s-effect`](cats-effect): `AgentIO[IO]`, an fs2 `Stream` | available |
-| ZIO HTTP | [`llm4s-zio`](zio): `AgentZ`, `ZStream` | planned ([#1459](https://github.com/llm4s/llm4s/issues/1459)) |
+| ZIO HTTP (Netty) | [`llm4s-zio`](zio): `AgentZ`, `ZStream` | available |
 | Tapir | endpoint definitions with streaming bodies | planned ([#1459](https://github.com/llm4s/llm4s/issues/1459)) |
 
-The module is not published: it is code to read and copy. Its HTTP dependencies stay in it.
+The module is not published: it is code to read and copy. Its HTTP dependencies stay in it. The apps share what does
+not depend on the stack: the request and event JSON (`ChatProtocol`), the error mapping (`HttpErrors`), the command
+line (`ServerSettings`) and the agent's configuration (`ChatAgent`).
 
 ## Run it
 
@@ -39,6 +41,13 @@ With a model: the app loads the provider at startup through `Llm4sConfig`, from 
 ```bash
 sbt examplesHttp/run
 LLM4S_PROVIDER=openai-main sbt examplesHttp/run    # with OPENAI_API_KEY set
+```
+
+`run` starts the http4s app; the ZIO HTTP app takes the same arguments through `runMain`:
+
+```bash
+sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"
+LLM4S_PROVIDER=openai-main sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain"
 ```
 
 `--port N` and `--host H` change the address (default `127.0.0.1:8080`). Then:
@@ -76,7 +85,26 @@ agent
   .mergeHaltL(Stream.awakeEvery[IO](heartbeat).as(ServerSentEvent(comment = Some("keep-alive"))))
 ```
 
-The agent is built with `withStreaming()`, so its model calls stream and their text reaches the run's events as
+The ZIO HTTP app does the same with `AgentZ.stream`, writing each event in the SSE format itself, so the keep-alive can
+be a comment:
+
+```scala
+agent
+  .stream(ThreadId(UUID.randomUUID().toString), message)
+  .collect {
+    case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
+    case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
+      event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+    case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
+  }
+  .catchAllCause(cause => ZStream.succeed(event("error", ChatProtocol.streamError(HttpErrors.of(llmError(cause))))))
+  .mergeHaltLeft(ZStream.fromSchedule(Schedule.spaced(heartbeat)).as(": keep-alive\n\n"))
+```
+
+The response is that stream as a chunked body (`Body.fromCharSequenceStreamChunked`) with
+`Content-Type: text/event-stream`.
+
+Both agents are built with `withStreaming()`, so its model calls stream and their text reaches the run's events as
 `AgentEvents.TextDelta`.
 
 ## Cancellation
@@ -87,9 +115,12 @@ silent. The failed write interrupts the response stream, and interrupting `Agent
 (`AgentRun.cancel`), which interrupts its model call. `Http4sChatServerSpec` shows it: a provider call that parks after
 its first chunk is interrupted once the test's socket closes.
 
-`POST /chat` runs the turn with `AgentIO.run`, which cancels the turn when its fiber is cancelled. Ember does not watch
-a connection while it computes a response, so the turn of a client that leaves `/chat` runs to the end; use
-`/chat/stream` when that matters, or bound the run with a timeout
+In the ZIO HTTP app, the server interrupts the response stream when the connection closes, or when a write fails;
+interrupting `AgentZ.stream` cancels the run in the same way. `ZioChatServerSpec` makes the same check.
+
+`POST /chat` runs the turn with `AgentIO.run` or `AgentZ.run`, each of which cancels the turn when its fiber is
+cancelled. Ember does not watch a connection while it computes a response, so with the http4s app the turn of a client
+that leaves `/chat` runs to the end; use `/chat/stream` when that matters, or bound the run with a timeout
 (`RunConfig().withBudgets(RunBudgets().withTimeout(...))`).
 
 ## Errors
@@ -114,7 +145,8 @@ The message is the library's, which can name the provider; a public service may 
 The tests need no API key and no network beyond the loopback. `ChatRoutesSpec` calls the routes in memory against a
 `ScriptedLLMClient` from [`llm4s-testkit`](testing-with-the-testkit): the JSON answer, the order of the streamed
 events, each error's status, and the stream's `error` event. `Http4sChatServerSpec` starts the server on an ephemeral
-port and calls it over real sockets, including the disconnect above.
+port and calls it over real sockets, including the disconnect above. `ZioChatRoutesSpec` (with `Routes.runZIO`) and
+`ZioChatServerSpec` check the ZIO HTTP app the same way.
 
 ```bash
 sbt examplesHttp/test

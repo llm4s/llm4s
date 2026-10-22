@@ -52,6 +52,11 @@ object Versions {
   // ZIO
   val zio = "2.1.16"
 
+  // ZIO HTTP, for the unpublished reference app in modules/examples-http (#1459) only. 3.2.0 is the last release
+  // built on the zio version above (3.3.0 needs 2.1.17); it brings Netty 4.1 and zio-schema, which no published
+  // module resolves.
+  val zioHttp = "3.2.0"
+
   // Apache Pekko (Apache-2.0). 1.7.1 is the latest stable line; its class files are version 52 (Java 8), apart from 39
   // classes of version 55 (Java 11) for the JDK 9+ Flow converters and fork-join pool, so it does not raise the JDK floor.
   // Built with Scala 3.3 LTS, which the 3.7.1 compiler reads. Used by `llm4s-pekko` only; a frozen module may not
@@ -139,6 +144,9 @@ object Deps {
   val http4sEmberServer = "org.http4s" %% "http4s-ember-server" % Versions.http4s
   val http4sEmberClient = "org.http4s" %% "http4s-ember-client" % Versions.http4s
   val http4sDsl         = "org.http4s" %% "http4s-dsl"          % Versions.http4s
+
+  // ZIO HTTP (unpublished modules/examples-http only; see Versions)
+  val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
 
   // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
   // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
