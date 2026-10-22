@@ -74,6 +74,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Gemini (and Vertex AI) — **carved** | `llm4s-gemini` | Frozen at 1.0 |
 | `llmconnect/provider` — Ollama — **carved** | `llm4s-ollama` | Frozen at 1.0 |
 | `llmconnect/provider` — Mistral and Cohere, as dialects on `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Beta |
+| `llmconnect/provider` — xAI (Grok), as a dialect on `OpenAICompatibleClient` ([#1023](https://github.com/llm4s/llm4s/issues/1023)) — **new** | `llm4s-openai-compatible` | Beta |
 | `llmconnect/provider` — Voyage AI embeddings — **carved** | `llm4s-voyage` (`modules/providers/voyage`) | Beta |
 | `llmconnect/provider` — AWS Bedrock (Converse, ConverseStream) — **new** | `llm4s-bedrock` (`modules/providers/bedrock`) | Beta |
 | `llmconnect/provider` — Jina AI embeddings — **new** | `llm4s-jina` (`modules/providers/jina`) | Beta |

@@ -51,6 +51,11 @@ object OpenAICompatibleConfigKeys {
   /** Z.ai API key, as Z.ai's SDK (`zai-sdk`) reads it. Bound to `llm4s.credentials.zai.apiKey`. */
   val ZAI_API_KEY = "ZAI_API_KEY"
 
+  // ---- xAI ----------------------------------------------------------------
+
+  /** xAI API key, as xAI's docs and SDK name it. Bound to `llm4s.credentials.xai.apiKey`. */
+  val XAI_API_KEY = "XAI_API_KEY"
+
   // ---- Cohere -------------------------------------------------------------
 
   /**

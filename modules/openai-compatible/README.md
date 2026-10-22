@@ -19,7 +19,7 @@ depends on this module for it, never the other way round. The providers register
 
 ## Providers
 
-All six are chat providers on `OpenAICompatibleClient`; each differs only by its *dialect* (headers,
+All seven are chat providers on `OpenAICompatibleClient`; each differs only by its *dialect* (headers,
 role names, reasoning and tool-call decoding).
 
 | Id | Default base URL | Key (shared `llm4s.credentials.<id>.apiKey`) |
@@ -30,6 +30,7 @@ role names, reasoning and tool-call decoding).
 | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 | `mistral` (Beta) | `https://api.mistral.ai` | `MISTRAL_API_KEY` |
 | `cohere` (Beta) | `https://api.cohere.ai/compatibility/v1` | `COHERE_API_KEY` |
+| `xai` (Beta) | `https://api.x.ai/v1` | `XAI_API_KEY` |
 
 ## Configuration
 

@@ -274,9 +274,9 @@ export OPENAI_API_KEY=<your_openai_api_key>
 export LLM4S_PROVIDER=openai-main   # bound by the samples' application.conf
 ```
 
-Anthropic, Gemini, Azure, OpenRouter, Z.ai, DeepSeek, Mistral, Cohere and generic OpenAI-compatible
+Anthropic, Gemini, Azure, OpenRouter, Z.ai, DeepSeek, Mistral, Cohere, xAI and generic OpenAI-compatible
 endpoints work the same way with `provider = "anthropic"`, `"gemini"`, `"azure"`, `"openrouter"`,
-`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"` or `"openai-compatible"`, and the vendor's own
+`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"`, `"xai"` or `"openai-compatible"`, and the vendor's own
 key variable (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`/`GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY`, ...);
 each provider module's `reference.conf` has an example section. See the
 [API keys table](docs/getting-started/configuration.md#api-keys), the

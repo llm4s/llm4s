@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.config.{
   OpenAIConfig,
   ProviderConfig,
   ProviderTimeouts,
+  XaiConfig,
   ZaiConfig
 }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -57,6 +58,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
       "zai"               -> "",
       "mistral"           -> "",
       "cohere"            -> "",
+      "xai"               -> "",
       "openrouter"        -> "",
       "openai-compatible" -> """baseUrl = "http://localhost:8000/v1""""
     )
@@ -68,7 +70,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
   }
 
   it should "leave the timeouts unset for a section without the block, so each client keeps its default" in {
-    Seq("deepseek", "zai", "mistral", "cohere", "openrouter").foreach { provider =>
+    Seq("deepseek", "zai", "mistral", "cohere", "xai", "openrouter").foreach { provider =>
       withClue(s"provider '$provider': ") {
         load(provider, timeouts = "").timeouts shouldBe ProviderTimeouts.default
       }
@@ -97,6 +99,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
     val zai      = ZaiClient(ZaiConfig("k", "m", "http://localhost:1", 128000, 8192).withTimeouts(Configured))
     val mistral  = MistralClient(MistralConfig("k", "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
     val cohere   = CohereClient(CohereConfig("k", "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
+    val xai      = XaiClient(XaiConfig("k", "m", "http://localhost:1", 131072, 8192).withTimeouts(Configured))
     val router   = OpenRouterClient(OpenAIConfig("k", "m").withBaseUrl("http://localhost:1").withTimeouts(Configured))
     val generic = new OpenAICompatibleClient(
       OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1", None).withTimeouts(Configured)),
@@ -108,6 +111,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
       "zai"      -> (zai.value.requestTimeout, zai.value.streamTimeout),
       "mistral"  -> (mistral.value.requestTimeout, mistral.value.streamTimeout),
       "cohere"   -> (cohere.value.requestTimeout, cohere.value.streamTimeout),
+      "xai"      -> (xai.value.requestTimeout, xai.value.streamTimeout),
       "router"   -> (router.value.requestTimeout, router.value.streamTimeout),
       "generic"  -> (generic.requestTimeout, generic.streamTimeout)
     ).foreach { case (name, (request, stream)) =>

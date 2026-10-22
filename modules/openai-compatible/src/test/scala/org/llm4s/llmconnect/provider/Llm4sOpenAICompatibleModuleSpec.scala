@@ -27,7 +27,7 @@ import org.scalatest.wordspec.AnyWordSpec
 /**
  * `llm4s-openai-compatible` registers itself, and what it registers works.
  *
- * These are the DeepSeek, Z.ai, OpenRouter, Mistral and Cohere rows of core's `BuiltinProvidersSpec`,
+ * These are the DeepSeek, Z.ai, OpenRouter, Mistral and Cohere rows (xAI joined in #1023) of core's `BuiltinProvidersSpec`,
  * which left with the providers (#1132). Mistral's and Cohere's asserted `streaming = false`
  * (#925); on the shared client they stream, plus the generic `openai-compatible` provider and the part
  * that only a carved module has to prove: that depending on it is enough - the services
@@ -45,7 +45,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
     (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
     (MistralProvider, "MistralConfig", "MistralClient"),
-    (CohereProvider, "CohereConfig", "CohereClient")
+    (CohereProvider, "CohereConfig", "CohereClient"),
+    (XaiProvider, "XaiConfig", "XaiClient")
   )
 
   /** A section carrying every field any of the providers asks for. */
@@ -125,6 +126,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       DeepSeekProvider.modelLister shouldBe defined
       OpenRouterProvider.modelLister shouldBe defined
       MistralProvider.modelLister shouldBe defined
+      XaiProvider.modelLister shouldBe defined
       // Z.ai and Cohere had no lister in core either.
       ZaiProvider.modelLister shouldBe None
       CohereProvider.modelLister shouldBe None
@@ -167,7 +169,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         ZaiProvider              -> images,
         OpenRouterProvider       -> (images ++ Seq(ContentPartCase.UserPdfUrl, ContentPartCase.UserPdfInline)),
         MistralProvider          -> (images :+ ContentPartCase.UserPdfUrl),
-        CohereProvider           -> images
+        CohereProvider           -> images,
+        XaiProvider              -> images
       )
       expectations.foreach { (descriptor, _, _) =>
         withClue(s"${descriptor.id.asString}: ") {
@@ -221,7 +224,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         ZaiProvider        -> OpenAICompatibleConfigKeys.ZAI_API_KEY,
         OpenRouterProvider -> OpenAICompatibleConfigKeys.OPENROUTER_API_KEY,
         MistralProvider    -> OpenAICompatibleConfigKeys.MISTRAL_API_KEY,
-        CohereProvider     -> OpenAICompatibleConfigKeys.COHERE_API_KEY
+        CohereProvider     -> OpenAICompatibleConfigKeys.COHERE_API_KEY,
+        XaiProvider        -> OpenAICompatibleConfigKeys.XAI_API_KEY
       )
       expected.foreach { (descriptor, variable) =>
         withClue(s"${descriptor.id.asString}: ") {

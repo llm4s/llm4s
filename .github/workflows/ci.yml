@@ -1632,10 +1632,11 @@ jobs:
           LANGFUSE_URL: ${{ secrets.LANGFUSE_URL }}
           # Keys for the smoke suites added with the new providers. With LLM4S_IT_STRICT=true each
           # one that is missing from the repository secrets makes its suite FAIL (not skip).
-          # MistralSmokeSpec, ZaiSmokeSpec, JinaEmbeddingsSmokeSpec, StableDiffusionSmokeSpec.
+          # MistralSmokeSpec, ZaiSmokeSpec, XaiSmokeSpec, JinaEmbeddingsSmokeSpec, StableDiffusionSmokeSpec.
           # (CohereEmbeddingsSmokeSpec reads COHERE_API_KEY, set above for CohereSmokeSpec.)
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
           STABILITY_API_KEY: ${{ secrets.STABILITY_API_KEY }}
           # BedrockSmokeSpec: AWS_REGION plus credentials the default chain finds

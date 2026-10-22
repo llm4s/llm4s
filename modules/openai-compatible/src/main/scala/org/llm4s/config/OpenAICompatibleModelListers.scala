@@ -1,10 +1,10 @@
 package org.llm4s.config
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.TokenExchange
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig, XaiConfig }
 import org.llm4s.llmconnect.provider.{ OpenAICompatibleProvider, OpenRouterDialect, OpenRouterProvider }
 import org.llm4s.types.Result
 
@@ -18,6 +18,18 @@ import org.llm4s.types.Result
 object DeepSeekModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(ProviderId("deepseek"), DeepSeekConfig.DEFAULT_BASE_URL)
+
+  def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+    delegate.listModels(config, httpClient)
+
+/**
+ * Model lister for the xAI provider, using its OpenAI-compatible `/models` endpoint
+ * ([[https://github.com/llm4s/llm4s/issues/1023 #1023]]).
+ */
+@Experimental
+object XaiModelLister extends ProviderModelLister:
+  private val delegate =
+    ProviderModelListers.openAICompatible(ProviderId("xai"), XaiConfig.DEFAULT_BASE_URL)
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     delegate.listModels(config, httpClient)

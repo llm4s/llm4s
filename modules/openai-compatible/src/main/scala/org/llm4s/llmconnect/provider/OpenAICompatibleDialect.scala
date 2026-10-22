@@ -38,7 +38,7 @@ import org.llm4s.util.BoundedJson
  *    parsed ([[parseToolCalls]]).
  *
  * The generic `openai-compatible` provider uses [[OpenAICompatibleDialect.standard]],
- * which overrides only headers and streamed usage, both from config. DeepSeek, Z.ai, OpenRouter, Mistral and Cohere
+ * which overrides only headers and streamed usage, both from config. DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and xAI
  * each override two to six members. A new OpenAI-compatible provider whose
  * differences fit these members is a dialect and a descriptor, not a client;
  * one whose differences do not should extend this trait rather than fork

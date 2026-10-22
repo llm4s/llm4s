@@ -266,8 +266,8 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
       ).contextWindow shouldBe 131072
 
       recipe(
-        "xai-main",
-        """xai-main {
+        "xai-generic",
+        """xai-generic {
           |  provider = "openai-compatible"
           |  baseUrl = "https://api.x.ai/v1"
           |  model = "grok-4.7"

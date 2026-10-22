@@ -71,7 +71,7 @@ libraryDependencies ++= Seq(
 | `gemini`, `vertexai` | `llm4s-gemini` |
 | `ollama` | `llm4s-ollama` |
 | `bedrock` | `llm4s-bedrock` |
-| `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
+| `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`, `openai-compatible` | `llm4s-openai-compatible` |
 
 Before 0.5.0, every provider shipped inside `llm4s-core`, so the `llm4s-core` dependency alone was enough.
 
@@ -159,6 +159,7 @@ the value.
 | `zai` | `ZAI_API_KEY` | `llm4s-openai-compatible` |
 | `openrouter` | `OPENROUTER_API_KEY` | `llm4s-openai-compatible` |
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
+| `xai` | `XAI_API_KEY` | `llm4s-openai-compatible` |
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
@@ -915,7 +916,7 @@ also set in `application.conf` or with `-D`.
 | `REQUESTY_API_KEY` | `llm4s.credentials.requesty.apiKey` | `llm4s-openai` |
 | `ANTHROPIC_API_KEY` | `llm4s.credentials.anthropic.apiKey` | `llm4s-anthropic` |
 | `GOOGLE_API_KEY`, else `GEMINI_API_KEY` | `llm4s.credentials.gemini.apiKey` | `llm4s-gemini` |
-| `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | `llm4s.credentials.<provider>.apiKey` | `llm4s-openai-compatible` |
+| `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY` | `llm4s.credentials.<provider>.apiKey` | `llm4s-openai-compatible` |
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |

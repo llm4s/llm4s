@@ -282,7 +282,7 @@ lazy val stabilityTierCheck = taskKey[Unit](
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama")
 // Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
-val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere)[A-Za-z]*\.scala$""".r)
+val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere|Xai)[A-Za-z]*\.scala$""".r)
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))

@@ -148,7 +148,8 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
         "http://localhost:8000/v1/",
         "http://localhost:8000/v1/models"
       ),
-      (MistralModelLister, ProviderId("mistral"), "https://api.mistral.ai/v1", "https://api.mistral.ai/v1/models")
+      (MistralModelLister, ProviderId("mistral"), "https://api.mistral.ai/v1", "https://api.mistral.ai/v1/models"),
+      (XaiModelLister, ProviderId("xai"), "https://api.x.ai/v1", "https://api.x.ai/v1/models")
     )
     cases.foreach { (lister, id, baseUrl, expected) =>
       withClue(id.asString) {

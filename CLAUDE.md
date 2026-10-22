@@ -88,7 +88,7 @@ llm4s/
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
 │   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
 │   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + openai-java SDK (published)
-│   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
+│   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, xAI, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   ├── voyage/            # Voyage AI embedding provider
 │   │   ├── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
@@ -256,7 +256,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 OPENAI_API_KEY=sk-...                # llm4s-openai (openai); also REQUESTY_API_KEY, AZURE_OPENAI_API_KEY
 ANTHROPIC_API_KEY=sk-ant-...         # llm4s-anthropic
 GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY when GOOGLE_API_KEY is unset
-DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
+DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY, XAI_API_KEY
 COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
 TYPESAFE_API_KEY=...                 # llm4s-jev (Jev decision client, not a provider) -> llm4s.credentials.typesafe.apiKey

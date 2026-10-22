@@ -33,9 +33,10 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **DeepSeek** | Cloud | Cost-effective, reasoning models | Easy |
 | **OpenRouter** | Cloud gateway | Many vendors' models behind one key | Easy |
 | **Z.ai** | Cloud | GLM models | Easy |
-| **OpenAI-compatible** | Cloud or local | Groq, Together, Fireworks, xAI, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
+| **OpenAI-compatible** | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
 | **Mistral** | Cloud | Mistral and Magistral models | Easy |
 | **Cohere** | Cloud | Command models, RAG | Easy |
+| **xAI** | Cloud | Grok models, reasoning | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
 | **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 
@@ -1009,8 +1010,12 @@ fireworks-main {
 
 #### xAI (Grok)
 
+xAI has a provider of its own, [`provider = "xai"`](#xai-grok), which reads Grok's reasoning and
+sends `CompletionOptions.reasoning`; prefer it. The generic path still works, for chat, streaming
+and tools only:
+
 ```hocon
-xai-main {
+xai-generic {
   provider = "openai-compatible"
   baseUrl = "https://api.x.ai/v1"
   model = "grok-4.7"
@@ -1021,15 +1026,8 @@ xai-main {
 
 - Keep `contextWindow`: the model registry does not list `grok-4.7`, so without it the provider would use
   8192. (For an xAI model the registry does list, such as `grok-2`, it is taken automatically.)
-- xAI offers Chat Completions as a **legacy** endpoint; its new features ship on the Responses
-  API, which the generic path does not speak. Chat, streaming and tools work.
-- `grok-4.7` is a reasoning model (default effort `high`). Its reasoning output is not read, and
-  the effort cannot be set.
-- xAI rejects `presencePenalty`, `frequencyPenalty` and `stop` on reasoning models. Leave
-  `CompletionOptions.presencePenalty` and `frequencyPenalty` at 0, and llm4s sends neither; it
-  never sends `stop`.
-- Prompts of 200k tokens or more are billed at xAI's long-context rate. A lower `contextWindow`
-  keeps context compression below that line.
+- On this path Grok's reasoning output is not read and the effort cannot be set, and xAI rejects
+  `presencePenalty` and `frequencyPenalty` on reasoning models: leave them at 0.
 
 #### NVIDIA NIM (hosted)
 
@@ -1492,6 +1490,83 @@ unchanged.
 
 ---
 
+## xAI (Grok)
+
+xAI's Grok models, through xAI's OpenAI-compatible Chat Completions API
+(`https://api.x.ai/v1/chat/completions`). The provider ships in `llm4s-openai-compatible` as a
+dialect on the shared client ([#1023](https://github.com/llm4s/llm4s/issues/1023)), and is Beta:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+### Setup
+
+1. **Get API key** from [console.x.ai](https://console.x.ai)
+2. **Export the key** - `llm4s-openai-compatible` binds it to `llm4s.credentials.xai.apiKey`:
+
+```bash
+export XAI_API_KEY=xai-...
+```
+
+### Configuration
+
+```hocon
+llm4s {
+  providers {
+    provider = "xai-main"
+
+    xai-main {
+      provider = "xai"
+      model = "grok-4.7"
+      # apiKey defaults to XAI_API_KEY
+      # baseUrl defaults to https://api.x.ai/v1
+    }
+  }
+}
+```
+
+The context window comes from the model registry when it lists the model, and otherwise from
+xAI's published windows: 500k for `grok-4.5` to `grok-4.7`, 1M for `grok-4.3` and `grok-4.20`,
+256k for the other Grok 4 models and 131072 for older ones.
+
+### What it supports
+
+Chat, **streaming** (text, tool calls and token usage), **tool calling**, images in user messages,
+structured output, model listing (`/v1/models`) and exchange logging.
+
+- **Reasoning output.** A reply's `reasoning_content`, where the model returns it (Grok 3 mini
+  does), is `Completion.thinking`, and streams as thinking deltas. Grok 4.5 and later keep their
+  reasoning encrypted and return it only on xAI's Responses API, so on Chat Completions they
+  return none. Earlier turns' thinking is not sent back: Chat Completions has no field for it.
+- **Reasoning tokens** are `TokenUsage.thinkingTokens`, from
+  `usage.completion_tokens_details.reasoning_tokens`. xAI counts them outside `completion_tokens`
+  and inside `total_tokens`.
+- **Reasoning effort.** `CompletionOptions.reasoning` is sent as `reasoning_effort` where the model
+  takes it. xAI's reasoning models cannot stop reasoning, so `None` sends the lowest level, and the
+  first such request in a process logs a warning:
+
+| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+|---|---|---|---|---|
+| `grok-4.5`, `grok-4.6`, `grok-4.7` (and their `-latest` aliases) | `low` | `low` | `medium` | `high` |
+| `grok-3-mini` (and variants) | `low` | `low` | `high` | `high` |
+| any other model | not sent | not sent | not sent | not sent |
+
+  `high` is the default on Grok 4.5 and later; `xhigh` (4.6 and later) is not reachable from
+  `CompletionOptions`. `grok-4` rejects the parameter, and on `grok-4.20-multi-agent` it sets the
+  number of agents, so neither is sent it. With `reasoning` unset nothing is sent.
+- **Penalties.** xAI rejects `presence_penalty`, `frequency_penalty` and `stop` on reasoning models.
+  llm4s never sends `stop`; a non-zero `presencePenalty` or `frequencyPenalty` is left out of a
+  request to a reasoning model (logged once), and sent as given to a `-non-reasoning` model.
+- xAI calls Chat Completions its **legacy** endpoint; new features ship on its Responses API, which
+  this provider does not speak.
+
+### Available Models
+
+`grok-4.7` and the other models your key can use; see [xAI's model list](https://docs.x.ai/developers/models).
+
+---
+
 ## Ollama (Local Models)
 
 From the release after `0.4.1`, Ollama support - chat and embeddings - ships in its own
@@ -1917,7 +1992,8 @@ place. Defaults when `baseUrl` is omitted:
 - **Cost-conscious?** → **DeepSeek** or **Ollama**
 - **Enterprise?** → **Azure OpenAI** or **Anthropic**
 - **Private data?** → **Ollama** (runs locally)
-- **Groq, Together, Fireworks, xAI, NVIDIA NIM, or a local vLLM, LM Studio or llama.cpp server?** → the generic [**OpenAI-compatible**](#openai-compatible-endpoints) provider
+- **xAI (Grok)?** → [**xAI**](#xai-grok)
+- **Groq, Together, Fireworks, NVIDIA NIM, or a local vLLM, LM Studio or llama.cpp server?** → the generic [**OpenAI-compatible**](#openai-compatible-endpoints) provider
 - **Reasoning tasks?** → **Anthropic Claude** or **DeepSeek reasoner**
 - **Vision/multimodal?** → **OpenAI GPT-4o** or **Anthropic Claude**
 
