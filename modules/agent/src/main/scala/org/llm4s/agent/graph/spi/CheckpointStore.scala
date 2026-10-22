@@ -35,7 +35,7 @@ final class CheckpointStore private (
 
   /**
    * The store's run queue, in the same database as [[checkpointer]] - a `RunSubmitter` and W2's workers are built over
-   * the two - or a `ConfigurationError` for a store whose backend gave it none ([[withRunQueue]]).
+   * the two - or a `ConfigurationError` for a store whose backend gave it none ([[CheckpointStore!.withRunQueue]]).
    */
   def runQueue: Result[RunQueue] =
     queue.toRight(
@@ -63,7 +63,7 @@ final class CheckpointStore private (
 
 object CheckpointStore:
 
-  /** `checkpointer`, with `close` releasing what was opened for it, and no run queue until [[withRunQueue]]. */
+  /** `checkpointer`, with `close` releasing what was opened for it, and no run queue until [[CheckpointStore!.withRunQueue]]. */
   def apply(kind: String, checkpointer: Checkpointer, close: () => Unit): CheckpointStore =
     new CheckpointStore(kind, checkpointer, None, close, new AtomicBoolean(false))
 
