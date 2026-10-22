@@ -117,3 +117,18 @@ class GeminiModelListerSpec extends AnyFunSuite with Matchers:
       case Right(descriptor) => descriptor.modelLister shouldBe Some(GeminiModelLister)
       case Left(err)         => fail(s"Expected the Gemini provider to be registered, got error: ${err.message}")
   }
+
+  test("Gemini lister keeps a failed listing's request id and Retry-After on its ServiceError (#2266)") {
+    val config = namedConfig(ProviderId("gemini"), "gemini-2.0-flash", apiKey = Some("google-key"))
+    val response = HttpResponse(
+      503,
+      """{"error":"overloaded"}""",
+      Map("x-request-id" -> Seq("req-2266"), "retry-after" -> Seq("12"))
+    )
+    GeminiModelLister.listModels(config, MockHttpClient(response)) match
+      case Left(err: org.llm4s.error.ServiceError) =>
+        err.httpStatus shouldBe 503
+        err.requestId shouldBe Some("req-2266")
+        err.retryAfter shouldBe Some(scala.concurrent.duration.DurationInt(12).seconds)
+      case other => fail(s"Expected a ServiceError, got $other")
+  }

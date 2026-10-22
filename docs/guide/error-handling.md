@@ -137,8 +137,8 @@ agent hands it back to the model as the tool's result instead of failing the run
 with `GraphError.ToolFailed`, described below.
 
 **`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
-going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (from
-`ServiceError.ServiceErrorOps`) is true for 5xx, 429 and 408. The library's automatic retries retry a
+going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (a method of
+`ServiceError`, no import needed) is true for 5xx, 429 and 408. The library's automatic retries retry a
 `ServiceError` only when it is; see the next paragraph.
 
 **Recoverable is not the same as retried automatically.** Every retry in the library -

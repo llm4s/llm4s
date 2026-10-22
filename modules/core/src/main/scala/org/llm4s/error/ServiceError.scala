@@ -26,6 +26,13 @@ final case class ServiceError private (
   /** The provider's `retryAfter` hint when it gave one, else [[ServiceError.DefaultRetryDelay]]. */
   override val retryDelay: Option[FiniteDuration] = retryAfter.orElse(Some(ServiceError.DefaultRetryDelay))
 
+  /**
+   * Whether `httpStatus` is one a retry may fix: 5xx, 429 and 408 - the status check of
+   * [[org.llm4s.reliability.RetryPolicy.isRetryableStatus RetryPolicy.isRetryableStatus]]. The error itself is
+   * always a `RecoverableError`; this says whether this particular status is.
+   */
+  def isRecoverableStatus: Boolean = org.llm4s.reliability.RetryPolicy.isRetryableStatus(httpStatus)
+
   /** This error, carrying the delay the provider asked for before retrying. */
   def withRetryAfter(delay: FiniteDuration): ServiceError = copy(retryAfter = Some(delay))
 
@@ -52,12 +59,16 @@ object ServiceError {
       None
     )
 
-  /** Unapply extractor for pattern matching */
-  def unapply(error: ServiceError): Option[(String, Int, String, Option[String])] =
-    Some((error.message, error.httpStatus, error.provider, error.requestId))
-
-  // Make ServiceError recoverable or non-recoverable based on HTTP status
-  implicit class ServiceErrorOps(error: ServiceError) {
-    def isRecoverableStatus: Boolean = org.llm4s.reliability.RetryPolicy.isRetryableStatus(error.httpStatus)
-  }
+  /**
+   * `error` with `details` as its message and `provider` as its provider, keeping its status, request id and
+   * `retryAfter` (the message does not repeat the request id, which `details` usually already holds).
+   */
+  private[llm4s] def rewrapped(error: ServiceError, provider: String, details: String): ServiceError =
+    new ServiceError(
+      s"Service error from $provider: $details (HTTP ${error.httpStatus})",
+      error.httpStatus,
+      provider,
+      error.requestId,
+      error.retryAfter
+    )
 }

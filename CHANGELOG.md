@@ -45,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
 - `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` gain a `span` field, and an agent
   run's OpenTelemetry spans and Langfuse trace ids change: positional patterns and dashboards break; [migration](docs/reference/migration.md#one-trace-per-run-2137).
+- `ServiceError`'s extractor binds five fields (`retryAfter` added) and `ServiceError.ServiceErrorOps` is gone
+  (`isRecoverableStatus` is a method of `ServiceError`): four-field patterns and the import break; [migration](docs/reference/migration.md#serviceerror-extractor-and-isrecoverablestatus-2266).
 
 ### Agent subagents (Phase 4)
 
@@ -144,6 +146,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NetworkError("Request timeout")`, as a socket timeout already was, so `ReliableClient` retries it. The `anthropic` client
   also returns an unreachable server as a recoverable `NetworkError` instead of an `UnknownError`, and a 429's
   `Retry-After` on its `RateLimitError`, as the other providers do [#380](https://github.com/llm4s/llm4s/issues/380).
+- **Fixed** `HttpResponse#ensureSuccess` and `Result#mapServiceError` dropping a failed response's request id and
+  `Retry-After`: `ensureSuccess` reads `x-request-id` / `request-id` / `x-amzn-requestid` / `apim-request-id` and a
+  `Retry-After` of delta-seconds or an HTTP-date into the `ServiceError`, and `mapServiceError` keeps both, so the
+  model listers' errors carry the provider's correlation id and retry hint [#2266](https://github.com/llm4s/llm4s/issues/2266).
 
 ### Java & Kotlin APIs
 
