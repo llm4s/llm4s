@@ -2,6 +2,7 @@ package org.llm4s.javaapi
 
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.llmconnect.model.*
+import org.llm4s.toolapi.ToolCallInfo
 import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
@@ -232,12 +233,50 @@ class JToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
   }
 
   "JToolArgs" should "answer has, get and asMap, and print its values" in {
-    val args = new JToolArgs(FacadeToken.INSTANCE, java.util.Map.of("a", "1"))
+    val args = new JToolArgs(FacadeToken.INSTANCE, java.util.Map.of("a", "1"), None)
     args.has("a") shouldBe true
+    args.toolCallId() shouldBe java.util.Optional.empty()
+    args.idempotencyKey() shouldBe java.util.Optional.empty()
     args.has("b") shouldBe false
     args.getString("b") shouldBe null
     args.asMap().get("a") shouldBe "1"
     args.toString shouldBe "JToolArgs({a=1})"
+  }
+
+  it should "carry the call an agent runs: its id and idempotency key (#1740)" in {
+    val args = new JToolArgs(FacadeToken.INSTANCE, java.util.Map.of(), Some(ToolCallInfo("c1", "k1")))
+    args.toolCallId() shouldBe java.util.Optional.of("c1")
+    args.idempotencyKey() shouldBe java.util.Optional.of("k1")
+  }
+
+  "A Java tool run by an agent" should "read the call's id and idempotency key, annotated and lambda alike (#1740)" in {
+    val charged  = run(ToolCall("c7", "charge", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
+    val refunded = run(ToolCall("c8", "refund", ujson.Obj("cents" -> 5))).stripPrefix("tool said: ")
+    Seq(charged, refunded).foreach(_ should fullyMatch regex "[0-9a-f]{64}")
+    charged should not be refunded
+    ToolsCheck.CALLS.asScala.toList shouldBe List(s"charge:5,c7,$charged", s"refund:5,c8,$refunded")
+  }
+
+  it should "see no id or key outside an agent, and the call it is given through execute(args, call)" in {
+    val charge = JTool.fromAnnotated(new ToolsCheck.KeyedTools).get().get(0)
+    val refund = ToolsCheck.refund().get()
+    Seq(charge, refund).foreach { tool =>
+      tool.function.execute(ujson.Obj("cents" -> 1)) shouldBe Right(ujson.Str("none"))
+      tool.function.execute(ujson.Obj("cents" -> 2), ToolCallInfo("id", "key")) shouldBe Right(ujson.Str("key"))
+    }
+    ToolsCheck.CALLS.asScala.toList shouldBe List(
+      "charge:1,none,none",
+      "charge:2,id,key",
+      "refund:1,none,none",
+      "refund:2,id,key"
+    )
+  }
+
+  "An annotated tool's JToolArgs parameter" should "not be shown to the model" in {
+    val charge = JTool.fromAnnotated(new ToolsCheck.KeyedTools).get().get(0)
+    val schema = charge.function.toOpenAITool(strict = false)("function")("parameters")
+    schema("properties").obj.keySet shouldBe Set("cents")
+    schema("required").arr.map(_.str).toList shouldBe List("cents")
   }
 
   "A handler's result" should "become JSON: text, numbers, booleans, enums, maps, lists, null and anything else" in {

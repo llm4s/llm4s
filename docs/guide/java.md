@@ -292,6 +292,7 @@ import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JTool;
+import org.llm4s.javaapi.JToolArgs;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmErrorKind;
@@ -601,6 +602,29 @@ is an exception your method or lambda throws - the agent keeps running and the m
 the model as text if it is a `String`; a number, boolean, enum, `Map` or `Collection` becomes JSON. A tool that cannot be
 built (no handler, an unsupported parameter type, a parameter declared twice) and an agent given two tools with one name
 are failed results, not exceptions.
+
+An agent runs a tool at least once, not exactly once: a retry, an approval, an answered question or a `recover` can run
+the same call again (see [Tool side effects](agents/#tool-side-effects)). A tool with an external side effect therefore
+passes the call's idempotency key to the system it reaches, which then does the work once. A lambda reads it from its
+arguments, as `args.idempotencyKey()`; an annotated method declares a `JToolArgs` parameter, which the model does not
+see, and reads it there:
+
+```java
+@Tool(description = "Charges a card once")
+public String charge(@Param(name = "cents", description = "Amount in cents") long cents, JToolArgs call) {
+    return billing.charge(cents, call.idempotencyKey().orElse(null));   // empty outside an agent run
+}
+```
+
+```java
+LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
+    .param("charge", String.class, "The charge to refund")
+    .handler(args -> billing.refund(args.getString("charge"), args.idempotencyKey().orElse(null)))
+    .build();
+```
+
+`idempotencyKey()` and `toolCallId()` (the id the model gave the call) are `Optional<String>`s: present for every call
+an agent runs, the key the same in every run of one call, and empty when the tool runs outside an agent.
 
 ## Embeddings
 

@@ -294,6 +294,17 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       .foreach(name => withClue(name)(classOf[JTokenUsage].getMethod(name).getReturnType shouldBe Integer.TYPE))
   }
 
+  "the tool facade" should "hand a Java tool its call's id and idempotency key as Optional<String> (#1740)" in {
+    Seq("toolCallId", "idempotencyKey").foreach { name =>
+      withClue(name)(
+        mentioned(classOf[JToolArgs].getMethod(name).getGenericReturnType) shouldBe List(
+          classOf[java.util.Optional[_]],
+          classOf[String]
+        )
+      )
+    }
+  }
+
   "the embeddings facade" should "hand Java callers JEmbeddings from both embed overloads, its vectors as float arrays" in {
     def returns(m: java.lang.reflect.Method): List[Class[_]] = mentioned(m.getGenericReturnType)
     returns(classOf[JEmbeddingClient].getMethod("embed", classOf[java.util.List[_]])) shouldBe
