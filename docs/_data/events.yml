@@ -171,8 +171,8 @@
   speakers: [Kannupriya Kalra]
   image: /image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
 
-- start: 2026-10-25
-  starts_at: "2026-10-25T12:00:00+05:30"
+- start: 2026-10-31
+  starts_at: "2026-10-31T12:00:00+05:30"
   time: "12:00-13:00 IST"
   event: DataverseHub
   title: "LLM4S Foundation: A Retrospective"
