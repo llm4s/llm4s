@@ -384,6 +384,31 @@ The method is `completion`, a noun, because it returns the reply rather than per
 keeps returning a `String`. There is no `completion` overload for core's Scala `CompletionOptions`, so
 `client.completion(conversation, null)` compiles, and returns a failed result like any other `null` argument.
 
+## Structured output
+
+Pass a record class after the query, or after the conversation (and options), and `complete` returns an instance of
+it instead of text. The record's components become a JSON Schema that is sent as the structured-output format, and
+the answer is read back into the record:
+
+```java
+record City(String name, String country, int population) {}
+
+City city = client.complete("The largest city in Japan, with its population", City.class).get();
+System.out.println(city.name() + ", " + city.country() + ": " + city.population());
+```
+
+A component can be a `String`, an `int`, `long`, `short` or `byte` (boxed or not), a `double` or `float`, a
+`boolean`, an enum (the model answers with a constant's name), another record, a `java.util.List` of any of these, or an
+`Optional` of any of these. `Optional` is the only way to let the model answer `null` or leave a field out; every other
+field is required. A `Map`, an array, a raw `List`, an interface or a record that contains itself is refused before
+any call, and an answer that does not fit - a missing field, the wrong JSON type, a fraction for an `int`, an unknown
+enum name - is a failed result whose message names the field, such as `field 'previous[0].city': expected a string,
+got a number`. Numbers pass through a `double`, so ask for an identifier above 2^53 as a `String`.
+
+How firmly the schema binds the model is the provider's: OpenAI-style providers send it as a native JSON Schema,
+Anthropic adds it to the system prompt, and watsonx and Bedrock ignore it, so the answer is still checked when it comes
+back. See [Structured output](structured-output) for each provider.
+
 ## Reading a result
 
 Every `complete` call returns an `LlmResult<String>`, and every `completion` call an `LlmResult<JCompletion>`. There
@@ -651,7 +676,6 @@ available from Java yet, each with the issue that tracks it:
 |---|---|
 | Streaming tokens | `JLlmClient` has blocking `complete` calls only: [#1485](https://github.com/llm4s/llm4s/issues/1485) |
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
-| Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
 | Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
 

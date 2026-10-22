@@ -116,6 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
+  overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
 - **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
   files or text, `ask` for an answer with its sources [#1491](https://github.com/llm4s/llm4s/issues/1491); see [Java RAG](docs/guide/java-rag.md).
 - **Added** Spring Boot configuration metadata to `llm4s-spring-boot-starter`, so IDEs complete and document the
@@ -154,6 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
+  `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
+  the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
 - **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with

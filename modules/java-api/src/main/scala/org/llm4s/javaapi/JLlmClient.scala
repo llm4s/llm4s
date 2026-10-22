@@ -139,6 +139,50 @@ final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] va
         underlying.complete(conversation, options.underlying).map(FacadeInternals.completion)
       )
 
+  /**
+   * Sends a single user query and returns the answer as an instance of the Java record `type`: the record's JSON
+   * Schema is derived from its components, sent as the structured-output format, and the reply is read back into the
+   * record. `complete(String)` returns the text instead.
+   *
+   * A component may be a `String`, an integer type, a `double` or `float`, a `boolean`, an enum, another record, a
+   * `java.util.List` of these, or an `Optional` of these (the one way to let the model answer `null`). A type outside
+   * that list, or a reply that does not fit the record - a missing or `null` field that is not an `Optional`, the wrong
+   * JSON type, an unknown enum name - is a failed result whose message names the field. How firmly the schema binds the
+   * model depends on the provider: OpenAI-style providers send it as a native JSON Schema, Anthropic as a prompt
+   * instruction. Blocks and reports an interrupt as `complete(String)` does.
+   *
+   * {{{
+   * record City(String name, String country, int population) {}
+   * City city = client.complete("The largest city in Japan", City.class).get();
+   * }}}
+   */
+  def complete[T](query: String, `type`: Class[T]): LlmResult[T] =
+    if (query == null) nullArgument("query")
+    else structured(Conversation(Seq(UserMessage(query))), CompletionOptions(), `type`)
+
+  /** Sends a conversation and returns the answer as an instance of the record `type`, as `complete(String, Class)`. */
+  def complete[T](conversation: Conversation, `type`: Class[T]): LlmResult[T] =
+    structured(conversation, CompletionOptions(), `type`)
+
+  /**
+   * Sends a conversation with the options a [[JCompletionOptions]] builder made and returns the answer as an instance of
+   * the record `type`, as `complete(String, Class)`. The options' response format is replaced by the record's schema.
+   */
+  def complete[T](conversation: Conversation, options: JCompletionOptions, `type`: Class[T]): LlmResult[T] =
+    if (options == null) nullArgument("options") else structured(conversation, options.underlying, `type`)
+
+  private def structured[T](conversation: Conversation, options: CompletionOptions, cls: Class[T]): LlmResult[T] =
+    if (conversation == null) nullArgument("conversation")
+    else if (cls == null) nullArgument("type")
+    else
+      guarded("JLlmClient.complete") {
+        for {
+          schema <- JavaRecords.schema(cls).left.map(ValidationError("type", _))
+          json   <- underlying.completeStructured[ujson.Value](conversation, schema, options)
+          record <- JavaRecords.read(cls, json).left.map(ValidationError("structured_output", _))
+        } yield record
+      }
+
   private def nullArgument[A](name: String): LlmResult[A] =
     LlmResult.failure(ValidationError.required(name))
 
