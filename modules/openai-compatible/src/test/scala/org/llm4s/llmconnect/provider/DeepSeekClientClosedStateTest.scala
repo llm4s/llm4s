@@ -75,7 +75,7 @@ class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "deepseek-reasoner")
+    val config = createTestConfig.withModel("deepseek-reasoner")
     val client = new DeepSeekClient(config)
 
     client.close()

@@ -6,6 +6,8 @@ import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration._
+
 /**
  * `AzureConfig`: construction, fallbacks, redaction and self-description.
  *
@@ -155,5 +157,43 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     renamed.apiVersion shouldBe azure.apiVersion
     renamed.endpointUrl shouldBe azure.endpointUrl
     renamed.contextWindow shouldBe azure.contextWindow
+  }
+
+  // ---- growth-prone construction (#2263) ----
+
+  test("AzureConfig(...) defaults timeouts") {
+    azure.timeouts shouldBe ProviderTimeouts.default
+  }
+
+  test(
+    "AzureConfig(endpoint, apiKey, model) defaults the API version and takes the context window from the model name"
+  ) {
+    AzureConfig("https://x.openai.azure.com", "k", "gpt-4o") shouldBe
+      AzureConfig("https://x.openai.azure.com", "k", "gpt-4o", AzureConfig.DEFAULT_API_VERSION, 128000, 4096)
+    AzureConfig("https://x.openai.azure.com", "k", "gpt-4").contextWindow shouldBe 8192
+    AzureConfig("https://x.openai.azure.com", "k", "my-deployment").contextWindow shouldBe 8192
+  }
+
+  test("AzureConfig's setters each change one field") {
+    val timeouts = ProviderTimeouts(request = Some(45.seconds))
+    val adjusted = azure
+      .withEndpoint("https://y.openai.azure.com")
+      .withApiKey("k2")
+      .withModel("gpt-4o-mini")
+      .withApiVersion("2024-10-21")
+      .withContextWindow(64000)
+      .withReserveCompletion(2048)
+      .withTimeouts(timeouts)
+
+    adjusted shouldBe AzureConfig(
+      "https://y.openai.azure.com",
+      "k2",
+      "gpt-4o-mini",
+      "2024-10-21",
+      64000,
+      2048,
+      timeouts
+    )
+    adjusted.endpointUrl shouldBe Some("https://y.openai.azure.com")
   }
 }

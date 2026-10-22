@@ -391,6 +391,24 @@ final class BoundAgent[I, O] private[delegation] (val definition: TypedAgent[I, 
   /** [[run]] on the caller-chosen thread `threadId`, with the default config. */
   def run(threadId: ThreadId, input: I): Result[TaskOutcome[O]] = run(threadId, input, RunConfig())
 
+  /**
+   * The first user message of a queued start (Stage 5 W2): `input`, an `I` in its JSON form (`QueuedInput.typed`),
+   * decoded and rendered as [[run]] renders it. Input that does not decode as an `I` is a `ValidationError`.
+   */
+  private[agent] def queuedQuery(input: ujson.Value): Result[String] =
+    scala.util
+      .Try(upickle.default.read[I](input)(using definition.inputCodec))
+      .toEither
+      .left
+      // the input is the caller's: the message names only how it failed (Stage 5 rule 10)
+      .map(thrown =>
+        ValidationError(
+          "input",
+          s"subagent '${agent.id.value}': the queued input does not decode (${thrown.getClass.getSimpleName})"
+        )
+      )
+      .flatMap(rendered)
+
   /** The child's first user message for `input`: what a renderer or input codec throws is a refused input. */
   private def rendered(input: I): Result[String] =
     // an interrupt while it renders is a cancellation, the flag kept, as for the run itself

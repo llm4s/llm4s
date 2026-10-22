@@ -8,11 +8,16 @@ import org.llm4s.util.Redaction
 /**
  * Configuration for the Mistral AI API.
  *
- * Prefer [[MistralConfig.fromValues]] over the primary constructor; it resolves
+ * Prefer [[MistralConfig.fromValues]] over the companion `apply`; it resolves
  * `contextWindow` and `reserveCompletion` automatically from the model name.
  *
  * This was in `llm4s-core` until Mistral moved onto `llm4s-openai-compatible`'s shared
  * client ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]); its package is unchanged.
+ *
+ * The constructor is private: build one with the companion `apply`, whose defaults cover every
+ * field after `model`, and adjust it with the `with*` setters. Java and Kotlin, which cannot see
+ * Scala default arguments, use `MistralConfig.apply(apiKey, model)` and the setters, so adding a field
+ * never breaks them ([[https://github.com/llm4s/llm4s/issues/2264 #2264]]).
  *
  * @param apiKey        Mistral API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"mistral-large-latest"`.
@@ -24,18 +29,23 @@ import org.llm4s.util.Redaction
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Experimental
-case class MistralConfig(
+final case class MistralConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                                  = ProviderId("mistral")
   override def endpointUrl: Option[String]                             = Some(baseUrl)
   override def withModel(model: String): MistralConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig = copy(timeouts = timeouts)
+
+  def withApiKey(apiKey: String): MistralConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): MistralConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): MistralConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -44,11 +54,35 @@ case class MistralConfig(
 object MistralConfig:
   val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
 
-  private val DefaultContextWindow     = 128000
-  private val DefaultReserveCompletion = 4096
+  /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_CONTEXT_WINDOW: Int = 128000
+
+  /** The completion reserve `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_RESERVE_COMPLETION: Int = 4096
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates and resolves the context window
+   * from the model. Every field after `model` has a default.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String = DEFAULT_BASE_URL,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): MistralConfig =
+    new MistralConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. Set the rest with the `with*` setters.
+   */
+  def apply(apiKey: String, model: String): MistralConfig =
+    apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val mistralFallback: String => (Int, Int) =
-    _ => (DefaultContextWindow, DefaultReserveCompletion)
+    _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The versioned API base the chat client posts `/chat/completions` under: the configured
@@ -74,8 +108,8 @@ object MistralConfig:
       val (cw, rc) = resolver.resolve(
         lookupProviders = Seq("mistral"),
         modelName = modelName,
-        defaultContextWindow = DefaultContextWindow,
-        defaultReserve = DefaultReserveCompletion,
+        defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
+        defaultReserve = DEFAULT_RESERVE_COMPLETION,
         fallbackResolver = mistralFallback
       )
       MistralConfig(

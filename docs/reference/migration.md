@@ -11,7 +11,9 @@ Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
-growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so is [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708).
+growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708)
+and [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263);
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266).
 
 ## Multimodal content parts (#1913)
 
@@ -262,6 +264,27 @@ which binds them itself; no llm4s library module reads them any more. Their defa
 value that is set but cannot be read (`CHUNK_SIZE=abc`) is now a `ConfigurationError` instead of silently falling back to
 the default.
 
+### `ServiceError` extractor and `isRecoverableStatus` (#2266)
+
+`ServiceError`'s extractor binds all five fields, `retryAfter` last
+([#2266](https://github.com/llm4s/llm4s/issues/2266)); the hand-written four-field `unapply`, which left out
+`retryAfter`, is gone. A positional pattern needs a fifth binder:
+
+```scala
+case ServiceError(message, status, provider, requestId)    => ... // before
+case ServiceError(message, status, provider, requestId, _) => ... // after
+case e: ServiceError                                       => ... // or match on the type
+```
+
+`isRecoverableStatus` is now a method of `ServiceError` rather than of the public `implicit class
+ServiceError.ServiceErrorOps`, which an `import ServiceError.*` would have pulled in. `error.isRecoverableStatus`
+compiles unchanged; delete any `import ServiceError.ServiceErrorOps`.
+
+Not a source change, but visible: `HttpResponse#ensureSuccess` now puts the response's request id
+(`x-request-id`, `request-id`, `x-amzn-requestid` or `apim-request-id`) and its `Retry-After` delay on the
+`ServiceError`, so its message gains `(Request ID ...)` when the provider sent one, and `Result#mapServiceError`
+keeps both fields. A retry now waits the delay the provider asked for rather than the default backoff.
+
 ### `LLMClientPekko.streamComplete` materializes `Future[Done]` (#1848)
 
 `streamComplete` is now a `Source[StreamedChunk, Future[Done]]`, like every `AgentPekko` stream
@@ -271,6 +294,26 @@ that names the type changes it, and code that wanted the old value drops it:
 
 ```scala
 val chunks: Source[StreamedChunk, NotUsed] = client.streamComplete(conversation).mapMaterializedValue(_ => NotUsed)
+```
+
+### The OpenAI-compatible provider configs are growth-safe (#2264)
+
+`DeepSeekConfig`, `ZaiConfig`, `XaiConfig`, `MistralConfig` and `CohereConfig` (`llm4s-openai-compatible`) follow
+the growth-prone pattern, as `OpenAIConfig` and `OpenAICompatibleConfig` beside them already did
+([#2264](https://github.com/llm4s/llm4s/issues/2264)). The classes are `final`, `new` and `.copy` are private, and:
+
+- the companion `apply` keeps its argument order - `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `timeouts` - and every field after `model` now has a default: `DEFAULT_BASE_URL`, the new `DEFAULT_CONTEXT_WINDOW`
+  and `DEFAULT_RESERVE_COMPLETION`, and `ProviderTimeouts.default`. Positional and named calls compile unchanged;
+- `apply(apiKey, model)` is the entry point for Java and Kotlin, which do not see Scala default arguments;
+- `withApiKey`, `withBaseUrl`, `withContextWindow` and `withReserveCompletion` join `withModel` and `withTimeouts`.
+
+`fromValues`, which validates and resolves the context window from the model, is still the preferred way in.
+
+```scala
+import org.llm4s.llmconnect.config.DeepSeekConfig
+
+val config = DeepSeekConfig("sk-...", "deepseek-chat").withContextWindow(64000) // was .copy(contextWindow = 64000)
 ```
 
 ### `MemoryManagerConfig` is growth-safe (#1847)
@@ -285,6 +328,27 @@ val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .cop
 ```
 
 `toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
+
+### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
+
+`GeminiConfig`, `VertexAIConfig` (`llm4s-gemini`) and `AzureConfig` (`llm4s-openai`) follow the growth-prone pattern,
+as `OpenAIConfig`, `AnthropicConfig` and `OllamaConfig` already did ([#2263](https://github.com/llm4s/llm4s/issues/2263)),
+so a new field - as `googleSearch` was - no longer breaks Java and Kotlin callers or compiled code. The constructor
+and `copy` are private:
+
+- **Scala**: `GeminiConfig(...)`, `VertexAIConfig(...)` and `AzureConfig(...)` with the same arguments, positional or
+  named (`timeouts`, `googleSearch` and `wellKnownCredentialPath` keep their defaults), still compile. Replace
+  `config.copy(contextWindow = n)` with `config.withContextWindow(n)`; each field has a setter - `withApiKey`,
+  `withBaseUrl`, `withReserveCompletion` and `withGoogleSearch` on Gemini; `withProjectId`, `withLocation`,
+  `withCredentialFilePath` and `withWellKnownCredentialPath` (the value or an `Option`) on Vertex AI; `withEndpoint`,
+  `withApiKey` and `withApiVersion` on Azure - besides `withModel` and `withTimeouts`.
+- **Java and Kotlin**: call the companion's short `apply` and chain setters instead of the constructor -
+  `GeminiConfig.apply(apiKey, "gemini-2.0-flash").withGoogleSearch(true)`, `VertexAIConfig.apply(projectId, model)`,
+  `AzureConfig.apply(endpoint, apiKey, deployment).withApiVersion("2024-10-21")`. They take the default base URL,
+  location or API version and a context window from the model name; `fromValues` still consults the bundled model
+  catalogue.
+
+Pattern matching (`case GeminiConfig(...)`) is unchanged.
 
 ### `ToolRetryPolicy` is growth-safe (#1708)
 

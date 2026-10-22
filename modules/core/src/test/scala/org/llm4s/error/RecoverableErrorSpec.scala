@@ -140,8 +140,6 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "identify recoverable HTTP status codes" in {
-    import ServiceError.ServiceErrorOps
-
     ServiceError(500, "p", "d").isRecoverableStatus shouldBe true
     ServiceError(502, "p", "d").isRecoverableStatus shouldBe true
     ServiceError(503, "p", "d").isRecoverableStatus shouldBe true
@@ -156,12 +154,12 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     val error = ServiceError(503, "openai", "unavailable", "req-123")
 
     error match {
-      case ServiceError(msg, status, provider, requestId) =>
+      case ServiceError(msg, status, provider, requestId, retryAfter) =>
         msg should include("Service error")
         status shouldBe 503
         provider shouldBe "openai"
         requestId shouldBe Some("req-123")
-      case _ => fail("Pattern matching failed")
+        retryAfter shouldBe None
     }
   }
 

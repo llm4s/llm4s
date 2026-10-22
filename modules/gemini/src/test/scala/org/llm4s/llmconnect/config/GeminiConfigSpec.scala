@@ -5,6 +5,8 @@ import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration._
+
 /**
  * `GeminiConfig` and `VertexAIConfig`: construction, fallbacks, redaction and
  * self-description.
@@ -173,5 +175,89 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
     config.projectId shouldBe "my-project"
     config.location shouldBe VertexAIConfig.DEFAULT_LOCATION
+  }
+
+  // ---- growth-prone construction (#2263) ----
+
+  test("GeminiConfig(...) defaults timeouts and googleSearch") {
+    gemini.timeouts shouldBe ProviderTimeouts.default
+    gemini.googleSearch shouldBe false
+  }
+
+  test("GeminiConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
+    GeminiConfig("k", "gemini-2.0-flash") shouldBe
+      GeminiConfig("k", "gemini-2.0-flash", GeminiConfig.DEFAULT_BASE_URL, 1048576, 8192)
+    GeminiConfig("k", "gemini-1.0-pro").contextWindow shouldBe 32768
+    GeminiConfig("k", "gemini-2.0-flash").providerId shouldBe ProviderId("gemini")
+  }
+
+  test("GeminiConfig's setters each change one field") {
+    val timeouts = ProviderTimeouts(request = Some(30.seconds))
+    val adjusted = gemini
+      .withApiKey("k2")
+      .withModel("gemini-2.5-pro")
+      .withBaseUrl("https://proxy.example.com/v1beta")
+      .withContextWindow(64000)
+      .withReserveCompletion(2048)
+      .withTimeouts(timeouts)
+      .withGoogleSearch(true)
+
+    adjusted shouldBe GeminiConfig(
+      "k2",
+      "gemini-2.5-pro",
+      "https://proxy.example.com/v1beta",
+      64000,
+      2048,
+      timeouts = timeouts,
+      googleSearch = true
+    )
+    adjusted.withGoogleSearch(false).googleSearch shouldBe false
+  }
+
+  test("VertexAIConfig(...) defaults timeouts, wellKnownCredentialPath and googleSearch") {
+    vertexai.timeouts shouldBe ProviderTimeouts.default
+    vertexai.wellKnownCredentialPath shouldBe None
+    vertexai.googleSearch shouldBe false
+  }
+
+  test("VertexAIConfig(projectId, model) defaults the location, credentials and context window") {
+    VertexAIConfig("proj", "gemini-2.0-flash") shouldBe vertexai
+    VertexAIConfig("proj", "gemini-2.0-flash").providerId shouldBe ProviderId("vertexai")
+  }
+
+  test("VertexAIConfig's setters each change one field") {
+    val timeouts = ProviderTimeouts(stream = Some(5.minutes))
+    val adjusted = vertexai
+      .withProjectId("proj-2")
+      .withLocation("europe-west4")
+      .withModel("gemini-2.5-pro")
+      .withCredentialFilePath("/creds.json")
+      .withContextWindow(64000)
+      .withReserveCompletion(2048)
+      .withTimeouts(timeouts)
+      .withWellKnownCredentialPath("/home/u/.config/gcloud/application_default_credentials.json")
+      .withGoogleSearch(true)
+
+    adjusted shouldBe VertexAIConfig(
+      "proj-2",
+      "europe-west4",
+      "gemini-2.5-pro",
+      Some("/creds.json"),
+      64000,
+      2048,
+      timeouts = timeouts,
+      wellKnownCredentialPath = Some("/home/u/.config/gcloud/application_default_credentials.json"),
+      googleSearch = true
+    )
+    adjusted.computedBaseUrl shouldBe "https://europe-west4-aiplatform.googleapis.com/v1"
+  }
+
+  test("VertexAIConfig's Option setters also take an Option, so a field can be cleared") {
+    val set = vertexai.withCredentialFilePath("/creds.json").withWellKnownCredentialPath("/adc.json")
+
+    set.withCredentialFilePath(None).credentialFilePath shouldBe None
+    set.withWellKnownCredentialPath(None).wellKnownCredentialPath shouldBe None
+    vertexai.withCredentialFilePath(Some("/c.json")).credentialFilePath shouldBe Some("/c.json")
+    vertexai.withWellKnownCredentialPath(Some("/a.json")).wellKnownCredentialPath shouldBe Some("/a.json")
   }
 }

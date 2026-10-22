@@ -8,9 +8,14 @@ import org.llm4s.util.Redaction
 /**
  * Configuration for the xAI (Grok) API.
  *
- * Prefer [[XaiConfig.fromValues]] over the primary constructor; it resolves
+ * Prefer [[XaiConfig.fromValues]] over the companion `apply`; it resolves
  * `contextWindow` and `reserveCompletion` from the model registry (provider `xai`), falling
  * back to xAI's published windows for models the registry does not list.
+ *
+ * The constructor is private: build one with the companion `apply`, whose defaults cover every
+ * field after `model`, and adjust it with the `with*` setters. Java and Kotlin, which cannot see
+ * Scala default arguments, use `XaiConfig.apply(apiKey, model)` and the setters, so adding a field
+ * never breaks them ([[https://github.com/llm4s/llm4s/issues/2264 #2264]]).
  *
  * @param apiKey        xAI API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"grok-4.7"`.
@@ -22,18 +27,23 @@ import org.llm4s.util.Redaction
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Experimental
-case class XaiConfig(
+final case class XaiConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                              = ProviderId("xai")
   override def endpointUrl: Option[String]                         = Some(baseUrl)
   override def withModel(model: String): XaiConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig = copy(timeouts = timeouts)
+
+  def withApiKey(apiKey: String): XaiConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): XaiConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): XaiConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"XaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -44,6 +54,33 @@ object XaiConfig {
 
   /** xAI's API base. Requests go to `<baseUrl>/chat/completions`. */
   val DEFAULT_BASE_URL: String = "https://api.x.ai/v1"
+
+  /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_CONTEXT_WINDOW: Int = 131072
+
+  /** The completion reserve `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_RESERVE_COMPLETION: Int = 8192
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates and resolves the context window
+   * from the model. Every field after `model` has a default.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String = DEFAULT_BASE_URL,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): XaiConfig =
+    new XaiConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. Set the rest with the `with*` setters.
+   */
+  def apply(apiKey: String, model: String): XaiConfig =
+    apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val HalfMillionWindow = """grok-4\.[5-9](?:-.*)?""".r
   private val MillionWindow     = """grok-4\.(?:3|20)(?:-.*)?""".r

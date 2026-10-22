@@ -6,10 +6,8 @@ import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
 
-import java.time.{ Clock, Duration, ZonedDateTime }
-import java.time.format.DateTimeFormatter
-import scala.concurrent.duration.{ FiniteDuration, MILLISECONDS }
-import scala.util.Try
+import java.time.Clock
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Shared HTTP status-code to [[org.llm4s.error.LLMError]] mapping used by all
@@ -76,28 +74,9 @@ object HttpErrorMapper {
     }
   }
 
-  /**
-   * The delay a `Retry-After` header asks for.
-   *
-   * Accepts delta-seconds (`"120"`) or an RFC 1123 HTTP-date, which is measured against
-   * `clock` (a date already past gives zero), to millisecond precision. Returns `None` when
-   * the header is absent, unparseable, negative, or too large to represent as a
-   * `FiniteDuration`.
-   */
+  /** The delay a `Retry-After` header asks for; see `HttpHeaders.retryAfter`, which parses it. */
   private[provider] def retryAfter(headers: Map[String, Seq[String]], clock: Clock): Option[FiniteDuration] =
-    HttpHeaders.first(headers, "Retry-After").map(_.trim).flatMap { value =>
-      val millis =
-        if (value.nonEmpty && value.forall(_.isDigit))
-          value.toLongOption.filter(_ <= MaxRetryAfterMillis / 1000L).map(_ * 1000L)
-        else
-          Try(ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)).toOption
-            .flatMap(date => Try(Duration.between(clock.instant(), date.toInstant).toMillis).toOption)
-            .map(math.max(0L, _))
-      millis.filter(_ <= MaxRetryAfterMillis).map(FiniteDuration(_, MILLISECONDS))
-    }
-
-  /** The longest delay a `FiniteDuration` (nanosecond-backed) holds, in whole milliseconds. */
-  private val MaxRetryAfterMillis = Long.MaxValue / 1000000L
+    HttpHeaders.retryAfter(headers, clock)
 
   /**
    * Attempts to extract a human-readable error message from a JSON response

@@ -76,7 +76,7 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "command-r-plus")
+    val config = createTestConfig.withModel("command-r-plus")
     val client = new CohereClient(config)
 
     client.close()

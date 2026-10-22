@@ -75,7 +75,7 @@ class VertexAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "gemini-1.5-pro")
+    val config = createTestConfig.withModel("gemini-1.5-pro")
     val client = new VertexAIClient(config)
 
     client.close()

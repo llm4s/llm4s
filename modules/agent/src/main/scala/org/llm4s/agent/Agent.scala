@@ -2,7 +2,7 @@ package org.llm4s.agent
 
 import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
+import org.llm4s.agent.graph.toolloop.{ AgentInput, SettledTurn, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
@@ -453,6 +453,37 @@ final class Agent private[agent] (
           amend = _ => Right(record)
         )
         .map(agentRun(_, None, drain = false))
+
+  /**
+   * Whether this agent's graph can take `checkpoint` on as a run would (Stage 5 W2, design 4.56): a worker leaves an
+   * entry it cannot run - another graph's thread, or a run in flight at another graph version - for a worker that can.
+   */
+  private[agent] def canContinue(checkpoint: Checkpoint): Result[Unit] = loop.graph.canContinue(checkpoint)
+
+  /**
+   * Settles `threadId` - its latest checkpoint incomplete and committed by one of `runs` - as `outcome`, with the
+   * history closed: each tool call left without a result gets `result` as its synthetic one ([[SettledTurn]]), and a
+   * `Failed` checkpoint with a `RunFailed(message)` event is committed as run `config.runId` under the thread's claim
+   * (`GraphRuntime.settleQueued`). For a worker settling an entry whose attempts ran out (W2), and W3's cancel of a
+   * queued run.
+   */
+  private[agent] def settleQueued(
+    threadId: ThreadId,
+    runs: Set[RunId],
+    outcome: RunOutcome,
+    message: String,
+    result: String,
+    config: RunConfig
+  ): Result[Unit] =
+    runtime.settleQueued(
+      threadId,
+      loop.graph,
+      outcome,
+      message,
+      configured(config),
+      amend = state => SettledTurn.closing(state, s"${config.runId.value}/settled", result),
+      owns = checkpoint => runs.contains(RunId(checkpoint.runId))
+    )
 
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =

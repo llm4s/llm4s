@@ -54,7 +54,8 @@ import scala.concurrent.duration.*
  *    ([[QueueEntry.closedAtSeq]]), and keep it for the ticket lifetime;
  *    [[reclaim]] removes closed entries older than that, oldest first, and never an open one;
  *  - '''scope by tenant''' (rule 9): [[entry]], [[awaitClosed]] and [[openEntries]] answer for the caller's tenant's
- *    entries only (`None` and `Some` differ), another tenant's being as unknown as a reclaimed one;
+ *    entries only (`None` and `Some` differ), another tenant's being as unknown as a reclaimed one; [[openRuns]] and
+ *    [[reclaim]] are the operator's, store-wide;
  *  - return from every call within a bound it documents, as `Checkpointer` does.
  *
  * `RunQueueContract` in `llm4s-agent-testkit` is the executable form of this contract.
@@ -130,6 +131,15 @@ trait RunQueue:
    * retention sweep (W2) calls it.
    */
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int]
+
+  /**
+   * For each of `threads` that has an open entry - of any tenant: the operator's store-wide retention sweep asks it -
+   * the [[org.llm4s.agent.graph.RunId RunId]]s of every attempt its open entries recorded (an empty set for open entries
+   * that have recorded none); a thread with no open entry is absent. What the worker's sweep guard answers
+   * (`org.llm4s.agent.graph.SweepGuard`, W2): the thread keeps its tombstone and the newest checkpoint of each of these
+   * runs (rule 4). At most `SweepPolicy.MaxBatchSize` threads are asked at once.
+   */
+  def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]]
 
 @Experimental
 object RunQueue:

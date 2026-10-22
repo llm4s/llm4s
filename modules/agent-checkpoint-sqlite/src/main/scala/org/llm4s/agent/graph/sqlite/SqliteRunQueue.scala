@@ -109,10 +109,13 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
       store.writing("queue.take") { c =>
         val now    = epochNanos(clock.instant())
         val agents = request.agents.toVector.map(_.value)
+        val skip   = request.skip.toVector.map(_.value)
+        val passed =
+          if skip.isEmpty then "" else s"AND e.entry_id NOT IN (${skip.map(_ => "?").mkString(", ")})"
         val head = query(
           c,
           s"""SELECT e.entry_id FROM llm4s_checkpoint_queue_entries e
-             |WHERE e.state = 'open' AND e.agent_id IN (${agents.map(_ => "?").mkString(", ")})
+             |WHERE e.state = 'open' AND e.agent_id IN (${agents.map(_ => "?").mkString(", ")}) $passed
              |  AND (e.lease_token IS NULL OR e.lease_expires_nanos <= ?)
              |  AND e.entry_id = (
              |    SELECT h.entry_id FROM llm4s_checkpoint_queue_entries h
@@ -123,7 +126,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
              |    WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
              |      AND o.lease_token IS NOT NULL AND o.lease_expires_nanos > ?)
              |ORDER BY e.entry_id LIMIT 1""".stripMargin,
-          (agents ++ Vector(now, now))*
+          (agents ++ skip ++ Vector(now, now))*
         )(_.getLong(1)).headOption
         head match
           case None     => Right(None)
@@ -267,6 +270,21 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           update(c, "DELETE FROM llm4s_checkpoint_queue_entries WHERE entry_id = ?", id)
         }
         Right(expired.size)
+      }
+
+  def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] =
+    if threads.isEmpty then Right(Map.empty)
+    else
+      store.reading("queue.openRuns") { c =>
+        val ids = threads.distinct.map(_.value)
+        val rows = query(
+          c,
+          s"""SELECT e.thread_id, a.run_id FROM llm4s_checkpoint_queue_entries e
+             |LEFT JOIN llm4s_checkpoint_queue_attempts a ON a.entry_id = e.entry_id
+             |WHERE e.state = 'open' AND e.thread_id IN (${ids.map(_ => "?").mkString(", ")})""".stripMargin,
+          ids*
+        )(r => ThreadId(r.getString(1)) -> Option(r.getString(2)).map(RunId(_)))
+        Right(rows.groupMapReduce(_._1)(_._2.toSet)(_ ++ _))
       }
 
   // ---- rows ----

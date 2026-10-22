@@ -9,9 +9,14 @@ import org.slf4j.LoggerFactory
 /**
  * Configuration for the DeepSeek API.
  *
- * Prefer [[DeepSeekConfig.fromValues]] over the primary constructor; it
+ * Prefer [[DeepSeekConfig.fromValues]] over the companion `apply`; it
  * resolves `contextWindow` and `reserveCompletion` automatically, and logs a
  * warning for unknown or legacy model names.
+ *
+ * The constructor is private: build one with the companion `apply`, whose defaults cover every
+ * field after `model`, and adjust it with the `with*` setters. Java and Kotlin, which cannot see
+ * Scala default arguments, use `DeepSeekConfig.apply(apiKey, model)` and the setters, so adding a field
+ * never breaks them ([[https://github.com/llm4s/llm4s/issues/2264 #2264]]).
  *
  * @param apiKey        DeepSeek API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"deepseek-chat"` or `"deepseek-reasoner"`.
@@ -22,18 +27,23 @@ import org.slf4j.LoggerFactory
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
-case class DeepSeekConfig(
+final case class DeepSeekConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                                   = ProviderId("deepseek")
   override def endpointUrl: Option[String]                              = Some(baseUrl)
   override def withModel(model: String): DeepSeekConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig = copy(timeouts = timeouts)
+
+  def withApiKey(apiKey: String): DeepSeekConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): DeepSeekConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): DeepSeekConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -43,6 +53,33 @@ object DeepSeekConfig {
   private val standardReserve = 8192
 
   val DEFAULT_BASE_URL: String = "https://api.deepseek.com"
+
+  /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_CONTEXT_WINDOW: Int = 128000
+
+  /** The completion reserve `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_RESERVE_COMPLETION: Int = 8192
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates and resolves the context window
+   * from the model. Every field after `model` has a default.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String = DEFAULT_BASE_URL,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): DeepSeekConfig =
+    new DeepSeekConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. Set the rest with the `with*` setters.
+   */
+  def apply(apiKey: String, model: String): DeepSeekConfig =
+    apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private def deepSeekFallback(modelName: String): (Int, Int) =
     // Explicit allowlist based on official DeepSeek API (as of Feb 2026)
