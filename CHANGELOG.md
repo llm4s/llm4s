@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `DeepSeekConfig`, `ZaiConfig`, `XaiConfig`, `MistralConfig` and `CohereConfig` are growth-prone types: build them with
+  `X(...)` or `X.fromValues` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`;
+  [migration](docs/reference/migration.md#the-openai-compatible-provider-configs-are-growth-safe-2264).
 - `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
   `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;

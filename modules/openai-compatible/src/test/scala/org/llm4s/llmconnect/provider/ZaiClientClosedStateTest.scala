@@ -81,7 +81,7 @@ class ZaiClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "zai-custom-model")
+    val config = createTestConfig.withModel("zai-custom-model")
     val client = new ZaiClient(config)
 
     client.close()

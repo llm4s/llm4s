@@ -239,6 +239,26 @@ that names the type changes it, and code that wanted the old value drops it:
 val chunks: Source[StreamedChunk, NotUsed] = client.streamComplete(conversation).mapMaterializedValue(_ => NotUsed)
 ```
 
+### The OpenAI-compatible provider configs are growth-safe (#2264)
+
+`DeepSeekConfig`, `ZaiConfig`, `XaiConfig`, `MistralConfig` and `CohereConfig` (`llm4s-openai-compatible`) follow
+the growth-prone pattern, as `OpenAIConfig` and `OpenAICompatibleConfig` beside them already did
+([#2264](https://github.com/llm4s/llm4s/issues/2264)). The classes are `final`, `new` and `.copy` are private, and:
+
+- the companion `apply` keeps its argument order - `apiKey`, `model`, `baseUrl`, `contextWindow`, `reserveCompletion`,
+  `timeouts` - and every field after `model` now has a default: `DEFAULT_BASE_URL`, the new `DEFAULT_CONTEXT_WINDOW`
+  and `DEFAULT_RESERVE_COMPLETION`, and `ProviderTimeouts.default`. Positional and named calls compile unchanged;
+- `apply(apiKey, model)` is the entry point for Java and Kotlin, which do not see Scala default arguments;
+- `withApiKey`, `withBaseUrl`, `withContextWindow` and `withReserveCompletion` join `withModel` and `withTimeouts`.
+
+`fromValues`, which validates and resolves the context window from the model, is still the preferred way in.
+
+```scala
+import org.llm4s.llmconnect.config.DeepSeekConfig
+
+val config = DeepSeekConfig("sk-...", "deepseek-chat").withContextWindow(64000) // was .copy(contextWindow = 64000)
+```
+
 ### `MemoryManagerConfig` is growth-safe (#1847)
 
 `MemoryManagerConfig` follows the growth-prone pattern ([#1847](https://github.com/llm4s/llm4s/issues/1847)): build

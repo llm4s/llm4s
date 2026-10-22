@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
 /**
  * Configuration for the Cohere API.
  *
- * Prefer [[CohereConfig.fromValues]] over the primary constructor; it resolves
+ * Prefer [[CohereConfig.fromValues]] over the companion `apply`; it resolves
  * `contextWindow` and `reserveCompletion` automatically from the model name, and
  * normalises the base URL to Cohere's OpenAI-compatibility endpoint.
  *
@@ -18,6 +18,11 @@ import org.slf4j.LoggerFactory
  * now speaks Cohere's Compatibility API (`/compatibility/v1/chat/completions`) rather than
  * the native v2 `/v2/chat`, which is what gives it streaming, tool calling and structured
  * output ([[https://github.com/llm4s/llm4s/issues/925 #925]]).
+ *
+ * The constructor is private: build one with the companion `apply`, whose defaults cover every
+ * field after `model`, and adjust it with the `with*` setters. Java and Kotlin, which cannot see
+ * Scala default arguments, use `CohereConfig.apply(apiKey, model)` and the setters, so adding a field
+ * never breaks them ([[https://github.com/llm4s/llm4s/issues/2264 #2264]]).
  *
  * @param apiKey        Cohere API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"command-a-03-2025"`.
@@ -31,27 +36,30 @@ import org.slf4j.LoggerFactory
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Experimental
-case class CohereConfig(
+final case class CohereConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("cohere")
   override def endpointUrl: Option[String]                            = Some(baseUrl)
   override def withModel(model: String): CohereConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig = copy(timeouts = timeouts)
+
+  def withApiKey(apiKey: String): CohereConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): CohereConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): CohereConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
 @Experimental
 object CohereConfig {
-  private val logger                   = LoggerFactory.getLogger(getClass)
-  private val DefaultContextWindow     = 128000
-  private val DefaultReserveCompletion = 4096
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /** The path of Cohere's OpenAI-compatibility API under an API root. */
   val COMPATIBILITY_PATH: String = "/compatibility/v1"
@@ -62,7 +70,34 @@ object CohereConfig {
    */
   val DEFAULT_BASE_URL: String = s"https://api.cohere.ai$COMPATIBILITY_PATH"
 
-  private val cohereFallback: String => (Int, Int) = _ => (DefaultContextWindow, DefaultReserveCompletion)
+  /** The context window `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_CONTEXT_WINDOW: Int = 128000
+
+  /** The completion reserve `apply` uses when none is given; [[fromValues]] resolves the model's own. */
+  val DEFAULT_RESERVE_COMPLETION: Int = 4096
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates and resolves the context window
+   * from the model. Every field after `model` has a default.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String = DEFAULT_BASE_URL,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): CohereConfig =
+    new CohereConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. Set the rest with the `with*` setters.
+   */
+  def apply(apiKey: String, model: String): CohereConfig =
+    apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
+
+  private val cohereFallback: String => (Int, Int) = _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
 
   /**
    * The Compatibility API base for a configured base URL.
@@ -101,8 +136,8 @@ object CohereConfig {
       val (cw, rc) = resolver.resolve(
         lookupProviders = Seq("cohere"),
         modelName = modelName,
-        defaultContextWindow = DefaultContextWindow,
-        defaultReserve = DefaultReserveCompletion,
+        defaultContextWindow = DEFAULT_CONTEXT_WINDOW,
+        defaultReserve = DEFAULT_RESERVE_COMPLETION,
         fallbackResolver = cohereFallback
       )
       val endpoint = compatibilityBaseUrl(baseUrl)

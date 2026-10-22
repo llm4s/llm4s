@@ -76,7 +76,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
       (shown should not).include("sk-secret")
       (shown should not).include("tok-secret")
       shown should include("X-Token")
-      (deepseek.copy(apiKey = "ds-secret").toString should not).include("ds-secret")
+      (deepseek.withApiKey("ds-secret").toString should not).include("ds-secret")
     }
   }
 

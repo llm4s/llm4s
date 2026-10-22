@@ -108,7 +108,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       )
     } { baseUrl =>
       val chunks = ListBuffer.empty[StreamedChunk]
-      val completion = new MistralClient(config(baseUrl).copy(model = "magistral-small-latest"))
+      val completion = new MistralClient(config(baseUrl).withModel("magistral-small-latest"))
         .streamComplete(Conversation(Seq(UserMessage("2+2?"))), CompletionOptions(), chunks += _)
         .value
 
