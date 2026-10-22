@@ -139,6 +139,130 @@ final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] va
         underlying.complete(conversation, options.underlying).map(FacadeInternals.completion)
       )
 
+  /**
+   * Sends a single user query and streams the reply to `listener`: each piece of its text as it arrives, then the whole
+   * reply or the error (see [[CompletionStreamListener]]). Returns at once with the running [[CompletionStream]],
+   * which cancels the call (`close()` or `cancel()`) and awaits its reply (`await()`). A `null` argument is a failed
+   * result, and `listener` hears nothing.
+   *
+   * {{{
+   * CompletionStream stream = client.stream("Tell me a story", System.out::print).get();
+   * JCompletion reply = stream.await().get();
+   * }}}
+   */
+  def stream(query: String, listener: CompletionStreamListener): LlmResult[CompletionStream] =
+    if (query == null) nullArgument("query")
+    else streaming(Conversation(Seq(UserMessage(query))), CompletionOptions(), listener)
+
+  /** Sends a conversation and streams the reply to `listener`, as `stream(String, listener)` does. */
+  def stream(conversation: Conversation, listener: CompletionStreamListener): LlmResult[CompletionStream] =
+    streaming(conversation, CompletionOptions(), listener)
+
+  /**
+   * Sends a conversation with the options a [[JCompletionOptions]] builder made and streams the reply to `listener`, as
+   * `stream(String, listener)` does.
+   */
+  def stream(
+    conversation: Conversation,
+    options: JCompletionOptions,
+    listener: CompletionStreamListener
+  ): LlmResult[CompletionStream] =
+    if (options == null) nullArgument("options") else streaming(conversation, options.underlying, listener)
+
+  private def streaming(
+    conversation: Conversation,
+    options: CompletionOptions,
+    listener: CompletionStreamListener
+  ): LlmResult[CompletionStream] =
+    if (conversation == null) nullArgument("conversation")
+    else if (listener == null) nullArgument("listener")
+    else
+      LlmResult.success(
+        new CompletionStream(
+          FacadeToken.INSTANCE,
+          underlying,
+          conversation,
+          options,
+          listener,
+          5000L // how long cancel() waits for the listener to hear the outcome
+        )
+      )
+
+  /**
+   * The reply to a single user query as a `java.util.concurrent.Flow.Publisher` of its text: in the JDK, so it adapts to
+   * Reactor, RxJava or Mutiny with their own `Flow` adapters and adds no dependency. It is cold: each subscription
+   * makes its own provider call, on a thread of its own. A subscriber slower than the provider holds the provider's
+   * thread rather than losing text (up to 64 pieces wait for it); cancelling the
+   * subscription interrupts the call. The publisher completes after the last piece, or fails with an [[LlmException]]
+   * - at once, on subscription, for a `null` argument.
+   */
+  def streamAsPublisher(query: String): java.util.concurrent.Flow.Publisher[String] =
+    if (query == null) publishing(Left(ValidationError.required("query")))
+    else publishing(Right((Conversation(Seq(UserMessage(query))), CompletionOptions())))
+
+  /** A conversation's reply as a `Flow.Publisher` of its text, as `streamAsPublisher(String)`. */
+  def streamAsPublisher(conversation: Conversation): java.util.concurrent.Flow.Publisher[String] =
+    publishing(Option(conversation).toRight(ValidationError.required("conversation")).map((_, CompletionOptions())))
+
+  /** A conversation's reply, with the options of a [[JCompletionOptions]] builder, as `streamAsPublisher(String)`. */
+  def streamAsPublisher(
+    conversation: Conversation,
+    options: JCompletionOptions
+  ): java.util.concurrent.Flow.Publisher[String] =
+    publishing(for {
+      c <- Option(conversation).toRight(ValidationError.required("conversation"))
+      o <- Option(options).toRight(ValidationError.required("options"))
+    } yield (c, o.underlying))
+
+  private def publishing(
+    start: Either[ValidationError, (Conversation, CompletionOptions)]
+  ): java.util.concurrent.Flow.Publisher[String] =
+    new CompletionPublisher(start.map((c, o) => (underlying, c, o)), CompletionPublisher.BufferSize)
+
+  /**
+   * Sends a single user query and returns the answer as an instance of the Java record `type`: the record's JSON
+   * Schema is derived from its components, sent as the structured-output format, and the reply is read back into the
+   * record. `complete(String)` returns the text instead.
+   *
+   * A component may be a `String`, an integer type, a `double` or `float`, a `boolean`, an enum, another record, a
+   * `java.util.List` of these, or an `Optional` of these (the one way to let the model answer `null`). A type outside
+   * that list, or a reply that does not fit the record - a missing or `null` field that is not an `Optional`, the wrong
+   * JSON type, an unknown enum name - is a failed result whose message names the field. How firmly the schema binds the
+   * model depends on the provider: OpenAI-style providers send it as a native JSON Schema, Anthropic as a prompt
+   * instruction. Blocks and reports an interrupt as `complete(String)` does.
+   *
+   * {{{
+   * record City(String name, String country, int population) {}
+   * City city = client.complete("The largest city in Japan", City.class).get();
+   * }}}
+   */
+  def complete[T](query: String, `type`: Class[T]): LlmResult[T] =
+    if (query == null) nullArgument("query")
+    else structured(Conversation(Seq(UserMessage(query))), CompletionOptions(), `type`)
+
+  /** Sends a conversation and returns the answer as an instance of the record `type`, as `complete(String, Class)`. */
+  def complete[T](conversation: Conversation, `type`: Class[T]): LlmResult[T] =
+    structured(conversation, CompletionOptions(), `type`)
+
+  /**
+   * Sends a conversation with the options a [[JCompletionOptions]] builder made and returns the answer as an instance of
+   * the record `type`, as `complete(String, Class)`. The options' response format is replaced by the record's schema.
+   */
+  def complete[T](conversation: Conversation, options: JCompletionOptions, `type`: Class[T]): LlmResult[T] =
+    if (options == null) nullArgument("options") else structured(conversation, options.underlying, `type`)
+
+  private def structured[T](conversation: Conversation, options: CompletionOptions, cls: Class[T]): LlmResult[T] =
+    if (conversation == null) nullArgument("conversation")
+    else if (cls == null) nullArgument("type")
+    else
+      guarded("JLlmClient.complete") {
+        for {
+          schema <- JavaRecords.schema(cls).left.map(ValidationError("type", _))
+          json   <- underlying.completeStructured[ujson.Value](conversation, schema, options)
+          record <- JavaRecords.read(cls, json).left.map(ValidationError("structured_output", _))
+        } yield record
+      }
+
   private def nullArgument[A](name: String): LlmResult[A] =
     LlmResult.failure(ValidationError.required(name))
 

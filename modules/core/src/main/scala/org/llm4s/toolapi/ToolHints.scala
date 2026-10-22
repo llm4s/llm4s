@@ -20,13 +20,62 @@ import org.llm4s.annotation.Experimental
  */
 @Experimental
 final case class ToolHints private (readOnly: Boolean, destructive: Boolean, idempotent: Boolean, openWorld: Boolean):
-  def withReadOnly(v: Boolean): ToolHints    = copy(readOnly = v)
-  def withDestructive(v: Boolean): ToolHints = copy(destructive = v)
-  def withIdempotent(v: Boolean): ToolHints  = copy(idempotent = v)
-  def withOpenWorld(v: Boolean): ToolHints   = copy(openWorld = v)
+  /**
+   * Sets the `readOnlyHint`.
+   *
+   * @param v `true` if the tool does not modify its environment
+   * @return new ToolHints with readOnly set; this is a hint, not a guarantee
+   */
+  def withReadOnly(v: Boolean): ToolHints = copy(readOnly = v)
 
+  /**
+   * Sets the `destructiveHint`. Meaningful only when the tool is not read-only.
+   *
+   * @param v `true` if the tool may perform destructive updates rather than only additive ones
+   * @return new ToolHints with destructive set; this is a hint, not a guarantee
+   */
+  def withDestructive(v: Boolean): ToolHints = copy(destructive = v)
+
+  /**
+   * Sets the `idempotentHint`. Meaningful only when the tool is not read-only.
+   *
+   * @param v `true` if calling the tool again with the same arguments has no further effect
+   * @return new ToolHints with idempotent set; this is a hint, not a guarantee
+   */
+  def withIdempotent(v: Boolean): ToolHints = copy(idempotent = v)
+
+  /**
+   * Sets the `openWorldHint`.
+   *
+   * @param v `true` if the tool may interact with an open world of external entities, such as the web,
+   *          rather than a closed domain
+   * @return new ToolHints with openWorld set; this is a hint, not a guarantee
+   */
+  def withOpenWorld(v: Boolean): ToolHints = copy(openWorld = v)
+
+/**
+ * Factory and default for [[ToolHints]]. The defaults are the conservative MCP ones: a tool that does not
+ * say what it does is treated as not read-only, destructive, not idempotent and open-world.
+ */
 @Experimental
 object ToolHints:
+  /**
+   * Creates a [[ToolHints]]. Each default assumes the less safe case, so that a middleware asking approval for
+   * tools that are not read-only does not skip a tool that never declared otherwise.
+   *
+   * @param readOnly `readOnlyHint`: the tool does not modify its environment; defaults to `false`, so the tool
+   *                 is assumed to modify it
+   * @param destructive `destructiveHint`: the tool may perform destructive updates rather than only additive
+   *                    ones; meaningful only when the tool is not read-only; defaults to `true`, so updates are
+   *                    assumed destructive
+   * @param idempotent `idempotentHint`: calling it again with the same arguments has no further effect;
+   *                   meaningful only when the tool is not read-only; defaults to `false`, so repeating a call
+   *                   is assumed to have a further effect
+   * @param openWorld `openWorldHint`: the tool may interact with an open world of external entities, such as
+   *                  the web, rather than a closed domain; defaults to `true`, so the tool is assumed to reach
+   *                  external entities
+   * @return the hints; they are hints, not guarantees
+   */
   def apply(
     readOnly: Boolean = false,
     destructive: Boolean = true,

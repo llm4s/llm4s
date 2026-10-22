@@ -5,8 +5,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
+import org.llm4s.javaapi.CompletionStream;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JEmbeddingClient;
@@ -14,15 +17,23 @@ import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
+import org.llm4s.javaapi.JTool;
 import org.llm4s.javaapi.JToolCall;
 import org.llm4s.javaapi.Llm4s;
+import org.llm4s.javaapi.LlmErrorKind;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
 import org.llm4s.llmconnect.config.AnthropicConfig;
 import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The fragments of {@code docs/guide/java.md}, compiled, and run by {@code JavaGuideSpec} against a client the
@@ -117,6 +128,100 @@ final class GuideSnippets {
         }
 
         return reply;
+    }
+
+    /** Code under test in the "Testing your code" block: anything that takes a {@code JLlmClient}. */
+    static final class Calculator {
+        private final JLlmClient client;
+
+        Calculator(JLlmClient client) {
+            this.client = client;
+        }
+
+        String ask(String question) {
+            return client.complete(question).getOrNull();
+        }
+    }
+
+    /** The "Testing your code" block (#1497): a JUnit 5 test of code that calls llm4s, with a fake model. */
+    static final class CalculatorTest {
+
+        @Test
+        void answersFromTheModel() {
+            FakeLlmClient fake = FakeLlmClient.replying("4");
+
+            String answer = new Calculator(fake.client()).ask("What is 2+2?");
+
+            assertEquals("4", answer);
+            assertEquals(List.of("What is 2+2?"), fake.prompts());
+        }
+
+        @Test
+        void reportsAProviderFailure() {
+            FakeLlmClient fake = FakeLlmClient.builder()
+                .failWith(LlmErrorKind.RATE_LIMIT, "slow down")
+                .build();
+
+            LlmResult<String> result = fake.client().complete("What is 2+2?");
+
+            assertTrue(result.isFailure());
+            assertEquals(LlmErrorKind.RATE_LIMIT, result.getError().getKind());
+        }
+    }
+
+    /** The "Tools" section's annotated class (#1484). */
+    public static final class WeatherTools {
+        @Tool(description = "The current weather in a city")
+        public String weather(@Param(name = "city", description = "City name") String city) {
+            return "Sunny in " + city;
+        }
+    }
+
+    /** The "Tools" section's agent block (#1484). */
+    static JAgentResult tools(JLlmClient client) {
+        List<JTool> weather = JTool.fromAnnotated(new WeatherTools()).get();
+        LlmResult<JTool> add = JTool.builder("add", "Adds two numbers")
+            .param("a", long.class, "First")
+            .param("b", long.class, "Second")
+            .handler(args -> args.getLong("a") + args.getLong("b"))
+            .build();
+
+        JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather.get(0), add.get())).get();
+        JAgentResult result = agent.run("What is the weather in Paris?").get();
+
+        return result;
+    }
+
+    /** The "Streaming the reply" block (#1485). */
+    static JCompletion streaming(JLlmClient client, Conversation conversation) {
+        JCompletion reply;
+        try (CompletionStream stream = client.stream(conversation, System.out::print).get()) {
+            reply = stream.await().get();
+        }
+        System.out.println();
+
+        Flow.Publisher<String> pieces = client.streamAsPublisher(conversation);
+
+        pieces.subscribe(new PrintingSubscriber());
+        return reply;
+    }
+
+    /** Only for the spec: prints what the publisher sends, as the guide's Reactor or RxJava code would. */
+    static final class PrintingSubscriber implements Flow.Subscriber<String> {
+        public void onSubscribe(Flow.Subscription subscription) { subscription.request(Long.MAX_VALUE); }
+        public void onNext(String piece) { }
+        public void onError(Throwable error) { }
+        public void onComplete() { }
+    }
+
+    /** The "Structured output" block (#1486). */
+    static String structured(JLlmClient client) {
+        record City(String name, String country, int population) {}
+
+        City city = client.complete("The largest city in Japan, with its population", City.class).get();
+        System.out.println(city.name() + ", " + city.country() + ": " + city.population());
+
+        return city.name();
     }
 
     /** The "Handling a failure" block. */

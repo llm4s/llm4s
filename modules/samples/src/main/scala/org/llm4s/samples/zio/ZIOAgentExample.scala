@@ -13,9 +13,22 @@ import zio.{ ZIO, ZIOAppDefault }
  * sbt "samples/runMain org.llm4s.samples.zio.ZIOAgentExample"
  * }}}
  *
- * Required environment:
- *   LLM_MODEL=openai/gpt-4o  (or any supported provider)
- *   OPENAI_API_KEY=sk-...
+ * The client comes from the default named provider, which `samples/src/main/resources/application.conf` sets to
+ * `ollama-local`. To use OpenAI instead, add a section in the git-ignored `application.local.conf` beside it:
+ * {{{
+ * llm4s {
+ *   providers {
+ *     openai-main {
+ *       provider = "openai"
+ *       model = "gpt-4o-mini"
+ *     }
+ *   }
+ * }
+ * }}}
+ * then select it and give the key (`llm4s-openai` binds `OPENAI_API_KEY` to the provider's key):
+ * {{{
+ * export OPENAI_API_KEY=sk-... LLM4S_PROVIDER=openai-main
+ * }}}
  */
 object ZIOAgentExample extends ZIOAppDefault {
 
