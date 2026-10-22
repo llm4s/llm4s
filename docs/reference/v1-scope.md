@@ -92,6 +92,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | build — the bill of materials that pins every published artifact to one version (no code) — **new** | `llm4s-bom` (`modules/bom`) | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
+| `vectorstore.elasticsearch` — `ElasticsearchVectorStore`, a `VectorStore` over the Elasticsearch REST API (`dense_vector` kNN, metadata filters, `_bulk`), with `ElasticsearchConfig` and `ElasticsearchVectorStoreConfigLoader`; no Elasticsearch client library — **new** | `llm4s-vectorstore-elasticsearch` (`modules/vectorstore-elasticsearch`) | Experimental |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |

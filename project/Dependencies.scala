@@ -187,10 +187,13 @@ object Deps {
     "org.springframework.boot" % "spring-boot-actuator-autoconfigure" % Versions.springBoot
   val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
   val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
-  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Intransitive: the starter compiles against
-  // Boot 3, and this jar's own dependencies are Boot 4's.
+  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Without its dependencies: the starter
+  // compiles against Boot 3, and this jar's own dependencies are Boot 4's. A `*:*` exclusion rather than
+  // `.intransitive()`, which a Maven POM cannot express, so sbt warned about it on every resolution (#1967).
   val springBoot4HealthApi =
-    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).intransitive()
+    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).excludeAll(
+      ExclusionRule("*", "*")
+    )
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",

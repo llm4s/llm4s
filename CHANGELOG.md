@@ -219,6 +219,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
   suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
   [#1468](https://github.com/llm4s/llm4s/issues/1468).
+- **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
+  directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
+  extractor used, character and line counts, metadata, a preview and any extraction error
+  [#478](https://github.com/llm4s/llm4s/issues/478).
 - **Added** an http4s reference app, the unpublished `modules/examples-http`: an Ember server over `llm4s-effect`'s
   `AgentIO[IO]` with `POST /chat` (JSON) and `POST /chat/stream` (server-sent events of the answer), the provider from
   `Llm4sConfig` at startup or `--fake`, `LLMError` mapped to HTTP statuses (400, 429 with `Retry-After`, 504, 502, 503),
@@ -237,6 +241,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+
+### Embeddings & RAG
+
+- **Added** `llm4s-vectorstore-elasticsearch` (Experimental): `ElasticsearchVectorStore`, a `VectorStore` over the
+  Elasticsearch REST API with no client library - a `dense_vector` index created on the first upsert with the configured
+  similarity, kNN search with every `MetadataFilter` applied inside it, `_bulk` writes, API-key or basic authentication,
+  configured from `llm4s.vectorstore.elasticsearch` (`ELASTICSEARCH_URL`, ...) by `ElasticsearchVectorStoreConfigLoader`
+  [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#elasticsearch).
 
 ### Memory
 
@@ -263,6 +275,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** the release's `publish` job checks the Scaladoc log before `sbt ci-release`, as CI's ScalaDoc job does, so
+  a release cannot package a new Scaladoc warning; and `scripts/check-scaladoc-warnings.sh` now fails on a third-party
+  warning (a doc comment inherited from ScalaTest or cats-effect that Scaladoc cannot resolve) unless
+  `scripts/scaladoc-third-party-warnings.txt` lists it with its reason. That file holds the ones that cannot be silenced
+  from sbt, since Scaladoc ignores `-Wconf` [#1967](https://github.com/llm4s/llm4s/issues/1967).
+- **Fixed** sbt's `Found intransitive dependency (spring-boot-health)` warning on every resolution: the starter's
+  provided Spring Boot 4 health API now drops its dependencies with a `*:*` exclusion, which the published POM states,
+  instead of `.intransitive()`, which a POM cannot; the classpath is unchanged [#1967](https://github.com/llm4s/llm4s/issues/1967).
 - **Added** `ProviderSwitchingFailoverSpec`, a `@Local` suite in `modules/it` (part of `sbt test`): OpenAI, Anthropic and
   Ollama clients built from named sections switch in one JVM against local mock servers, with streaming, tool calls, token
   usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,

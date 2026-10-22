@@ -37,6 +37,10 @@ flags:
     paths:
       - modules/rag/src/main/scala
     carryforward: true
+  vectorstore-elasticsearch:
+    paths:
+      - modules/vectorstore-elasticsearch/src/main/scala
+    carryforward: true
   knowledgegraph:
     paths:
       - modules/knowledgegraph/src/main/scala

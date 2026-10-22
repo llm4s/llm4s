@@ -293,6 +293,7 @@ lazy val llm4s = (project in file("."))
     media,
     core,
     rag,
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -728,6 +729,28 @@ lazy val rag = (project in file("modules/rag"))
       Deps.hikariCP,
       Deps.scalatest % Test,
       Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-vectorstore-elasticsearch` (#1469): `ElasticsearchVectorStore`, a `VectorStore` over the Elasticsearch REST
+// API through core's `Llm4sHttpClient` - no Elasticsearch client library. Its own module so that `llm4s-rag` does not
+// grow a backend list; it depends on `llm4s-rag` for the trait. Experimental, like any new module until it has users.
+// Its suite against a real cluster is `ElasticsearchVectorStoreSpec` in `modules/it` (@Docker tier).
+lazy val vectorstoreElasticsearch = (project in file("modules/vectorstore-elasticsearch"))
+  // core's test classes: `EchoedCredentials`, for the redaction of an error body that echoes a credential
+  .dependsOn(rag, core % "test->test")
+  .settings(
+    name := "llm4s-vectorstore-elasticsearch",
+    commonSettings,
+    // Measured 99.40% statement coverage
+    // (`sbt coverage vectorstoreElasticsearch/test vectorstoreElasticsearch/coverageReport`) on its first version.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
     )
   )
 
@@ -1839,6 +1862,8 @@ lazy val it = (project in file("modules/it"))
   .dependsOn(
     core,
     rag,
+    // ElasticsearchVectorStoreSpec (#1469), a @Docker suite against a real cluster
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory % "compile->compile;test->test",
     memoryPostgres,
@@ -1926,6 +1951,7 @@ lazy val docs = (project in file("modules/docs"))
     media,
     core,
     rag,
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -1979,6 +2005,7 @@ lazy val docs = (project in file("modules/docs"))
       (media / Compile / sources).value ++
         (core / Compile / sources).value ++
         (rag / Compile / sources).value ++
+        (vectorstoreElasticsearch / Compile / sources).value ++
         (knowledgegraph / Compile / sources).value ++
         (memory / Compile / sources).value ++
         (memoryPostgres / Compile / sources).value ++
