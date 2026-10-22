@@ -329,7 +329,9 @@ jobs:
         # disappearing from the published Scaladoc.
         #
         # Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` is only a `[warn]` line and `doc` still
-        # succeeds. The log is checked instead: a Scaladoc warning in an llm4s source fails the job (#1967).
+        # succeeds. The log is checked instead: a Scaladoc warning in an llm4s source fails the job, and so does one in a
+        # third-party source that scripts/scaladoc-third-party-warnings.txt does not list (#1967). The release's publish
+        # job runs the same check before `sbt ci-release`.
         run: |
           set -o pipefail
           scripts/test-check-scaladoc-warnings.sh
@@ -370,10 +372,11 @@ jobs:
             modules: [core, memory, memoryPostgres, schemaDerivation, testkit, observabilityMicrometer, agentTools,
                       traceOpentelemetry, gradleDemo]
           - leg: rag
-            modules: [rag, knowledgegraph, mcp, media, image, speech, observability, observabilityPrometheus]
+            modules: [rag, vectorstoreElasticsearch, knowledgegraph, mcp, media, image, speech, observability,
+                      observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService]
+                      providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService, examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
                       llm4sPekko]
@@ -530,6 +533,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: rag
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload vectorstore-elasticsearch coverage to Codecov
+        if: contains(matrix.modules, 'vectorstoreElasticsearch')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/vectorstore-elasticsearch/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: vectorstore-elasticsearch
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -795,6 +809,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/deploy-service/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: deploy-service
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload examples-http coverage to Codecov
+        if: contains(matrix.modules, 'examplesHttp')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/examples-http/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: examples-http
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1082,6 +1107,16 @@ jobs:
         ports:
           - 6333:6333
 
+      # ElasticsearchVectorStoreSpec (#1469): one node, security off, a small heap.
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+
       neo4j:
         image: neo4j:5
         env:
@@ -1104,7 +1139,7 @@ jobs:
       # Postgres is covered by the service health check above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
       # and fail the job if they never come up, rather than letting the suites skip.
-      - name: Wait for Qdrant and Neo4j
+      - name: Wait for Qdrant, Neo4j and Elasticsearch
         run: |
           wait_for() {
             for _ in $(seq 1 60); do
@@ -1116,6 +1151,7 @@ jobs:
           }
           wait_for Qdrant http://localhost:6333/readyz
           wait_for Neo4j http://localhost:7474
+          wait_for Elasticsearch "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
 
       - name: Run containerised integration tests
         env:
@@ -1132,6 +1168,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           QDRANT_TEST_URL: http://localhost:6333
+          ELASTICSEARCH_TEST_URL: http://localhost:9200
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
@@ -1246,6 +1283,14 @@ jobs:
       - name: Build the Maven sample
         working-directory: modules/samples/maven-java
         run: mvn -q -B compile
+
+      # The Quarkus sample (docs/guide/quarkus.md): built and tested against the library just published. Its
+      # @QuarkusTest runs the real client against a stub Ollama server, so it needs no model and no key (#1468).
+      - name: Build and test the Quarkus sample
+        working-directory: modules/samples/quarkus-java
+        run: |
+          ../../../scripts/check-quarkus-guide-snippets.sh
+          mvn -q -B verify
 
       # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
       # against the library just published, and a Gradle project without the BOM must not (#1462).

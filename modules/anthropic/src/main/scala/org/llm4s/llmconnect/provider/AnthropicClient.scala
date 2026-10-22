@@ -995,14 +995,22 @@ object AnthropicClient {
   private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError = {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
     e match {
-      case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", safe(e.getMessage))
-      case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+      case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
+      // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
+      case e: com.anthropic.errors.RateLimitException =>
+        HttpErrorMapper
+          .mapHttpError(429, "", "anthropic", Try(headerMap(e.headers())).getOrElse(Map.empty))
+          .left
+          .getOrElse(RateLimitError("anthropic"))
       case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
       // the service refused the request - a vendor limit (an image count, a request size) among others: typed, with
       // its message, as HttpErrorMapper maps the other providers' responses
       case e: com.anthropic.errors.BadRequestException => ValidationError("request", safe(e.getMessage))
       case e: com.anthropic.errors.AnthropicServiceException =>
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
+      // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
+      // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
+      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapError(io.getCause, secrets)
       case e =>
         e.toLLMError match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
@@ -1010,6 +1018,10 @@ object AnthropicClient {
         }
     }
   }
+
+  /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */
+  private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =
+    headers.names().asScala.map(name => name -> headers.values(name).asScala.toSeq).toMap
 
   /**
    * The configured values an error must not repeat: the API key, or with workload identity the ids

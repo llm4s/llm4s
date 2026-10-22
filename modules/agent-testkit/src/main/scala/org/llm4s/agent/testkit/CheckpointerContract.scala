@@ -2440,8 +2440,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       val b = GraphBuilder("contract-workers", "v1")
       val worker = b.node[String]("worker", writes = Set(results)) { (item, _, _) =>
         calls.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
+        // the gate is taken before the call is announced, so a later call - another runtime's recovery, which a case
+        // starts once it has seen this one enter - never finds it still there and waits on it in this call's place
+        val gate = Option(gates.remove(item))
         Option(entered.get(item)).foreach(_.countDown())
-        Option(gates.remove(item)).foreach(_.await(contractWait.toMillis, TimeUnit.MILLISECONDS))
+        gate.foreach(_.await(contractWait.toMillis, TimeUnit.MILLISECONDS))
         NodeResult.Continue(Command.empty.update(results, item.toUpperCase))
       }
       val collect = b.node[Unit]("collect")((_, _, _) => NodeResult.Continue(Command.empty))

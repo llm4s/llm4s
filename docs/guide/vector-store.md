@@ -34,12 +34,14 @@ The `VectorStore` trait provides a backend-agnostic interface for storing and se
 - **SQLite** - File-based or in-memory storage (default)
 - **pgvector** - PostgreSQL with pgvector extension (production-ready)
 - **Qdrant** - Cloud-native vector database via REST API
+- **Elasticsearch** - `dense_vector` kNN search in a cluster you already run, in the separate module `llm4s-vectorstore-elasticsearch` (Experimental); see [Elasticsearch](#elasticsearch)
 
 **Keyword Backends (for hybrid search):**
 - **SQLite FTS5** - File-based or in-memory BM25 search (default)
 - **PostgreSQL** - Native full-text search with tsvector/tsquery (production-ready)
 
 **Planned Backends:**
+- OpenSearch (a dialect of the Elasticsearch module: `knn_vector` and the k-NN plugin's query, [#1469](https://github.com/llm4s/llm4s/issues/1469))
 - Milvus
 - Pinecone
 
@@ -148,6 +150,81 @@ val cloudStore = VectorStoreFactory.qdrantCloud(
 
 store.close()
 ```
+
+### Elasticsearch
+
+`ElasticsearchVectorStore` keeps the vectors in one index of an Elasticsearch cluster, through the REST API and
+`llm4s-core`'s HTTP client: no Elasticsearch client library is added. It lives in its own module (Experimental):
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-elasticsearch" % llm4sVersion
+```
+
+```scala
+import org.llm4s.vectorstore.elasticsearch._
+
+// Local single node with security off:
+// docker run -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabled=false \
+//   docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+val local = ElasticsearchVectorStore.local(index = "my-vectors")
+
+// A secured cluster: an API key (its `encoded` value) or a username and password
+val config = ElasticsearchConfig("https://es.example.com:9200")
+  .withIndex("my-vectors")
+  .withAuth(ElasticsearchAuth.ApiKey(encodedKey))
+  .withSimilarity(ElasticsearchSimilarity.Cosine) // or DotProduct, L2Norm, MaxInnerProduct
+  .withDimensions(1536)                           // unset: the first record's size
+val store = ElasticsearchVectorStore(config)
+```
+
+Or from configuration, at the app edge:
+
+```hocon
+llm4s.vectorstore.elasticsearch {
+  baseUrl    = "https://es.example.com:9200"   # ELASTICSEARCH_URL; default http://localhost:9200
+  index      = "my-vectors"                    # ELASTICSEARCH_INDEX; default llm4s-vectors
+  apiKey     = ${?ELASTICSEARCH_API_KEY}       # or username / password (ELASTICSEARCH_USERNAME, _PASSWORD)
+  similarity = cosine                          # cosine | dot_product | l2_norm | max_inner_product
+  dimensions = 1536
+  # numCandidates  = 100                       # kNN candidates per shard; default max(100, 10 * topK)
+  # refreshOnWrite = true                      # writes wait for a refresh, so a search sees them at once
+  # timeout        = 30 seconds
+}
+```
+
+```scala
+import org.llm4s.config.ElasticsearchVectorStoreConfigLoader
+
+val store = for {
+  config <- ElasticsearchVectorStoreConfigLoader.default()
+  store  <- ElasticsearchVectorStore(config)
+} yield store
+```
+
+How it maps onto Elasticsearch:
+
+- **Index**: created on the first upsert when it does not exist, with a `dense_vector` field (`embedding`, indexed
+  for kNN with the configured similarity and size), `content` as `text`, `id` as `keyword`, and every metadata value
+  as a `keyword` under `metadata` (a dynamic template). `clear()` deletes the index; the next upsert creates it again.
+  Reads of an index that does not exist yet answer as an empty store.
+- **Writes**: `upsert` and `upsertBatch` are one `_bulk` request, and the document `_id` is the record ID, so an
+  upsert replaces. A record whose size differs from the configured `dimensions` is refused before anything is sent;
+  a record Elasticsearch rejects is reported with its ID and reason. `deleteByPrefix` and `deleteByFilter` are
+  `_delete_by_query` and return the number deleted.
+- **Search**: an approximate kNN search with the metadata filter inside the `knn` clause, so `topK` results come back
+  when that many records match. Elasticsearch's `_score` is clamped to `[0, 1]`: it already lies there for `cosine`
+  and `l2_norm` (and for `dot_product` over unit vectors), while `max_inner_product` can score above 1.
+- **Filters**: `Equals` is a `term` query, `In` a `terms` query, `HasKey` an `exists` query, `Contains` a `wildcard`
+  query (`*substring*`, matched literally), and `And`, `Or` and `Not` are `bool` queries.
+- **Errors**: a 401 or 403 is an `AuthenticationError`, a 429 a `RateLimitError`, any other failing status a
+  `ServiceError` with the status and the redacted body; configured credentials are masked wherever a body echoes them.
+
+Limits to know: `list` pages with `from` and `size`, so `offset + limit` cannot exceed the index's
+`max_result_window` (10,000 by default); `Contains` is a leading-wildcard query, which a cluster with
+`search.allow_expensive_queries: false` refuses; a metadata key containing a dot is mapped as a nested object path,
+so keys `a` and `a.b` cannot both be used. The base URL must be `https` when credentials are configured, unless the
+host is loopback. `ElasticsearchVectorStoreSpec` in `modules/it` (`@Docker` tier, `ELASTICSEARCH_TEST_URL`) runs every
+operation against a real cluster.
 
 ---
 
@@ -328,6 +405,10 @@ store.deleteByFilter(Equals("archived", "true"))
 ## Factory Configuration
 
 ### Using VectorStoreFactory
+
+`VectorStoreFactory` covers the backends inside `llm4s-rag` (SQLite, pgvector, Qdrant). A backend in a module of its
+own, such as [Elasticsearch](#elasticsearch), is built with its own constructor, and any `VectorStore` can be passed
+wherever one is taken.
 
 ```scala
 import org.llm4s.vectorstore._

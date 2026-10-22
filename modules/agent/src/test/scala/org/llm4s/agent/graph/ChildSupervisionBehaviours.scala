@@ -556,6 +556,16 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
 
   behavior.of("A timeout on the delegating call")
 
+  /**
+   * The timeout of a delegating call that a wrapper runs again after it timed out. Every run of a call is bounded by the
+   * call's one timeout, the retry included, and that timeout is wall-clock time (`ToolLoop`'s Ox `timeoutOption`), which
+   * no latch or test clock can stand in for: the first run must outlast it and the retry - reattaching the child,
+   * its model call and commits, its drain - must not. At 300 ms a slow runner's retry outlasted it too (on Windows, over
+   * SQLite: #2211), so it timed out as well, its child was cancelled and settled `Failed("timed-out")`, and the cases
+   * failed. Only the first run waits this out, since it hangs until the timeout fires; the retry returns long before.
+   */
+  private val RetriedCallTimeout: FiniteDuration = 3.seconds
+
   it should "cancel the child and settle it timed-out before the call commits, announcing the settlement (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)
@@ -606,7 +616,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       delegating(),
       ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
       childTools = Seq(hanging(blocking, entered)),
-      delegateTimeout = Some(300.millis),
+      delegateTimeout = Some(RetriedCallTimeout),
       parentMiddleware = Seq(retrying)
     )
     val runtime = new GraphRuntime(open())
@@ -645,7 +655,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
         ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
         ScriptedLLMClient.of(calling(call("k1", "hang")), CompletionFixture.simple("report")),
         childTools = Seq(hanging(blocking, new CountDownLatch(1))),
-        delegateTimeout = Some(300.millis),
+        // only a call run again needs the longer timeout: one that gives up never runs it a second time
+        delegateTimeout = Some(if (rerun) RetriedCallTimeout else 300.millis),
         parentMiddleware = Seq(approvingRetry(rerun, blocking))
       )
       val runtime = new GraphRuntime(open())

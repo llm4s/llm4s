@@ -85,7 +85,9 @@ final class HostFileBackend private (
   mountsBeneath: Path => Result[Vector[Path]],
   countsLinks: Boolean,
   openDirectory: Path => java.nio.file.DirectoryStream[Path],
-  canonical: Path => Path
+  canonical: Path => Path,
+  move: (Path, Path) => Unit,
+  contendedReplace: Boolean
 ) extends FileBackend
     with AutoCloseable:
 
@@ -357,7 +359,13 @@ final class HostFileBackend private (
    * ACL view, and its DOS hidden and system flags. Where they cannot be kept the write is refused, never
    * widened. A new file gets what any file created in its directory gets.
    */
-  private def atomicWrite(operation: String, path: VPath, target: Path, bytes: Array[Byte]): Result[Unit] =
+  private def atomicWrite(
+    operation: String,
+    path: VPath,
+    target: Path,
+    bytes: Array[Byte],
+    before: StateCheck
+  ): Result[Unit] =
     HostFileBackend.Kept.of(target) match
       case Left(reason) => refused(operation, path, reason)
       case Right(kept)  =>
@@ -383,9 +391,7 @@ final class HostFileBackend private (
                 None
               }
             }.flatMap {
-              case None =>
-                Try(Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING))
-                  .map(_ => None)
+              case None    => Try(replace(operation, path, temp, target, before)).map(_ => None)
               case refusal => Success(refusal)
             }
           if attempt != Success(None) then
@@ -393,10 +399,47 @@ final class HostFileBackend private (
           attempt match
             case Success(None)         => Right(())
             case Success(Some(reason)) => refused(operation, path, reason)
-            case Failure(e)            => classified(operation, path)(Failure[Unit](e))
+            case Failure(e: HostFileBackend.ChangedWhileReplacing) =>
+              Left(
+                GraphError.EffectReplayRefused(
+                  s"file.$operation",
+                  s"${path.value} changed while it was being replaced: it is now ${e.now.value}, not ${before.value}"
+                )
+              )
+            case Failure(e) => classified(operation, path)(Failure[Unit](e))
         }
         if written.isLeft then undo()
         written
+
+  /**
+   * Moves `temp` over `target`, whose digest was `before` under the effect lock. Windows refuses to replace
+   * a file another handle has open - a concurrent read of it, such as another call's plan - with an
+   * `AccessDeniedException` (or a sharing violation), where POSIX allows it. Where the host does
+   * (`contendedReplace`), such a refusal is taken for contention, not a permission: the target's digest is
+   * read again, and if it changed the write lost a race and throws [[HostFileBackend.ChangedWhileReplacing]]
+   * (`EffectReplayRefused`, as on POSIX); if it did not and the target is still writable, the move is tried
+   * again, at most [[HostFileBackend.ReplaceAttempts]] times in all. A target that is not writable, or a
+   * refusal that outlasts the attempts, is the permission denial it reports. Elsewhere the first failure is
+   * thrown as it is.
+   */
+  private def replace(operation: String, path: VPath, temp: Path, target: Path, before: StateCheck): Unit =
+    @annotation.tailrec
+    def attempt(n: Int): Unit =
+      Try(move(temp, target)) match
+        case Success(_) => ()
+        case Failure(e) if contendedReplace && HostFileBackend.contention(e) =>
+          Try(digest(operation, path, target)) match
+            case Failure(interrupt) if HostFileBackend.isInterrupt(interrupt) => throw interrupt
+            case Success(Right(now)) if now != before => throw new HostFileBackend.ChangedWhileReplacing(now)
+            case Success(Right(_)) if n < HostFileBackend.ReplaceAttempts && Files.isWritable(target) =>
+              // parked, not slept: an interrupt ends the wait as a cancellation, which `io` reports as one
+              java.util.concurrent.locks.LockSupport.parkNanos(math.min(50L, 1L << n) * 1_000_000L)
+              if Thread.currentThread().isInterrupted then
+                throw new java.util.concurrent.CancellationException(s"$operation ${path.value}")
+              attempt(n + 1)
+            case _ => throw e
+        case Failure(e) => throw e
+    attempt(1)
 
   // ---- mutations
 
@@ -465,7 +508,7 @@ final class HostFileBackend private (
               before <- digest("write", path, target)
               outcome = FileWritten(before == StateCheck.absent, bytes.length.toLong)
             yield casPlan("write", path)(before, fileCheck(bytes), outcome)(t =>
-              atomicWrite("write", path, t, bytes).map(_ => outcome)
+              atomicWrite("write", path, t, bytes, before).map(_ => outcome)
             )
     }
 
@@ -486,7 +529,7 @@ final class HostFileBackend private (
           else Right(())
         next = edited._1.getBytes(StandardCharsets.UTF_8)
       yield casPlan("edit", path)(fileCheck(bytes), fileCheck(next), FileEdited(edited._2))(t =>
-        atomicWrite("edit", path, t, next).map(_ => FileEdited(edited._2))
+        atomicWrite("edit", path, t, next, fileCheck(bytes)).map(_ => FileEdited(edited._2))
       )
     }
 
@@ -767,6 +810,8 @@ object HostFileBackend:
     mountsBeneath: Path => Result[Vector[Path]] = mountPointsBeneath,
     openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_),
     canonical: Path => Path = _.toRealPath(),
+    move: (Path, Path) => Unit = replaceAtomically,
+    contendedReplace: Path => Boolean = refusesReplacingOpenFiles,
     // called at each named step before the lock is held and the root revalidated, for tests that race it
     pause: String => Unit = _ => ()
   ): Result[HostFileBackend] =
@@ -827,7 +872,9 @@ object HostFileBackend:
                 mounts,
                 links,
                 openDirectory,
-                canonical
+                canonical,
+                move,
+                contendedReplace(real)
               )
             } match
             case Left(error) =>
@@ -1132,6 +1179,31 @@ object HostFileBackend:
 
   /** Whether `root`'s file system reports hard-link counts (the `unix` attribute view): POSIX does, NTFS not. */
   def reportsLinkCounts(root: Path): Boolean = root.getFileSystem.supportedFileAttributeViews.contains("unix")
+
+  /**
+   * Whether `root`'s file system refuses to replace a file another handle has open: one without the POSIX
+   * attribute view (Windows), whose rename over an open file fails where POSIX's succeeds.
+   */
+  def refusesReplacingOpenFiles(root: Path): Boolean =
+    !root.getFileSystem.supportedFileAttributeViews.contains("posix")
+
+  /** How many times a write tries to move its temporary file over a target held open elsewhere (Windows). */
+  private[harness] val ReplaceAttempts = 10
+
+  private def replaceAtomically(temp: Path, target: Path): Unit =
+    Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING): Unit
+
+  /**
+   * Whether a failed move is what Windows reports for a target another handle has open: access denied, or a
+   * sharing violation ("being used by another process").
+   */
+  private[harness] def contention(e: Throwable): Boolean = e match
+    case _: AccessDeniedException => true
+    case e: FileSystemException   => Option(e.getReason).exists(_.contains("used by another process"))
+    case _                        => false
+
+  /** A target whose digest changed while a write was replacing it: the write lost a race. */
+  final private class ChangedWhileReplacing(val now: StateCheck) extends RuntimeException(null, null, false, false)
 
   final private case class Unlock(lock: ReentrantLock) extends AutoCloseable:
     def close(): Unit = lock.unlock()

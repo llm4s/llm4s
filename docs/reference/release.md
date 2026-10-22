@@ -39,7 +39,7 @@ ci → publish → publish-kotlin → github-release → docs
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
+| `publish` | Checks the Scaladoc it will package (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list), then signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
 | `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |

@@ -108,6 +108,22 @@ fails *structured output*: that is a client finding, not a test bug.
 not apply (and `reasoningSetup` if a reasoning model exists), and call `registerCapabilityContract()` after the
 spec's own tests.
 
+## Provider switching and failover
+
+`ProviderSwitchingFailoverSpec` (`@Local`, issue #380) builds the OpenAI, Anthropic and Ollama clients the way an
+application does - named sections under `llm4s.providers`, `Llm4sConfig.provider`, `LLMConnect.getClient` - and points
+each at its own local mock server speaking that provider's wire format (`LocalProviderTestServer` from
+`llm4s-provider-testkit`). It checks that the providers switch in one JVM without leaking keys or models into each other's
+requests, stream and report model metadata after switching, map a tool call, token usage and a 401, 429 or 500 to the
+same `Completion` and `LLMError`, and turn an unreachable or silent server into a retryable error. Config errors name the
+section, and a section changed through system properties is picked up on the next load.
+
+llm4s has no built-in failover client, so the failover tests cover the documented pattern
+([reliability guide](../../docs/reliability-guide.md), the cookbook's `FallbackRecipe`): each provider in its own
+`ReliableClient`, the second asked only when the first still fails - after its retries, or at once while its circuit is open.
+The mock servers send `x-should-retry: false` on errors so the vendor SDKs leave retrying to `ReliableClient`, and no test
+asserts on elapsed time.
+
 ## Running the containerised tier
 
 ```bash
@@ -120,11 +136,15 @@ docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg1
 # Start Qdrant:
 docker run --rm -p 6333:6333 qdrant/qdrant
 
+# Start Elasticsearch (one node, security off):
+docker run --rm -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabled=false docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
 export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
+export ELASTICSEARCH_TEST_URL=http://localhost:9200
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
 
 sbt testIntegration
@@ -195,6 +215,7 @@ sbt testMcpReference
 - Neo4j via `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`
 - PostgreSQL/pgvector via `PGVECTOR_TEST_URL`, `PGVECTOR_TEST_USER`, `PGVECTOR_TEST_PASSWORD`, or the `POSTGRES_*` variables used by memory tests
 - Qdrant via `QDRANT_TEST_URL` and `QDRANT_TEST_API_KEY`
+- Elasticsearch via `ELASTICSEARCH_TEST_URL` and, for a secured cluster, `ELASTICSEARCH_TEST_API_KEY`
 - The MCP reference server (`@modelcontextprotocol/server-everything`, Streamable HTTP, pinned with its dependency tree in `mcp-reference-server/`) via `MCP_SERVER_URL`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled

@@ -16,11 +16,12 @@ for the home page countdown.
 <p class="event-card__event">{{ e.event }}</p>
 <p class="event-card__title">{{ e.title }}</p>
 <p class="event-card__meta">{{ e.location }}<br>{{ e.speakers | join: ", " }}</p>
-{%- if e.url or e.recording or e.slides -%}
+{%- if e.url or e.recording or e.slides or e.links -%}
 <p class="event-card__links">
 {%- if e.url -%}<a href="{{ e.url }}">Event page</a>{%- endif -%}
 {%- if e.recording -%}<a href="{{ e.recording }}">Watch recording</a>{%- endif -%}
 {%- for s in e.slides -%}<a href="{{ s.url | relative_url }}">{{ s.label }}</a>{%- endfor -%}
+{%- for link in e.links -%}<a href="{{ link.url | escape }}">{{ link.label | escape }}</a>{%- endfor -%}
 </p>
 {%- endif -%}
 </div>

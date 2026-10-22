@@ -45,8 +45,17 @@ object Versions {
   val catsEffect = "3.5.7"
   val fs2        = "3.11.0"
 
+  // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
+  // cats-effect and fs2 versions above.
+  val http4s = "0.23.30"
+
   // ZIO
   val zio = "2.1.16"
+
+  // ZIO HTTP, for the unpublished reference app in modules/examples-http (#1459) only. 3.2.0 is the last release
+  // built on the zio version above (3.3.0 needs 2.1.17); it brings Netty 4.1 and zio-schema, which no published
+  // module resolves.
+  val zioHttp = "3.2.0"
 
   // Apache Pekko (Apache-2.0). 1.7.1 is the latest stable line; its class files are version 52 (Java 8), apart from 39
   // classes of version 55 (Java 11) for the JDK 9+ Flow converters and fork-join pool, so it does not raise the JDK floor.
@@ -131,6 +140,14 @@ object Deps {
   val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
   val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
 
+  // http4s (unpublished modules/examples-http only; see Versions)
+  val http4sEmberServer = "org.http4s" %% "http4s-ember-server" % Versions.http4s
+  val http4sEmberClient = "org.http4s" %% "http4s-ember-client" % Versions.http4s
+  val http4sDsl         = "org.http4s" %% "http4s-dsl"          % Versions.http4s
+
+  // ZIO HTTP (unpublished modules/examples-http only; see Versions)
+  val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
+
   // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
   // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
   val circeCore  = "io.circe"          %% "circe-core"  % Versions.circe
@@ -178,10 +195,13 @@ object Deps {
     "org.springframework.boot" % "spring-boot-actuator-autoconfigure" % Versions.springBoot
   val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
   val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
-  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Intransitive: the starter compiles against
-  // Boot 3, and this jar's own dependencies are Boot 4's.
+  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Without its dependencies: the starter
+  // compiles against Boot 3, and this jar's own dependencies are Boot 4's. A `*:*` exclusion rather than
+  // `.intransitive()`, which a Maven POM cannot express, so sbt warned about it on every resolution (#1967).
   val springBoot4HealthApi =
-    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).intransitive()
+    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).excludeAll(
+      ExclusionRule("*", "*")
+    )
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",

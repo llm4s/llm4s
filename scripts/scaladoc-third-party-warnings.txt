@@ -1,0 +1,29 @@
+# Scaladoc warnings in third-party sources that scripts/check-scaladoc-warnings.sh accepts (#1967).
+#
+# Scaladoc walks a library's source for a doc comment one of our classes inherits, and reports a link in it that
+# it cannot resolve against our classpath. These are the ones we cannot remove: the member is the library's own
+# (often `final` or a macro), so we cannot give it a doc comment of our own, and Scaladoc ignores `-Wconf`, so sbt
+# cannot silence them. They still print in the `doc` log (CI's ScalaDoc job and the release's publish job); the
+# check accepts exactly these and fails on any other.
+#
+# Format: `<path from the package root> | <link query as Scaladoc prints it> | <reason>`. No line number, so a
+# library upgrade that moves the comment still matches; one entry covers every comment in the file with that link.
+# When an entry is no longer seen (the check lists it), remove it.
+#
+# Seen at main 64f8235e6 with `sbt doc docs/doc`: 21 warnings, 6 entries.
+
+# llm4s-provider-testkit's ProviderModuleChecks extends org.scalatest.Assertions, and llm4s-agent-testkit's
+# contracts (CheckpointerContract, ReplayContract, FileBackendContract, ...) extend AnyFlatSpecLike, so that a
+# provider or backend's own spec mixes them in. They inherit ScalaTest's assert/assume/fail/intercept/pending, whose
+# comments link to ScalaTest's exception types by short name.
+org/scalatest/Assertions.scala | TestFailedException | assert/fail/intercept/assertResult docs, inherited by the testkits
+org/scalatest/Assertions.scala | NullArgumentException | assert/assume/fail/cancel docs, inherited by the testkits
+org/scalatest/Assertions.scala | TestCanceledException | assume docs, inherited by the testkits
+org/scalatest/Assertions.scala | TestPendingException | pending docs, inherited by the testkits
+org/scalatest/Suite.scala | NullArgumentException | Suite.run docs, inherited by the agent-testkit contracts via AnyFlatSpecLike
+org/scalatest/flatspec/AnyFlatSpecLike.scala | NullArgumentException | registerTest/registerIgnoredTest/run docs, inherited by the agent-testkit contracts
+
+# The cats-effect samples (CatsEffectAgentExample, AgentStreamIOExample) extend IOApp.Simple, whose
+# `final def run(args: List[String])` inherits IOApp.run's comment and its member link; a final member cannot be
+# given a comment of ours.
+cats/effect/IOApp.scala | IOApp.Simple!.run:cats\.effect\.IO[Unit]* | IOApp.run docs, inherited by the samples' IOApp.Simple mains

@@ -311,6 +311,7 @@ really executes:
 ```bash
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
 docker run -d -p 6333:6333 qdrant/qdrant
+docker run -d -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabled=false docker.elastic.co/elasticsearch/elasticsearch:8.15.3
 docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
@@ -318,6 +319,7 @@ export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
 export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
+export ELASTICSEARCH_TEST_URL=http://localhost:9200
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
 export LLM4S_IT_STRICT=true
 

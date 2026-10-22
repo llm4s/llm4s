@@ -41,7 +41,20 @@ jobs:
           echo "${{ secrets.PGP_SECRET }}" | base64 --decode | gpg --batch --import
           echo "GPG keys imported:"
           gpg --list-secret-keys
-      
+
+      # The Scaladoc this job packages into every -javadoc.jar, checked before anything is signed or uploaded (#1967).
+      # Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` never fails `doc` or `ci-release`; the log is
+      # read instead, as in CI's ScalaDoc job. It fails on a warning in an llm4s source, or in a third-party source that
+      # is not on scripts/scaladoc-third-party-warnings.txt. `ci-release` then reuses the compiled classes.
+      - name: Check Scaladoc warnings
+        run: |
+          set -o pipefail
+          scripts/test-check-scaladoc-warnings.sh
+          sbt doc 2>&1 | tee scaladoc.log
+          scripts/check-scaladoc-warnings.sh scaladoc.log
+        env:
+          SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
+
       - name: Release
         run: sbt ci-release
         env:

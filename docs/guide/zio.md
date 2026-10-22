@@ -95,6 +95,13 @@ Cancellation is by thread interrupt, matching the llm4s core contract. `LLMClien
 methods all run the provider call on an interruptible blocking thread, so cancelling the fiber (or
 a timeout) interrupts the call instead of waiting for it to finish.
 
+## Serving an agent over HTTP
+
+[Serving an Agent over HTTP](http-reference-apps) includes a tested ZIO HTTP app over `AgentZ`: `POST /chat` answers
+as JSON and `POST /chat/stream` streams `AgentZ.stream` as server-sent events, with errors mapped to HTTP statuses and
+the run cancelled when the client disconnects. Run it with
+`sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"`.
+
 ## Error handling
 
 `LLMError` flows naturally in the ZIO error channel:

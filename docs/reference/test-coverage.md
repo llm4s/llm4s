@@ -86,6 +86,7 @@ Only main sources are tracked. `modules/benchmarks` is ignored.
 
 - `org.llm4s.runner.*`
 - `org.llm4s.deploy.DeployServiceMain` (the deploy service's entry point; its routes and checks are measured)
+- `org.llm4s.examples.http.*Main` (the HTTP reference apps' entry points; their routes and servers are measured)
 - `org.llm4s.samples.*`
 - `org.llm4s.workspace.*`
 

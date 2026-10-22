@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A standalone Quarkus application that calls llm4s from Java through llm4s-java-api: a CDI producer for the
+  JLlmClient, configured with @ConfigMapping, and a REST resource at /chat. See README.md and docs/guide/quarkus.md.
+
+  Build against a release with -Dllm4s.version=0.5.1 (or later). The default is the locally built snapshot that
+  `sbt publishM2` puts in your local Maven repository; CI builds and tests the sample against it, so the sample cannot
+  drift from the API on main.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.llm4s.samples</groupId>
+  <artifactId>llm4s-quarkus-sample</artifactId>
+  <version>1</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <!-- llm4s-java-api is JDK 21 bytecode, so the sample compiles for 21 whatever JDK runs Maven. -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <llm4s.version>0.1.0-SNAPSHOT</llm4s.version>
+    <quarkus.platform.version>3.40.1</quarkus.platform.version>
+    <!-- The Scala 3 library the llm4s modules were built with. -->
+    <scala3.version>3.7.1</scala3.version>
+    <surefire.version>3.5.4</surefire.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.quarkus.platform</groupId>
+        <artifactId>quarkus-bom</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- Pin scala3-library_3 by name. Scala 3 runs on the Scala 2.13 scala-library, which has no 3.x release,
+           so never pin the whole org.scala-lang group. -->
+      <dependency>
+        <groupId>org.scala-lang</groupId>
+        <artifactId>scala3-library_3</artifactId>
+        <version>${scala3.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- Scala 3 only, and Maven does not add the cross-version suffix: write _3 yourself. The POM brings
+         llm4s-core, llm4s-agent and the provider modules. -->
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-java-api_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+
+    <!-- Quarkus REST (RESTEasy Reactive) and CDI (ArC). Quarkus routes SLF4J to its own log manager, so llm4s's logs
+         appear in the Quarkus log with no logging backend added here: do not add logback. -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-arc</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-junit</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.rest-assured</groupId>
+      <artifactId>rest-assured</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.quarkus.platform</groupId>
+        <artifactId>quarkus-maven-plugin</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <goals>
+              <goal>build</goal>
+              <goal>generate-code</goal>
+              <goal>generate-code-tests</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <!-- @ConfigMapping and CDI read parameter names. -->
+          <parameters>true</parameters>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${surefire.version}</version>
+        <configuration>
+          <systemPropertyVariables>
+            <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

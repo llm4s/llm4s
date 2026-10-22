@@ -77,6 +77,7 @@ llm4s/
 ├── modules/
 │   ├── core/                  # Core library (published)
 │   ├── rag/                   # RAG, vector stores, chunking, reranking, extraction (published)
+│   ├── vectorstore-elasticsearch/ # ElasticsearchVectorStore over the Elasticsearch REST API (published)
 │   ├── knowledgegraph/        # Knowledge graph model, storage, query (published)
 │   ├── memory/                # Agent memory: managers, in-memory + SQLite stores (published)
 │   ├── memory-postgres/       # Agent memory: Postgres/pgvector store (published)
@@ -118,6 +119,7 @@ llm4s/
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
+│   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
 │   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI

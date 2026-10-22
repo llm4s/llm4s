@@ -72,6 +72,9 @@ inThisBuild(
       // The deploy service's entry point starts a server and exits; the routes, the check and the
       // configuration behind it are measured, and the image smoke test in deploy-staged.yml runs it.
       "org\\.llm4s\\.deploy\\.DeployServiceMain",
+      // The reference apps' entry points read the command line, load the provider and serve until stopped; the
+      // routes and servers behind them are measured on ephemeral ports.
+      "org\\.llm4s\\.examples\\.http\\..*Main",
       "org\\.llm4s\\.samples\\..*",
       "org\\.llm4s\\.workspace\\..*"
     ).mkString(";"),
@@ -290,6 +293,7 @@ lazy val llm4s = (project in file("."))
     media,
     core,
     rag,
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -337,6 +341,7 @@ lazy val llm4s = (project in file("."))
     gradleDemo,
     benchmarks,
     deployService,
+    examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
@@ -724,6 +729,28 @@ lazy val rag = (project in file("modules/rag"))
       Deps.hikariCP,
       Deps.scalatest % Test,
       Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-vectorstore-elasticsearch` (#1469): `ElasticsearchVectorStore`, a `VectorStore` over the Elasticsearch REST
+// API through core's `Llm4sHttpClient` - no Elasticsearch client library. Its own module so that `llm4s-rag` does not
+// grow a backend list; it depends on `llm4s-rag` for the trait. Experimental, like any new module until it has users.
+// Its suite against a real cluster is `ElasticsearchVectorStoreSpec` in `modules/it` (@Docker tier).
+lazy val vectorstoreElasticsearch = (project in file("modules/vectorstore-elasticsearch"))
+  // core's test classes: `EchoedCredentials`, for the redaction of an error body that echoes a credential
+  .dependsOn(rag, core % "test->test")
+  .settings(
+    name := "llm4s-vectorstore-elasticsearch",
+    commonSettings,
+    // Measured 99.40% statement coverage
+    // (`sbt coverage vectorstoreElasticsearch/test vectorstoreElasticsearch/coverageReport`) on its first version.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
     )
   )
 
@@ -1365,6 +1392,50 @@ lazy val deployService = (project in file("modules/deploy-service"))
   )
   .settings(DeployServiceDocker.settings)
 
+// Reference apps that serve an llm4s agent over HTTP, `POST /chat` and `POST /chat/stream` (#1459): http4s over
+// `llm4s-effect` and ZIO HTTP over `llm4s-zio`; Tapir follows. One module for both stacks: they share the protocol,
+// the error mapping and the settings, and their dependencies do not conflict (ZIO HTTP's Netty is on no other
+// classpath here, and its zio is `llm4s-zio`'s). Its own module, not part of `samples`, so the HTTP stacks stay
+// off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
+// service would, and it is in neither the published artifacts nor the `docs` Scaladoc aggregate.
+lazy val examplesHttp = (project in file("modules/examples-http"))
+  .dependsOn(
+    core,
+    agent,
+    llm4sEffect,
+    llm4sZio,
+    // `--fake` serves a scripted client, so the app runs with no model and no key.
+    testkit,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible
+  )
+  .settings(
+    name := "llm4s-examples-http",
+    commonSettings,
+    Compile / mainClass := Some("org.llm4s.examples.http.http4s.Http4sChatServerMain"),
+    // Forked, so `sbt examplesHttp/run` serves until stopped instead of sharing sbt's JVM.
+    run / fork         := true,
+    run / connectInput := true,
+    libraryDependencies ++= Seq(
+      Deps.catsEffect,
+      Deps.fs2,
+      Deps.http4sEmberServer,
+      Deps.http4sDsl,
+      Deps.zioHttp,
+      Deps.http4sEmberClient % Test,
+      Deps.scalatest         % Test
+    ),
+    appLogging,
+    publish / skip := true,
+    // Measured 98.33% statement coverage (`sbt coverage examplesHttp/test examplesHttp/coverageReport`), by the
+    // routes in memory and the servers on ephemeral ports. The entry points are excluded via
+    // ThisBuild / coverageExcludedPackages. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95)
+  )
+
 lazy val docSnippetsReport = taskKey[Unit](
   "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"
 )
@@ -1795,6 +1866,8 @@ lazy val it = (project in file("modules/it"))
   .dependsOn(
     core,
     rag,
+    // ElasticsearchVectorStoreSpec (#1469), a @Docker suite against a real cluster
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory % "compile->compile;test->test",
     memoryPostgres,
@@ -1819,6 +1892,8 @@ lazy val it = (project in file("modules/it"))
     traceOpentelemetry,
     agent,
     agentTestkit % Test,
+    // ProviderSwitchingFailoverSpec (#380): mock provider servers and application-style config loading
+    providerTestkit % Test,
     // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
     testkit               % Test,
     agentCheckpointSqlite % Test,
@@ -1880,6 +1955,7 @@ lazy val docs = (project in file("modules/docs"))
     media,
     core,
     rag,
+    vectorstoreElasticsearch,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -1933,6 +2009,7 @@ lazy val docs = (project in file("modules/docs"))
       (media / Compile / sources).value ++
         (core / Compile / sources).value ++
         (rag / Compile / sources).value ++
+        (vectorstoreElasticsearch / Compile / sources).value ++
         (knowledgegraph / Compile / sources).value ++
         (memory / Compile / sources).value ++
         (memoryPostgres / Compile / sources).value ++

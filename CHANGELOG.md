@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace root as `safe.directory` [#2014](https://github.com/llm4s/llm4s/issues/2014).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
   `StaticFileBackend` (read-only application files, e.g. skills) [#1916](https://github.com/llm4s/llm4s/issues/1916); [design §4.38](docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md).
+- **Fixed** `HostFileBackend` on Windows refusing a write or edit as "permission denied" when its replace met a target
+  another call had open: the replace is retried while the target is unchanged and writable, a target changed meanwhile
+  is `EffectReplayRefused` (as on POSIX), and a real denial is still `BackendRefused` [#2127](https://github.com/llm4s/llm4s/issues/2127).
 
 ### Streaming integrations
 
@@ -134,6 +137,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
   (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
+- **Fixed** the `openai`, `azure`, `requesty` and `anthropic` clients returning a request that hit its `timeouts.request`
+  as a non-retryable `UnknownError` (OkHttp's call timeout, `InterruptedIOException("timeout")`): it is now a recoverable
+  `NetworkError("Request timeout")`, as a socket timeout already was, so `ReliableClient` retries it. The `anthropic` client
+  also returns an unreachable server as a recoverable `NetworkError` instead of an `UnknownError`, and a 429's
+  `Retry-After` on its `RateLimitError`, as the other providers do [#380](https://github.com/llm4s/llm4s/issues/380).
 
 ### Java & Kotlin APIs
 
@@ -203,6 +211,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** a Quarkus guide ([docs/guide/quarkus.md](docs/guide/quarkus.md)) and a runnable Maven sample,
+  `modules/samples/quarkus-java`: a `@Produces @ApplicationScoped JLlmClient` built with the Java API's builders from
+  a `@ConfigMapping` of `llm4s.provider`, `model`, `base-url` and `api-key`, closed by a `@Disposes` method, and a
+  `@Blocking` `POST /chat` resource; `mvn quarkus:dev` answers from a local Ollama. Its `@QuarkusTest` runs against a
+  stub Ollama server on a loopback port, and CI builds and tests it against the published snapshot and checks that
+  the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
+  suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
+  [#1468](https://github.com/llm4s/llm4s/issues/1468).
+- **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
+  directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
+  extractor used, character and line counts, metadata, a preview and any extraction error
+  [#478](https://github.com/llm4s/llm4s/issues/478).
+- **Added** an http4s reference app, the unpublished `modules/examples-http`: an Ember server over `llm4s-effect`'s
+  `AgentIO[IO]` with `POST /chat` (JSON) and `POST /chat/stream` (server-sent events of the answer), the provider from
+  `Llm4sConfig` at startup or `--fake`, `LLMError` mapped to HTTP statuses (400, 429 with `Retry-After`, 504, 502, 503),
+  and the run cancelled when a streaming client disconnects. Tested on an ephemeral port against scripted clients;
+  guide: `docs/guide/http-reference-apps.md`. ZIO HTTP and Tapir apps follow [#1459](https://github.com/llm4s/llm4s/issues/1459).
+- **Added** a ZIO HTTP reference app to `modules/examples-http`: a ZIO HTTP 3.2 (Netty) server over `llm4s-zio`'s
+  `AgentZ` with the http4s app's API and behaviour - `POST /chat` (JSON), `POST /chat/stream` (`delta`, `tool_call`,
+  `done`/`error` events and a keep-alive comment), the shared error-to-status mapping, `--fake`, and the run cancelled
+  when a streaming client disconnects. Run it with
+  `sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"`; the ZIO guide links it.
+  Tapir follows [#1459](https://github.com/llm4s/llm4s/issues/1459).
 - **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
   `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
   the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).
@@ -216,6 +247,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+
+### Embeddings & RAG
+
+- **Added** `llm4s-vectorstore-elasticsearch` (Experimental): `ElasticsearchVectorStore`, a `VectorStore` over the
+  Elasticsearch REST API with no client library - a `dense_vector` index created on the first upsert with the configured
+  similarity, kNN search with every `MetadataFilter` applied inside it, `_bulk` writes, API-key or basic authentication,
+  configured from `llm4s.vectorstore.elasticsearch` (`ELASTICSEARCH_URL`, ...) by `ElasticsearchVectorStoreConfigLoader`
+  [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#elasticsearch).
 
 ### Memory
 
@@ -242,6 +281,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** the release's `publish` job checks the Scaladoc log before `sbt ci-release`, as CI's ScalaDoc job does, so
+  a release cannot package a new Scaladoc warning; and `scripts/check-scaladoc-warnings.sh` now fails on a third-party
+  warning (a doc comment inherited from ScalaTest or cats-effect that Scaladoc cannot resolve) unless
+  `scripts/scaladoc-third-party-warnings.txt` lists it with its reason. That file holds the ones that cannot be silenced
+  from sbt, since Scaladoc ignores `-Wconf` [#1967](https://github.com/llm4s/llm4s/issues/1967).
+- **Fixed** sbt's `Found intransitive dependency (spring-boot-health)` warning on every resolution: the starter's
+  provided Spring Boot 4 health API now drops its dependencies with a `*:*` exclusion, which the published POM states,
+  instead of `.intransitive()`, which a POM cannot; the classpath is unchanged [#1967](https://github.com/llm4s/llm4s/issues/1967).
+- **Added** `ProviderSwitchingFailoverSpec`, a `@Local` suite in `modules/it` (part of `sbt test`): OpenAI, Anthropic and
+  Ollama clients built from named sections switch in one JVM against local mock servers, with streaming, tool calls, token
+  usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,
+  a section reloaded from system properties, and failover through `ReliableClient` plus a fallback provider
+  [#380](https://github.com/llm4s/llm4s/issues/380).
 - **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual

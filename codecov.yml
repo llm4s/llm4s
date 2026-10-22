@@ -37,6 +37,10 @@ flags:
     paths:
       - modules/rag/src/main/scala
     carryforward: true
+  vectorstore-elasticsearch:
+    paths:
+      - modules/vectorstore-elasticsearch/src/main/scala
+    carryforward: true
   knowledgegraph:
     paths:
       - modules/knowledgegraph/src/main/scala
@@ -184,6 +188,10 @@ flags:
   deploy-service:
     paths:
       - modules/deploy-service/src/main/scala
+    carryforward: true
+  examples-http:
+    paths:
+      - modules/examples-http/src/main/scala
     carryforward: true
   spring-boot-starter:
     paths:
