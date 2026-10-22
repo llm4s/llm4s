@@ -49,7 +49,8 @@ final case class WorkspaceSandboxConfig(
    *
    * '''An added program is trusted code execution.''' It is held to the same checks as the built-in ones (no shell,
    * forbidden characters, path arguments inside the workspace, the environment allowlist), but it has no per-program
-   * option rules (bar those that stop `tar`, `zip`, `rsync`, `scp` and `sftp` running a program, #1805), so it can do
+   * option rules (bar those that stop `tar`, `zip`, `rsync`, `scp` and `sftp` running a program, #1805, and `tar` and
+   * `rsync` naming a file on another host, #1845), so it can do
    * whatever its own arguments let it - and a build tool such as `sbt` runs the code in the workspace by design. The
    * denylist only stops the obvious ways to run anything (shells, interpreters, launchers, loaders); it is not a
    * boundary. Add only what the agent needs.
@@ -95,13 +96,15 @@ object WorkspaceSandboxConfig {
   /**
    * Programs [[WorkspaceSandboxConfig.withExtraCommands]] refuses to add: shells, interpreters, launchers and loaders
    * that run another program or code named in their arguments, editors and stream editors that run a command
-   * (`vim -c '!cmd'`, GNU `sed` `e`), schedulers, and Windows programs that run another one (#1756, #1761, #1792,
-   * #1805). Any of them would let a command run anything, which is what running commands without a shell prevents.
+   * (`vim -c '!cmd'`, GNU `sed` `e`), schedulers, package and project runners, notebook tooling, and Windows
+   * programs that run another one (#1756, #1761, #1792, #1805, #1845). Any of them would let a command run anything,
+   * which is what running commands without a shell prevents.
    *
    * A name is matched case-insensitively, without a `.exe` / `.com` extension and without a trailing version
    * (`Python3.12.EXE` is `python`). Interpreter families are matched by prefix as well, since they come in many
-   * spellings (`python3.7m`, `python3-dbg`, `pypy3`, `luajit`), as is the dynamic loader (`ld.so`, `ld-linux-x86-64.so.2`,
-   * `ld-musl-x86_64.so.1`), which runs any program given as its argument. Only ASCII letters, digits, `.`, `_`, `+` and
+   * spellings (`python3.7m`, `python3-dbg`, `pypy3`, `luajit`, `ipython3`, `jupyter-lab`), as is the dynamic loader
+   * (`ld.so`, `ld-linux-x86-64.so.2`, `ld-musl-x86_64.so.1`, musl's `libc.musl-x86_64.so.1`), which runs any program
+   * given as its argument. Only ASCII letters, digits, `.`, `_`, `+` and
    * `-` make a name, so no Unicode look-alike (`ｐｙｔｈｏｎ`, a Kelvin sign for `k`) reaches the comparison.
    *
    * The list is a speed bump, not a boundary: no list names every program that can run another - most tools with a
@@ -191,6 +194,51 @@ object WorkspaceSandboxConfig {
     "make",
     "gmake",
     "expect",
+    // Python front-ends, the Python documentation tool and debugger, which import and run code (#1845); the ipython,
+    // bpython and jupyter families are also matched by prefix
+    "ipython",
+    "bpython",
+    "ptpython",
+    "ptipython",
+    "pydoc",
+    "pdb",
+    "idle",
+    // Notebook tooling: runs a notebook's cells (#1845)
+    "jupyter",
+    "papermill",
+    "voila",
+    "marimo",
+    // Package and project runners and version managers: fetch and run a package, or run the command named in their
+    // arguments (`npx`, `uvx`, `uv run`, `poetry run`, `npm exec`, `conda run`, `pyenv exec`) (#1845)
+    "npx",
+    "pnpx",
+    "bunx",
+    "npm",
+    "pnpm",
+    "yarn",
+    "yarnpkg",
+    "corepack",
+    "pipx",
+    "uv",
+    "uvx",
+    "poetry",
+    "pipenv",
+    "pdm",
+    "hatch",
+    "rye",
+    "conda",
+    "mamba",
+    "micromamba",
+    "pixi",
+    "tox",
+    "nox",
+    "pyenv",
+    "rbenv",
+    "nodenv",
+    "asdf",
+    "mise",
+    "volta",
+    "fnm",
     // Editors and stream editors that run a command: GNU sed's `e` command and `s///e` flag, `vim -c '!cmd'`,
     // `emacs --batch --eval`
     "sed",
@@ -282,12 +330,19 @@ object WorkspaceSandboxConfig {
 
   /**
    * Interpreter families whose every spelling runs code, matched by prefix: `python3.7m`, `python3-dbg`,
-   * `python-dbg`, `pypy3.10`, `jython2.7`, `luajit-2.1`.
+   * `python-dbg`, `pypy3.10`, `jython2.7`, `luajit-2.1`, `ipython3`, `bpython-curses`, `jupyter-lab`,
+   * `jupyter-nbconvert` (#1845).
    */
-  private val NeverAllowedPrefixes: Seq[String] = Seq("python", "pypy", "jython", "lua")
+  private val NeverAllowedPrefixes: Seq[String] =
+    Seq("python", "pypy", "jython", "lua", "ipython", "bpython", "jupyter")
 
-  /** The dynamic loader, which runs the program given as its argument: `ld.so`, `ld-linux-x86-64.so.2`, `ld64.so.1`. */
-  private val DynamicLoader = "ld[^.]*\\.so(\\..*)?".r
+  /**
+   * The dynamic loader, which runs the program given as its argument: `ld.so`, `ld-linux-x86-64.so.2`, `ld64.so.1`,
+   * `ld-musl-x86_64.so.1` - and, on Alpine and other musl systems, the same file under its C library names,
+   * `libc.musl-x86_64.so.1` and `libc.so` (#1845). A glibc `libc.so.6` only prints its version, but is refused with
+   * them.
+   */
+  private val DynamicLoader = "(ld[^.]*|libc(\\.musl-[^.]*)?)\\.so(\\..*)?".r
 
   private val CommandName = "[A-Za-z0-9._+-]+".r
 

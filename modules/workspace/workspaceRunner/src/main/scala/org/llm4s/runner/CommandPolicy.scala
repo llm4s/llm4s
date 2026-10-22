@@ -175,12 +175,18 @@ private[runner] object CommandPolicy {
     ),
     // zip: `-TT` / `--unzip-command` runs the command that tests the archive (`-T` is refused with it).
     "zip" -> Options(short = Set('T'), long = Set("--unzip-command")),
-    // rsync: `-e` / `--rsh` and `--rsync-path` name the program it starts.
-    "rsync" -> Options(short = Set('e'), long = Set("--rsh", "--rsync-path")),
+    // rsync: `-e` / `--rsh` and `--rsync-path` name the program it starts. `--daemon` starts a server that detaches
+    // and outlives the command, and `--config` / `--dparam` / `-M` set its parameters, some of which run a command
+    // (`pre-xfer exec`, `post-xfer exec`); `-M` / `--remote-option` passes options to the other side (#1845).
+    "rsync" -> Options(
+      short = Set('e', 'M'),
+      long = Set("--rsh", "--rsync-path", "--daemon", "--config", "--dparam", "--remote-option")
+    ),
     // scp and sftp: `-S` names the ssh program, `-o ProxyCommand=` and a `-F` configuration file run a command, and
-    // sftp's `-D` starts a local sftp server program.
-    "scp"  -> Options(short = Set('S', 'o', 'F')),
-    "sftp" -> Options(short = Set('S', 'o', 'F', 'D'))
+    // `-D` starts a local sftp server program. sftp's `-b` batch file runs sftp commands, whose `!command` runs a
+    // local shell (#1845).
+    "scp"  -> Options(short = Set('S', 'o', 'F', 'D')),
+    "sftp" -> Options(short = Set('S', 'o', 'F', 'D', 'b'))
   )
 
   /** `find`'s leading options in one cluster (`-HL` on BSD); one with `L` follows every link. */
@@ -604,8 +610,12 @@ private[runner] object CommandPolicy {
       case "findstr" if isWindows => findstrRefusal(args)
       case "hostname"             => hostnameRefusal(args).orElse(refusedOption(program, args))
       case "find"                 => findFollowRefusal(args).orElse(refusedOption(program, args))
-      case "tar"                  => tarTraditionalRefusal(args).orElse(refusedOption(program, args))
-      case _                      => refusedOption(program, args)
+      case "tar" =>
+        tarTraditionalRefusal(args)
+          .orElse(refusedOption(program, args))
+          .orElse(remoteOperandRefusal(program, args, isWindows))
+      case "rsync" => refusedOption(program, args).orElse(remoteOperandRefusal(program, args, isWindows))
+      case _       => refusedOption(program, args)
     }
 
   private def notAllowed(program: String, arg: String, why: String): Refusal =
@@ -643,6 +653,31 @@ private[runner] object CommandPolicy {
     args.headOption
       .filter(first => !first.startsWith("-") && first.exists(ProgramOptions("tar").short.contains))
       .map(notAllowed("tar", _, WritesOrRuns))
+
+  private val ReachesNetwork =
+    "it names a file on another host, which the program reaches through the system's ssh or rsh, outside the " +
+      "workspace. Write a local name with a '/' before its ':' (`./a:b`)."
+
+  /**
+   * An argument `tar` or `rsync` reads as a file on another host (#1845): one with a `:` after a non-empty part that
+   * holds no `/` - `host:path`, `user@host:path`, rsync's `host::module` and `rsync://host/module`, GNU tar's remote
+   * archive `-f host:a.tar` (glued, `-fhost:a.tar`, or traditional, `cf host:a.tar`). Both programs then start the
+   * system's ssh or rsh, which reaches the network and reads the user's ssh configuration. The value of a
+   * `--name=value` option is judged on its own (`--file=host:a.tar`, rsync's `--files-from=host:list`); every other
+   * argument whole, so an option value holding such a `:` is refused too (over-blocking accepted). On Windows a drive
+   * letter (`C:\x`, `--file=C:/x`) is not a host.
+   */
+  private[runner] def remoteOperandRefusal(program: String, args: Seq[String], isWindows: Boolean): Option[Refusal] =
+    args.find(arg => namesRemoteFile(arg, isWindows)).map(notAllowed(program, _, ReachesNetwork))
+
+  private def namesRemoteFile(arg: String, isWindows: Boolean): Boolean = {
+    val candidate =
+      if (arg.startsWith("--") && arg.contains('=')) arg.substring(arg.indexOf('=') + 1)
+      else arg
+    val colon = candidate.indexOf(':')
+    val drive = isWindows && colon == 1 && candidate.charAt(0).isLetter
+    colon > 0 && !candidate.substring(0, colon).contains('/') && !drive
+  }
 
   private def findFollowRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => FindFollowCluster.matches(arg)).map(notAllowed("find", _, "it follows every link it meets."))

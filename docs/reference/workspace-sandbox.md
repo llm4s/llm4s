@@ -57,16 +57,19 @@ or a later argument that goes through a name an earlier one of its operations ma
 
 These cannot be added (`WorkspaceSandboxConfig.NeverAllowedCommands`), as any of them would bring back the shell
 [#1756](https://github.com/llm4s/llm4s/issues/1756) removed ([#1761](https://github.com/llm4s/llm4s/issues/1761),
-[#1792](https://github.com/llm4s/llm4s/issues/1792), [#1805](https://github.com/llm4s/llm4s/issues/1805)):
+[#1792](https://github.com/llm4s/llm4s/issues/1792), [#1805](https://github.com/llm4s/llm4s/issues/1805),
+[#1845](https://github.com/llm4s/llm4s/issues/1845)):
 
 | Kind | Refused |
 |------|---------|
 | Shells | `sh`, `bash`, `rbash`, `zsh`, `dash`, `ash`, `ksh`, `mksh`, `yash`, `csh`, `tcsh`, `fish`, `elvish`, `nu`, `xonsh`, `busybox`, `toybox`, `cmd`, `powershell`, `pwsh`, and the cmd.exe built-ins `call` and `start` |
 | Interpreters | `python`, `py`, `pyw`, `pypy`, `jython`, `perl`, `ruby`, `irb`, `node`, `nodejs`, `deno`, `bun`, `php`, `lua`, `luajit`, `tclsh`, `wish`, `awk` (`gawk`, `mawk`, `nawk`), `java`, `javaw`, `jshell`, `jjs`, `jrunscript`, `scala`, `kotlin`, `kotlinc`, `groovy`, `r`, `rscript`, `julia`, `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `osascript`, `dc`, `make`, `gmake`, `expect` |
-| Interpreter families, by prefix | every name starting `python`, `pypy`, `jython` or `lua` (`python3.7m`, `python3-dbg`, `pypy3.10`, `luajit-2.1`) |
+| Interpreter families, by prefix | every name starting `python`, `pypy`, `jython`, `lua`, `ipython`, `bpython` or `jupyter` (`python3.7m`, `python3-dbg`, `pypy3.10`, `luajit-2.1`, `ipython3`, `jupyter-lab`, `jupyter-nbconvert`) |
+| Python front-ends and notebook tooling | `ipython`, `bpython`, `ptpython`, `ptipython`, `pydoc`, `pdb`, `idle`, `jupyter`, `papermill`, `voila`, `marimo` |
+| Package and project runners, version managers | `npx`, `pnpx`, `bunx`, `npm`, `pnpm`, `yarn`, `yarnpkg`, `corepack`, `pipx`, `uv`, `uvx`, `poetry`, `pipenv`, `pdm`, `hatch`, `rye`, `conda`, `mamba`, `micromamba`, `pixi`, `tox`, `nox`, `pyenv`, `rbenv`, `nodenv`, `asdf`, `mise`, `volta`, `fnm` (each runs the command or package named in its arguments: `npx`, `uv run`, `npm exec`, `conda run`, `pyenv exec`) |
 | Editors that run a command | `sed` (GNU `e`, `s///e`), `vi`, `vim`, `nvim`, `ex`, `view`, `emacs` |
 | Launchers | `env`, `xargs`, `nohup`, `nice`, `timeout`, `exec`, `eval`, `setsid`, `stdbuf`, `chroot`, `ionice`, `flock`, `watch`, `script`, `time`, `systemd-run`, `parallel`, `prlimit`, `numactl`, `unbuffer`, `tini`, `tmux`, `screen`, `fakeroot`, `proot` |
-| The dynamic loader | `ld.so`, `ld-linux*.so*`, `ld-musl*.so*`, `ld64.so*` |
+| The dynamic loader | `ld.so`, `ld-linux*.so*`, `ld-musl*.so*`, `ld64.so*`, and musl's loader under its C library names `libc.musl-*.so*` and `libc.so*` |
 | Schedulers | `at`, `batch`, `crontab` |
 | Debuggers, profilers, remote and container tools | `strace`, `ltrace`, `gdb`, `lldb`, `valgrind`, `perf`, `ssh`, `docker`, `podman` |
 | Privilege, scheduling and namespace tools | `sudo`, `su`, `runuser`, `doas`, `pkexec`, `gosu`, `su-exec`, `setpriv`, `capsh`, `nsenter`, `unshare`, `bwrap`, `firejail`, `taskset`, `chrt` |
@@ -76,19 +79,32 @@ A name is matched ignoring case, a `.exe` / `.com` extension and a trailing vers
 `scala3` is `scala`). A `.bat` or `.cmd` name is refused too: Windows runs a batch file through cmd.exe, outside the
 runner's cmd.exe checks. A name may hold only ASCII letters, digits, `.`, `_`, `+` and `-`, so no Unicode spelling of
 a refused name (fullwidth letters, a Kelvin sign that lower-cases to `k`, a character Windows best-fits to a
-letter) is accepted. Build tools (`sbt`, `mvn`, `gradle`, `scala-cli`, `cargo`, `npm`) are not refused: they run the
-project's code by design, which is what an operator adds them for.
+letter) is accepted. Build tools (`sbt`, `mvn`, `gradle`, `scala-cli`, `cargo`) are not refused: they run the
+project's code by design, which is what an operator adds them for. `npm`, `yarn` and `pnpm` are refused with the
+package runners, since `npm exec` / `yarn dlx` / `pnpm dlx` fetch and run any package by name.
 
 **The list is a speed bump, not a boundary.** No list names every program that can run another: most tools with a
 hook, plugin, pager, editor or helper-program option can, and catalogues such as
 [GTFOBins](https://gtfobins.github.io/) and [LOLBAS](https://lolbas-project.github.io/) list hundreds - `man -P`,
 `sqlite3 -cmd .shell`, `psql` and `mysql` shell escapes, `ssh-keygen -D lib.so`, an `openssl` engine, `gpg`'s exec
 options, `wget --use-askpass`, `cmake -P`, `gcc -wrapper` and `-fplugin`, and every package manager's install
-scripts (`npm`, `npx`, `yarn`, `pnpm`, `pip`, `cargo`, `go`). That is why an added program must be one you trust to
+scripts (`pip`, `cargo`, `go`, and the runners above). That is why an added program must be one you trust to
 run any code. For the archive and copy tools operators most often add, the runner refuses the options that run a
 program, as it does for `sort` and `cp` (see [Command policy](#command-policy)): `tar --to-command`, `-I` /
 `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script`; `zip -TT` / `--unzip-command`; `rsync -e` /
-`--rsh` / `--rsync-path`; `scp` and `sftp` `-S`, `-o`, `-F` and sftp's `-D`.
+`--rsh` / `--rsync-path`, and rsync's daemon mode (`--daemon`, `--config`, `--dparam`, `-M` / `--remote-option`),
+whose configuration runs commands and whose server outlives the command; `scp` and `sftp` `-S`, `-o`, `-F` and `-D`,
+and sftp's `-b` batch file, whose `!command` runs a local shell.
+
+**Network-reaching modes.** `tar` and `rsync` read an argument with a `:` after a part holding no `/` as a file on
+another host (`host:a.tar`, `user@host:dir`, `host::module`, `rsync://host/module`, `tar -f host:a.tar`,
+`--files-from=host:list`) and start the system's ssh or rsh to reach it. The runner refuses such an argument
+(`ARGUMENT_NOT_ALLOWED`); name a local file with a `:` as `./a:b`. Over-blocking is accepted: an option value or a
+member name holding a `:` with no `/` before it (`--transform=s:a:b:`) is refused too. On Windows a drive letter
+(`C:\x`) is not a host. `scp` and `sftp` reach another host by design, so their operands are not refused: added, they
+connect wherever their arguments say, through the system's ssh and its configuration. On Linux a command has no
+network unless `networkAllowed = true` (Landlock and seccomp); elsewhere, and with the network allowed, nothing but
+these rules stands between an added `scp`, `sftp`, `tar` or `rsync` and the network.
 
 With `WORKSPACE_SANDBOX_PROFILE=locked`, which refuses every command, any `WORKSPACE_EXTRA_COMMANDS` name stops the
 runner with a message saying so, rather than logging programs added that could never run.
@@ -248,10 +264,10 @@ following links out of the workspace through its own options:
 | `cp` | `-L`, `--dereference`, `-H`, `-s`, `--symbolic-link`; with `-R`, `-r`, `-a`, `-P` or `-d` (or their long forms) anywhere in the arguments, two sources with the same name (letter case and Unicode normalisation ignored; on Windows a name with `~` matches any), or several sources and one that names a directory's contents (`src/.`, `src/`) |
 | `chmod` | `-L`, `-H`, `--dereference` |
 | `hostname` | an operand, `-F`, `--file`, `-b`, `--boot` |
-| `tar` (when added) | `--to-command`, `-I`, `--use-compress-program`, `--checkpoint-action`, `-F`, `--info-script`, `--new-volume-script`, `--rsh-command`, `--rmt-command`; `I` or `F` in a first argument without a dash (the traditional `tar cIf` form) |
+| `tar` (when added) | `--to-command`, `-I`, `--use-compress-program`, `--checkpoint-action`, `-F`, `--info-script`, `--new-volume-script`, `--rsh-command`, `--rmt-command`; `I` or `F` in a first argument without a dash (the traditional `tar cIf` form); an argument naming a file on another host (`host:a.tar`, `-fhost:a.tar`, `--file=host:a.tar`, see [Adding programs to the allowlist](#adding-programs-to-the-allowlist)) |
 | `zip` (when added) | `-T` (and so `-TT`), `--unzip-command` |
-| `rsync` (when added) | `-e`, `--rsh`, `--rsync-path` |
-| `scp`, `sftp` (when added) | `-S`, `-o`, `-F`; sftp's `-D` |
+| `rsync` (when added) | `-e`, `--rsh`, `--rsync-path`, `--daemon`, `--config`, `--dparam`, `-M`, `--remote-option`; an argument naming a file on another host (`host:dir`, `host::module`, `rsync://host/module`) |
+| `scp`, `sftp` (when added) | `-S`, `-o`, `-F`, `-D`; sftp's `-b` |
 
 `mv`, `rm`, `mkdir` and `touch` have no option that follows a link out of the workspace, so they get the path rule
 only (with the exception for a link itself under [Removing a link](#removing-a-link)).

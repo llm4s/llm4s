@@ -96,6 +96,104 @@ class ExtraCommandRulesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "refuse rsync's daemon mode and its configuration, in every form rsync parses (#1845)" in inRoot { root =>
+    Seq(
+      "--daemon",
+      "--daemon --no-detach",
+      "--daemon --config=a.txt",
+      "--daemon --config a.txt",
+      "--config=a.txt --daemon",
+      "--conf=a.txt", // an abbreviation
+      "--da",         // an abbreviation
+      "--daemon=yes", // with a value
+      "--dparam=pidfile=a.txt",
+      "--dparam pidfile=a.txt",
+      "-M pidfile=a.txt",
+      "-avM--rsync-path=id a.txt b.txt", // in a cluster
+      "--remote-option=--rsync-path=id a.txt b.txt",
+      "-av a.txt b.txt -- --daemon" // after `--`
+    ).foreach(args => withClue(s"rsync $args: ")(refusal("rsync", args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED")))
+  }
+
+  it should "refuse an rsync argument naming a file on another host, in every form (#1845)" in inRoot { root =>
+    Seq(
+      "-av a.txt host:b",
+      "-av host:a.txt b.txt",
+      "-av a.txt user@host:b",
+      "-av a.txt host::module",
+      "-av host::module/a.txt b.txt",
+      "-av a.txt rsync://host/module",
+      "-av a.txt RSYNC://host/module",
+      "-av a.txt host:",
+      "-av --files-from=host:list a.txt b.txt",
+      "-av --files-from host:list a.txt b.txt",
+      "-av a.txt [::1]:b"
+    ).foreach(args => withClue(s"rsync $args: ")(refusal("rsync", args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED")))
+  }
+
+  it should "refuse a tar archive or argument on another host, in every form tar parses (#1845)" in inRoot { root =>
+    Seq(
+      "-cf host:a.tar a.txt",
+      "-xf user@host:a.tar",
+      "-cfhost:a.tar a.txt", // glued to the option
+      "-tvf host:a.tar",
+      "cf host:a.tar a.txt", // the traditional form
+      "--file=host:a.tar -c a.txt",
+      "--file host:a.tar -c a.txt",
+      "--fi=host:a.tar -c a.txt", // an abbreviation
+      "-cf a.tar a.txt -- host:b"
+    ).foreach(args => withClue(s"tar $args: ")(refusal("tar", args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED")))
+  }
+
+  it should "refuse sftp's batch file and scp's local sftp server (#1845)" in inRoot { root =>
+    Seq(
+      "sftp" -> "-b a.txt host",
+      "sftp" -> "-ba.txt host",
+      "sftp" -> "-qb a.txt host", // in a cluster
+      "sftp" -> "-b - host",
+      "scp"  -> "-D id a.txt b.txt"
+    ).foreach { case (program, args) =>
+      withClue(s"$program $args: ")(refusal(program, args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED"))
+    }
+  }
+
+  it should "say why a remote argument is refused, and how to name a local file with a ':'" in inRoot { root =>
+    val message = CommandPolicy
+      .refusal("rsync", Seq("a.txt", "host:b"), false, root, root, Map.empty)
+      .map(_.message)
+    message.get should (include("'host:b'").and(include("another host")).and(include("./a:b")))
+  }
+
+  it should "still let tar and rsync work on local names, including one with a ':' after a '/'" in inRoot { root =>
+    Seq(
+      "tar"   -> "-cf ./a:b.tar a.txt",
+      "tar"   -> "-cf a.tar ./a:b",
+      "tar"   -> "--file=./a:b.tar -c a.txt",
+      "tar"   -> "-cf :a.tar a.txt", // a leading ':' is not a host
+      "tar"   -> "-cf a.tar a.txt",
+      "rsync" -> "-av ./a:b c.txt",
+      "rsync" -> "-av a.txt b.txt",
+      "rsync" -> "-av --delete --dry-run a.txt b.txt",
+      "rsync" -> "--checksum --compress a.txt b.txt",
+      "rsync" -> "-av --exclude=x a.txt b.txt",
+      "sftp"  -> "-P 2222 host",
+      "sftp"  -> "-q host",
+      "scp"   -> "-P 2222 a.txt host:b",
+      "scp"   -> "-r a.txt user@host:b"
+    ).foreach { case (program, args) =>
+      withClue(s"$program $args: ")(refusal(program, args, root) shouldBe None)
+    }
+  }
+
+  it should "on Windows, read a drive letter as a drive, not a host, and still refuse a host" in {
+    def remote(args: String*)(windows: Boolean) = CommandPolicy.remoteOperandRefusal("tar", args, windows).map(_.code)
+    remote("-cf", "C:\\work\\a.tar", "--file=D:/x.tar")(windows = true) shouldBe None
+    remote("-cf", "host:a.tar")(windows = true) shouldBe Some("ARGUMENT_NOT_ALLOWED")
+    remote("-cf", "hh:a.tar")(windows = true) shouldBe Some("ARGUMENT_NOT_ALLOWED")
+    // elsewhere a one-letter host is a host
+    remote("-cf", "C:a.tar")(windows = false) shouldBe Some("ARGUMENT_NOT_ALLOWED")
+  }
+
   // -----------------------------------------------------------------------------------------------------------------
   // Unicode spellings: a name Windows or a case- and normalisation-insensitive file system could read as a refused one
 

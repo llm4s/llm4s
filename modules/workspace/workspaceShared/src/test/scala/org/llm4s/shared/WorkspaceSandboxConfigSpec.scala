@@ -261,6 +261,117 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
     WorkspaceSandboxConfig.LockedDown.withExtraCommands("") shouldBe Right(WorkspaceSandboxConfig.LockedDown)
   }
 
+  private def refusedAsRunner(name: String) =
+    Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
+
+  it should "refuse the #1845 Python front-ends, notebook tools and package and project runners, in any case, with a " +
+    ".exe / .com extension and with a version" in {
+      for {
+        base <- Refused1845
+        name <- Seq(
+          base,
+          base.toUpperCase,
+          base.capitalize,
+          s"$base.exe",
+          s"${base.toUpperCase}.EXE",
+          s"$base.com",
+          s"${base}3",
+          s"$base-1.2",
+          s"${base.capitalize}3.12.Exe"
+        )
+      } withClue(name) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe refusedAsRunner(name)
+      }
+    }
+
+  it should "refuse each #1845 entry as a .cmd / .bat batch file (npx.cmd, npm.cmd are how Windows installs them)" in {
+    for {
+      base <- Refused1845
+      name <- Seq(s"$base.cmd", s"${base.toUpperCase}.CMD", s"$base.bat")
+    } withClue(name) {
+      WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe Left(
+        s"'$name' is a Windows batch file, which Windows runs through cmd.exe, so it cannot be added to the allowlist"
+      )
+    }
+  }
+
+  it should "refuse a Unicode look-alike of a #1845 entry, which is not a bare program name" in {
+    val lookAlikes = Seq(
+      "\uFF4E\uFF50\uFF58",        // fullwidth npx
+      "ipyth\u043En",              // Cyrillic o
+      "jupyt\u0435r",              // Cyrillic e
+      "pydo\u0441",                // Cyrillic es
+      "\u0131python",              // dotless i: upper-cases to `IPYTHON`
+      "u\u0301v",                  // combining acute
+      "libc.mu\u017Fl-x86_64.so.1" // long s: upper-cases to `S`
+    )
+    for (name <- lookAlikes)
+      withClue(name.codePoints().toArray.map(c => f"U+$c%04X").mkString(" ")) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe
+          Left(s"'$name' is not a bare program name")
+      }
+  }
+
+  it should "refuse every spelling of the ipython, bpython and jupyter families, matched by prefix (#1845)" in {
+    for (
+      name <- Seq(
+        "ipython3",
+        "ipython3.12",
+        "IPython",
+        "ipython-dev",
+        "bpython-curses",
+        "bpython-urwid",
+        "jupyter-notebook",
+        "jupyter-lab",
+        "jupyter-nbconvert",
+        "jupyter-execute",
+        "jupyter-console",
+        "Jupyter-Lab.EXE"
+      )
+    ) withClue(name)(WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe refusedAsRunner(name))
+  }
+
+  it should "refuse musl's dynamic loader under its C library names, in any case (#1845)" in {
+    for (
+      name <- Seq(
+        "libc.musl-x86_64.so.1",
+        "libc.musl-aarch64.so.1",
+        "libc.musl-armhf.so.1",
+        "LIBC.MUSL-X86_64.SO.1",
+        "libc.musl-x86_64.so.1.exe",
+        "libc.so",
+        "libc.so.6",
+        "ld-musl-aarch64.so.1"
+      )
+    ) withClue(name)(WorkspaceSandboxConfig.Permissive.withExtraCommands(name) shouldBe refusedAsRunner(name))
+  }
+
+  it should "still accept the names near the #1845 entries that are not them" in {
+    for (
+      name <- Seq(
+        "pyright",
+        "pylint",
+        "mypy",
+        "ruff",
+        "black",
+        "pytest-watch-not",
+        "pdftotext",
+        "uvicorn-not",
+        "yq",
+        "libcurl-config",
+        "ldd",
+        "condaenv-tool",
+        "nodemon-x",
+        "poetryx",
+        "jq"
+      )
+    )
+      withClue(name) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(name).map(_.allowedCommands.contains(name)) shouldBe
+          Right(true)
+      }
+  }
+
   "WorkspaceSandboxConfig.programKey" should "match a Windows name without case or a .exe / .com extension (#1790)" in {
     WorkspaceSandboxConfig.programKey("sort.exe", windows = true) shouldBe "sort"
     WorkspaceSandboxConfig.programKey("SORT.COM", windows = true) shouldBe "sort"
@@ -423,5 +534,50 @@ object WorkspaceSandboxConfigSpec {
     // cmd.exe built-ins that run a file (#1792)
     "call",
     "start"
+  )
+
+  // #1845: Python front-ends, notebook tooling, and package and project runners that run the code or command named in
+  // their arguments
+  val Refused1845 = Seq(
+    "ipython",
+    "bpython",
+    "ptpython",
+    "ptipython",
+    "pydoc",
+    "pdb",
+    "idle",
+    "jupyter",
+    "papermill",
+    "voila",
+    "marimo",
+    "npx",
+    "pnpx",
+    "bunx",
+    "npm",
+    "pnpm",
+    "yarn",
+    "yarnpkg",
+    "corepack",
+    "pipx",
+    "uv",
+    "uvx",
+    "poetry",
+    "pipenv",
+    "pdm",
+    "hatch",
+    "rye",
+    "conda",
+    "mamba",
+    "micromamba",
+    "pixi",
+    "tox",
+    "nox",
+    "pyenv",
+    "rbenv",
+    "nodenv",
+    "asdf",
+    "mise",
+    "volta",
+    "fnm"
   )
 }
