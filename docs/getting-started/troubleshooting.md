@@ -2,7 +2,7 @@
 layout: page
 title: First-Run Troubleshooting
 parent: Getting Started
-nav_order: 9
+nav_order: 11
 ---
 
 # First-Run Troubleshooting
