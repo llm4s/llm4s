@@ -228,6 +228,40 @@ yield (files, ExecuteTool(sandbox))
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
 
+### The embeddings sample's settings left `Llm4sConfig` (#2265)
+
+`Llm4sConfig` exposed settings only the embeddings sample (`EmbeddingExample` in `modules/samples`) read, and
+`llm4s-core`'s `reference.conf` bound their variables. Under the single-consumer rule they moved to the samples with their
+keys ([#2265](https://github.com/llm4s/llm4s/issues/2265)), and the duplicate entry points went:
+
+| Removed from `llm4s-core` | Now |
+|---|---|
+| `Llm4sConfig.embeddingsChunking()`, `loadEmbeddingsChunking()`, `EmbeddingsChunkingSettings` | `EmbeddingSampleConfig.chunking()`, `EmbeddingChunkingSettings` (samples) |
+| `Llm4sConfig.embeddingsInputs()`, `loadEmbeddingsInputs()`, `EmbeddingsInputSettings` | `EmbeddingSampleConfig.inputs()`, `EmbeddingInputSettings` (samples) |
+| `Llm4sConfig.embeddingsUi()`, `loadEmbeddingsUiSettings()`, `EmbeddingsUiSettings` | `EmbeddingSampleConfig.ui()`, `EmbeddingUiSettings` (samples) |
+| `Llm4sConfig.experimentalStubsEnabled` | `EmbeddingSampleConfig.experimentalStubs()` (samples) |
+| `Llm4sConfig.localEmbeddingModels()` | `EmbeddingSampleConfig.localModels()` (samples); or build a `LocalEmbeddingModels` |
+| `Llm4sConfig.loadTextEmbeddingModel()` | `Llm4sConfig.textEmbeddingModel()`, unchanged |
+| `ConfigKeys.EMBEDDING_INPUT_PATH`, `EMBEDDING_QUERY`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | the string literals |
+| `llm4s.embeddings.{inputPath,inputPaths,query,chunking,ui,experimentalStubs,localModels}` | `llm4s.samples.embeddings.*` in the samples' `application.conf` |
+
+`EmbeddingSampleConfig` and its types are in `org.llm4s.samples.embeddingsupport`, which is not published: an application
+that used these settings defines its own, or copies the sample's. `LocalEmbeddingModels` stays in `llm4s-core`, as
+`FileEmbeddingConfig` (`llm4s-rag`) and `ModelSelector` take it, so build one directly:
+
+```scala
+import org.llm4s.llmconnect.config.LocalEmbeddingModels
+
+val localModels = LocalEmbeddingModels(imageModel = "openclip-vit-b32", audioModel = "wav2vec2-base", videoModel = "timesformer-base")
+```
+
+The environment variables (`EMBEDDING_INPUT_PATH`, `EMBEDDING_INPUT_PATHS`, `EMBEDDING_QUERY`, `CHUNK_SIZE`,
+`CHUNK_OVERLAP`, `CHUNKING_ENABLED`, `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`,
+`TABLE_WIDTH`, `ENABLE_EXPERIMENTAL_STUBS`, `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL`) still drive the sample,
+which binds them itself; no llm4s library module reads them any more. Their defaults are unchanged. One difference: a
+value that is set but cannot be read (`CHUNK_SIZE=abc`) is now a `ConfigurationError` instead of silently falling back to
+the default.
+
 ### `LLMClientPekko.streamComplete` materializes `Future[Done]` (#1848)
 
 `streamComplete` is now a `Source[StreamedChunk, Future[Done]]`, like every `AgentPekko` stream

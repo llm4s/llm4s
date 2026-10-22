@@ -36,16 +36,8 @@ object EmbeddingExample {
     logger.info("Starting embedding example...")
 
     val result = for {
-      uiCfg <- Llm4sConfig.embeddingsUi()
-      ui = EmbeddingUiSettings(
-        maxRowsPerFile = uiCfg.maxRowsPerFile,
-        topDimsPerRow = uiCfg.topDimsPerRow,
-        globalTopK = uiCfg.globalTopK,
-        showGlobalTop = uiCfg.showGlobalTop,
-        colorEnabled = uiCfg.colorEnabled,
-        tableWidth = uiCfg.tableWidth
-      )
-      inputs  <- Llm4sConfig.embeddingsInputs()
+      ui      <- EmbeddingSampleConfig.ui()
+      inputs  <- EmbeddingSampleConfig.inputs()
       targets <- EmbeddingTargets.fromInputs(inputs.inputPath, inputs.inputPaths).map(_.targets)
       emb     <- Llm4sConfig.embeddings()
       service <- Llm4sConfig.modelRegistryService()
@@ -64,8 +56,8 @@ object EmbeddingExample {
         size = runtime.chunkSize,
         overlap = runtime.chunkOverlap
       )
-      stubsEnabled = Llm4sConfig.experimentalStubsEnabled
-      localModels <- Llm4sConfig.localEmbeddingModels()
+      stubsEnabled <- EmbeddingSampleConfig.experimentalStubs()
+      localModels  <- EmbeddingSampleConfig.localModels()
       embedConfig = FileEmbeddingConfig(
         textModel = textModel,
         localModels = localModels,
@@ -73,7 +65,7 @@ object EmbeddingExample {
         experimentalStubs = stubsEnabled
       )
       _ = {
-        val eq          = EmbeddingQuery.loadFromEnv().getOrElse(EmbeddingQuery(None))
+        val eq          = EmbeddingQuery(inputs.query)
         val queryVecOpt = eq.value.flatMap(q => embedQueryOnce(client, q, runtime.provider, emb._2.model, ui))
         // accumulate results
         val perFileRows = collection.mutable.ArrayBuffer.empty[(String, Seq[Row])]

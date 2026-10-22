@@ -26,6 +26,8 @@ object ConfigKeys {
   // OpenRouter, DeepSeek and Mistral keys `OpenAICompatibleConfigKeys` in
   // `llm4s-openai-compatible`, and the Voyage keys `VoyageConfigKeys` in `llm4s-voyage` (#1132).
   // The Langfuse keys are `LangfuseConfigKeys` in `llm4s-observability` (#1133).
+  // `EMBEDDING_INPUT_PATH`, `EMBEDDING_QUERY` and the `CHUNK_*` keys were the embeddings
+  // sample's own; `modules/samples` binds them in its `application.conf` (#2265).
 
   // ---- Embeddings: provider selection -------------------------------------
 
@@ -40,21 +42,4 @@ object ConfigKeys {
 
   /** Legacy embedding provider selector; superseded by [[EMBEDDING_MODEL]]. */
   val EMBEDDING_PROVIDER = "EMBEDDING_PROVIDER"
-
-  /** Path to the file or directory to embed. */
-  val EMBEDDING_INPUT_PATH = "EMBEDDING_INPUT_PATH"
-
-  /** Query string used when searching an embedding index. */
-  val EMBEDDING_QUERY = "EMBEDDING_QUERY"
-
-  // ---- Embeddings: chunking -----------------------------------------------
-
-  /** Token count per chunk when splitting documents for embedding. Default: `1000`. */
-  val CHUNK_SIZE = "CHUNK_SIZE"
-
-  /** Token overlap between consecutive chunks. Default: `100`. */
-  val CHUNK_OVERLAP = "CHUNK_OVERLAP"
-
-  /** Enables or disables document chunking (`true`/`false`). Default: `true`. */
-  val CHUNKING_ENABLED = "CHUNKING_ENABLED"
 }

@@ -906,7 +906,6 @@ also set in `application.conf` or with `-D`.
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
-| `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | `llm4s.embeddings.chunking.*` | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
@@ -944,6 +943,12 @@ every chat provider's endpoint and model variable (`AZURE_API_BASE`, `AZURE_API_
 `openai-compatible` provider, and `OTEL_EXPORTER_OTLP_HEADERS`. A shared key sets only `apiKey`:
 `baseUrl`, `endpoint`, `model` and `apiVersion` always come from the section. `LLM_MODEL` was
 removed with legacy single-provider loading in [#903](https://github.com/llm4s/llm4s/issues/903).
+
+The embeddings sample's variables - `EMBEDDING_INPUT_PATH`, `EMBEDDING_INPUT_PATHS`, `EMBEDDING_QUERY`, `CHUNK_SIZE`,
+`CHUNK_OVERLAP`, `CHUNKING_ENABLED`, `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`,
+`TABLE_WIDTH`, `ENABLE_EXPERIMENTAL_STUBS` and `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL` - are bound by the
+samples' own `application.conf` under `llm4s.samples.embeddings`, not by a library module
+([#2265](https://github.com/llm4s/llm4s/issues/2265)).
 
 ---
 

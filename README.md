@@ -542,10 +542,12 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Type: `WorkspaceSettings`
   - Loader: `WorkspaceConfigSupport.load()`
 
-- Embeddings: inputs and UI (samples)
-  - Input paths: `EMBEDDING_INPUT_PATHS` or `EMBEDDING_INPUT_PATH` → `EmbeddingTargets.loadFromEnv()` → `EmbeddingTargets`
-  - Query: `EMBEDDING_QUERY` → `EmbeddingQuery.loadFromEnv()` → `EmbeddingQuery`
-  - UI knobs: `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`, `TABLE_WIDTH` → `EmbeddingUiSettings.loadFromEnv()` → `EmbeddingUiSettings`
+- Embeddings sample settings (samples only; bound under `llm4s.samples.embeddings` in the samples' `application.conf`)
+  - Input paths: `EMBEDDING_INPUT_PATHS` or `EMBEDDING_INPUT_PATH` → `EmbeddingSampleConfig.inputs()` → `EmbeddingTargets.fromInputs(...)`
+  - Query: `EMBEDDING_QUERY` → `EmbeddingSampleConfig.inputs()` (or `EmbeddingQuery.loadFromEnv()`) → `EmbeddingQuery`
+  - Chunking: `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` → `EmbeddingSampleConfig.chunking()`
+  - UI knobs: `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`, `TABLE_WIDTH` → `EmbeddingSampleConfig.ui()` → `EmbeddingUiSettings`
+  - Non-text stubs: `ENABLE_EXPERIMENTAL_STUBS`, `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL` → `EmbeddingSampleConfig.experimentalStubs()`, `.localModels()`
 
 - Embeddings: provider configuration
   - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model` (or legacy `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider`)

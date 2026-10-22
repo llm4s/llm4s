@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
 - `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` gain a `span` field, and an agent
   run's OpenTelemetry spans and Langfuse trace ids change: positional patterns and dashboards break; [migration](docs/reference/migration.md#one-trace-per-run-2137).
+- `Llm4sConfig.embeddingsChunking()` / `embeddingsInputs()` / `embeddingsUi()` (and their `load*` twins and settings
+  types), `experimentalStubsEnabled`, `localEmbeddingModels()`, the duplicate `loadTextEmbeddingModel()`, five sample-only
+  `ConfigKeys` and their `llm4s.embeddings.*` `reference.conf` keys are removed from `llm4s-core`; the embeddings sample
+  reads them itself; [migration](docs/reference/migration.md#the-embeddings-samples-settings-left-llm4sconfig-2265).
 
 ### Agent subagents (Phase 4)
 
@@ -213,6 +217,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Changed** the embeddings sample to load its own settings: `EmbeddingSampleConfig` in
+  `org.llm4s.samples.embeddingsupport` reads `llm4s.samples.embeddings.*`, which the samples' `application.conf` binds to the
+  same variables as before (`EMBEDDING_INPUT_PATH(S)`, `EMBEDDING_QUERY`, `CHUNK_*`, the UI knobs,
+  `ENABLE_EXPERIMENTAL_STUBS`, `LLM4S_EMBEDDINGS_LOCAL_*`) [#2265](https://github.com/llm4s/llm4s/issues/2265).
 - **Changed** the front of llm4s.org: a redesigned home page and new **Why LLM4S** (`/why-llm4s/`), **Learn**
   (`/learn/`) and **Showcase** (`/showcase/`) pages, and a rewritten **Foundation** page (`/foundation/`) on what
   support funds, ways to give and partner on internships, and how funds are handled through Open Collective. They use

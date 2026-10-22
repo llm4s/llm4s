@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, LocalEmbeddingModels, ProviderTimeouts }
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.spi.{
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
@@ -83,28 +83,6 @@ private[config] object EmbeddingsConfigLoader {
     ProviderRegistry
   ): Result[(String, EmbeddingProviderConfig)] =
     unified(Option(modelSpec).getOrElse(""), None).flatMap(configFor(_, source))
-
-  /** Load configured local model names for non-text modalities from llm4s.embeddings.localModels. */
-  def loadLocalModels(source: ConfigSource): Result[LocalEmbeddingModels] = {
-    final case class LocalModelsSection(
-      imageModel: String,
-      audioModel: String,
-      videoModel: String
-    )
-
-    implicit val localModelsSectionReader: PureConfigReader[LocalModelsSection] =
-      PureConfigReader.forProduct3("imageModel", "audioModel", "videoModel")(LocalModelsSection.apply)
-
-    source
-      .at("llm4s.embeddings.localModels")
-      .load[LocalModelsSection]
-      .left
-      .map { failures =>
-        val msg = failures.toList.map(_.description).mkString("; ")
-        ConfigurationError(s"Failed to load llm4s embeddings localModels via PureConfig: $msg")
-      }
-      .map(s => LocalEmbeddingModels(imageModel = s.imageModel, audioModel = s.audioModel, videoModel = s.videoModel))
-  }
 
   // ---- Internal helpers ----
 

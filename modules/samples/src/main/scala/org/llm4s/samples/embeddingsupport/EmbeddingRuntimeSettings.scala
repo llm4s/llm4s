@@ -15,7 +15,7 @@ object EmbeddingRuntimeSettings {
   def apply(): Result[EmbeddingRuntimeSettings] =
     for {
       emb      <- Llm4sConfig.embeddings()
-      chunking <- Llm4sConfig.embeddingsChunking()
+      chunking <- EmbeddingSampleConfig.chunking()
       (prov, _) = emb
     } yield EmbeddingRuntimeSettings(
       provider = prov,

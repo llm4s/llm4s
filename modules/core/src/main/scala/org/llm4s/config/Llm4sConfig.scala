@@ -332,27 +332,6 @@ object Llm4sConfig {
   def exchangeLogging(): Result[ProviderExchangeLogging] =
     org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
-  final case class EmbeddingsChunkingSettings(
-    enabled: Boolean,
-    size: Int,
-    overlap: Int
-  )
-
-  final case class EmbeddingsInputSettings(
-    inputPath: Option[String],
-    inputPaths: Option[String],
-    query: Option[String]
-  )
-
-  final case class EmbeddingsUiSettings(
-    maxRowsPerFile: Int,
-    topDimsPerRow: Int,
-    globalTopK: Int,
-    showGlobalTop: Boolean,
-    colorEnabled: Boolean,
-    tableWidth: Int
-  )
-
   final case class TextEmbeddingModelSettings(
     provider: String,
     modelName: String,
@@ -402,109 +381,6 @@ object Llm4sConfig {
     org.llm4s.config.EmbeddingsConfigLoader.loadProviderFor(source, modelSpec)
 
   /**
-   * Loads configuration for locally-available embedding models from the current environment.
-   *
-   * @return the local model configuration, or a [[org.llm4s.error.ConfigurationError]]
-   *         when required variables are missing.
-   */
-  def localEmbeddingModels(): Result[LocalEmbeddingModels] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadLocalModels(ConfigSource.default)
-
-  /**
-   * Loads text-chunking settings for the embeddings pipeline from the current environment.
-   *
-   * Reads `CHUNK_SIZE`, `CHUNK_OVERLAP`, and `CHUNKING_ENABLED`, applying
-   * defaults of 1000, 100, and `true` respectively when variables are absent.
-   *
-   * @return chunking settings; always returns `Right` — missing variables fall
-   *         back to defaults rather than failing.
-   */
-  def loadEmbeddingsChunking(): Result[EmbeddingsChunkingSettings] = {
-    val default = EmbeddingsChunkingSettings(enabled = true, size = 1000, overlap = 100)
-    val source  = ConfigSource.default.at("llm4s.embeddings.chunking")
-
-    val size    = source.at("size").load[Int].toOption.getOrElse(default.size)
-    val overlap = source.at("overlap").load[Int].toOption.getOrElse(default.overlap)
-    val enabled = source.at("enabled").load[Boolean].toOption.getOrElse(default.enabled)
-
-    Right(EmbeddingsChunkingSettings(enabled = enabled, size = size, overlap = overlap))
-  }
-
-  /** Alias for [[loadEmbeddingsChunking]]. */
-  def embeddingsChunking(): Result[EmbeddingsChunkingSettings] =
-    loadEmbeddingsChunking()
-
-  /**
-   * Loads input path and query settings for the embeddings pipeline from the current environment.
-   *
-   * Reads `EMBEDDING_INPUT_PATH`, `llm4s.embeddings.inputPaths`, and
-   * `EMBEDDING_QUERY`. All fields are optional; returns `Right` with `None`
-   * values when variables are absent.
-   */
-  def loadEmbeddingsInputs(): Result[EmbeddingsInputSettings] = {
-    val source = ConfigSource.default.at("llm4s.embeddings")
-
-    val inputPathConf  = source.at("inputPath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val inputPathsConf = source.at("inputPaths").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    val queryConf      = source.at("query").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-
-    Right(
-      EmbeddingsInputSettings(
-        inputPath = inputPathConf,
-        inputPaths = inputPathsConf,
-        query = queryConf,
-      )
-    )
-  }
-
-  /** Alias for [[loadEmbeddingsInputs]]. */
-  def embeddingsInputs(): Result[EmbeddingsInputSettings] =
-    loadEmbeddingsInputs()
-
-  /**
-   * Loads UI display settings for the embeddings explorer from the current environment.
-   *
-   * Applies defaults when variables are absent: `maxRowsPerFile=200`,
-   * `topDimsPerRow=6`, `globalTopK=10`, `showGlobalTop=false`,
-   * `colorEnabled=true`, `tableWidth=120`.
-   *
-   * @return UI settings; always returns `Right` — missing variables fall back
-   *         to defaults rather than failing.
-   */
-  def loadEmbeddingsUiSettings(): Result[EmbeddingsUiSettings] = {
-    val source = ConfigSource.default.at("llm4s.embeddings.ui")
-
-    val maxRowsConf    = source.at("maxRowsPerFile").load[Int].toOption
-    val topDimsConf    = source.at("topDimsPerRow").load[Int].toOption
-    val globalTopKConf = source.at("globalTopK").load[Int].toOption
-    val showTopConf    = source.at("showGlobalTop").load[Boolean].toOption
-    val colorOnConf    = source.at("colorEnabled").load[Boolean].toOption
-    val tableWidthConf = source.at("tableWidth").load[Int].toOption
-
-    val maxRows    = maxRowsConf.getOrElse(200)
-    val topDims    = topDimsConf.getOrElse(6)
-    val globalTopK = globalTopKConf.getOrElse(10)
-    val showTop    = showTopConf.getOrElse(false)
-    val colorOn    = colorOnConf.getOrElse(true)
-    val tableWidth = tableWidthConf.getOrElse(120)
-
-    Right(
-      EmbeddingsUiSettings(
-        maxRowsPerFile = maxRows,
-        topDimsPerRow = topDims,
-        globalTopK = globalTopK,
-        showGlobalTop = showTop,
-        colorEnabled = colorOn,
-        tableWidth = tableWidth
-      )
-    )
-  }
-
-  /** Alias for [[loadEmbeddingsUiSettings]]. */
-  def embeddingsUi(): Result[EmbeddingsUiSettings] =
-    loadEmbeddingsUiSettings()
-
-  /**
    * Loads and resolves the active embedding model, including its output dimensions.
    *
    * Reads `EMBEDDING_MODEL` and looks up the known dimension count for the
@@ -517,27 +393,11 @@ object Llm4sConfig {
    * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
-  def loadTextEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
+  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
     embeddings().flatMap { case (provider, cfg) =>
       val p = provider.toLowerCase
       ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
         TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
       }
     }
-
-  /** Alias for [[loadTextEmbeddingModel]]. */
-  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
-    loadTextEmbeddingModel()
-
-  /**
-   * Returns `true` when experimental embedding stubs are enabled.
-   *
-   * Controlled by the `llm4s.embeddings.experimentalStubs` config key.
-   * Defaults to `false` when the key is absent.
-   */
-  def experimentalStubsEnabled: Boolean = {
-    val source     = ConfigSource.default.at("llm4s.embeddings")
-    val configured = source.at("experimentalStubs").load[Boolean].toOption
-    configured.getOrElse(false)
-  }
 }

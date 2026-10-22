@@ -3,9 +3,7 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -107,32 +105,15 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
     }
   }
 
-  "Llm4sConfig.localEmbeddingModels" should {
-    "load local model names via llm4s.*" in {
-      val props = Map(
-        "llm4s.embeddings.localModels.imageModel" -> "custom-image-model",
-        "llm4s.embeddings.localModels.audioModel" -> "custom-audio-model",
-        "llm4s.embeddings.localModels.videoModel" -> "custom-video-model",
-      )
-      withProps(props) {
-        val localModels: LocalEmbeddingModels =
-          Llm4sConfig.localEmbeddingModels().fold(err => fail(err.toString), identity)
-
-        localModels.imageModel shouldBe "custom-image-model"
-        localModels.audioModel shouldBe "custom-audio-model"
-        localModels.videoModel shouldBe "custom-video-model"
+  "core's reference.conf" should {
+    "bind none of the embeddings sample's settings, which moved to modules/samples (#2265)" in {
+      val embeddings = ConfigFactory
+        .parseResources(getClass.getClassLoader, "reference.conf")
+        .resolve()
+        .getConfig("llm4s.embeddings")
+      Seq("inputPath", "inputPaths", "query", "chunking", "ui", "experimentalStubs", "localModels").foreach { key =>
+        withClue(key)(embeddings.hasPath(key) shouldBe false)
       }
-    }
-
-    "have defaults declared in reference.conf" in {
-      val referenceConf = ConfigFactory.parseResources("reference.conf")
-      val source        = ConfigSource.fromConfig(referenceConf)
-      val localModels: LocalEmbeddingModels =
-        org.llm4s.config.EmbeddingsConfigLoader.loadLocalModels(source).fold(err => fail(err.toString), identity)
-
-      localModels.imageModel shouldBe "openclip-vit-b32"
-      localModels.audioModel shouldBe "wav2vec2-base"
-      localModels.videoModel shouldBe "timesformer-base"
     }
   }
 }

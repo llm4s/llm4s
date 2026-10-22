@@ -15,7 +15,7 @@ object EmbeddingTargets {
    * Build EmbeddingTargets from higher-level embeddings input settings.
    *
    * This helper is config-agnostic; callers are responsible for loading any
-   * configuration (e.g. via Llm4sConfig.embeddingsInputs()) and passing in
+   * configuration (e.g. via EmbeddingSampleConfig.inputs()) and passing in
    * the resolved values.
    */
   def fromInputs(inputPath: Option[String], inputPaths: Option[String]): Result[EmbeddingTargets] = {
