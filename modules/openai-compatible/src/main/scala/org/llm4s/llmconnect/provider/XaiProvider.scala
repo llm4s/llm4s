@@ -14,7 +14,8 @@ import org.llm4s.types.Result
 /**
  * Registration for the xAI (Grok) API, through its OpenAI-compatible Chat Completions endpoint
  * ([[https://github.com/llm4s/llm4s/issues/1023 #1023]]). The key defaults to `XAI_API_KEY`, bound
- * to `llm4s.credentials.xai.apiKey`, and the base URL to [[XaiConfig.DEFAULT_BASE_URL]].
+ * to `llm4s.credentials.xai.apiKey`, and the base URL to
+ * [[org.llm4s.llmconnect.config.XaiConfig.DEFAULT_BASE_URL]].
  */
 @Experimental
 object XaiProvider extends ProviderDescriptor:
