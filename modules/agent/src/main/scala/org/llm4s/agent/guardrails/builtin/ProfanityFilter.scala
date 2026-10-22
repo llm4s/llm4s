@@ -7,7 +7,7 @@ import org.llm4s.types.Result
 /**
  * Rejects text that contains a word from a fixed word list.
  *
- * Works as both an [[InputGuardrail]] and an [[OutputGuardrail]]: the same instance can be passed to either
+ * Works as both an [[org.llm4s.agent.guardrails.InputGuardrail InputGuardrail]] and an [[org.llm4s.agent.guardrails.OutputGuardrail OutputGuardrail]]: the same instance can be passed to either
  * side of an agent run. The check is rule-based, fast and deterministic, and makes no network call.
  *
  * The built-in list is deliberately minimal (two placeholder words, `badword` and `inappropriate`), so a real

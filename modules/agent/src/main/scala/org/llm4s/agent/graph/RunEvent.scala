@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.UsageSummary
 import upickle.default.ReadWriter
@@ -47,21 +48,22 @@ enum RunEvent:
   /**
    * The run failed with `message`. `usage` is the model usage of the attempts of its tasks that committed nothing -
    * a task that failed, or was cut short - which is the only durable record of their calls' cost (design §4.22).
-   * `None` when they made none.
+   * `None` when they made none. `steps` is how many of those attempts were an agent's model step - its own model call,
+   * not a middleware's - which a recovered child counts against its step grant (design 4.45).
    */
-  case RunFailed(message: String, usage: Option[UsageSummary] = None)
+  case RunFailed(message: String, usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. `usage` is the
-   * model usage of the attempts the cancel cut short, as on [[RunFailed]].
+   * model usage of the attempts the cancel cut short, and `steps` their agent model steps, as on [[RunFailed]].
    */
-  case RunCancelled(usage: Option[UsageSummary] = None)
+  case RunCancelled(usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. `usage`
-   * is the model usage of the attempts the deadline cut short, as on [[RunFailed]].
+   * is the model usage of the attempts the deadline cut short, and `steps` their agent model steps, as on [[RunFailed]].
    */
-  case RunTimedOut(usage: Option[UsageSummary] = None)
+  case RunTimedOut(usage: Option[UsageSummary] = None, steps: Long = 0L)
 
   /**
    * [[GraphRuntime.updateState]] committed a new checkpoint over `fromCheckpoint`, with a state update
@@ -197,8 +199,23 @@ enum StreamEvent:
     payload: ujson.Value
   )
 
-  /** `dropped` live events were discarded at this point because the subscriber's queue was full. */
+  /**
+   * `dropped` live events were discarded at this point because the subscriber's queue was full. Inside a
+   * [[Nested]], `0` means a delegated child's live events were sent where this subscription could not receive them -
+   * by another runtime holding the child, or before a crash, for a child already settled (design 4.47) - so how
+   * many is unknown; its durable events are kept, and `Agent.subscribeChild` replays them.
+   */
   case LiveGap(dropped: Int)
+
+  /**
+   * An event of the delegated child run `child` (design 4.47): live-only, never persisted in the parent's log, and
+   * delivered only to a parent subscription made with `nested = true` (`Agent.stream`, `AgentRun.subscribe`,
+   * [[GraphRuntime.subscribe]]). It follows the parent's live `SubagentEvents.TaskStarted` for the child, and carries
+   * every event of the child's run - durable, live, a `LiveGap` - up to its terminal event; a grandchild's events
+   * arrive nested twice. It takes a live slot of the parent's subscription, so an overflow is a `LiveGap` there
+   * (rule 12). `Disconnected` is never nested: the child's forwarding ends without one.
+   */
+  case Nested(child: ChildRef, event: StreamEvent)
 
   /**
    * The subscription has ended; always the last event. `lastSeq` is the last durable `seq` the

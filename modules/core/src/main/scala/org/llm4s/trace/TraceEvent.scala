@@ -136,6 +136,9 @@ object TraceEvent {
    * @param usage    this run's own token usage and cost, per model: the model calls the run made,
    *                 never the thread's earlier runs, so a backend can report it per run (as
    *                 OpenTelemetry's per-operation `gen_ai.usage.*`) without double counting
+   * @param parentThreadId for a delegated child run, the thread of the parent whose tool call started it;
+   *                 `None` for a top-level run
+   * @param parentRunId for a delegated child run, the parent run that started it; `None` for a top-level run
    */
   case class AgentRunEnded(
     threadId: String,
@@ -144,21 +147,28 @@ object TraceEvent {
     status: String,
     messages: Seq[Message],
     usage: UsageSummary,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant = Instant.now(),
+    parentThreadId: Option[String] = None,
+    parentRunId: Option[String] = None
   ) extends TraceEvent {
     def eventType: String = "agent_run_ended"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type"    -> eventType,
-      "timestamp"     -> timestamp.toString,
-      "thread_id"     -> threadId,
-      "run_id"        -> runId,
-      "agent"         -> agent,
-      "status"        -> status,
-      "message_count" -> messages.size,
-      "input_tokens"  -> usage.inputTokens.toDouble,
-      "output_tokens" -> usage.outputTokens.toDouble,
-      "total_cost"    -> usage.totalCost.toDouble
-    )
+    def toJson: ujson.Value = {
+      val json = ujson.Obj(
+        "event_type"    -> eventType,
+        "timestamp"     -> timestamp.toString,
+        "thread_id"     -> threadId,
+        "run_id"        -> runId,
+        "agent"         -> agent,
+        "status"        -> status,
+        "message_count" -> messages.size,
+        "input_tokens"  -> usage.inputTokens.toDouble,
+        "output_tokens" -> usage.outputTokens.toDouble,
+        "total_cost"    -> usage.totalCost.toDouble
+      )
+      parentThreadId.foreach(id => json("parent_thread_id") = id)
+      parentRunId.foreach(id => json("parent_run_id") = id)
+      json
+    }
   }
 
   case class CustomEvent(

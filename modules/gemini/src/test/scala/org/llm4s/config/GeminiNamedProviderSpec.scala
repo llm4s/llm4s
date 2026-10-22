@@ -212,6 +212,32 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected GeminiConfig, got $other")
     }
 
+    "read googleSearch from gemini and vertexai sections, off unless set (#1216)" in {
+      def load(name: String, body: String) =
+        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), name)
+      val gemini = """provider = "gemini", model = "gemini-2.5-flash", apiKey = "k""""
+      val vertex = """provider = "vertexai", model = "gemini-2.5-flash", project = "p""""
+
+      load("g-off", gemini) should matchPattern { case Right(c: GeminiConfig) if !c.googleSearch => }
+      load("g-on", s"$gemini, googleSearch = true") should matchPattern {
+        case Right(c: GeminiConfig) if c.googleSearch =>
+      }
+      load("g-str", s"""$gemini, googleSearch = "TRUE" """) should matchPattern {
+        case Right(c: GeminiConfig) if c.googleSearch =>
+      }
+      load("v-off", vertex) should matchPattern { case Right(c: VertexAIConfig) if !c.googleSearch => }
+      load("v-on", s"$vertex, googleSearch = true") should matchPattern {
+        case Right(c: VertexAIConfig) if c.googleSearch =>
+      }
+    }
+
+    "refuse a googleSearch value that is not true or false" in {
+      val hocon = """llm4s.providers.g-bad { provider = "gemini", model = "m", apiKey = "k", googleSearch = "yes" }"""
+      Llm4sConfig.provider(ConfigSource.string(hocon), "g-bad").left.map(_.message) match
+        case Left(message) => message should include("googleSearch must be true or false, got 'yes'")
+        case Right(cfg)    => fail(s"expected an error, got $cfg")
+    }
+
     // Regression for the #1131 scoping finding: before the capabilities registry gained a
     // `vertexai` entry, this HOCON failed validation outright, even though NamedProviderLoader
     // and LLMConnect had supported Vertex AI all along.

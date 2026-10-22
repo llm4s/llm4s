@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.DelegatedRequest
 import org.llm4s.agent.graph.{ Breakpoint, InterruptId, RunId, ThreadId }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalDecision,
@@ -32,18 +33,32 @@ enum AgentStatus:
   case StepLimitReached
 
   /**
+   * The run used its token budget (`RunBudgets.maxTokens`) without a final answer: at the budget the turn
+   * ended before the next model call. The call in flight when the budget was crossed was not interrupted,
+   * so `usage` can exceed the budget by one call. Like `StepLimitReached`, a completed turn: the next
+   * turn, with its own budget, runs normally.
+   */
+  case TokenLimitReached
+
+  /**
    * The turn is parked on tool approvals, tool questions, middleware questions and static
    * breakpoints, each keyed by its interrupt id. Answer them - any non-empty subset at a time - with
    * [[AgentResult.approve]], [[AgentResult.reject]] and [[AgentResult.edit]] (approvals),
    * [[AgentResult.reply]] (a tool's or a middleware's question, with its answer type) and
    * [[AgentResult.proceed]] (breakpoints), and continue with [[Agent.resume]]; unanswered ones stay
    * pending.
+   *
+   * `delegated` lists the interrupts of suspended subagents (design 4.46), flattened: each child interrupt under the
+   * composite id `<parent interrupt>~<child interrupt>` (a grandchild's `p~c~g`), with the child run that waits. The
+   * same helpers answer them by that id, encoding the answer the child expects, and [[Agent.resume]] routes each to
+   * its child through the parent. A `task` call waiting on its child is listed only here, never in `questions`.
    */
   case Suspended(
     approvals: Vector[(InterruptId, ApprovalRequest)],
     questions: Vector[(InterruptId, ToolQuestionRequest)],
     middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)] = Vector.empty,
-    breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty
+    breakpoints: Vector[(InterruptId, BreakpointRequest)] = Vector.empty,
+    delegated: Vector[(InterruptId, DelegatedRequest)] = Vector.empty
   )
 
 /**

@@ -33,12 +33,15 @@
 # The baseline (scripts/docs-link-baseline.txt) lists one `file -> target` key per known-broken link, without
 # line numbers so unrelated edits do not change it. The check FAILS when
 #   - a link is broken and not in the baseline (a new broken link), or
-#   - a baseline entry is no longer broken (delete it: the baseline only shrinks).
+#   - a baseline entry is no longer broken (delete it: the baseline only shrinks), or
+#   - a link is an md-extension link, even one listed in the baseline: the fix is always to drop the `.md`, so
+#     that cause can never be baselined, and --update-baseline leaves such links out (#1575).
 #
 # Usage: scripts/check-docs-site-links.sh [--root DIR] [--baseline FILE] [--print | --update-baseline]
 #   (no flag)          check; exit 0 when the broken links equal the baseline, 1 on any difference, 2 on a usage error
 #   --print            print every broken link as `file -> target<TAB>cause` and exit 0 (maintainers: what is broken now)
-#   --update-baseline  rewrite the baseline from the current tree and exit 0 (review the diff before committing)
+#   --update-baseline  rewrite the baseline from the current tree, leaving out md-extension links, and exit 0
+#                      (review the diff before committing)
 #   --root DIR         the docs directory (default: docs/ of this repository)
 #   --baseline FILE    the baseline file (default: scripts/docs-link-baseline.txt)
 set -euo pipefail
@@ -396,20 +399,28 @@ def main():
         for key in sorted(broken):
             print("%s\t%s" % (key, broken[key][0]))
         return 0
+    kept = [k for k in broken if broken[k][0] != "md-extension"]
     if opts["mode"] == "update":
         with open(opts["baseline"], "w", encoding="utf-8") as f:
             f.write(HEADER)
-            for key in sorted(broken):
+            for key in sorted(kept):
                 f.write(key + "\n")
-        print("wrote %d entries to %s" % (len(broken), opts["baseline"]))
+        print("wrote %d entries to %s" % (len(kept), opts["baseline"]))
+        if len(kept) != len(broken):
+            print("left out %d md-extension link(s): drop the .md from them, they cannot be baselined"
+                  % (len(broken) - len(kept)))
         return 0
     baseline = read_baseline(opts["baseline"])
-    new = sorted(k for k in broken if k not in baseline)
+    new = sorted(k for k in broken if k not in baseline or broken[k][0] == "md-extension")
     stale = sorted(k for k in baseline if k not in broken)
     for key in new:
         cause, line = broken[key]
         rel, _, target = key.partition(" -> ")
-        print("NEW BROKEN LINK %s:%d -> %s (%s)" % (rel, line, target, cause))
+        if key in baseline:
+            print("MD-EXTENSION LINK IN BASELINE %s:%d -> %s (md-extension): drop the .md from the link and delete "
+                  "its baseline entry; this cause cannot be baselined" % (rel, line, target))
+        else:
+            print("NEW BROKEN LINK %s:%d -> %s (%s)" % (rel, line, target, cause))
     for key in stale:
         print("STALE BASELINE ENTRY, remove this baseline entry: %s (this link no longer breaks)" % key)
     if new or stale:

@@ -262,6 +262,71 @@ class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with O
     state.get(LoopKeys.usage).value.requestCount shouldBe 0
   }
 
+  it should "fail the run on an undeclared write even when a call of the step was refused at the token budget" in {
+    val undeclared = StateUpdate.update(notes, "x")
+    val judge = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    // its judge call uses the budget, so next is refused; it fabricates a response carrying an undeclared write
+    val sneaky = middleware(
+      "sneaky",
+      writing = Set.empty,
+      model = (r, c, next) =>
+        c.accounted(judge).complete(Conversation(Seq(UserMessage("judge")))): Unit
+        next(r).orElse(Right(ModelResponse(completion(AssistantMessage("fake"))))).map(_.addUpdate(undeclared))
+    )
+    val budget = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(50))
+    val result =
+      runInMemory(
+        loopOf(ScriptedModel(answer("never")), Seq(middleware("owner"), sneaky)).graph,
+        AgentInput("go"),
+        budget
+      )
+    result match {
+      case RunResult.Failed(_, GraphError.NodeFailed(_, _, v: ValidationError)) =>
+        v.message should include("middleware 'sneaky'")
+      case other => fail(s"not an undeclared-write failure: $other")
+    }
+  }
+
+  it should "end the turn TokenLimitReached when a prompt-section hook's accounted call is refused" in {
+    val judge = new LLMClient {
+      def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(completion(AssistantMessage("ok"), prompt = 100, completion = 1))
+      def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    // the first call uses the budget, the second is refused, and the hook propagates the refusal
+    val sectioning = middleware(
+      "sections",
+      sections = c =>
+        val client = c.accounted(judge)
+        for
+          _ <- client.complete(Conversation(Seq(UserMessage("one"))))
+          _ <- client.complete(Conversation(Seq(UserMessage("two"))))
+        yield Vector.empty
+    )
+    val model           = ScriptedModel(answer("never"))
+    val budget          = RunConfig().withBudgets(RunBudgets.default.withMaxTokens(50))
+    val (state, output) = runInMemory(loopOf(model, Seq(sectioning)).graph, AgentInput("go"), budget).completed
+    output.outcome shouldBe TurnOutcome.TokenLimitReached
+    model.calls shouldBe 0
+    state.get(LoopKeys.usage).value.requestCount shouldBe 1
+  }
+
   "ModelContext.accounted" should "count every call a hook makes through it, also when a hook makes it outside next" in {
     val judge = new LLMClient {
       def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

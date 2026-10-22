@@ -26,8 +26,8 @@ liaisons with sponsors, and conference programme committees.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="/people/kannupriya-kalra.jpg" alt="Kannupriya Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Kannupriya Kalra**<br>[X / Twitter](https://x.com/KannupriyaKalra) &middot; [Bluesky](https://bsky.app/profile/kannupriyakalra.bsky.social) &middot; [Functional Café](https://functional.cafe/@kannupriyakalra) &middot; [Instagram](https://www.instagram.com/kannupriyakalra/)<br>Discord: `kannupriyakalra_46520`<br>Email: [kannupriya@llm4s.org](mailto:kannupriya@llm4s.org) | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="/people/rory-graves.jpg" alt="Rory Graves" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Rory Graves**<br>Discord: `rorybot1`<br>Email: [rory@llm4s.org](mailto:rory@llm4s.org) | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -48,6 +48,7 @@ liaisons with sponsors, and conference programme committees.
 |---|---|---|---|---|---|
 | <img src="/images/chapters/merlion.svg" alt="Merlion, Singapore" title="Merlion, Singapore" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/gagandeep-kalra.jpg" alt="Gagandeep Kalra" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:left top;border:1px solid #d0d7de;border-radius:8px"> | 🇸🇬 Singapore | **Gagandeep Kalra** | Chapter Lead: Singapore | [linkedin.com/in/gagandeep-kalra-9b23b2b1](https://www.linkedin.com/in/gagandeep-kalra-9b23b2b1/) |
 | <img src="/images/chapters/gateway-of-india.svg" alt="Gateway of India" title="Gateway of India" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/shubham-vishwakarma.jpg" alt="Shubham Vishwakarma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center;border:1px solid #d0d7de;border-radius:8px"> | 🇮🇳 Mumbai | **Shubham Vishwakarma** | Chapter Lead: Mumbai | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="/images/chapters/charminar.svg" alt="Charminar" title="Charminar" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/lucky-shekhawat.jpeg" alt="Lucky Shekhawat" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center;border:1px solid #d0d7de;border-radius:8px"> | 🇮🇳 Hyderabad | **Lucky Shekhawat** | Chapter Lead: Hyderabad | [linkedin.com/in/lucky-shekhawat](https://www.linkedin.com/in/lucky-shekhawat/) |
 | <img src="/images/chapters/india-gate.svg" alt="India Gate" title="India Gate" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/vansh-sharma.jpg" alt="Vansh Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center;border:1px solid #d0d7de;border-radius:8px"> | 🇮🇳 Delhi | **Vansh Sharma** | Chapter Lead: Delhi | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 | <img src="/images/chapters/eiffel-tower.svg" alt="Eiffel Tower" title="Eiffel Tower" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/olivier-nouguier.png" alt="Olivier Nouguier" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center;border:1px solid #d0d7de;border-radius:8px"> | 🇫🇷 France | **Olivier Nouguier** | Chapter Lead: France | [linkedin.com/in/olivier-nouguier](https://www.linkedin.com/in/olivier-nouguier/) |
 | <img src="/images/chapters/sheikh-zayed-mosque.svg" alt="Sheikh Zayed Grand Mosque" title="Sheikh Zayed Grand Mosque" width="88" height="88" style="width:88px;height:88px;max-width:none"> | <img src="/people/yoshita-sharma.png" alt="Yoshita Sharma" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center;border:1px solid #d0d7de;border-radius:8px"> | 🇦🇪 Abu Dhabi | **Yoshita Sharma** | Chapter Lead: Abu Dhabi | [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/) |
@@ -143,7 +144,7 @@ and community outreach.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** |  | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
+| <img src="/people/ansh-k-shah.jpg" alt="Ansh K Shah" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Ansh K Shah** | [@anshshah2111](https://github.com/anshshah2111) | [linkedin.com/in/ansh-k-shah](https://www.linkedin.com/in/ansh-k-shah/) |
 | <img alt="Shubham Vishwakarma" src="/people/shubham-vishwakarma.jpg" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
 | <img src="/people/gopi-trinadh.jpg" alt="Gopi Trinadh" width="208" height="208" style="width:208px;height:208px;max-width:none;object-fit:cover;object-position:center"> | **Gopi Trinadh** | [@GOPITRINADH3561](https://github.com/GOPITRINADH3561) | [https://www.linkedin.com/in/gopitrinadhmaddikunta/](https://www.linkedin.com/in/gopitrinadhmaddikunta/) |
 
@@ -172,7 +173,7 @@ testing, design, and event support. To get involved, join the
 
 | Step | How |
 |---|---|
-| **Foundation Core Team** | Fund Foundation initiatives |
+| **Foundation Core Team** | Make sustained contributions to Foundation initiatives, such as funding, advancing LLM4S adoption, building the community, mentoring contributors, forming partnerships, or organising events |
 | **LLM4S Global Chapter Leader** | Organise local community events and provide leadership for the city’s LLM4S community |
 | **Contributor** | Have a pull request merged |
 | **Significant Individual Contributor** | Consistent, high-quality PRs over time; nominated by an existing member |

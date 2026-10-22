@@ -41,7 +41,7 @@ result.fold(err => println(s"Error: ${err.formatted}"), println)
 
 | Package | Contains |
 |---|---|
-| `org.llm4s.agent` | `Agent`, `AgentBuilder` (`Agent.builder(id, client)`), `AgentResult`, `AgentStatus` (`Completed`, `Blocked`, `StepLimitReached`, `Suspended`), `AgentRun` (a started, cancellable turn), `Handoff` for multi-agent handoffs |
+| `org.llm4s.agent` | `Agent`, `AgentBuilder` (`Agent.builder(id, client)`), `AgentResult`, `AgentStatus` (`Completed`, `Blocked`, `StepLimitReached`, `TokenLimitReached`, `Suspended`), `AgentRun` (a started, cancellable turn), `Handoff` for multi-agent handoffs |
 | `org.llm4s.agent.graph` | `GraphBuilder`, `CompiledGraph`, `GraphRuntime`, `RunConfig`, `ThreadId`, `Checkpointer`/`InMemoryCheckpointer` - the graph runtime agents run on, with checkpointed, resumable threads |
 | `org.llm4s.agent.graph.middleware` | `AgentMiddleware`, `GuardrailMiddleware` (attach guardrails with `withMiddleware`), `ApprovalMiddleware`, `ContextWindowMiddleware` |
 | `org.llm4s.agent.guardrails` | `Guardrail`, `InputGuardrail`, `OutputGuardrail`, `CompositeGuardrail`, `LLMGuardrail`; built-in guardrails in `guardrails.builtin` (`LengthCheck`, `ProfanityFilter`, `JSONValidator`, `PIIDetector`, `PIIMasker`, `SecretLeakGuardrail`, `PromptInjectionDetector`, and others) and RAG guardrails in `guardrails.rag` |

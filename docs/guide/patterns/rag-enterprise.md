@@ -757,9 +757,9 @@ object ProductionRAG {
 
 ## See Also
 
-- [Production Monitoring](./production-monitoring.md) - Monitor RAG system health
-- [Error Recovery](./error-recovery.md) - Handle retrieval failures
-- [Scaling Strategies](./scaling-strategies.md) - Scale RAG to large datasets
+- [Production Monitoring](./production-monitoring) - Monitor RAG system health
+- [Error Recovery](./error-recovery) - Handle retrieval failures
+- [Scaling Strategies](./scaling-strategies) - Scale RAG to large datasets
 
 ---
 

@@ -55,7 +55,8 @@ final class CompiledGraph[I, O] private[graph] (
   output: ThreadState => Result[O],
   executorOverride: Option[TaskExecutor],
   sleeper: FiniteDuration => Unit = CompiledGraph.sleepThread,
-  ticker: () => Long = () => System.nanoTime()
+  ticker: () => Long = () => System.nanoTime(),
+  settles: O => RunOutcome = (_: O) => RunOutcome.Answered
 ):
 
   /**
@@ -364,7 +365,8 @@ final class CompiledGraph[I, O] private[graph] (
       output,
       Some(next),
       sleeper,
-      ticker
+      ticker,
+      settles
     )
 
   /** A copy that waits between a node's attempts with `next`, so a spec need not sleep. */
@@ -385,7 +387,8 @@ final class CompiledGraph[I, O] private[graph] (
       output,
       executorOverride,
       next,
-      ticker
+      ticker,
+      settles
     )
 
   /** A copy, with empty caches, that reads time from `next` (monotonic nanoseconds), so a spec can expire entries. */
@@ -406,8 +409,37 @@ final class CompiledGraph[I, O] private[graph] (
       output,
       executorOverride,
       sleeper,
+      next,
+      settles
+    )
+
+  /**
+   * A copy whose completed runs settle as `next` says ([[RunOutcome]], recorded on the run's terminal checkpoint);
+   * the default is [[RunOutcome.Answered]]. The agent loop's graph maps its turn's outcome.
+   */
+  private[agent] def withOutcome(next: O => RunOutcome): CompiledGraph[I, O] =
+    new CompiledGraph(
+      id,
+      version,
+      shape,
+      legacy,
+      owner,
+      entry,
+      nodes,
+      edges,
+      staticJoins,
+      dynamicJoins,
+      resumes,
+      keys,
+      output,
+      executorOverride,
+      sleeper,
+      ticker,
       next
     )
+
+  /** How a run that completed with `output` settled. */
+  private[graph] def outcomeOf(output: O): RunOutcome = settles(output)
 
   /**
    * The graph's declared structure as a Mermaid flowchart. Nodes and joins are ordered by id and a

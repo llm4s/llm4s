@@ -41,7 +41,8 @@ def project(pid, base, aggregate=(), configs=(), extra=(), no_aggregate=()):
     keys += [["test", "", k] for k in TEST_KEYS] + [list(k) for k in extra]
     return {"id": pid, "base": base, "aggregate": list(aggregate),
             "configurations": [COMPILE, RUNTIME, TEST] + list(configs), "keys": sorted(keys),
-            "noAggregate": sorted(no_aggregate), "scalaVersion": "3.7.1", "crossScalaVersions": ["3.7.1"]}
+            "noAggregate": sorted(no_aggregate), "scalaVersion": "3.7.1", "crossScalaVersions": ["3.7.1"],
+            "scalacOptions": ["-feature", "-java-output-version", "21"], "javacOptions": ["--release", "21"]}
 
 
 ROOT_TASKS = ["publishedArtifactsCheck", "stabilityTierCheck"]
@@ -246,6 +247,47 @@ expect_fail "no JDK in CI is an error" "$d" "cannot establish the JDK CI runs"
 
 d="$(fresh_copy jdk-ok)"; say "$d" "$INSTALL" "Tested on JDK 25; JDK 17 is not supported."
 expect_pass "a JDK CI runs, and a denied one" "$d"
+
+d="$(fresh_copy jdk-module-readme)"; printf 'It needs a JDK (17 or newer).\n' > "$d/modules/core/README.md"
+expect_fail "a module README's floor is read too" "$d" "gives JDK 17 as the minimum"
+
+echo "== bytecode level"
+# add_sources DIR MODULE EXT...: give a fixture module a source file per extension, so the level applies to it.
+add_sources() { local d="$1" m="$2"; shift 2; for e in "$@"; do mkdir -p "$d/modules/$m/src/main/$e"; echo "class A" > "$d/modules/$m/src/main/$e/A.$e"; done; }
+gradle() { mkdir -p "$1/modules/kotlin-api"; printf '%s\n' "$2" > "$1/modules/kotlin-api/build.gradle.kts"; }
+
+d="$(fresh_copy level-ok)"; add_sources "$d" core scala java
+edit_model "$d" 'proj(m, "core")["scalacOptions"] = ["-release:21"]'
+gradle "$d" "$(printf '%s\n' 'jvmTarget.set(JvmTarget.JVM_21)' 'options.release.set(21)' 'kotlin { jvmToolchain(21) }')"
+expect_pass "Scala, Java and Gradle all at the floor" "$d"
+
+d="$(fresh_copy level-scala-default)"; add_sources "$d" core scala
+edit_model "$d" 'proj(m, "core")["scalacOptions"] = ["-feature"]'
+expect_fail "Scala sources with no -java-output-version" "$d" "project \`core\` compiles Scala for JDK the compiler default"
+
+d="$(fresh_copy level-scala-old)"; add_sources "$d" core scala
+edit_model "$d" 'proj(m, "core")["scalacOptions"] = ["-java-output-version", "17"]'
+expect_fail "Scala compiled below the floor" "$d" "compiles Scala for JDK 17"
+
+d="$(fresh_copy level-java-default)"; add_sources "$d" core scala java
+edit_model "$d" 'proj(m, "core")["javacOptions"] = []'
+expect_fail "Java sources with no javac --release" "$d" "project \`core\` compiles Java for JDK the building JDK"
+
+d="$(fresh_copy level-no-sources)"; edit_model "$d" 'proj(m, "it")["scalacOptions"] = []; proj(m, "it")["javacOptions"] = []'
+add_sources "$d" core scala; edit_model "$d" 'proj(m, "core")["javacOptions"] = []'
+expect_pass "no level needed without sources, nor javac's without Java sources" "$d"
+
+d="$(fresh_copy level-gradle-release)"; gradle "$d" 'options.release.set(17)'
+expect_fail "a Gradle Java release below the floor" "$d" "modules/kotlin-api/build.gradle.kts:1: targets JDK 17"
+
+d="$(fresh_copy level-gradle-kotlin)"; gradle "$d" 'jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)'
+expect_fail "a Kotlin JVM target below the floor" "$d" "targets JDK 17 (\`JvmTarget.JVM_17\`)"
+
+d="$(fresh_copy level-ci-moved)"; add_sources "$d" core scala
+sed -i.bak 's/java: \[21, 25\]/java: [25]/; s/java-version: 21/java-version: 25/' "$d/.github/workflows/ci.yml"
+sed -i.bak 's/JDK 21+/JDK 25+/; s/JDK 21 and 25/JDK 25/' "$d/README.md" "$d/docs/reference/v1-scope.md"
+sed -i.bak 's/JDK 21 or newer/JDK 25 or newer/' "$d/$INSTALL"
+expect_fail "the floor moved, the bytecode level did not" "$d" "compiles Scala for JDK 21"
 
 echo "== modules"
 d="$(fresh_copy module-missing)"; rm -r "$d/modules/deploy-service"; edit_model "$d" 'm["projects"] = [p for p in m["projects"] if p["id"] != "deployService"]'

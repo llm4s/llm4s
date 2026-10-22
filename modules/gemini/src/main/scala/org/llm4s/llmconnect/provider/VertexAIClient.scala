@@ -45,7 +45,7 @@ import scala.util.{ Try, Using }
  *  - Tool results are sent as `functionResponse` parts keyed by function name.
  *  - Synthetic UUIDs are generated for tool-call IDs (Vertex AI does not return them).
  *
- * @param config         [[VertexAIConfig]] with project, location, model, and credential path.
+ * @param config         [[org.llm4s.llmconnect.config.VertexAIConfig VertexAIConfig]] with project, location, model, and credential path.
  * @param metrics        Receives per-call latency and token-usage events.
  * @param exchangeLogging Controls whether raw request/response bodies are recorded.
  * @param httpClient     HTTP client (injectable for testing).
@@ -188,6 +188,7 @@ class VertexAIClient(
               val rawStream   = StringBuilder()
               val signatures =
                 scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+              val citations = scala.collection.mutable.ArrayBuffer.empty[Citation] // grounding sources, in order
               var textLength = 0 // characters of answer text streamed so far: where a text signature sits
               // a chunk nested too deeply: the stream fails with it, unread
               var refused = Option.empty[org.llm4s.error.LLMError]
@@ -212,6 +213,9 @@ class VertexAIClient(
                               onChunk(chunk)
                             }
                           }
+                          // grounding metadata usually arrives with the last chunk; collect it from any chunk
+                          Try(json("candidates").arr.headOption).toOption.flatten
+                            .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
                           for {
                             usage      <- Try(json("usageMetadata")).toOption
                             prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
@@ -241,6 +245,7 @@ class VertexAIClient(
                         c.message.toolCalls.toList
                       ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
+                      .withCitations(citations.distinct.toList)
                       .withMessage(
                         ThinkingReplay.bindOrigin(replayOrigin, message)
                       )
@@ -350,12 +355,13 @@ class VertexAIClient(
       request("systemInstruction") = ujson.Obj("parts" -> ujson.Arr(ujson.Obj("text" -> sysContent)))
     }
 
-    if (options.tools.nonEmpty) {
-      val functionDeclarations = options.tools.map(convertToolToVertexFormat)
-      request("tools") = ujson.Arr(
-        ujson.Obj("functionDeclarations" -> ujson.Arr(functionDeclarations: _*))
-      )
-    }
+    // Function declarations, and the Google Search grounding tool when the section enables it
+    val functions = Option.when(options.tools.nonEmpty)(
+      ujson.Obj("functionDeclarations" -> ujson.Arr(options.tools.map(convertToolToVertexFormat): _*))
+    )
+    val search = Option.when(config.googleSearch)(ujson.Obj("googleSearch" -> ujson.Obj()))
+    val tools  = functions.toSeq ++ search
+    if (tools.nonEmpty) request("tools") = ujson.Arr(tools: _*)
 
     request
   }
@@ -428,7 +434,8 @@ class VertexAIClient(
               created = System.currentTimeMillis() / 1000,
               message = message,
               usage = usageOpt,
-              estimatedCost = cost
+              estimatedCost = cost,
+              citations = GeminiGrounding.citations(candidate)
             )
           )
         }
@@ -436,7 +443,7 @@ class VertexAIClient(
     }
 
   /**
-   * Parse a streaming chunk into the parts it held and the [[StreamedChunk]]s they make: one per function call
+   * Parse a streaming chunk into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per function call
    * (a chunk holds a single call), or one when there is none. `textOffset` is the number of answer-text
    * characters streamed before this chunk, so a text signature records where it sits.
    */

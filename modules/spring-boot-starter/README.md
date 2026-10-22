@@ -1,8 +1,8 @@
 # llm4s-spring-boot-starter
 
 Spring Boot auto-configuration for llm4s (`org.llm4s:llm4s-spring-boot-starter_3`, built on `llm4s-java-api`).
-Supports Spring Boot 3.x from 3.3 on: built against 3.3.6 and tested in CI against the latest 3.x release too. Spring
-Boot 4 is not supported yet ([#1467](https://github.com/llm4s/llm4s/issues/1467)).
+Supports Spring Boot 3.x from 3.3 on and 4.x from 4.0 on, from one artifact: built against 3.3.6 and tested in CI
+against the latest 3.x, 4.0.x and latest 4.x releases too ([#1467](https://github.com/llm4s/llm4s/issues/1467)).
 
 ```properties
 # openai | anthropic | ollama
@@ -93,7 +93,7 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 | `llm4sClient` (`JLlmClient`) | closed on context shutdown |
 | `llm4sTaskExecutor` (`ExecutorService`) | defined by name: a bean called `llm4sTaskExecutor` replaces it |
 | `llm4sTemplate` (`LLM4STemplate`) | |
-| `llmHealthIndicator` (`LlmHealthIndicator`, only with Spring Boot Actuator) | |
+| `llmHealthIndicator` (`LlmHealthIndicator`, or `LlmBoot4HealthIndicator` on Spring Boot 4; only with Spring Boot Actuator) | |
 | `llm4sMetricsCollector` (`MicrometerMetrics`, only with `llm4s-observability-micrometer` and a `MeterRegistry` bean) | any `MetricsCollector` bean; the client reports to all of them |
 
 Set `llm4s.enabled=false` to switch all of them off.

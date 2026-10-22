@@ -167,17 +167,12 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     err.message should startWith("Parsing error")
   }
 
-  it should "be a returned error, not an exception, on a transport failure" in {
-    val http = stub[Llm4sHttpClient]
-    (http.post _)
-      .when(*, *, *, *)
-      .returns(Left(org.llm4s.error.NetworkError("connection refused", None, "http://jina-test/embeddings")))
+  it should "be a returned error, not an exception, on a transport failure: the HTTP client's own (#1781)" in {
+    val refused = org.llm4s.error.NetworkError("connection refused", None, "http://jina-test/embeddings")
+    val http    = stub[Llm4sHttpClient]
+    (http.post _).when(*, *, *, *).returns(Left(refused))
 
-    val err = JinaEmbeddingProvider.forTest(cfg, http).embed(req).left.toOption.get
-
-    err.code shouldBe None
-    err.message should include("connection refused")
-    err.context("provider") shouldBe "jina"
+    JinaEmbeddingProvider.forTest(cfg, http).embed(req) shouldBe Left(refused)
   }
 
   "multimodal embedding" should "be 501 Not Implemented, as Jina text embeddings are text only" in {

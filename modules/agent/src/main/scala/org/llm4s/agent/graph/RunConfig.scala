@@ -1,9 +1,11 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.ValidationError
+import org.llm4s.agent.delegation.ChildRef
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.types.Result
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 
 import scala.concurrent.duration.FiniteDuration
@@ -12,34 +14,66 @@ import scala.concurrent.duration.FiniteDuration
  * Limits on one run; each `start`, `recover` or `resume` brings its own. Every value is validated
  * on the way in: `apply` and the `with*` setters throw `IllegalArgumentException` for a
  * non-positive one, and [[RunBudgets.of]] returns it as a `ValidationError`.
+ *
+ * `maxTokens` is the input and output tokens the run may use, counted from the thread's usage when
+ * the run was admitted: before each model call - the loop's own and every one a middleware makes
+ * through `next` or `ModelContext.accounted` - the run's tokens so far are compared with it, and at
+ * or above it the turn ends `TokenLimitReached` without calling the model. A model call in flight is
+ * never interrupted, so a run can overshoot the budget by one call. A completion without usage is
+ * charged an estimate of its whole request and answer. A retrying client (`ReliableClient`) is one
+ * call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in
+ * mind. `None`, the default, sets no token budget. A plain graph's nodes never read it.
  */
-final case class RunBudgets private (maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int):
-  def withMaxSupersteps(n: Int): RunBudgets              = RunBudgets(n, timeout, maxConcurrency)
-  def withTimeout(t: FiniteDuration): RunBudgets         = RunBudgets(maxSupersteps, Some(t), maxConcurrency)
-  def withTimeout(t: Option[FiniteDuration]): RunBudgets = RunBudgets(maxSupersteps, t, maxConcurrency)
-  def withMaxConcurrency(n: Int): RunBudgets             = RunBudgets(maxSupersteps, timeout, n)
+final case class RunBudgets private (
+  maxSupersteps: Int,
+  timeout: Option[FiniteDuration],
+  maxConcurrency: Int,
+  maxTokens: Option[Long]
+):
+  def withMaxSupersteps(n: Int): RunBudgets              = RunBudgets(n, timeout, maxConcurrency, maxTokens)
+  def withTimeout(t: FiniteDuration): RunBudgets         = RunBudgets(maxSupersteps, Some(t), maxConcurrency, maxTokens)
+  def withTimeout(t: Option[FiniteDuration]): RunBudgets = RunBudgets(maxSupersteps, t, maxConcurrency, maxTokens)
+  def withMaxConcurrency(n: Int): RunBudgets             = RunBudgets(maxSupersteps, timeout, n, maxTokens)
+  def withMaxTokens(n: Long): RunBudgets                 = RunBudgets(maxSupersteps, timeout, maxConcurrency, Some(n))
+  def withMaxTokens(n: Option[Long]): RunBudgets         = RunBudgets(maxSupersteps, timeout, maxConcurrency, n)
 
 object RunBudgets:
-  private def problems(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): List[String] =
+  private def problems(
+    maxSupersteps: Int,
+    timeout: Option[FiniteDuration],
+    maxConcurrency: Int,
+    maxTokens: Option[Long]
+  ): List[String] =
     List(
       Option.when(maxSupersteps <= 0)(s"maxSupersteps must be positive, was $maxSupersteps"),
       timeout.filter(_.length <= 0).map(t => s"timeout must be positive, was $t"),
-      Option.when(maxConcurrency <= 0)(s"maxConcurrency must be positive, was $maxConcurrency")
+      Option.when(maxConcurrency <= 0)(s"maxConcurrency must be positive, was $maxConcurrency"),
+      maxTokens.filter(_ <= 0).map(n => s"maxTokens must be positive, was $n")
     ).flatten
 
   /** Throws `IllegalArgumentException` for a non-positive value; use [[of]] for untrusted input. */
-  def apply(maxSupersteps: Int = 1000, timeout: Option[FiniteDuration] = None, maxConcurrency: Int = 16): RunBudgets =
-    val found = problems(maxSupersteps, timeout, maxConcurrency)
+  def apply(
+    maxSupersteps: Int = 1000,
+    timeout: Option[FiniteDuration] = None,
+    maxConcurrency: Int = 16,
+    maxTokens: Option[Long] = None
+  ): RunBudgets =
+    val found = problems(maxSupersteps, timeout, maxConcurrency, maxTokens)
     require(found.isEmpty, found.mkString("; "))
-    new RunBudgets(maxSupersteps, timeout, maxConcurrency)
+    new RunBudgets(maxSupersteps, timeout, maxConcurrency, maxTokens)
+
+  /** Budgets without a token budget, as before `maxTokens` existed. */
+  def apply(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): RunBudgets =
+    apply(maxSupersteps, timeout, maxConcurrency, None)
 
   def of(
     maxSupersteps: Int = 1000,
     timeout: Option[FiniteDuration] = None,
-    maxConcurrency: Int = 16
+    maxConcurrency: Int = 16,
+    maxTokens: Option[Long] = None
   ): Result[RunBudgets] =
-    problems(maxSupersteps, timeout, maxConcurrency) match
-      case Nil   => Right(new RunBudgets(maxSupersteps, timeout, maxConcurrency))
+    problems(maxSupersteps, timeout, maxConcurrency, maxTokens) match
+      case Nil   => Right(new RunBudgets(maxSupersteps, timeout, maxConcurrency, maxTokens))
       case found => Left(ValidationError("budgets", found))
 
   val default: RunBudgets = apply()
@@ -50,6 +84,11 @@ object RunBudgets:
  * admission refuses a run whose `tenantId` differs from the latest checkpoint's
  * ([[GraphError.TenantMismatch]]; `None` and `Some` differ). The principal is recorded on the run's
  * `RunStarted`, `RunRecovered` and `RunResumed` events and is never checked.
+ *
+ * `metadata`, when not empty, is the thread's [[ThreadMetadata]] (design 4.52): a top-level `start` sets it in its
+ * claim commit, replacing what the thread had, and refuses metadata that breaks its limits with a `ValidationError`
+ * before it claims anything. `recover`, `resume` and a child thread's run leave it as it is; change it with
+ * [[GraphRuntime.updateMetadata]].
  *
  * `interruptBefore` and `interruptAfter` are the run's static breakpoints ([[BreakpointPhase]]): a
  * task of a node in `interruptBefore` is held before it runs, and one of a node in `interruptAfter`
@@ -66,7 +105,8 @@ final case class RunConfig private (
   metadata: Map[String, String],
   interruptBefore: Set[NodeId],
   interruptAfter: Set[NodeId],
-  retention: Option[RetentionPolicy]
+  retention: Option[RetentionPolicy],
+  childRetention: Int
 ):
   def withRunId(id: RunId): RunConfig                 = copy(runId = id)
   def withTenantId(t: TenantId): RunConfig            = copy(tenantId = Some(t))
@@ -91,11 +131,29 @@ final case class RunConfig private (
    * events beyond the policy are removed, raising the replay floor for their handles. `RetentionPolicy.keepAll`
    * removes nothing and is skipped. A prune that fails is logged at WARN and the run goes on: retention is
    * housekeeping.
+   *
+   * A child thread's run (design 4.42) is the exception: its admission prunes only after the claim commit, which stores
+   * the usage folded from the earlier attempts' terminal events, and before the run is launched. A run refused at
+   * admission, or whose claim commit fails, still leaves the thread unchanged; but the claim's own checkpoint and event
+   * exist by then and count against the limits (`maxEvents` is at least 1 on a child), and `maxAge` may remove that
+   * event, raising the replay floor above the run's start.
    */
   def withRetention(policy: RetentionPolicy): RunConfig = copy(retention = Some(policy))
 
   /** [[withRetention]], or no pruning for `None`. */
   def withRetention(policy: Option[RetentionPolicy]): RunConfig = copy(retention = policy)
+
+  /**
+   * How many settled (`Completed` or `Failed`) child threads of the run's thread to keep (design 4.41, default
+   * [[RunConfig.DefaultChildRetention]]): once the run's terminal checkpoint commits, and at a later `start` on the
+   * settled thread, older settled children are deleted, each with everything below it. At that `start` a child an
+   * earlier run left `Running` or `Suspended` can never be reattached, so it is first settled
+   * `RunOutcome.Failed("abandoned", ...)` and then counts; otherwise one is never deleted, and nothing is at
+   * `recover` or `resume`. Throws `IllegalArgumentException` below 0.
+   */
+  def withChildRetention(n: Int): RunConfig =
+    require(n >= 0, s"childRetention must not be negative, was $n")
+    copy(childRetention = n)
 
 object RunConfig:
   def apply(
@@ -106,9 +164,47 @@ object RunConfig:
     metadata: Map[String, String] = Map.empty,
     interruptBefore: Set[NodeId] = Set.empty,
     interruptAfter: Set[NodeId] = Set.empty,
-    retention: Option[RetentionPolicy] = None
+    retention: Option[RetentionPolicy] = None,
+    childRetention: Int = DefaultChildRetention
   ): RunConfig =
-    new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, retention)
+    require(childRetention >= 0, s"childRetention must not be negative, was $childRetention")
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      retention,
+      childRetention
+    )
+
+  /** Settled child threads a thread keeps unless its run says otherwise ([[RunConfig.withChildRetention]]). */
+  val DefaultChildRetention: Int = 64
+
+  /** A config keeping [[DefaultChildRetention]] children, as before `childRetention` existed. */
+  def apply(
+    runId: RunId,
+    tenantId: Option[TenantId],
+    principal: Option[Principal],
+    budgets: RunBudgets,
+    metadata: Map[String, String],
+    interruptBefore: Set[NodeId],
+    interruptAfter: Set[NodeId],
+    retention: Option[RetentionPolicy]
+  ): RunConfig =
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      retention,
+      DefaultChildRetention
+    )
 
   /** A config without retention, as before `retention` existed. */
   def apply(
@@ -119,7 +215,18 @@ object RunConfig:
     metadata: Map[String, String],
     interruptBefore: Set[NodeId],
     interruptAfter: Set[NodeId]
-  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter, None)
+  ): RunConfig =
+    new RunConfig(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      None,
+      DefaultChildRetention
+    )
 
 /**
  * Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a
@@ -181,11 +288,43 @@ final class RunContext private[graph] (
   /** The task effect records belong to: the task a continuation stands in for, else this one (design §4.24). */
   owner: Option[(TaskId, String)] = None,
   /** A resume continuation's identity, kept with its task ([[CompiledGraph.resumeDigest]]). */
-  private[agent] val resumeDigest: Option[String] = None
+  private[agent] val resumeDigest: Option[String] = None,
+  /**
+   * When the run's `RunBudgets.timeout` expires, by the clock of the [[GraphRuntime]] running it: fixed as the run
+   * is admitted, so each `start`, `recover` and `resume` has its own. `None` for a run without a timeout, and
+   * outside a runtime, which enforces no timeout. A task that starts work of its own bounded in time (a child run)
+   * ends it no later than this.
+   */
+  val deadline: Option[Instant] = None,
+  /** The thread's state as the run was admitted: what the run's own usage is counted from. `None` outside a runtime. */
+  private[agent] val admitted: Option[ThreadState] = None,
+  /**
+   * The model calls the current agent turn may still make, for a tool call of an agent's tool loop: the active
+   * agent's step limit less the model calls the turn has made at the task's snapshot (design 4.45). It can be zero or
+   * less when the call came from the turn's last allowed step, or after a handoff to an agent with a lower limit.
+   * A delegated task caps its child's steps by it. `None` in any other task.
+   */
+  val remainingSteps: Option[Int] = None
 ):
   /** This context with `next` as the answers its hooks see, recording usage in the same task's accumulator. */
   private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
-    new RunContext(config, position, sink, next, usage, journal, owner, resumeDigest)
+    new RunContext(
+      config,
+      position,
+      sink,
+      next,
+      usage,
+      journal,
+      owner,
+      resumeDigest,
+      deadline,
+      admitted,
+      remainingSteps
+    )
+
+  /** This context with `steps` as its [[remainingSteps]], recording usage in the same task's accumulator. */
+  private[agent] def withRemainingSteps(steps: Option[Int]): RunContext =
+    new RunContext(config, position, sink, answers, usage, journal, owner, resumeDigest, deadline, admitted, steps)
 
   /**
    * An object unique to this run incarnation: the same for every task of one run of a runtime (or one execution of a
@@ -227,8 +366,31 @@ final class RunContext private[graph] (
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
 
-  /** Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. */
+  /**
+   * Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. A no-op once the
+   * task's run has ended - released the thread, or lost its claim - so a node that keeps its context, or a thread of
+   * its own, past its run sends nothing into a later run's subscriptions (#1737).
+   */
   def progress(name: String, version: Int, payload: ujson.Value): Unit = sink.progress(name, version, payload)
+
+  /** Forwards a delegated child's event to this task's thread's nested subscribers (design 4.47). */
+  private[agent] def nested(event: StreamEvent.Nested): Unit = sink.nested(event)
+
+  /**
+   * Sends `child`'s live `TaskStarted` (`name`, `version`, `payload`), as [[progress]] does, and remembers the child as
+   * running until its call's `TaskEnded` is handed over or the run releases the thread: a nested subscriber attaching
+   * meanwhile gets it and a gap (design 4.47, #2074).
+   */
+  private[agent] def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
+    sink.childStarted(child, name, version, payload)
+
+  /**
+   * Settles `child`, a child thread of this task's thread that no call will reattach, as `outcome`, under its own
+   * claim and fenced by the run's (#2098): the run that settled it, `None` for a child with no checkpoint and outside a
+   * runtime. A busy child is `GraphError.ThreadBusy`.
+   */
+  private[agent] def settleChild(child: ThreadId, outcome: RunOutcome, message: String): Result[Option[RunId]] =
+    sink.settleChild(child, outcome, message)
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
@@ -243,9 +405,67 @@ final class RunContext private[graph] (
 final private[agent] class TaskUsage:
   private val recorded = new AtomicReference(UsageSummary())
 
+  /** Child runs' roll-ups (design 4.42): committed with the task, never lost usage, since each child keeps its own. */
+  private val delegated = new AtomicReference(UsageSummary())
+
   def add(model: String, usage: TokenUsage, cost: Option[Double]): Unit =
     recorded.updateAndGet(_.add(model, usage, cost)): Unit
 
-  def summary: UsageSummary = recorded.get
+  /** Whether the task made an agent's model step: its own model call, not a hook's (design 4.45). */
+  private val stepped = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-  def isEmpty: Boolean = recorded.get.requestCount == 0
+  /** Marks the task as an agent's model step, which a failed task reports as a lost step. */
+  def step(): Unit = stepped.set(true)
+
+  /** The agent model steps a failed task loses: one for a model step that called the model, else none. */
+  def lostSteps: Long = if stepped.get then 1L else 0L
+
+  /** Whether an accounted call was refused at the run's token budget (#2084): the model step then ends the turn. */
+  private val refusedAtLimit = new java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Marks the task as having refused a model call at `RunBudgets.maxTokens`. */
+  def refuse(): Unit = refusedAtLimit.set(true)
+
+  /** Whether the task refused a model call at `RunBudgets.maxTokens`. */
+  def refused: Boolean = refusedAtLimit.get
+
+  /** Serializes the task's model calls under a token budget, so each is admitted against every earlier one's usage. */
+  private val calls = new java.util.concurrent.locks.ReentrantLock(true)
+
+  /**
+   * `body` - a model call's admission, the call and its recording - run while no other model call of the task runs
+   * (#2084). An interrupt while waiting is `Left(CancelledError)`, with the flag restored.
+   */
+  def serialized[A](body: => Result[A]): Result[A] =
+    CancelledError.catchInterrupt(calls.lockInterruptibly()) match
+      case Left(_) =>
+        Thread.currentThread().interrupt()
+        Left(CancelledError("model"))
+      case Right(_) =>
+        given scala.util.Using.Releasable[java.util.concurrent.locks.ReentrantLock] = _.unlock()
+        scala.util.Using.resource(calls)(_ => body)
+
+  /**
+   * Adds a child run's roll-up (design 4.42). It commits with the task's result, as the rest does; a task that fails
+   * drops it rather than reporting it as the run's lost usage, because the child thread keeps that usage itself and the
+   * call's replay, which reattaches the child, adds it then.
+   */
+  def merge(other: UsageSummary, child: ThreadId): Unit =
+    // once per child per task: a wrapper may run the call - and so reattach the child - more than once
+    if !children.getAndUpdate(_ + child.value).contains(child.value) then delegated.updateAndGet(_.merge(other)): Unit
+
+  /** The child threads whose roll-ups [[merge]] added. */
+  private val children = new AtomicReference(Set.empty[String])
+
+  /** The child threads whose roll-ups this task's result commits. */
+  def countedChildren: Set[String] = children.get
+
+  /** Everything the task's result commits: its own model calls and its children's roll-ups. */
+  def summary: UsageSummary = recorded.get.merge(delegated.get)
+
+  def isEmpty: Boolean = recorded.get.requestCount == 0 && delegated.get.requestCount == 0
+
+  /** What a failed task loses: its own model calls only ([[merge]]). */
+  def lost: UsageSummary = recorded.get
+
+  def lostIsEmpty: Boolean = recorded.get.requestCount == 0

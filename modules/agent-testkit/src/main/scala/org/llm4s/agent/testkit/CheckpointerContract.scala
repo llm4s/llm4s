@@ -34,35 +34,42 @@ import scala.jdk.CollectionConverters.*
  * The cases are the ones the `Checkpointer` Scaladoc states, in three groups:
  *
  *  - '''The store''', called directly: commits applied atomically or not at all; a new checkpoint
- *    accepted only over the latest ([[GraphError.CheckpointConflict]]) and pending writes only for
- *    it ([[GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
+ *    accepted only over the latest ([[org.llm4s.agent.graph.GraphError.CheckpointConflict GraphError.CheckpointConflict]]) and pending writes only for
+ *    it ([[org.llm4s.agent.graph.GraphError.InvalidCommit GraphError.InvalidCommit]]); events numbered contiguously in commit order and never
  *    reused, also after a refused commit, compaction or `deleteThread` - a new thread of a deleted
  *    thread's id is numbered on past the deleted thread's events, and a read from inside the deleted
- *    log is refused ([[GraphError.ThreadDeleted]]), also while waiting; compaction and
- *    [[GraphError.ReplayUnavailable]]; `deleteThread`, fenced by the current claim's token like a
- *    commit ([[GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
+ *    log is refused ([[org.llm4s.agent.graph.GraphError.ThreadDeleted GraphError.ThreadDeleted]]), also while waiting; compaction and
+ *    [[org.llm4s.agent.graph.GraphError.ReplayUnavailable GraphError.ReplayUnavailable]]; `deleteThread`, fenced by the current claim's token like a
+ *    commit ([[org.llm4s.agent.graph.GraphError.StaleClaim GraphError.StaleClaim]] otherwise, deleting nothing); checkpoints, pending writes and events read
  *    back as written; the checkpoint history - every superseded checkpoint kept, newest first, paged
  *    and read by id, ids never repeated, a blocked turn retracted (`Commit.retractTurn`), and pruning
- *    by age, by count and by event count, never the latest checkpoint; effect records (design §4.24) -
+ *    by age (by when the store committed, never a skewed producer's timestamps), by count and by event count, never the
+ *    latest checkpoint; effect records (design §4.24) -
  *    upserted by key and fenced like any commit, released at a commit with a checkpoint exactly as
- *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; and claims and fencing - one
+ *    `Commit.releasesEffect` says, kept by `prune` and across a reopen, removed by `deleteThread`; child threads (design
+ *    4.41) - a checkpoint's `origin` and `outcome` read back, a format-7 checkpoint read with neither, and `children`
+ *    listing a parent's children oldest first, paged, without a tenant, never one deleted or one whose latest
+ *    checkpoint names another parent; the thread registry (design 4.52) - metadata kept and replaced only by a fenced
+ *    commit, a tenant's root threads listed newest first by commit time, paged, filtered by status (judged by the latest
+ *    checkpoint and a live claim, by the store's clock), agent, metadata and age, and its incomplete threads oldest
+ *    first, never another tenant's, a child or a deleted thread; and claims and fencing - one
  *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
  *    holder as `takenOverFrom`), the tenant recorded on each claim - a holder named, in a refusal or as
  *    `takenOverFrom`, only to a claim of its own tenant, also across a reopen - renewal and release by the
  *    current token only, a refused claim leaving the live one as it was, and every commit refused
- *    with [[GraphError.StaleClaim]] unless it carries the current token - checked before any other
+ *    with [[org.llm4s.agent.graph.GraphError.StaleClaim GraphError.StaleClaim]] unless it carries the current token - checked before any other
  *    refusal, and including from many threads at once; one claim granted of many raced at once from
  *    as many stores over the storage ([[contenders]]); stored values kept apart from those callers
  *    pass in and are given back - and change notification:
  *    `awaitEventsAfter` returns what is there at once, returns a commit made meanwhile through
  *    this store or another over the same storage within about its `timeout`, returns empty when
  *    nothing lands, and ends its wait when interrupted.
- *  - '''Two runtimes over one store''': a second [[GraphRuntime]] is refused a thread whose run is
- *    live in the first ([[GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
+ *  - '''Two runtimes over one store''': a second [[org.llm4s.agent.graph.GraphRuntime GraphRuntime]] is refused a thread whose run is
+ *    live in the first ([[org.llm4s.agent.graph.GraphError.ThreadBusy GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
  *    the first run's completed tasks, and the first run's later commits are refused as stale, so it
- *    ends with [[GraphError.ClaimLost]] and leaves nothing in the thread; and of several
+ *    ends with [[org.llm4s.agent.graph.GraphError.ClaimLost GraphError.ClaimLost]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted; `updateState` and `fork` from a
  *    second runtime are refused while a run is live in the first, and fenced by their own claim; and
  *    a run a node blocks leaves nothing of its turn in the history; and a claim of another tenant on a
@@ -74,7 +81,7 @@ import scala.jdk.CollectionConverters.*
  *    runtime commits - in order, without gap or duplicate, when it joined before or mid-run - while
  *    runs alternate between the runtimes; resumes from a sequence number after its runtime restarts;
  *    never receives another runtime's live progress; stops watching the store when cancelled; and
- *    ends with [[DisconnectReason.TenantMismatch]], delivering nothing of it, when another runtime
+ *    ends with [[org.llm4s.agent.graph.DisconnectReason.TenantMismatch DisconnectReason.TenantMismatch]], delivering nothing of it, when another runtime
  *    creates the thread for another tenant.
  *
  * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`
@@ -472,7 +479,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val otherToken = s.claim("other", other).value.token
     s.commit(otherToken, Some(s.checkpoint("o1", None, on = other)), events = Vector(s.event("x")), on = other).value
 
-    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
 
     s.store.latest(s.thread).value shouldBe None
     s.historyIds() shouldBe empty
@@ -482,7 +489,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     // the claim went with the thread: its token is stale, and the thread can be claimed at once
     s.commit(token, events = Vector(s.event("late"))).refused shouldBe a[GraphError.StaleClaim]
     s.store.renew(s.thread, token, ttl).refused shouldBe a[GraphError.StaleClaim]
-    s.store.deleteThread(s.thread, token).refused shouldBe GraphError.StaleClaim(s.thread.value, token, None)
+    s.store.deleteThread(s.thread, token, None).refused shouldBe GraphError.StaleClaim(s.thread.value, token, None)
     val again = s.claim("again").value
     again.token.value should be > token.value
     // the id is a new thread: a first checkpoint is accepted, its events numbered on past the old ones,
@@ -498,15 +505,17 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(first.token, Some(s.checkpoint("c1", None)), Vector(s.write("c1", "0.0")), Vector(s.event("a"))).value
     // released: the token is no longer the thread's claim, and nobody holds it
     s.store.release(s.thread, first.token).value shouldBe (())
-    s.store.deleteThread(s.thread, first.token).refused shouldBe
+    s.store.deleteThread(s.thread, first.token, None).refused shouldBe
       GraphError.StaleClaim(s.thread.value, first.token, None)
     // taken over after expiry: the old holder's delete is refused, naming the current token
     val second = s.claim("second").value
     s.advance(ttl)
     val third = s.claim("third").value
-    s.store.deleteThread(s.thread, second.token).refused shouldBe
+    s.store.deleteThread(s.thread, second.token, None).refused shouldBe
       GraphError.StaleClaim(s.thread.value, second.token, Some(third.token))
-    s.store.deleteThread(s.thread, FencingToken(third.token.value + 1000)).refused shouldBe a[GraphError.StaleClaim]
+    s.store
+      .deleteThread(s.thread, FencingToken(third.token.value + 1000), None)
+      .refused shouldBe a[GraphError.StaleClaim]
     // nothing was deleted, and the current holder is untouched
     s.latestId() shouldBe Some("c1")
     s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("0.0")
@@ -519,7 +528,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(third.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
     // an unknown thread has no claim to delete under
     val unknown = newThread()
-    s.store.deleteThread(unknown, third.token).refused shouldBe
+    s.store.deleteThread(unknown, third.token, None).refused shouldBe
       GraphError.StaleClaim(unknown.value, third.token, None)
   }
 
@@ -529,9 +538,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(holder.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"))).value
     // a deleter holding a claim on another thread, or a token from before, cannot delete this one
     val elsewhere = s.claim("deleter", newThread()).value
-    s.store.deleteThread(s.thread, elsewhere.token).refused shouldBe
+    s.store.deleteThread(s.thread, elsewhere.token, None).refused shouldBe
       GraphError.StaleClaim(s.thread.value, elsewhere.token, Some(holder.token))
-    s.store.deleteThread(s.thread, FencingToken(holder.token.value - 1)).refused shouldBe
+    s.store.deleteThread(s.thread, FencingToken(holder.token.value - 1), None).refused shouldBe
       GraphError.StaleClaim(s.thread.value, FencingToken(holder.token.value - 1), Some(holder.token))
     s.latestId() shouldBe Some("c1")
     s.seqs() shouldBe Vector(1L)
@@ -544,11 +553,109 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(holder.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
   }
 
+  it should "refuse a fenced delete once the fence thread's claim is taken over, deleting nothing (#2063)" in {
+    val s     = Store()
+    val above = newThread()
+    // the thread above - a parent, or a cascade's root - and the thread to delete, each claimed
+    val first = s.claim("parent", above).value
+    // the claim above lapses and a successor takes the thread above over: the fence is stale
+    s.advance(ttl)
+    val successor = s.claim("successor", above).value
+    val token     = s.claim("deleter").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), Vector(s.write("c1", "0.0")), Vector(s.event("a"))).value
+    s.store.deleteThread(s.thread, token, Some(above -> first.token)).refused shouldBe
+      GraphError.StaleClaim(above.value, first.token, Some(successor.token))
+    // a fence on a thread with no claim at all, an unknown one included, is refused too
+    s.store.deleteThread(s.thread, token, Some(newThread() -> first.token)).refused shouldBe a[GraphError.StaleClaim]
+    // nothing was deleted: the thread's data and its own claim are untouched
+    s.latestId() shouldBe Some("c1")
+    s.store.latest(s.thread).value.value.pendingWrites.map(_.taskId) shouldBe Vector("0.0")
+    s.seqs() shouldBe Vector(1L)
+    s.commit(token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
+    // the thread's own claim is checked first: a stale own token names the thread, whatever the fence
+    s.store.deleteThread(s.thread, FencingToken(token.value - 1), Some(above -> successor.token)).refused shouldBe
+      GraphError.StaleClaim(s.thread.value, FencingToken(token.value - 1), Some(token))
+  }
+
+  it should "delete under a fence that is the fence thread's current claim, leaving the fence thread alone (#2063)" in {
+    val s      = Store()
+    val above  = newThread()
+    val parent = s.claim("parent", above).value
+    s.commit(parent.token, Some(s.checkpoint("p1", None, on = above)), events = Vector(s.event("x")), on = above).value
+    val token = s.claim("deleter").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"))).value
+
+    s.store.deleteThread(s.thread, token, Some(above -> parent.token)).value shouldBe (())
+
+    s.store.latest(s.thread).value shouldBe None
+    s.seqs() shouldBe empty
+    // the fence thread keeps its data and its claim
+    s.latestId(above) shouldBe Some("p1")
+    s.store.renew(above, parent.token, ttl).value.token shouldBe parent.token
+    s.commit(parent.token, events = Vector(s.event("y")), on = above).value.map(_.seq) shouldBe Vector(2L)
+  }
+
+  it should "refuse a fenced commit once the fence thread's claim is taken over, writing nothing (#2071)" in {
+    val s      = Store()
+    val parent = newThread()
+    val child  = ThreadId(s"${parent.value}/~task/worker/1")
+    // the parent's run admits a child: the parent claimed, then the child under a claim of its own
+    val first = s.claim("parent", parent).value
+    // the parent's claim lapses and a successor takes it over: the stale task's fence is stale
+    s.advance(ttl)
+    val successor = s.claim("successor", parent).value
+    val token     = s.claim("child", child).value.token
+    val firstCommit =
+      Commit(token, Some(s.checkpoint("k1", None, on = child).withOrigin(Some(originOf(parent, 1)))))
+        .withPendingWrites(Vector(s.write("k1", "0.0")))
+        .withEvents(Vector(s.event("a")))
+    s.store.commit(child, firstCommit.withFence(parent -> first.token)).refused shouldBe
+      GraphError.StaleClaim(parent.value, first.token, Some(successor.token))
+    // a fence on a thread with no claim at all, an unknown one included, is refused too
+    s.store.commit(child, firstCommit.withFence(newThread() -> first.token)).refused shouldBe a[GraphError.StaleClaim]
+    // nothing was written: no checkpoint, no event, and the parent lists no child
+    s.store.latest(child).value shouldBe None
+    s.seqs(child) shouldBe empty
+    s.store.children(parent, None, 10).value shouldBe empty
+    // the thread's own claim is checked first: a stale own token names the thread, whatever the fence
+    s.store
+      .commit(child, firstCommit.withToken(FencingToken(token.value - 1)).withFence(parent -> successor.token))
+      .refused shouldBe GraphError.StaleClaim(child.value, FencingToken(token.value - 1), Some(token))
+    // the child's own claim is untouched: the same commit unfenced still lands, numbered from 1
+    s.store.commit(child, firstCommit).value.map(_.seq) shouldBe Vector(1L)
+  }
+
+  it should "commit under a fence that is the fence thread's current claim, leaving the fence thread alone (#2071)" in {
+    val s      = Store()
+    val parent = newThread()
+    val child  = ThreadId(s"${parent.value}/~task/worker/1")
+    val held   = s.claim("parent", parent).value
+    s.commit(held.token, Some(s.checkpoint("p1", None, on = parent)), events = Vector(s.event("x")), on = parent).value
+    val token = s.claim("child", child).value.token
+
+    s.store
+      .commit(
+        child,
+        Commit(token, Some(s.checkpoint("k1", None, on = child).withOrigin(Some(originOf(parent, 1)))))
+          .withEvents(Vector(s.event("a")))
+          .withFence(parent -> held.token)
+      )
+      .value
+      .map(_.seq) shouldBe Vector(1L)
+
+    s.latestId(child) shouldBe Some("k1")
+    s.store.children(parent, None, 10).value.map(_.threadId) shouldBe Vector(child)
+    // the fence thread keeps its data and its claim
+    s.latestId(parent) shouldBe Some("p1")
+    s.store.renew(parent, held.token, ttl).value.token shouldBe held.token
+    s.commit(held.token, events = Vector(s.event("y")), on = parent).value.map(_.seq) shouldBe Vector(2L)
+  }
+
   it should "number a new thread of a deleted thread's id past the deleted thread's events, across a reopen" in {
     val s     = Store()
     val token = s.claim("run").value.token
     s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
-    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
     s.seqs() shouldBe empty
     s.reopened()
     s.seqs() shouldBe empty
@@ -561,20 +668,20 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.seqs() shouldBe Vector(5L, 6L)
     s.store.eventsAfter(s.thread, 5L, 10).value.map(_.seq) shouldBe Vector(6L)
     // and again: each new thread of the id is numbered on past every one before it
-    s.store.deleteThread(s.thread, again).value shouldBe (())
+    s.store.deleteThread(s.thread, again, None).value shouldBe (())
     val third = s.claim("third").value.token
     s.commit(third, events = Vector(s.event("t1"))).value.map(_.seq) shouldBe Vector(8L)
     // deleting a tombstone that numbered no event since moves nothing on: forgetting twice is idempotent
-    s.store.deleteThread(s.thread, third).value shouldBe (())
+    s.store.deleteThread(s.thread, third, None).value shouldBe (())
     val fourth = s.claim("fourth").value.token
-    s.store.deleteThread(s.thread, fourth).value shouldBe (())
+    s.store.deleteThread(s.thread, fourth, None).value shouldBe (())
     s.store.eventsAfter(s.thread, 8L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 8L, 10L)
     val fifth = s.claim("fifth").value.token
     s.commit(fifth, events = Vector(s.event("f1"))).value.map(_.seq) shouldBe Vector(10L)
     // a thread that numbered no event leaves no gap
     val quiet = newThread()
     val q1    = s.claim("q1", quiet).value.token
-    s.store.deleteThread(quiet, q1).value shouldBe (())
+    s.store.deleteThread(quiet, q1, None).value shouldBe (())
     val q2 = s.claim("q2", quiet).value.token
     s.commit(q2, events = Vector(s.event("q")), on = quiet).value.map(_.seq) shouldBe Vector(1L)
   }
@@ -583,7 +690,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val s     = Store()
     val token = s.claim("run").value.token
     s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
-    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
 
     // deleted, not yet created again: a reader of the old log learns that it ended
     s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
@@ -621,7 +728,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       found.put(result)
     }: Unit
     Thread.sleep(50)
-    other.deleteThread(s.thread, token).value shouldBe (())
+    other.deleteThread(s.thread, token, None).value shouldBe (())
     Option(found.poll(contractWait.toMillis + 1000, TimeUnit.MILLISECONDS))
       .getOrElse(fail("awaitEventsAfter never returned"))
       .refused shouldBe GraphError.ThreadDeleted(s.thread.value, 2L, 4L)
@@ -925,7 +1032,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val tokens = (1 to 6).map { i =>
       val granted = s.claim(s"run-$i").value
       i % 3 match
-        case 0 => s.store.deleteThread(s.thread, granted.token).value
+        case 0 => s.store.deleteThread(s.thread, granted.token, None).value
         case 1 => s.store.release(s.thread, granted.token).value
         case _ => s.advance(ttl)
       granted.token.value
@@ -1032,7 +1139,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(taken.token, events = Vector(s.event("ok"))).value.map(_.seq) shouldBe Vector(1L)
 
     // a token issued after a reopen is greater than every token before it, on this thread and after a delete
-    s.store.deleteThread(s.thread, taken.token).value shouldBe (())
+    s.store.deleteThread(s.thread, taken.token, None).value shouldBe (())
     s.reopened()
     val again = s.claim("again").value
     again.token.value should be > taken.token.value
@@ -1048,7 +1155,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.compactEvents(s.thread, 4L).value shouldBe (())
     s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
 
-    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
     s.store.eventsAfter(s.thread, 0L, 10).value shouldBe empty
     val again = s.claim("again").value.token
     s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2")))
@@ -1308,13 +1415,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   it should "prune by age by the store's clock, never the latest checkpoint" in {
     val s     = Store()
     val token = s.claim("run").value.token
-    val ages  = Vector("old" -> 0.minutes, "middle" -> 30.minutes, "young" -> 50.minutes)
-    ages.foldLeft(Option.empty[String]) { case (parent, (id, offset)) =>
+    // committed 0, 30 and 50 minutes after the start by the store's clock, which stamps each with its commit time
+    val ages = Vector("old" -> 0.minutes, "middle" -> 30.minutes, "young" -> 50.minutes)
+    ages.foldLeft((Option.empty[String], 0.minutes)) { case ((parent, now), (id, offset)) =>
+      s.advance(offset - now)
       val at = start.plusNanos(offset.toNanos)
       s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
-      Some(id)
-    }
-    s.advance(60.minutes)
+      (Some(id), offset)
+    }: Unit
+    s.advance(10.minutes)
     s.store.prune(s.thread, RetentionPolicy(maxAge = Some(20.minutes))).value shouldBe (())
     s.historyIds() shouldBe Vector("young")
     s.store.eventsAfter(s.thread, 2L, 10).value.map(_.seq) shouldBe Vector(3L)
@@ -1323,6 +1432,26 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.historyIds() shouldBe Vector("young")
     s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
     s.commit(token, events = Vector(s.event("after"))).value.map(_.seq) shouldBe Vector(4L)
+  }
+
+  it should "prune by age by when the store committed, never by a skewed producer's own timestamps" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    // the producer's clock is wrong both ways: the oldest commit says it is from next year, the younger ones from last
+    // year; the store's commit times, not these, decide what is old (Stage 5, rule 1)
+    val future = start.plus(java.time.Duration.ofDays(365))
+    val past   = start.minus(java.time.Duration.ofDays(365))
+    def commitAt(id: String, parent: Option[String], at: Instant) =
+      s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
+    commitAt("old", None, future)
+    s.advance(40.minutes)
+    commitAt("young", Some("old"), past)
+    commitAt("latest", Some("young"), past)
+    s.advance(10.minutes)
+    s.store.prune(s.thread, RetentionPolicy(maxAge = Some(30.minutes))).value shouldBe (())
+    s.historyIds() shouldBe Vector("latest", "young")
+    s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L, 3L)
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 2L)
   }
 
   it should "prune by event count, never lowering the floor, and accept an unknown thread" in {
@@ -1347,13 +1476,400 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.reopened()
     s.historyIds() shouldBe Vector("c3", "c2", "c1")
     s.store.checkpoint(s.thread, "c1").value.map(_.id) shouldBe Some("c1")
-    s.store.deleteThread(s.thread, token).value shouldBe (())
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
     s.historyIds() shouldBe empty
     s.store.checkpoint(s.thread, "c1").value shouldBe None
     // a new thread of the same id may use the ids again
     val again = s.claim("again").value.token
     s.chain(again, Vector("c1"))
     s.historyIds() shouldBe Vector("c1")
+  }
+
+  // ---- child threads (design 4.41) ----
+
+  private def originOf(parent: ThreadId, n: Int, depth: Int = 1): RunOrigin =
+    RunOrigin(parent, IdempotencyKey(s"call-$n"), org.llm4s.agent.AgentId.unsafe("worker"), start.plusSeconds(n), depth)
+
+  /** Commits a first checkpoint with `origin` on `child`, under a claim of its own, with one event, and releases it. */
+  private def childCommitted(
+    s: Store,
+    child: ThreadId,
+    origin: Option[RunOrigin],
+    status: CheckpointStatus = CheckpointStatus.Completed,
+    tenant: Option[String] = None,
+    id: String = "c1"
+  ): Unit =
+    val claim  = s.claim("child", on = child, tenant = tenant).value
+    val parent = s.latestId(child)
+    s.commit(
+      claim.token,
+      Some(s.checkpoint(id, parent, on = child, status = status).withOrigin(origin).withTenantId(tenant)),
+      events = Vector(s.event(id, Some(id))),
+      on = child
+    ).value
+    s.store.release(child, claim.token).value
+
+  /**
+   * A format-7 checkpoint as the last format-7 build wrote it (`Checkpoint.toJson`, 7623bd442): no `origin` and no
+   * `outcome` field.
+   */
+  private val formatSeven: String =
+    """{"formatVersion":7,"id":"c7","parent":null,"threadId":"format-7","runId":"run","status":"Completed","createdAt":"2026-10-09T12:00:00Z","snapshot":{"graphId":"g","graphVersion":"v1","fingerprint":"f","superstep":0,"state":{},"frontier":[],"staticJoins":[],"dynamicJoins":[],"parked":[],"paused":false},"tenantId":"tenant-a","fencingToken":3}"""
+
+  it should "read back a checkpoint's origin and outcome, on the latest, in the history and by id, across a reopen" in {
+    val s      = Store()
+    val origin = originOf(s.thread, 1)
+    val child  = ThreadId(s"${s.thread.value}/~task/worker/1")
+    val token  = s.claim("run", on = child).value.token
+    s.commit(token, Some(s.checkpoint("c1", None, on = child).withOrigin(origin)), on = child).value
+    s.commit(
+      token,
+      Some(
+        s.checkpoint("c2", Some("c1"), on = child, status = CheckpointStatus.Completed)
+          .withOrigin(origin)
+          .withOutcome(RunOutcome.Blocked("LengthCheck", "too long"))
+      ),
+      on = child
+    ).value
+    s.reopened()
+    val latest = s.store.latest(child).value.value.checkpoint
+    latest.origin shouldBe Some(origin)
+    latest.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    s.store.history(child, None, 10).value.map(c => (c.id, c.origin, c.outcome)) shouldBe Vector(
+      ("c2", Some(origin), Some(RunOutcome.Blocked("LengthCheck", "too long"))),
+      ("c1", Some(origin), None)
+    )
+    s.store.checkpoint(child, "c1").value.value.origin shouldBe Some(origin)
+    // a later checkpoint without an outcome clears it, and keeps the origin it carries
+    s.commit(token, Some(s.checkpoint("c3", Some("c2"), on = child).withOrigin(origin)), on = child).value
+    s.store.latest(child).value.value.checkpoint.outcome shouldBe None
+    s.store.checkpoint(child, "c2").value.value.outcome shouldBe Some(RunOutcome.Blocked("LengthCheck", "too long"))
+    val invalid = RunOutcome.OutputInvalid(Vector("a", "b", "c", "d", "e", "f"))
+    s.commit(
+      token,
+      Some(s.checkpoint("c4", Some("c3"), on = child, status = CheckpointStatus.Failed).withOutcome(invalid)),
+      on = child
+    ).value
+    s.store.latest(child).value.value.checkpoint.outcome shouldBe Some(invalid)
+  }
+
+  it should "list a thread's children oldest first, paged, without a tenant, and never one deleted" in {
+    val s        = Store()
+    val children = (1 to 4).map(n => ThreadId(s"${s.thread.value}/~task/worker/$n")).toVector
+    children.zipWithIndex.foreach { (child, i) =>
+      childCommitted(
+        s,
+        child,
+        Some(originOf(s.thread, i + 1)),
+        status = if i == 1 then CheckpointStatus.Suspended else CheckpointStatus.Completed,
+        tenant = Some("tenant-a")
+      )
+    }
+    // another parent's child and a top-level thread are not listed
+    childCommitted(s, ThreadId(s"${s.thread.value}-other/~task/worker/1"), Some(originOf(ThreadId("other"), 1)))
+    childCommitted(s, ThreadId(s"${s.thread.value}-top"), None)
+
+    val listed = s.store.children(s.thread, None, 10).value
+    listed.map(_.threadId) shouldBe children
+    listed.map(_.status)(1) shouldBe CheckpointStatus.Suspended
+    listed.head.origin shouldBe originOf(s.thread, 1)
+    listed.head.latest shouldBe "c1"
+    listed.head.updatedAt shouldBe start
+    s.store.children(s.thread, None, 0).value shouldBe empty
+
+    val first = s.store.children(s.thread, None, 3).value
+    first.map(_.threadId) shouldBe children.take(3)
+    s.store.children(s.thread, first.lastOption.map(_.threadId), 3).value.map(_.threadId) shouldBe children.drop(3)
+    s.store.children(s.thread, Some(ThreadId("stranger")), 3).refused shouldBe a[ValidationError]
+    s.store.children(s.thread, Some(children(0)), 10).value.map(_.threadId) shouldBe children.drop(1)
+
+    // a child keeps its place as it moves on
+    childCommitted(s, children(0), Some(originOf(s.thread, 1)), tenant = Some("tenant-a"), id = "c2")
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children
+
+    // a deleted child is not listed, and keeps its place as a page boundary
+    val claim = s.claim("deleter", on = children(1), tenant = Some("tenant-a")).value
+    s.store.deleteThread(children(1), claim.token, None).value
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1)
+    s.store.children(s.thread, Some(children(1)), 10).value.map(_.threadId) shouldBe children.drop(2)
+
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1)
+
+    // a new thread under the deleted child's id is the newest child, not in the old one's place
+    childCommitted(s, children(1), Some(originOf(s.thread, 2)), tenant = Some("tenant-a"), id = "c3")
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1) :+ children(1)
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe children.patch(1, Nil, 1) :+ children(1)
+  }
+
+  it should "keep a child's place when a blocked first turn retracts every checkpoint it had" in {
+    val s       = Store()
+    val blocked = ThreadId(s"${s.thread.value}/~task/worker/1")
+    val sibling = ThreadId(s"${s.thread.value}/~task/worker/2")
+    childCommitted(s, blocked, Some(originOf(s.thread, 1)), status = CheckpointStatus.Running)
+    childCommitted(s, sibling, Some(originOf(s.thread, 2)))
+    // the blocked turn retracts back to the newest settled checkpoint, of which there is none: the history is
+    // emptied before the terminal checkpoint is written, but the thread is the same one and keeps its place
+    val claim = s.claim("child", on = blocked).value
+    val terminal = s
+      .checkpoint("c2", s.latestId(blocked), on = blocked, status = CheckpointStatus.Failed)
+      .withOrigin(Some(originOf(s.thread, 1)))
+    s.store.commit(blocked, Commit(claim.token, Some(terminal), retractTurn = true)).value
+    s.store.release(blocked, claim.token).value
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(blocked, sibling)
+    s.reopened()
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(blocked, sibling)
+  }
+
+  it should "stop listing a child whose latest checkpoint names no parent, or another" in {
+    val s     = Store()
+    val child = ThreadId(s"${s.thread.value}/~task/worker/1")
+    childCommitted(s, child, Some(originOf(s.thread, 1)))
+    s.store.children(s.thread, None, 10).value.map(_.threadId) shouldBe Vector(child)
+    childCommitted(s, child, None, id = "c2")
+    s.store.children(s.thread, None, 10).value shouldBe empty
+    childCommitted(s, child, Some(originOf(ThreadId("elsewhere"), 1)), id = "c3")
+    s.store.children(s.thread, None, 10).value shouldBe empty
+    s.store.children(ThreadId("elsewhere"), None, 10).value.map(_.threadId) shouldBe Vector(child)
+  }
+
+  it should "read a format-7 checkpoint as a top-level thread with no outcome, listed as nobody's child" in {
+    val s       = Store()
+    val written = Checkpoint.fromJson(ujson.read(formatSeven)).value
+    written.formatVersion shouldBe Checkpoint.CurrentFormat
+    written.origin shouldBe None
+    written.outcome shouldBe None
+    val token = s.claim("seed", tenant = Some("tenant-a")).value.token
+    s.commit(token, Some(written.withThreadId(s.thread.value))).value
+    s.reopened()
+    val read = s.store.latest(s.thread).value.value.checkpoint
+    read.origin shouldBe None
+    read.outcome shouldBe None
+    s.store.children(s.thread, None, 10).value shouldBe empty
+  }
+
+  // ---- the thread registry (design 4.52) ----
+
+  /** A tenant of the case's own: the registry is tenant-scoped, so cases sharing one database never see each other's. */
+  private def newTenant(): Option[TenantId] = Some(TenantId(s"tenant-${java.util.UUID.randomUUID()}"))
+
+  /**
+   * Commits a new latest checkpoint on `on` for `tenant` under a claim of its own, with `metadata` when given, and
+   * releases the claim unless `hold`; the claim's token.
+   */
+  private def registered(
+    s: Store,
+    on: ThreadId,
+    tenant: Option[TenantId],
+    status: CheckpointStatus = CheckpointStatus.Completed,
+    graph: String = "g",
+    metadata: Option[ThreadMetadata] = None,
+    origin: Option[RunOrigin] = None,
+    deleting: Boolean = false,
+    hold: Boolean = false
+  ): FencingToken =
+    val claim = s.claim("registrar", on = on, tenant = tenant.map(_.value)).value
+    val base  = s.checkpoint(s"c-${java.util.UUID.randomUUID()}", s.latestId(on), Some(claim.token), on, status)
+    val checkpoint = base
+      .withSnapshot(base.snapshot.copy(graphId = graph))
+      .withTenantId(tenant.map(_.value))
+      .withOrigin(origin)
+      .withDeleting(deleting)
+    s.store.commit(on, Commit(claim.token, Some(checkpoint)).withMetadata(metadata)).value
+    if !hold then s.store.release(on, claim.token).value
+    claim.token
+
+  private def listed(s: Store, query: ThreadQuery): Vector[ThreadId] =
+    s.store.threads(query).value.threads.map(_.threadId)
+
+  private def summary(s: Store, tenant: Option[TenantId], on: ThreadId): Option[ThreadSummary] =
+    s.store.threads(ThreadQuery(tenant, limit = ThreadQuery.MaxLimit)).value.threads.find(_.threadId == on)
+
+  it should "keep a thread's metadata, replaced only by a fenced commit carrying it, across a reopen, until the thread is deleted" in {
+    val s      = Store()
+    val tenant = newTenant()
+    val token  = registered(s, s.thread, tenant, metadata = Some(ThreadMetadata("team" -> "red")), hold = true)
+    // a commit without metadata leaves it as it is
+    s.commit(token, Some(s.checkpoint("c2", s.latestId(), Some(token)).withTenantId(tenant.map(_.value)))).value
+    summary(s, tenant, s.thread).value.metadata shouldBe ThreadMetadata("team" -> "red")
+    // a stale writer's is refused, changing nothing
+    s.store
+      .commit(s.thread, Commit(FencingToken(token.value + 1000)).withMetadata(ThreadMetadata("x" -> "y")))
+      .refused shouldBe a[GraphError.StaleClaim]
+    // one carrying metadata replaces it whole, without a checkpoint
+    s.store.commit(s.thread, Commit(token).withMetadata(ThreadMetadata("tier" -> "1"))).value
+    summary(s, tenant, s.thread).value.metadata shouldBe ThreadMetadata("tier" -> "1")
+    s.store.release(s.thread, token).value
+    s.reopened()
+    val read = summary(s, tenant, s.thread).value
+    read.metadata shouldBe ThreadMetadata("tier" -> "1")
+    read.checkpointId shouldBe "c2"
+    read.agent shouldBe "g"
+    read.tenantId shouldBe tenant
+
+    // a thread with metadata and no checkpoint keeps it, but is not listed until it has one
+    val bare  = newThread()
+    val claim = s.claim("bare", on = bare, tenant = tenant.map(_.value)).value
+    s.store.commit(bare, Commit(claim.token).withMetadata(ThreadMetadata("team" -> "blue"))).value
+    s.store.release(bare, claim.token).value
+    summary(s, tenant, bare) shouldBe None
+    registered(s, bare, tenant)
+    summary(s, tenant, bare).value.metadata shouldBe ThreadMetadata("team" -> "blue")
+
+    // deleted with the thread: a new thread of the id has none
+    val deleter = s.claim("deleter", tenant = tenant.map(_.value)).value
+    s.store.deleteThread(s.thread, deleter.token, None).value
+    summary(s, tenant, s.thread) shouldBe None
+    registered(s, s.thread, tenant)
+    summary(s, tenant, s.thread).value.metadata shouldBe ThreadMetadata.empty
+  }
+
+  it should "list a tenant's root threads newest first by when the store last changed them, paged, and never another tenant's, a child or a deleted one" in {
+    val s       = Store()
+    val tenant  = newTenant()
+    val threads = (1 to 4).map(_ => newThread()).toVector
+    val stamped = threads.map { t =>
+      s.advance(1.second)
+      registered(s, t, tenant)
+      s.clock.instant()
+    }
+    val all = ThreadQuery(tenant)
+    listed(s, all) shouldBe threads.reverse
+    // when the store committed, by its clock - never the producer's createdAt, which every checkpoint here shares
+    if exactExpiry then s.store.threads(all).value.threads.map(_.updatedAt) shouldBe stamped.reverse
+    // another tenant's thread, a thread of no tenant and a child are not the tenant's root threads
+    val mark = ThreadMetadata("case" -> s.thread.value.takeRight(36))
+    registered(s, newThread(), newTenant())
+    val untenanted = newThread()
+    registered(s, untenanted, None, metadata = Some(mark))
+    registered(s, ThreadId(s"${threads(0).value}/~task/worker/1"), tenant, origin = Some(originOf(threads(0), 1)))
+    listed(s, all) shouldBe threads.reverse
+    listed(s, ThreadQuery(None, metadata = mark)) shouldBe Vector(untenanted)
+
+    // paged by position: each page starts after the last one's end, and the last page names no next one
+    val first = s.store.threads(all.withLimit(3)).value
+    first.threads.map(_.threadId) shouldBe threads.reverse.take(3)
+    first.next shouldBe Some(first.threads.last.cursor)
+    val second = s.store.threads(all.withLimit(3).withAfter(first.next)).value
+    second.threads.map(_.threadId) shouldBe Vector(threads(0))
+    second.next shouldBe None
+    s.store.threads(all.withLimit(4)).value.next shouldBe None
+
+    // a thread changed moves to the front; a deleted one is gone
+    s.advance(1.second)
+    registered(s, threads(1), tenant)
+    listed(s, all) shouldBe Vector(threads(1), threads(3), threads(2), threads(0))
+    val cursorAtDeleted = summary(s, tenant, threads(2)).value.cursor
+    val deleter         = s.claim("deleter", on = threads(2), tenant = tenant.map(_.value)).value
+    s.store.deleteThread(threads(2), deleter.token, None).value
+    listed(s, all) shouldBe Vector(threads(1), threads(3), threads(0))
+    // a cursor at a deleted thread still names a position
+    listed(s, all.withAfter(cursorAtDeleted)) shouldBe Vector(threads(0))
+  }
+
+  it should "judge each thread's status by its latest checkpoint and a live claim, by the store's clock, and filter by it" in {
+    val s         = Store()
+    val tenant    = newTenant()
+    val completed = newThread()
+    val suspended = newThread()
+    val failed    = newThread()
+    val idle      = newThread()
+    val running   = newThread()
+    val reclaimed = newThread()
+    val deleting  = newThread()
+    registered(s, completed, tenant)
+    registered(s, suspended, tenant, CheckpointStatus.Suspended)
+    registered(s, failed, tenant, CheckpointStatus.Failed)
+    registered(s, idle, tenant, CheckpointStatus.Running)
+    registered(s, running, tenant, CheckpointStatus.Running, hold = true)
+    registered(s, reclaimed, tenant)
+    s.claim("again", on = reclaimed, tenant = tenant.map(_.value)).value
+    registered(s, deleting, tenant, CheckpointStatus.Running, deleting = true, hold = true)
+    def statuses: Map[ThreadId, ThreadStatus] =
+      s.store.threads(ThreadQuery(tenant)).value.threads.map(t => t.threadId -> t.status).toMap
+    statuses shouldBe Map(
+      completed -> ThreadStatus.Completed,
+      suspended -> ThreadStatus.Suspended,
+      failed    -> ThreadStatus.Failed,
+      idle      -> ThreadStatus.Idle,
+      running   -> ThreadStatus.Running,
+      reclaimed -> ThreadStatus.Running,
+      deleting  -> ThreadStatus.Deleted
+    )
+    ThreadStatus.values.foreach { status =>
+      listed(s, ThreadQuery(tenant, status = Some(status))).toSet shouldBe
+        statuses.collect { case (t, `status`) => t }.toSet
+    }
+    // once their claims expire, by the store's clock, the held threads are at rest again
+    s.advance(ttl + 1.second)
+    statuses(running) shouldBe ThreadStatus.Idle
+    statuses(reclaimed) shouldBe ThreadStatus.Completed
+    statuses(deleting) shouldBe ThreadStatus.Deleted
+    listed(s, ThreadQuery(tenant, status = Some(ThreadStatus.Running))) shouldBe empty
+    listed(s, ThreadQuery(tenant, status = Some(ThreadStatus.Idle))).toSet shouldBe Set(idle, running)
+  }
+
+  it should "filter by agent, by every metadata entry given, and by when the store last changed the thread" in {
+    val s      = Store()
+    val tenant = newTenant()
+    val a      = newThread()
+    val b      = newThread()
+    val c      = newThread()
+    registered(s, a, tenant, graph = "x", metadata = Some(ThreadMetadata("team" -> "red", "tier" -> "1")))
+    s.advance(1.second)
+    registered(s, b, tenant, graph = "y", metadata = Some(ThreadMetadata("team" -> "red")))
+    s.advance(1.second)
+    registered(s, c, tenant, graph = "x", metadata = Some(ThreadMetadata("team" -> "blue")))
+    val all = ThreadQuery(tenant)
+    listed(s, all.withAgent("x")) shouldBe Vector(c, a)
+    listed(s, all.withMetadata(ThreadMetadata("team" -> "red"))) shouldBe Vector(b, a)
+    listed(s, all.withMetadata(ThreadMetadata("team" -> "red", "tier" -> "1"))) shouldBe Vector(a)
+    listed(s, all.withMetadata(ThreadMetadata("team" -> "red", "tier" -> "2"))) shouldBe empty
+    listed(s, all.withAgent("x").withMetadata(ThreadMetadata("team" -> "red"))) shouldBe Vector(a)
+    listed(s, all.withAgent("z")) shouldBe empty
+    val since = summary(s, tenant, b).value.updatedAt
+    listed(s, all.withUpdatedSince(since)) shouldBe Vector(c, b)
+    // filters and paging together
+    val page = s.store.threads(all.withAgent("x").withLimit(1)).value
+    page.threads.map(_.threadId) shouldBe Vector(c)
+    listed(s, all.withAgent("x").withLimit(1).withAfter(page.next)) shouldBe Vector(a)
+  }
+
+  it should "list a tenant's incomplete root threads that no live claim holds, oldest first, an expired claim's included, paged" in {
+    val s        = Store()
+    val tenant   = newTenant()
+    val crashed  = newThread()
+    val held     = newThread()
+    val stopped  = newThread()
+    val complete = newThread()
+    registered(s, crashed, tenant, CheckpointStatus.Running)
+    s.advance(1.second)
+    registered(s, held, tenant, CheckpointStatus.Running, hold = true)
+    s.advance(1.second)
+    registered(s, stopped, tenant, CheckpointStatus.Running)
+    registered(s, complete, tenant)
+    val child = ThreadId(s"${crashed.value}/~task/worker/1")
+    registered(s, child, tenant, CheckpointStatus.Running, origin = Some(originOf(crashed, 1)))
+    registered(s, newThread(), newTenant(), CheckpointStatus.Running)
+    registered(s, newThread(), tenant, CheckpointStatus.Running, deleting = true)
+    def incomplete(after: Option[ThreadCursor] = None, limit: Int = 10): ThreadPage =
+      s.store.incompleteThreads(tenant, after, limit).value
+    incomplete().threads.map(_.threadId) shouldBe Vector(crashed, stopped)
+    incomplete().threads.map(_.status).distinct shouldBe Vector(ThreadStatus.Idle)
+    // a claim that expired without a release holds nothing
+    s.advance(ttl + 1.second)
+    incomplete().threads.map(_.threadId) shouldBe Vector(crashed, held, stopped)
+    val first = incomplete(limit = 2)
+    first.threads.map(_.threadId) shouldBe Vector(crashed, held)
+    first.next shouldBe Some(first.threads.last.cursor)
+    incomplete(first.next, 2) shouldBe ThreadPage(Vector(summary(s, tenant, stopped).value), None)
+    // a thread a run claims again is held again
+    s.claim("recovering", on = crashed, tenant = tenant.map(_.value)).value
+    incomplete().threads.map(_.threadId) shouldBe Vector(held, stopped)
+    // the page is bounded
+    s.store.incompleteThreads(tenant, None, 0).refused shouldBe a[ValidationError]
+    s.store.incompleteThreads(tenant, None, ThreadQuery.MaxLimit + 1).refused shouldBe a[ValidationError]
   }
 
   // ---- effect records (design §4.24) ----
@@ -1589,14 +2105,14 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.commit(token, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a"))), events = Vector(s.event("e"))).value
     val record = effectRecord("k", "0.0", "a")
     s.store.commit(s.thread, Commit(token, effects = Vector(record))).value
-    s.store.deleteThread(s.thread, token).value
+    s.store.deleteThread(s.thread, token, None).value
     s.store.effect(s.thread, keyOf(record)).value shouldBe None
     // and a thread that numbered no event, which leaves no tombstone
     val bare      = newThread()
     val bareToken = s.claim("bare", bare).value.token
     s.commit(bareToken, Some(liveCheckpoint(s, "c1", None, 0, Seq("0.0" -> "a"))), on = bare).value
     s.store.commit(bare, Commit(bareToken, effects = Vector(record))).value
-    s.store.deleteThread(bare, bareToken).value
+    s.store.deleteThread(bare, bareToken, None).value
     s.store.effect(bare, keyOf(record)).value shouldBe None
   }
 
@@ -1709,10 +2225,18 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       def latest(threadId: ThreadId)                                       = s.store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = s.store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId, token: FencingToken)       = s.store.deleteThread(threadId, token)
+      def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+        s.store.deleteThread(threadId, token, fence)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = s.store.history(threadId, before, limit)
-      def checkpoint(threadId: ThreadId, checkpointId: String)            = s.store.checkpoint(threadId, checkpointId)
-      def prune(threadId: ThreadId, policy: RetentionPolicy)              = s.store.prune(threadId, policy)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = s.store.children(parent, after, limit)
+      def threads(query: org.llm4s.agent.graph.ThreadQuery)               = s.store.threads(query)
+      def incompleteThreads(
+        tenantId: Option[org.llm4s.agent.graph.TenantId],
+        after: Option[org.llm4s.agent.graph.ThreadCursor],
+        limit: Int
+      ) = s.store.incompleteThreads(tenantId, after, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     val first   = GraphRuntime(counted, claims = ClaimPolicy(ttl = ttl, renewEvery = 20.millis))
     val second  = GraphRuntime(s.store, claims = neverRenewed)
     val gate    = w.gate("a")
@@ -1878,10 +2402,18 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         s.store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = s.store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = s.store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId, token: FencingToken)       = s.store.deleteThread(threadId, token)
+      def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+        s.store.deleteThread(threadId, token, fence)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = s.store.history(threadId, before, limit)
-      def checkpoint(threadId: ThreadId, checkpointId: String)            = s.store.checkpoint(threadId, checkpointId)
-      def prune(threadId: ThreadId, policy: RetentionPolicy)              = s.store.prune(threadId, policy)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = s.store.children(parent, after, limit)
+      def threads(query: org.llm4s.agent.graph.ThreadQuery)               = s.store.threads(query)
+      def incompleteThreads(
+        tenantId: Option[org.llm4s.agent.graph.TenantId],
+        after: Option[org.llm4s.agent.graph.ThreadCursor],
+        limit: Int
+      ) = s.store.incompleteThreads(tenantId, after, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     completed(GraphRuntime(s.store, claims = neverRenewed).start(s.thread, w.graph, Vector("a"), config("a")).value)
     val seqs = s.seqs()
 

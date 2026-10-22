@@ -1,6 +1,7 @@
 import sbt._
 import sbt.Keys._
 import com.typesafe.sbt.packager.docker._
+import com.typesafe.sbt.packager.universal.UniversalPlugin.autoImport.Universal
 import com.typesafe.sbt.packager.docker.DockerPlugin.autoImport._
 import com.typesafe.sbt.packager.Keys.{ packageName, maintainer }
 
@@ -50,18 +51,37 @@ object WorkspaceRunnerDocker {
         "[ -d /root/.sdkman/candidates/scala/$v ] || { echo \"scala $v was not installed after 5 attempts\" >&2; exit 1; }; " +
         "done'"
     ),
-    Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH")
+    Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH"),
+    // llm4s-confine (design §4.39): every execute command runs under it. Static, so it needs nothing from the image at
+    // run time; the compiler is removed in the same layer.
+    Cmd(
+      "RUN",
+      "apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && " +
+        "gcc -O2 -static -Wall -Wextra -Werror -o /usr/local/bin/llm4s-confine /opt/docker/confine/llm4s-confine.c && " +
+        "apt-get purge -y gcc libc6-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*"
+    )
   )
+
+  /** The runner JVM's java.io.tmpdir: owner-only, never granted to a command (design §4.39). */
+  val RunnerTmpDir: String = "/var/tmp/llm4s-runner"
 
   // Core image settings used by workspaceRunner
   val settings: Seq[Setting[_]] = Seq(
-    Docker / maintainer         := "llm4s",
-    Docker / packageName        := "llm4s/workspace-runner",
-    dockerExposedPorts          := Seq(8080),
-    dockerBaseImage             := "eclipse-temurin:21-jdk",
-    Docker / version            := version.value.replace('+', '-'),
-    Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
-    dockerCommands ++= devToolingCommands,
+    Docker / maintainer  := "llm4s",
+    Docker / packageName := "llm4s/workspace-runner",
+    dockerExposedPorts   := Seq(8080),
+    dockerBaseImage      := "eclipse-temurin:21-jdk",
+    Docker / version     := version.value.replace('+', '-'),
+    Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
+    // The runner grants commands /tmp only when its JVM keeps nothing there (design §4.39): no attach mechanism (its
+    // trigger file and socket are in /tmp, so a command could otherwise attach to the unconfined runner), no shared
+    // perf-data file, and its own temporary files (git's empty directory) in a runner-private directory, made below.
+    Universal / javaOptions ++= Seq(
+      "-J-XX:+DisableAttachMechanism",
+      "-J-XX:+PerfDisableSharedMem",
+      s"-J-Djava.io.tmpdir=$RunnerTmpDir"
+    ),
+    dockerCommands ++= devToolingCommands :+ Cmd("RUN", s"mkdir -p -m 0700 $RunnerTmpDir"),
     dockerLabels ++= Map(
       "org.opencontainers.image.title"       -> "llm4s workspace-runner",
       "org.opencontainers.image.source"      -> "https://github.com/llm4s/llm4s",

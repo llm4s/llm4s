@@ -35,6 +35,7 @@ nav_order: 4
 ## Suppressing a finding
 - File-wide: put `// scalafix:off` (silences all rules) or `// scalafix:off DisableSyntax.NoSysEnv` (silences one) at the top of the file, before the `package` declaration.
 - Block: wrap the region with `// scalafix:off RuleId` / `// scalafix:on RuleId`.
+- Name only the rules the region needs, and remove the marker when the code no longer trips them: `.scalafix.conf` sets `lint.error = [UnusedScalafixSuppression]`, so a suppression that suppresses nothing fails `scalafix`. A Scala 3 brace-less `try ... catch` does not match `NoKeywordTry`/`NoKeywordCatch` (their patterns need a `{`), so it needs no marker.
 - Use sparingly; prefer fixing the violation. App-edge code (samples, workspace, the `org.llm4s.config` package) is the most common legitimate exemption.
 
 ## Migration guidance

@@ -86,12 +86,10 @@ body:
     id: jdk_version
     attributes:
       label: JDK Version
-      description: Which JDK version are you using?
+      description: Which JDK version are you using? llm4s needs JDK 21 or newer (an older JDK fails with UnsupportedClassVersionError).
       options:
-        - "JDK 21"
-        - "JDK 20"
-        - "JDK 19"
-        - "JDK 17 (LTS)"
+        - "JDK 21 (LTS)"
+        - "JDK 25 (LTS)"
         - "Other (please specify below)"
     validations:
       required: true

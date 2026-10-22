@@ -35,7 +35,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
   }
 
   private def breakpointsOf(result: AgentResult): Vector[(InterruptId, BreakpointRequest)] = result.status match {
-    case AgentStatus.Suspended(approvals, questions, asked, held) =>
+    case AgentStatus.Suspended(approvals, questions, asked, held, _) =>
       (approvals ++ questions ++ asked).size shouldBe 0
       held
     case other => fail(s"expected Suspended, got $other")
@@ -43,7 +43,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
 
   /** The one interrupt `result` waits for: a middleware question. */
   private def onlyQuestion(result: AgentResult): InterruptId = result.status match {
-    case AgentStatus.Suspended(Vector(), Vector(), Vector((id, _)), Vector()) => id
+    case AgentStatus.Suspended(Vector(), Vector(), Vector((id, _)), Vector(), _) => id
     case other => fail(s"expected one middleware question, got $other")
   }
 
@@ -157,7 +157,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
     )
     val parked = agent.run("deploy").value
     val (approval, held) = parked.status match {
-      case AgentStatus.Suspended(approvals, Vector(), Vector(), breakpoints) =>
+      case AgentStatus.Suspended(approvals, Vector(), Vector(), breakpoints, _) =>
         approvals.map(_._2.call.id) shouldBe Vector("c1")
         breakpoints.map(_._2) shouldBe Vector(BreakpointRequest(toolNode, BreakpointPhase.After, None))
         (approvals.head._1, breakpoints.head._1)
@@ -241,7 +241,7 @@ class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
       built(Agent.builder("assistant", client).withTools(SpecTools.set(confirm)).withInterruptAfter(AgentNode.Tool))
     val parked = agent.run("go").value
     val question = parked.status match {
-      case AgentStatus.Suspended(Vector(), Vector((id, _)), Vector(), Vector()) => id
+      case AgentStatus.Suspended(Vector(), Vector((id, _)), Vector(), Vector(), _) => id
       case other => fail(s"expected a tool question, got $other")
     }
     val answered = agent.resume(parked.threadId, Map(parked.reply(question, true))).value

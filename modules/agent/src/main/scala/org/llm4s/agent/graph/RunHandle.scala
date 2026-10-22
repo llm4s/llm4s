@@ -53,9 +53,10 @@ trait RunHandle[O]:
    * from its start whenever it is called; see [[GraphRuntime.subscribe]]. The subscription is the
    * thread's, not the run's: it keeps delivering later runs on the same thread, and holds its parked
    * dispatcher thread until [[Subscription.cancel]] is called. Like every subscription, it
-   * delivers live only the commits made through this handle's [[GraphRuntime]].
+   * delivers live only the commits made through this handle's [[GraphRuntime]]. With `nested`, it also receives
+   * the events of the children the thread's runs delegate to, as [[StreamEvent.Nested]] (design 4.47).
    */
-  def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription]
+  def subscribe(capacity: Int = 1024, nested: Boolean = false)(listener: StreamEvent => Unit): Result[Subscription]
 
   /**
    * The subscription of the [[Observer]] this run was admitted with; `None` without one. Like any
@@ -113,7 +114,7 @@ final private[graph] class DefaultRunHandle[O](
   val runId: RunId,
   claimSeq: Long,
   signal: StopSignal,
-  subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Dispatched],
+  subscribeFrom: (Long, Int, Boolean, StreamEvent => Unit) => Result[Dispatched],
   val observation: Option[Dispatched]
 ) extends RunHandle[O]:
 
@@ -181,8 +182,8 @@ final private[graph] class DefaultRunHandle[O](
   /** A test hook run by [[stop]] between recording its cause and interrupting; a no-op by default. */
   @volatile private[graph] var beforeInterrupt: () => Unit = () => ()
 
-  def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription] =
-    subscribeFrom(claimSeq - 1, capacity, listener).map { subscription =>
+  def subscribe(capacity: Int = 1024, nested: Boolean = false)(listener: StreamEvent => Unit): Result[Subscription] =
+    subscribeFrom(claimSeq - 1, capacity, nested, listener).map { subscription =>
       endsWithRun(subscription)
       subscription
     }

@@ -46,7 +46,7 @@ abstract class LaggingOrDeletedCases
   /** Deletes the thread as another runtime would: under a claim of its own. */
   private def deleteElsewhere(store: Checkpointer, thread: ThreadId): Unit =
     val claim = store.claim(thread, ClaimRequest(RunId("deleter"), None, 30.seconds)).value
-    store.deleteThread(thread, claim.token).value
+    store.deleteThread(thread, claim.token, None).value
 
   /** A listener that holds its first call until `release`, so what follows it stays queued. */
   final private class Held extends (StreamEvent => Unit):

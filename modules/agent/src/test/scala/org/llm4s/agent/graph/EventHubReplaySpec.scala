@@ -52,6 +52,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
     case StreamEvent.Disconnected(_, reason)      => s"Disconnected($reason)"
     case StreamEvent.LiveGap(n)                   => s"gap:$n"
     case StreamEvent.Live(_, _, _, _, _, _, _, p) => s"live:${p.num.toInt}"
+    case _: StreamEvent.Nested                    => "nested"
 
   private def live(i: Int): StreamEvent.Live =
     StreamEvent.Live(thread.value, run.value, FencingToken(1L), "task", "node", "test.progress", 1, ujson.Num(i))
@@ -97,7 +98,15 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
         release.await(5, TimeUnit.SECONDS): Unit
       Right(page(n).filter(_.seq > afterSeq).take(limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = underlying.deleteThread(threadId, token)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)

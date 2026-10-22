@@ -12,10 +12,11 @@ import java.util.Optional;
  * <pre>{@code
  * JAgentStatus s = result.status();
  * switch (s.kind()) {
- *     case COMPLETED          -> System.out.println(s.answer().orElseThrow());
- *     case BLOCKED            -> System.out.println(s.guardrail().orElseThrow() + ": " + s.reason().orElseThrow());
- *     case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
- *     case SUSPENDED          -> s.pending().forEach(p -> answers.add(Answer.approve(p.id())));
+ *     case COMPLETED           -> System.out.println(s.answer().orElseThrow());
+ *     case BLOCKED             -> System.out.println(s.guardrail().orElseThrow() + ": " + s.reason().orElseThrow());
+ *     case STEP_LIMIT_REACHED  -> System.out.println("Hit the step limit");
+ *     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
+ *     case SUSPENDED           -> s.pending().forEach(p -> answers.add(Answer.approve(p.id())));
  * }
  * }</pre>
  *

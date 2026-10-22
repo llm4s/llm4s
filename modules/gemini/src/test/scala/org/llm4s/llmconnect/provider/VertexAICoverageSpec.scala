@@ -94,7 +94,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
        | "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""".stripMargin
 
-  private def captureBodyClient(onCompletion: String => Unit): VertexAIClient = {
+  private def captureBodyClient(onCompletion: String => Unit, config: VertexAIConfig = testConfig): VertexAIClient = {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).onCall {
       (url: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
@@ -107,7 +107,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
         }
     }
     (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
-    new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
 
   // ============================================================
@@ -383,6 +383,20 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val genCfg = ujson.read(capturedBody)("generationConfig")
     genCfg("responseMimeType").str shouldBe "application/json"
     genCfg.obj.contains("responseSchema") shouldBe true
+  }
+
+  it should "send the googleSearch tool only when the config enables it (#1216)" in {
+    var plain = ""
+    captureBodyClient(plain = _)
+      .complete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())
+      .isRight shouldBe true
+    ujson.read(plain).obj.contains("tools") shouldBe false
+
+    var grounded = ""
+    captureBodyClient(grounded = _, testConfig.withGoogleSearch(true))
+      .complete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions())
+      .isRight shouldBe true
+    ujson.read(grounded)("tools") shouldBe ujson.Arr(ujson.Obj("googleSearch" -> ujson.Obj()))
   }
 
   it should "include functionDeclarations when tools are passed in CompletionOptions" in {

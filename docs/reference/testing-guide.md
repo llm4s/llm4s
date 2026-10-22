@@ -272,10 +272,10 @@ to say which tier does run it.
 |---|---|---|---|
 | `@Local` | nothing external | `sbt test` | every PR |
 | `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
-| `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
-| `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` (a container started in a CI step) |
+| `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main`, PRs that change the workspace, and manual `workflow_dispatch` with `tier=workspace` |
+| `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` with `tier=mcp-reference` (a container started in a CI step) |
 | `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
-| `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` |
+| `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` with `tier=cloud-smoke` |
 
 ```scala
 import org.llm4s.it.tags.Docker
@@ -328,7 +328,7 @@ The `@McpReference` tier runs the MCP client against the official MCP reference 
 (`@modelcontextprotocol/server-everything`, pinned with its whole dependency tree in
 `modules/it/mcp-reference-server/`). Starting it pulls the `node` image from Docker Hub and the
 server from npm, so CI runs this tier on pushes to `main` and on manual `workflow_dispatch`
-rather than on every PR, where an outage of either service would fail unrelated changes:
+(`gh workflow run ci.yml --ref <branch> -f tier=mcp-reference`) rather than on every PR, where an outage of either service would fail unrelated changes:
 
 ```bash
 docker run -d -p 3001:3001 -v "$PWD/modules/it/mcp-reference-server:/src:ro" \

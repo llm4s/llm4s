@@ -587,9 +587,9 @@ object CompleteSupportSystem {
 
 ## See Also
 
-- [Error Recovery Patterns](./error-recovery.md) - Handle agent failures
-- [Production Monitoring](./production-monitoring.md) - Monitor multi-agent systems
-- [Scaling Strategies](./scaling-strategies.md) - Scale agent deployments
+- [Error Recovery Patterns](./error-recovery) - Handle agent failures
+- [Production Monitoring](./production-monitoring) - Monitor multi-agent systems
+- [Scaling Strategies](./scaling-strategies) - Scale agent deployments
 - [Agent Framework Documentation](../agents/)
 
 ---

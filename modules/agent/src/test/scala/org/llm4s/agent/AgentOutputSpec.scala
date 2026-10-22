@@ -413,8 +413,8 @@ class AgentOutputSpec extends AnyFlatSpec with Matchers {
 
     val parked = agent.run(thread, "first").value
     val asked = parked.status match {
-      case AgentStatus.Suspended(_, _, asked, _) => asked
-      case other                                 => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(_, _, asked, _, _) => asked
+      case other                                    => fail(s"expected Suspended, got $other")
     }
     agent.resume(thread, Map(parked.reply(asked.head._1, true))).error shouldBe a[GraphError.OutputInvalid]
 

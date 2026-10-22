@@ -1,0 +1,1293 @@
+package org.llm4s.agent.delegation
+
+import org.llm4s.agent.{ Agent, AgentBuilder, CompletionFixture }
+import org.llm4s.agent.graph.{
+  GraphError,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  InterruptId,
+  RunConfig,
+  ThreadId,
+  ToolCallId
+}
+import org.llm4s.agent.graph.toolloop.ApprovalDecision
+import org.llm4s.agent.graph.middleware.{ PermissionMiddleware, PermissionRule }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, Operation, ToolContent, ToolOutcome, ToolSet }
+import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.*
+import org.llm4s.toolapi.{ Schema, SchemaDefinition }
+import org.llm4s.types.Result
+import org.scalatest.{ EitherValues, LoneElement, OptionValues }
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import upickle.default.ReadWriter
+
+import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
+import scala.jdk.CollectionConverters.*
+
+/** `TypedAgent`, the `task` tools and parallel bounded children (#2048, design 4.44), through a parent agent's runs. */
+class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
+  import DelegationSpec.*
+
+  "a typed subagent" should "take its typed input and give back a typed report the parent reads as its tool result" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "tides"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(s"composed from ${toolResults(messages).mkString}"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"the moon","sources":2}"""))
+    }
+    val agent  = lead(client).withSubagents(researcher).build().value
+    val result = agent.run(ThreadId("t1"), "research tides").value
+
+    result.answer.value should include(""""summary":"the moon"""")
+    toolResults(client.sentTo(LeadPrompt).last) shouldBe Vector("""{"summary":"the moon","sources":2}""")
+  }
+
+  it should "start the child with only its rendered input, and keep every child message out of the parent's thread (rule 17)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "tides"))))
+      case Lead(_)                => Right(CompletionFixture.simple("done"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"SECRET-CHILD-TEXT","sources":1}"""))
+    }
+    val agent  = lead(client).withSubagents(researcher).build().value
+    val result = agent.run(ThreadId("t1"), "PARENT-QUERY").value
+
+    val childCall = client.sentTo("CHILD:researcher").loneElement
+    childCall.collect { case u: UserMessage => u.content } shouldBe Vector(
+      "Task for subagent 'researcher', as JSON:\n{\"topic\":\"tides\"}"
+    )
+    (childCall.map(_.content).mkString should not).include("PARENT-QUERY")
+    // the parent's thread: its query, its call, the report as the tool result, its answer - no child message
+    (result.messages.collect { case a: AssistantMessage => a.content }.mkString should not).include("SECRET-CHILD-TEXT")
+    result.messages.count { case _: UserMessage => true; case _ => false } shouldBe 1
+    // and the child thread holds only its own turn
+    val child = agent.children(ThreadId("t1")).value.loneElement
+    child.origin.agent.value shouldBe "researcher"
+    child.origin.depth shouldBe 1
+  }
+
+  it should "offer the child only its own tools, never the parent's or the task tools (rule 15)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Lead(_)                => Right(CompletionFixture.simple("done"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val agent = lead(client)
+      .withTools(ToolSet.of(echo("parent_tool")).value)
+      .withSubagents(researcher.withTools(ToolSet.of(echo("child_tool")).value))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value
+
+    client.toolsSentTo("CHILD:researcher").loneElement shouldBe Vector("child_tool")
+    client.toolsSentTo(LeadPrompt).head.toSet shouldBe Set("parent_tool", "task_researcher")
+  }
+
+  "a text subagent" should "be offered through the shared task tool, take the description as its query, and report its answer" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "summarise X"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("general", messages) =>
+        Right(CompletionFixture.simple(s"report on ${messages.collect { case u: UserMessage => u.content }.mkString}"))
+    }
+    val agent  = lead(client).withSubagents(general).build().value
+    val result = agent.run(ThreadId("t1"), "go").value
+
+    result.answer.value shouldBe "report on summarise X"
+    val taskTool = client.optionsSentTo(LeadPrompt).head.tools.find(_.name == "task").value
+    taskTool.toOpenAITool(true).render() should include(""""enum":["general"]""")
+    // the prompt section lists the subagent
+    client.sentTo(LeadPrompt).head.head.content should include("general (`task` with subagent_type \"general\")")
+  }
+
+  "a child whose typed answer fails its schema twice" should "be a refusal the parent model sees as a tool error" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
+    }
+    val result = lead(client).withSubagents(researcher).build().value.run(ThreadId("t1"), "go").value
+
+    result.answer.value should include("subagent 'researcher'")
+    result.answer.value should include("did not match its output schema")
+  }
+
+  "a blocked child or one at its step limit" should "be a refusal reported to the parent model" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+    }
+    val limited = researcher.withTools(ToolSet.of(echo("child_tool")).value).withMaxSteps(1)
+    val result  = lead(client).withSubagents(limited).build().value.run(ThreadId("t1"), "go").value
+
+    result.answer.value should include("reached its step limit")
+  }
+
+  "parallel task calls" should "run concurrently, at most maxConcurrentChildren children at once" in {
+    val bothLive = new CountDownLatch(2)
+    val live     = new AtomicInteger(0)
+    val maxLive  = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task_researcher", ujson.Obj("topic" -> "a")),
+            call("c2", "task_researcher", ujson.Obj("topic" -> "b")),
+            call("c3", "task_researcher", ujson.Obj("topic" -> "c"))
+          )
+        )
+      case Lead(messages) => Right(CompletionFixture.simple(s"${toolResults(messages).size} reports"))
+      case Child("researcher", _) =>
+        val now = live.incrementAndGet()
+        maxLive.accumulateAndGet(now, math.max)
+        // the first two wait for each other, so both are live at once; the third finds the latch open
+        bothLive.countDown()
+        bothLive.await(5, TimeUnit.SECONDS)
+        Thread.sleep(50)
+        live.decrementAndGet()
+        Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxConcurrentChildren(2))
+      .build()
+      .value
+    val result = agent.run(ThreadId("t1"), "go").value
+
+    result.answer.value shouldBe "3 reports"
+    bothLive.getCount shouldBe 0
+    maxLive.get shouldBe 2
+    agent.children(ThreadId("t1")).value should have size 3
+  }
+
+  "maxTasksPerTurn" should "refuse the calls of one batch past the bound, by their order in the message" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task_researcher", ujson.Obj("topic" -> "a")),
+            call("c2", "task_researcher", ujson.Obj("topic" -> "b")),
+            call("c3", "task_researcher", ujson.Obj("topic" -> "c"))
+          )
+        )
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(2))
+      .build()
+      .value
+    val results = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+
+    results.take(2).foreach(_ should include("summary"))
+    results(2) should include("over maxTasksPerTurn = 2")
+    agent.children(ThreadId("t1")).value should have size 2
+  }
+
+  it should "count the turn's task calls across its model steps" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) if toolResults(messages).size == 1 =>
+        Right(
+          calling(
+            call("c2", "task_researcher", ujson.Obj("topic" -> "b")),
+            call("c3", "task_researcher", ujson.Obj("topic" -> "c"))
+          )
+        )
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(2))
+      .build()
+      .value
+    val results = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+
+    results should have size 3
+    results(2) should include("over maxTasksPerTurn = 2")
+    // a new turn starts counting again
+    val again = agent.run(ThreadId("t1"), "again").value.answer.value.split('|').toVector
+    again.take(2).foreach(_ should include("summary"))
+  }
+
+  it should "count the turn's task calls across handoffs, whichever agent's task tool made them (#2067)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+          Right(CompletionFixture.simple(toolResults(messages).last))
+        else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("general", _)    => Right(CompletionFixture.simple("report"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    // delegate -> handoff -> delegate in one turn: a handoff stays in the turn, so the second task is over the bound
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 1")
+    agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
+  }
+
+  it should "refuse a family whose handoff target raises the root's maxDepth (#2089)" in {
+    val client     = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent.builder("specialist", client).withDelegation(DelegationConfig().withMaxDepth(3))
+    val refused = lead(client)
+      .withDelegation(DelegationConfig().withMaxDepth(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("agents 'lead' and 'specialist'")
+    refused.message should include("maxDepth (1 vs 3)")
+  }
+
+  it should "refuse a family whose handoff target raises the root's maxTasksPerTurn (#2089)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(16))
+    val refused = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("maxTasksPerTurn (1 vs 16)")
+  }
+
+  it should "run a handoff target that sets no bounds under the root's (#2089)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        if messages.exists { case t: ToolMessage => t.toolCallId == "c2"; case _ => false } then
+          Right(CompletionFixture.simple(toolResults(messages).last))
+        else Right(calling(call("c2", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("general", _)    => Right(CompletionFixture.simple("report"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    // the specialist sets none, so it takes the family's cap of one: its task is the turn's second
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST").withSubagents(researcher)
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(1))
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 1")
+    agent.children(ThreadId("t1")).value.loneElement.origin.agent.value shouldBe "general"
+  }
+
+  it should "refuse a family where an agent's ordinary tool is named like a family task tool (#2067)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withTools(ToolSet.of(echo("task_researcher")).value)
+    val refused = lead(client)
+      .withSubagents(researcher)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused shouldBe a[ValidationError]
+    refused.message should include("agent 'specialist' has a tool named 'task_researcher'")
+  }
+
+  it should "refuse a family where an agent's middleware contributes a tool named like a family task tool (#2067)" in {
+    val client = RoutingClient { case _ => Right(CompletionFixture.simple("done")) }
+    val contributing = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id: org.llm4s.agent.graph.middleware.MiddlewareId =
+        org.llm4s.agent.graph.middleware.MiddlewareId("contributes")
+      override def tools: Vector[AgentTool[?]] = Vector(echo("task_researcher"))
+    }
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST").withMiddleware(contributing)
+    val refused = lead(client)
+      .withSubagents(researcher)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .build()
+      .left
+      .value
+    refused.message should include("agent 'specialist' has a tool named 'task_researcher'")
+  }
+
+  it should "not reset its count at a mixed batch the loop refused" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages) if toolResults(messages).size == 1 =>
+        Right(
+          calling(
+            call("m1", "handoff_to_specialist", ujson.Obj()),
+            call("m2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))
+          )
+        )
+      case Lead(messages) if toolResults(messages).size == 3 =>
+        Right(calling(call("c3", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).last))
+      case Child("general", _) => Right(CompletionFixture.simple("report"))
+    }
+    val specialist = Agent.builder("specialist", client).withSystemPrompt("SPECIALIST")
+    val agent = lead(client)
+      .withSubagents(general)
+      .withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist"))
+      .withDelegation(DelegationConfig().withMaxTasksPerTurn(2))
+      .build()
+      .value
+    // c1 is the first task, m2 the second (refused with its batch), c3 the third: over the bound
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("over maxTasksPerTurn = 2")
+  }
+
+  "maxDepth" should "refuse a task that would nest deeper than the bound" in {
+    val client = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("{}")) }
+    val bound  = researcher.bind(client, GraphRuntime.inMemory()).value
+    // installed in an agent that itself runs at depth 1, with maxDepth 1
+    val middleware = new DelegationMiddleware(Vector(bound), DelegationConfig(), depth = 1)
+    val tool       = middleware.tools.loneElement
+    val parent = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+    }
+    val agent = lead(parent).withMiddleware(middleware).build().value
+    tool.spec.name shouldBe "task_researcher"
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("deeper than maxDepth = 1")
+    client.calls shouldBe empty
+  }
+
+  "maxReportBytes" should "turn a larger report into a tool error" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) => Right(CompletionFixture.simple(s"""{"summary":"${"x" * 200}","sources":0}"""))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxReportBytes(100))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value should include("report over 100 bytes")
+  }
+
+  "ChildFailure.Report" should "let the parent compose without a failed child" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) => Left(ValidationError("provider", "the provider is down"))
+    }
+    val result = lead(client).withSubagents(researcher).build().value.run(ThreadId("t1"), "go").value
+    result.answer.value should include("failed")
+    result.answer.value should include("the provider is down")
+  }
+
+  "ChildFailure.Fail" should "fail the parent run, and the parent's recover continue the child from its checkpoint" in {
+    val childCalls = new AtomicInteger(0)
+    val probes     = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        childCalls.incrementAndGet() match
+          case 1 => Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+          case 2 => Left(ValidationError("provider", "the provider is down"))
+          case _ => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
+    }
+    val probe = AgentTool(SpecText.spec("probe")) { (_, _) =>
+      probes.incrementAndGet()
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("probed")))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher.withTools(ToolSet.of(probe).value).withFailure(ChildFailure.Fail))
+      .build()
+      .value
+
+    agent.run(ThreadId("t1"), "go").left.value.message should (include("task_researcher").and(
+      include("the provider is down")
+    ))
+    val recovered = agent.recover(ThreadId("t1")).value
+
+    recovered.answer.value should include("recovered")
+    probes.get shouldBe 1 // the child continued from its checkpoint: its tool call did not run again
+    childCalls.get shouldBe 3
+    client.sentTo("CHILD:researcher").map(_.count { case _: UserMessage => true; case _ => false }).distinct shouldBe
+      Vector(1)
+    agent.children(ThreadId("t1")).value should have size 1
+  }
+
+  "a suspended child" should "suspend the parent with the child's interrupt delegated, the child left suspended" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+    }
+    val asking = researcher
+      .withTools(ToolSet.of(echo("child_tool")).value)
+      .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.ask(Operation.Invoke, "child_tool"))))
+    val agent  = lead(client).withSubagents(asking).build().value
+    val result = agent.run(ThreadId("t1"), "go").value
+
+    result.status match
+      case suspended: org.llm4s.agent.AgentStatus.Suspended =>
+        suspended.delegated.loneElement._2.request.id shouldBe a[org.llm4s.agent.graph.InterruptId]
+        suspended.questions shouldBe empty
+      case other => fail(s"expected Suspended, got $other")
+    agent.children(ThreadId("t1")).value.loneElement.status.toString shouldBe "Suspended"
+  }
+
+  "a task call" should "be decided by a PermissionMiddleware on its resource (Invoke, task:<id>)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+    }
+    val agent = lead(client)
+      .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.deny(Operation.Invoke, "task:researcher"))))
+      .withSubagents(researcher)
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "go").value.answer.value.toLowerCase should include("denied")
+    agent.children(ThreadId("t1")).value shouldBe empty
+  }
+
+  "a child" should "run with its parent's tenant (rule 16)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(_)                => Right(CompletionFixture.simple("done"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val runtime = new GraphRuntime(new InMemoryCheckpointer())
+    val agent   = lead(client).withRuntime(runtime).withSubagents(researcher).build().value
+    val tenant  = RunConfig().withTenantId(org.llm4s.agent.graph.TenantId("acme"))
+    agent.run(ThreadId("t1"), "go", tenant).value
+    val child = agent.children(ThreadId("t1"), tenant).value.loneElement
+    runtime.history(child.threadId, None, 1, tenant).value.loneElement.tenantId shouldBe Some("acme")
+    runtime.history(child.threadId).left.value shouldBe a[GraphError.TenantMismatch]
+  }
+
+  "BoundAgent.run" should "run a subagent with no parent, on a top-level thread" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"alone","sources":3}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val bound   = researcher.bind(client, runtime).value
+    val outcome = bound.run(Question("tides")).value
+
+    outcome match
+      case TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("alone", 3)
+        child.depth shouldBe 0
+        child.toolCallId shouldBe None
+        usage.requestCount shouldBe 1
+        runtime.history(child.threadId).value.head.origin shouldBe None
+      case other => fail(s"expected a report, got $other")
+  }
+
+  it should "call the model with the options it was bound with, unless withModel set its own (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    val options = CompletionOptions().withTemperature(0.2).withMaxTokens(321)
+    researcher.bind(client, GraphRuntime.inMemory(), options).value.run(Question("x")).value
+    val sent = client.optionsSentTo("CHILD:researcher").loneElement
+    sent.temperature shouldBe 0.2
+    sent.maxTokens shouldBe Some(321)
+
+    val own = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    researcher
+      .withModel(own, CompletionOptions().withMaxTokens(77))
+      .bind(client, GraphRuntime.inMemory(), options)
+      .value
+      .run(Question("x"))
+      .value
+    own.optionsSentTo("CHILD:researcher").loneElement.maxTokens shouldBe Some(77)
+    client.calls should have size 1
+  }
+
+  it should "return a renderer's failure as Left, not throw it" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val broken = researcher.withInputText(_ => throw new IllegalStateException("bad renderer"))
+    broken.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).left.value.message should include(
+      "bad renderer"
+    )
+    client.calls shouldBe empty
+  }
+
+  it should "return a renderer's failure as is on reattach, rendering once (#2086)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val renders = new AtomicInteger(0)
+    val flaky = researcher.withInputText { q =>
+      if (renders.incrementAndGet() > 1) throw new IllegalStateException("bad renderer") else q.topic
+    }
+    val bound = flaky.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-render")
+    bound.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+    renders.get shouldBe 1
+
+    val failed = bound.run(node, Question("tides")).left.value
+    failed shouldBe a[ValidationError]
+    failed.message should include("bad renderer")
+    renders.get shouldBe 2
+    client.calls should have size 1
+  }
+
+  it should "return an interrupt while rendering as a cancellation, the flag kept" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val blocking = researcher.withInputText { _ =>
+      Thread.currentThread().interrupt()
+      Thread.sleep(1000)
+      "unreached"
+    }
+    val result = blocking.bind(client, GraphRuntime.inMemory()).value.run(Question("x"))
+    val kept   = Thread.interrupted() // clears the flag for the rest of the suite
+    result.left.value shouldBe a[org.llm4s.error.CancelledError]
+    kept shouldBe true
+  }
+
+  it should "report a typed answer that fails its schema as a refusal" in {
+    val client  = RoutingClient { case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}""")) }
+    val outcome = researcher.bind(client, GraphRuntime.inMemory()).value.run(Question("x")).value
+    outcome match
+      case TaskOutcome.Refused(_, TaskRefusal.OutputInvalid(errors), usage) =>
+        errors should not be empty
+        usage.requestCount shouldBe 2 // the answer and its retry, both counted
+      case other => fail(s"expected a refusal, got $other")
+  }
+
+  it should "keep the thread of a run that fails, refused Failed with its ref, for recover to continue (#2069)" in {
+    val failures = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", _) if failures.getAndIncrement() == 0 => Left(ValidationError("provider", "down"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"recovered","sources":1}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val bound   = researcher.bind(client, runtime).value
+    val ref = bound.run(Question("x")).value match
+      case TaskOutcome.Refused(child, TaskRefusal.Failed(message), _) =>
+        message should include("down")
+        child.depth shouldBe 0
+        child
+      case other => fail(s"expected a Failed refusal, got $other")
+    runtime.history(ref.threadId).value should not be empty
+
+    bound.recover(ref).value match
+      case TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("recovered", 1)
+        child.threadId shouldBe ref.threadId
+        usage.requestCount shouldBe 1
+      case other => fail(s"expected a report, got $other")
+    client.calls should have size 2
+  }
+
+  it should "refuse recovering a run that did not fail, the thread unchanged" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"s","sources":1}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val ref   = bound.run(Question("x")).value.asInstanceOf[TaskOutcome.Reported[Findings]].child
+    bound.recover(ref).isLeft shouldBe true
+    client.calls should have size 1
+  }
+
+  "BoundAgent.run on a caller-chosen thread" should "return the stored report on a second run, with no model call (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"once","sources":1}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val bound   = researcher.bind(client, runtime).value
+    val node    = ThreadId("node-7")
+    val first = bound.run(node, Question("tides")).value match
+      case reported @ TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("once", 1)
+        child.threadId shouldBe node
+        child.depth shouldBe 0
+        child.toolCallId shouldBe None
+        usage.requestCount shouldBe 1
+        reported
+      case other => fail(s"expected a report, got $other")
+
+    val again = RunConfig().withRunId(org.llm4s.agent.graph.RunId("replay-1"))
+    bound.run(node, Question("tides"), again).value shouldBe first
+    client.calls should have size 1
+    runtime.history(node).value.map(_.runId).distinct shouldBe Vector(first.child.runId.value)
+  }
+
+  it should "never give a turn to a thread another caller created after its read, reading it again (#2077)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"raced","sources":1}"""))
+    }
+    val stale = new java.util.concurrent.atomic.AtomicBoolean(false)
+    // the first read after `stale` is set misses the thread, as a read made just before another caller started it
+    val store = new org.llm4s.agent.graph.ForwardingCheckpointer(new InMemoryCheckpointer()) {
+      override def latest(threadId: ThreadId) =
+        if stale.getAndSet(false) then Right(None) else super.latest(threadId)
+    }
+    val bound = researcher.bind(client, new GraphRuntime(store)).value
+    val node  = ThreadId("node-race")
+    val first = bound.run(node, Question("tides")).value
+    stale.set(true)
+    bound.run(node, Question("tides")).value shouldBe first
+    client.calls should have size 1
+  }
+
+  it should "reattach after a crash mid-run, never repeating a completed tool effect (#2077)" in {
+    val runs     = new AtomicInteger(0)
+    val failures = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", messages) if toolResults(messages).isEmpty =>
+        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+      // the process dies after the probe's effect committed, before the answer
+      case Child("researcher", _) if failures.getAndIncrement() == 0 => Left(ValidationError("provider", "crashed"))
+      case Child("researcher", messages) =>
+        val seen = toolResults(messages).mkString.replace("\"", "")
+        Right(CompletionFixture.simple(s"""{"summary":"$seen","sources":1}"""))
+    }
+    val store   = new InMemoryCheckpointer()
+    val node    = ThreadId("node-crash")
+    val probing = researcher.withTools(ToolSet.of(DelegatedSuspensionSpec.probe(runs)).value)
+    probing.bind(client, new GraphRuntime(store)).value.run(node, Question("tides"))
+    runs.get shouldBe 1
+
+    // the node replays on a new runtime over the same store, and calls run with the same id
+    probing.bind(client, new GraphRuntime(store)).value.run(node, Question("tides")).value match
+      case TaskOutcome.Reported(report, child, _) =>
+        report shouldBe Findings("probed once", 1)
+        child.threadId shouldBe node
+      case other => fail(s"expected a report, got $other")
+    runs.get shouldBe 1
+  }
+
+  it should "return a suspended thread's Suspended again, running nothing, until it is resumed (#2077)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val node = ThreadId("node-ask")
+    val (ref, status) = bound.run(node, Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+    val sent = client.calls.size
+
+    bound.run(node, Question("tides")).value match
+      case TaskOutcome.Suspended(child, again) =>
+        child shouldBe ref
+        again.approvals.map(_._1) shouldBe status.approvals.map(_._1)
+      case other => fail(s"expected a suspension, got $other")
+    client.calls should have size sent
+    runs.get shouldBe 0
+
+    val resumed = bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value
+    resumed shouldBe a[TaskOutcome.Reported[?]]
+    bound.run(node, Question("tides")).value shouldBe resumed
+    runs.get shouldBe 1
+  }
+
+  it should "wait for a run another caller holds on the thread, and return its outcome (#2077)" in {
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val client = RoutingClient { case Child("researcher", _) =>
+      entered.countDown()
+      release.await(10, TimeUnit.SECONDS)
+      Right(CompletionFixture.simple("""{"summary":"shared","sources":2}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-busy")
+    val pool  = java.util.concurrent.Executors.newFixedThreadPool(2)
+    try {
+      val first = pool.submit(() => bound.run(node, Question("tides")))
+      entered.await(10, TimeUnit.SECONDS) shouldBe true
+      val second = pool.submit(() => bound.run(node, Question("tides")))
+      Thread.sleep(50)
+      release.countDown()
+      val held   = first.get(10, TimeUnit.SECONDS).value
+      val waited = second.get(10, TimeUnit.SECONDS).value
+      held shouldBe a[TaskOutcome.Reported[?]]
+      waited shouldBe held
+      client.calls should have size 1
+    } finally pool.shutdownNow()
+  }
+
+  it should "refuse a delegated child's thread, which only its parent continues (rule 19)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(_)                => Right(CompletionFixture.simple("done"))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"s","sources":0}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val agent   = lead(client).withRuntime(runtime).withSubagents(researcher).build().value
+    agent.run(ThreadId("t1"), "go").value
+    val child = agent.children(ThreadId("t1")).value.loneElement.threadId
+    val sent  = client.calls.size
+
+    researcher.bind(client, runtime).value.run(child, Question("a")).left.value shouldBe a[ValidationError]
+    client.calls should have size sent
+  }
+
+  it should "refuse a thread another agent started at the id, returning nothing of its run (#2086)" in {
+    val client = RoutingClient {
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":"theirs","sources":1}"""))
+      case Child("auditor", _)    => Right(CompletionFixture.simple("""{"summary":"ours","sources":1}"""))
+    }
+    val runtime = GraphRuntime.inMemory()
+    val node    = ThreadId("node-shared")
+    researcher.bind(client, runtime).value.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+    val auditor = TypedAgent("auditor", "Audits one topic", questionSchema, findingsSchema)
+      .withSystemPrompt("CHILD:auditor")
+      .bind(client, runtime)
+      .value
+
+    auditor.run(node, Question("tides")).left.value shouldBe a[ValidationError]
+    client.calls should have size 1
+  }
+
+  it should "refuse the id when it was started with other input, or not by this overload (#2086)" in {
+    val client = RoutingClient { case Child("researcher", _) =>
+      Right(CompletionFixture.simple("""{"summary":"tides","sources":1}"""))
+    }
+    val bound = researcher.bind(client, GraphRuntime.inMemory()).value
+    val node  = ThreadId("node-input")
+    bound.run(node, Question("tides")).value shouldBe a[TaskOutcome.Reported[?]]
+
+    bound.run(node, Question("moons")).left.value shouldBe a[ValidationError]
+    client.calls should have size 1
+    // a thread the agent's own run started records no input, so it is never taken as this call's
+    bound.agent.run(ThreadId("node-plain"), "tides").value
+    bound.run(ThreadId("node-plain"), Question("tides")).left.value shouldBe a[ValidationError]
+    client.calls should have size 2
+  }
+
+  "BoundAgent.resume" should "continue a standalone run that suspended, and map its answer as run does (#2069)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+    ref.depth shouldBe 0
+    runs.get shouldBe 0
+
+    val id = status.approvals.loneElement._1
+    bound.resume(ref, Map(approve(id))).value match
+      case TaskOutcome.Reported(report, child, usage) =>
+        report shouldBe Findings("probed once", 1)
+        child.threadId shouldBe ref.threadId
+        usage.requestCount shouldBe 2
+      case other => fail(s"expected a report, got $other")
+    runs.get shouldBe 1
+  }
+
+  it should "refuse a continuation's typed answer that fails its schema, naming the continuation's run" in {
+    val runs = new AtomicInteger(0)
+    val client = RoutingClient {
+      case Child("researcher", messages) if toolResults(messages).isEmpty =>
+        Right(calling(ToolCall("k1", "probe", ujson.Obj("text" -> "x"))))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
+    }
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+
+    val resumed = RunConfig().withRunId(org.llm4s.agent.graph.RunId("resume-1"))
+    bound.resume(ref, Map(approve(status.approvals.loneElement._1)), resumed).value match
+      case TaskOutcome.Refused(child, TaskRefusal.OutputInvalid(errors), usage) =>
+        errors should not be empty
+        usage.requestCount shouldBe 3 // the probe call, the answer and its retry
+        child.threadId shouldBe ref.threadId
+        child.runId shouldBe org.llm4s.agent.graph.RunId("resume-1")
+        child.runId should not be ref.runId
+      case other => fail(s"expected an OutputInvalid refusal, got $other")
+  }
+
+  it should "refuse answers to interrupts that are not pending, the run staying suspended" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val (ref, status) = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, status) => child -> status
+      case other                                => fail(s"expected a suspension, got $other")
+
+    bound.resume(ref, Map(approve(InterruptId("not-pending")))).left.value shouldBe a[GraphError.InvalidResume]
+    runs.get shouldBe 0
+    bound.resume(ref, Map(approve(status.approvals.loneElement._1))).value shouldBe a[TaskOutcome.Reported[?]]
+  }
+
+  "BoundAgent.resume and recover" should "refuse a delegated child's ref, which only its parent continues (rule 19)" in {
+    val runs   = new AtomicInteger(0)
+    val client = DelegatedSuspensionSpec.approvingClient()
+    val bound =
+      DelegatedSuspensionSpec.asking(DelegatedSuspensionSpec.probe(runs)).bind(client, GraphRuntime.inMemory()).value
+    val ref = bound.run(Question("tides")).value match
+      case TaskOutcome.Suspended(child, _) => child
+      case other                           => fail(s"expected a suspension, got $other")
+    val sent = client.calls.size
+
+    val delegated = Vector(
+      ref.copy(toolCallId = Some(ToolCallId("c1")), depth = 1),
+      ref.copy(toolCallId = Some(ToolCallId("c1"))),
+      ref.copy(depth = 1),
+      ref.copy(agent = org.llm4s.agent.AgentId.unsafe("other"))
+    )
+    delegated.foreach { child =>
+      bound.resume(child, Map(approve(InterruptId("any")))).left.value shouldBe a[ValidationError]
+      bound.recover(child).left.value shouldBe a[ValidationError]
+    }
+    client.calls should have size sent
+    runs.get shouldBe 0
+  }
+
+  "ChildFailure.Fail" should "fail the parent with a typed child's OutputInvalid, every error kept" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "x"))))
+      case Child("researcher", _) => Right(CompletionFixture.simple("""{"summary":1}"""))
+    }
+    val agent = lead(client).withSubagents(researcher.withFailure(ChildFailure.Fail)).build().value
+    val error = agent.run(ThreadId("t1"), "go").left.value
+    error.message should include("task_researcher")
+    org.llm4s.agent.AgentFixture.cause(error) match
+      case failed: GraphError.ToolFailed =>
+        failed.cause match
+          case GraphError.OutputInvalid(errors) => errors.mkString should include("sources")
+          case other                            => fail(s"expected the child's OutputInvalid, got $other")
+      case other => fail(s"expected ToolFailed, got $other")
+  }
+
+  "DelegationConfig.childRetention" should "apply when only a handoff target delegates, as the family's bound" in {
+    val client = RoutingClient {
+      case Lead(_) => Right(calling(call("h1", "handoff_to_specialist", ujson.Obj())))
+      case messages if messages.headOption.exists(_.content.startsWith("SPECIALIST")) =>
+        val sinceUser = messages.drop(messages.lastIndexWhere { case _: UserMessage => true; case _ => false })
+        if toolResults(sinceUser).exists(_.contains("r")) && sinceUser.exists {
+            case a: AssistantMessage => a.toolCalls.exists(_.name == "task"); case _ => false
+          }
+        then Right(CompletionFixture.simple("done"))
+        else
+          Right(
+            calling(call(s"t${messages.size}", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")))
+          )
+      case Child("general", _) => Right(CompletionFixture.simple("r"))
+    }
+    val specialist = Agent
+      .builder("specialist", client)
+      .withSystemPrompt("SPECIALIST")
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withChildRetention(1))
+    val agent =
+      lead(client).withHandoffs(org.llm4s.agent.Handoff.to("specialist", specialist, "specialist")).build().value
+    agent.run(ThreadId("t1"), "one").value.answer.value shouldBe "done"
+    agent.run(ThreadId("t1"), "two").value.answer.value shouldBe "done"
+    agent.children(ThreadId("t1")).value should have size 1
+  }
+
+  "a task refused before any child existed" should "be a tool error under Report and Fatal under Fail, naming no child" in {
+    val notStarted: TaskOutcome[Findings] = TaskOutcome.NotStarted(researcher.id, TaskRefusal.TokenLimitReached)
+    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Report, 1024, notStarted, None) shouldBe
+      ToolOutcome.Error("subagent 'researcher' was not started: reached its token budget without an answer")
+    DelegationMiddleware.toolOutcome("researcher", ChildFailure.Fail, 1024, notStarted, None) match
+      case ToolOutcome.Fatal(error) => error.message should include("was not started")
+      case other                    => fail(s"expected Fatal, got $other")
+  }
+
+  "every task tool message" should "fit maxReportBytes, an oversized provider message cut" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages)         => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) => Left(ValidationError("provider", "é" * 5000))
+    }
+    val agent = lead(client)
+      .withSubagents(researcher)
+      .withDelegation(DelegationConfig().withMaxReportBytes(300))
+      .build()
+      .value
+    val message = agent.run(ThreadId("t1"), "go").value.answer.value
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 300
+    message should include("subagent 'researcher'")
+    message should endWith("(truncated)\"}")
+  }
+
+  it should "fit maxReportBytes when the loop refuses the call's arguments, and for every limit refusal" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task", ujson.Obj("subagent_type" -> ("x" * 5000), "description" -> "d")),
+            call("c2", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")),
+            call("c3", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))
+          )
+        )
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+      case Child("general", _) => Right(CompletionFixture.simple("r"))
+    }
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(64).withMaxTasksPerTurn(2))
+      .build()
+      .value
+    val messages = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+    messages should have size 3
+    messages.foreach(_.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 64)
+    messages.head should include("Invalid arguments")
+    messages(2) should include("(truncated)")
+  }
+
+  it should "fit maxReportBytes when a task call shares a message with a handoff" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(
+          calling(
+            call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d")),
+            call("h1", "handoff_to_other", ujson.Obj())
+          )
+        )
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString("|")))
+    }
+    val other = Agent.builder("other", client).withSystemPrompt("OTHER")
+    val agent = lead(client)
+      .withSubagents(general)
+      .withHandoffs(org.llm4s.agent.Handoff.to("other", other, "other"))
+      .withDelegation(DelegationConfig().withMaxReportBytes(64))
+      .build()
+      .value
+    val results = agent.run(ThreadId("t1"), "go").value.answer.value.split('|').toVector
+    results should have size 2
+    results.head.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 64
+    results.head should include("(truncated)")
+  }
+
+  it should "fit maxReportBytes when a wrapper outside the tool replaces its result with a larger one" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(messages)      => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("general", _) => Right(CompletionFixture.simple("small"))
+    }
+    val inflating = new org.llm4s.agent.graph.middleware.AgentMiddleware {
+      val id = org.llm4s.agent.graph.middleware.MiddlewareId("inflating")
+      override def wrapToolCall(
+        request: org.llm4s.agent.graph.middleware.ToolCallRequest,
+        context: org.llm4s.agent.graph.tool.ToolContext
+      )(next: () => ToolOutcome): ToolOutcome =
+        next() match
+          case ToolOutcome.Success(_, update) => ToolOutcome.Success(ToolContent.Json(ujson.Str("y" * 500)), update)
+          case other                          => other
+    }
+    val agent = lead(client)
+      .withMiddleware(inflating)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(100))
+      .build()
+      .value
+    val message = agent.run(ThreadId("t1"), "go").value.answer.value
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 100
+    message should include("result over 100 bytes")
+  }
+
+  it should "measure a text report as it is stored, unquoted" in {
+    val report: TaskOutcome[String] =
+      TaskOutcome.Reported(
+        "a" * 64,
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), general.id, Some(ToolCallId("k")), 1),
+        UsageSummary()
+      )
+    DelegationMiddleware.toolOutcome("general", ChildFailure.Report, 64, report, None) shouldBe
+      ToolOutcome.Success(ToolContent.Json(ujson.Str("a" * 64)))
+  }
+
+  it should "refuse media a wrapper put in a task result" in {
+    val tool = new DelegationMiddleware(
+      Vector(general.bind(RoutingClient(PartialFunction.empty), GraphRuntime.inMemory()).value),
+      DelegationConfig(),
+      0
+    ).tools.head
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(
+      tool,
+      Vector(
+        ContentPart.Text("x"),
+        ContentPart
+          .image(
+            org.llm4s.media.MediaSource.Url(java.net.URI.create("https://example.com/a.png")),
+            org.llm4s.media.MediaType.Png
+          )
+          .value
+      )
+    ) shouldBe defined
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(tool, Vector(ContentPart.Text("x"))) shouldBe None
+    org.llm4s.agent.graph.tool.ToolErrors.overBound(tool, Vector(ContentPart.Text("x"), ContentPart.Text(""))) shouldBe
+      defined
+  }
+
+  "a suspended child" should "leave its usage in the child thread while the parent waits (rules 10, 11)" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task_researcher", ujson.Obj("topic" -> "a"))))
+      case Lead(messages) => Right(CompletionFixture.simple(toolResults(messages).mkString))
+      case Child("researcher", _) =>
+        Right(calling(ToolCall("k1", "child_tool", ujson.Obj("text" -> "x"))))
+    }
+    val asking = researcher
+      .withTools(ToolSet.of(echo("child_tool")).value)
+      .withMiddleware(new PermissionMiddleware(Seq(PermissionRule.ask(Operation.Invoke, "child_tool"))))
+    val result = lead(client).withSubagents(asking).build().value.run(ThreadId("t1"), "go").value
+    result.answer shouldBe None
+    result.usage.requestCount shouldBe 1 // the lead's call: the child's is added once its call settles
+  }
+
+  it should "keep an oversized OutputInvalid's first errors and say how many it dropped" in {
+    val errors  = (1 to 50).map(i => s"error number $i is wrong").toVector
+    val message = DelegationMiddleware.within("subagent 'x' ", TaskRefusal.OutputInvalid(errors), 200)
+    message.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 200
+    message should include("error number 1 is wrong")
+    (message should not).include("error number 50 is wrong")
+    val kept = errors.count(e => message.contains(e + ";") || message.contains(e + " ("))
+    message should include(s"(and ${50 - kept} more errors dropped)")
+    // the typed outcome keeps them all
+    val refused: TaskOutcome[Findings] =
+      TaskOutcome.Refused(
+        ChildRef(ThreadId("c"), org.llm4s.agent.graph.RunId("r"), researcher.id, Some(ToolCallId("k")), 1),
+        TaskRefusal.OutputInvalid(errors),
+        UsageSummary()
+      )
+    DelegationMiddleware.toolOutcome("x", ChildFailure.Report, 200, refused, None) match
+      case ToolOutcome.Error(text) => text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length should be <= 200
+      case other                   => fail(s"expected an error, got $other")
+    DelegationMiddleware.cut("ab", 1) shouldBe ""
+  }
+
+  "a call its child runner refuses" should "be a tool error for a ValidationError and Fatal otherwise" in {
+    val edited = ValidationError("input", "the child thread 'c' was started with other input")
+    DelegationMiddleware.notRun("researcher", edited, 1024) match
+      case ToolOutcome.Error(text) =>
+        text should startWith("subagent 'researcher' was not run:")
+        text should include("started with other input")
+      case other => fail(s"expected a tool error, got $other")
+    val cancelled = org.llm4s.error.CancelledError("task")
+    DelegationMiddleware.notRun("researcher", cancelled, 1024) shouldBe ToolOutcome.Fatal(cancelled)
+  }
+
+  "build()" should "refuse two subagents with one id, a clash with another tool, bad bounds and a bad subagent" in {
+    val client = RoutingClient(PartialFunction.empty)
+    lead(client).withSubagents(general, general).build().left.value.message should include("defined twice")
+    lead(client)
+      .withTools(ToolSet.of(echo("task")).value)
+      .withSubagents(general)
+      .build()
+      .left
+      .value
+      .message should include("task")
+    lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxConcurrentChildren(0).withMaxDepth(-1))
+      .build()
+      .left
+      .value
+      .message should (include("maxConcurrentChildren must be positive").and(include("maxDepth must be positive")))
+    lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(11))
+      .build()
+      .left
+      .value
+      .message should include("maxReportBytes must be at least 64, was 11")
+    lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withMaxReportBytes(64))
+      .build()
+      .isRight shouldBe
+      true
+    lead(client).withDelegation(DelegationConfig().withMaxDepth(0)).build().left.value.message should
+      include("maxDepth must be positive")
+    lead(client).withSubagents(TypedAgent.text("bad id!", "d")).build().left.value.message should include("bad id!")
+    lead(client).withSubagents(TypedAgent.text("blank", " ")).build().left.value.message should include("blank")
+    lead(client)
+      .withSubagents(
+        TypedAgent.text("both", "d").withSystemPrompt("p").withHarness(org.llm4s.agent.harness.HarnessProfile())
+      )
+      .build()
+      .left
+      .value
+      .message should include("harness")
+  }
+
+  it should "refuse one agent id defined by two builders whose subagents or bounds differ behind the same task tools" in {
+    val client = RoutingClient(PartialFunction.empty)
+    def family(a: AgentBuilder, b: AgentBuilder) =
+      lead(client)
+        .withHandoffs(
+          org.llm4s.agent.Handoff
+            .to("left", Agent.builder("left", client).withHandoffs(org.llm4s.agent.Handoff.to("shared", a, "a")), "l")
+        )
+        .withHandoffs(
+          org.llm4s.agent.Handoff
+            .to("right", Agent.builder("right", client).withHandoffs(org.llm4s.agent.Handoff.to("shared", b, "b")), "r")
+        )
+        .build()
+    val base = Agent.builder("shared", client).withSubagents(general)
+    family(base, base).isRight shouldBe true
+    family(
+      base,
+      Agent.builder("shared", client).withSubagents(general.withSystemPrompt("CHILD:other"))
+    ).left.value.message should
+      include("defined by two different builders")
+    family(base, base.withDelegation(DelegationConfig().withMaxReportBytes(10))).left.value.message should
+      include("defined by two different builders")
+  }
+
+  it should "version the parent's graph by its task tools, and leave an agent without subagents as it was" in {
+    val client = RoutingClient(PartialFunction.empty)
+    val plain  = lead(client).build().value
+    val one    = lead(client).withSubagents(general).build().value
+    val two    = lead(client).withSubagents(general, TypedAgent.text("other", "d")).build().value
+    Set(plain.loop.graph.version, one.loop.graph.version, two.loop.graph.version) should have size 3
+    lead(client).build().value.loop.graph.version shouldBe plain.loop.graph.version
+  }
+
+  "DelegationConfig.childRetention" should "apply to the delegating agent's runs unless the run sets another" in {
+    val client = RoutingClient {
+      case Lead(messages) if toolResults(messages).isEmpty =>
+        Right(calling(call("c1", "task", ujson.Obj("subagent_type" -> "general", "description" -> "d"))))
+      case Lead(_)             => Right(CompletionFixture.simple("done"))
+      case Child("general", _) => Right(CompletionFixture.simple("r"))
+    }
+    val agent = lead(client)
+      .withSubagents(general)
+      .withDelegation(DelegationConfig().withChildRetention(1))
+      .build()
+      .value
+    agent.run(ThreadId("t1"), "one").value
+    agent.run(ThreadId("t1"), "two").value
+    agent.children(ThreadId("t1")).value should have size 1
+  }
+}
+
+object DelegationSpec {
+  val LeadPrompt = "LEAD"
+
+  final case class Question(topic: String) derives ReadWriter
+  final case class Findings(summary: String, sources: Int) derives ReadWriter
+
+  val questionSchema: SchemaDefinition[Question] =
+    Schema.`object`[Question]("A research question").withRequiredField("topic", Schema.string("The topic"))
+  val findingsSchema: SchemaDefinition[Findings] =
+    Schema
+      .`object`[Findings]("Findings")
+      .withRequiredField("summary", Schema.string("The summary"))
+      .withRequiredField("sources", Schema.integer("How many sources"))
+
+  val researcher: TypedAgent[Question, Findings] =
+    TypedAgent("researcher", "Researches one topic", questionSchema, findingsSchema)
+      .withSystemPrompt("CHILD:researcher")
+
+  val general: TypedAgent[TaskRequest, String] =
+    TypedAgent.text("general", "A general-purpose subagent").withSystemPrompt("CHILD:general")
+
+  def lead(client: LLMClient): AgentBuilder = Agent.builder("lead", client).withSystemPrompt(LeadPrompt)
+
+  /** An approval of the pending tool call `id`, as `AgentResult.approve` gives it. */
+  def approve(id: InterruptId): (InterruptId, ujson.Value) =
+    id -> upickle.default.writeJs[ApprovalDecision](ApprovalDecision.Approve)
+
+  final case class SpecText(text: String) derives ReadWriter
+  object SpecText {
+    def spec(name: String): AgentToolSpec[SpecText] =
+      AgentToolSpec(
+        name,
+        s"$name tool",
+        Schema.`object`[SpecText]("args").withRequiredField("text", Schema.string("t"))
+      )
+  }
+
+  def echo(name: String): AgentTool[SpecText] =
+    AgentTool(SpecText.spec(name))((a, _) => ToolOutcome.Success(ToolContent.Json(ujson.Str(a.text))))
+
+  def call(id: String, name: String, args: ujson.Value): ToolCall = ToolCall(id, name, args)
+
+  def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
+
+  def toolResults(messages: Vector[Message]): Vector[String] = messages.collect { case t: ToolMessage => t.content }
+
+  /** A conversation sent with the lead's system prompt. */
+  object Lead {
+    def unapply(messages: Vector[Message]): Option[Vector[Message]] =
+      Option.when(messages.headOption.exists(_.content.startsWith(LeadPrompt)))(messages)
+  }
+
+  /** A conversation sent with a child's system prompt, `CHILD:<id>`. */
+  object Child {
+    def unapply(messages: Vector[Message]): Option[(String, Vector[Message])] =
+      messages.headOption.map(_.content).filter(_.startsWith("CHILD:")).map { prompt =>
+        (prompt.stripPrefix("CHILD:").takeWhile(c => c.isLetterOrDigit || c == '-' || c == '_'), messages)
+      }
+  }
+
+  /** Answers each call by the conversation sent, recording every call; thread-safe. */
+  final class RoutingClient(route: PartialFunction[Vector[Message], Result[Completion]]) extends LLMClient {
+    private val recorded = new CopyOnWriteArrayList[(Vector[Message], CompletionOptions)]()
+
+    def calls: Vector[(Vector[Message], CompletionOptions)] = recorded.asScala.toVector
+
+    def sentTo(prompt: String): Vector[Vector[Message]] =
+      calls.collect { case (messages, _) if messages.headOption.exists(_.content.startsWith(prompt)) => messages }
+
+    def optionsSentTo(prompt: String): Vector[CompletionOptions] =
+      calls.collect { case (messages, options) if messages.headOption.exists(_.content.startsWith(prompt)) => options }
+
+    def toolsSentTo(prompt: String): Vector[Vector[String]] = optionsSentTo(prompt).map(_.tools.map(_.name).toVector)
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      val messages = conversation.messages.toVector
+      recorded.add(messages -> options)
+      route.applyOrElse(messages, (_: Vector[Message]) => Left(ValidationError("routing", "no route for the call")))
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 128000
+    override def getReserveCompletion(): Int = 4096
+  }
+}

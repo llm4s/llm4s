@@ -6,6 +6,8 @@ import org.llm4s.agent.harness.*
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 
+import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.file.{ Files, Path }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 
@@ -15,6 +17,29 @@ object HarnessBackends:
   def storeFiles(store: LongTermStore, path: Vector[String] = Vector("memories")): StoreFileBackend =
     StoreFileBackend(store, path).fold(e => throw new IllegalStateException(e.message), identity)
   def p(s: String): VPath = VPath(s).fold(e => throw new IllegalArgumentException(e.message), identity)
+
+  /** One lock directory for every host backend of the suite, as an application gives its backends. */
+  private lazy val locks: Path = Files.createTempDirectory("llm4s-contract-locks")
+
+  /**
+   * A host backend over a fresh temporary directory. Windows reports no hard-link counts, so there the suite
+   * vouches for its own directory; a volume that makes 8.3 short names is refused whatever is vouched for,
+   * and has nothing of the backend to test, so the case is cancelled.
+   */
+  def host(): (HostFileBackend, Path) =
+    val dir = Files.createTempDirectory("llm4s-contract")
+    HostFileBackend.open(dir, locks, allowUncheckedIdentity = !HostFileBackend.reportsLinkCounts(dir)) match
+      case Right(backend) => (backend, dir)
+      case Left(e) if e.message.contains("8.3 short names") =>
+        org.scalatest.Assertions.cancel(s"unsupported file system: ${e.message}")
+      case Left(e) => throw new IllegalStateException(e.message)
+
+  def onHost(dir: Path, path: VPath): Path = dir.resolve(path.value.drop(1))
+
+  /** Why this machine's temporary volume cannot hold a host backend (it makes 8.3 short names), if it cannot. */
+  lazy val hostUnsupported: Option[String] =
+    val probed = Files.createTempDirectory("llm4s-probe")
+    HostFileBackend.probeAliases(probed).toOption.filter(_.nonEmpty).map(_.mkString("; "))
 
   val memories: Namespace = Namespace(None, Vector("memories"))
 
@@ -38,6 +63,9 @@ class CompositeBackendContractSpec extends AnyFlatSpec with FileBackendContract:
       HarnessBackends.p("/memories") -> HarnessBackends.storeFiles(InMemoryLongTermStore())
     )
       .fold(e => throw new IllegalStateException(e.message), identity)
+
+class HostFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
+  protected def newBackend(): FileBackend = HarnessBackends.host()._1
 
 class StoreFileBackendContractSpec extends AnyFlatSpec with FileBackendContract:
   protected def newBackend(): FileBackend =
@@ -70,6 +98,35 @@ class ResolvedStateBackendContractSpec extends AnyFlatSpec with FileBackendContr
     Some(Vector("/a" -> "x" * 78, "/b" -> "x" * 78, "/c" -> "x" * 78))
 
 // Replay: each external backend through its own guarded path.
+
+class HostFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
+  override def withFixture(test: NoArgTest) =
+    HarnessBackends.hostUnsupported.fold(super.withFixture(test))(why =>
+      org.scalatest.Canceled(s"unsupported file system: $why")
+    )
+  protected def newSubject(): ReplayContract.Subject =
+    // the contract names its subject when it registers its cases; on a volume the backend refuses, a
+    // stand-in names it, and withFixture cancels every case before one could use it
+    HarnessBackends.hostUnsupported.fold(hostSubject())(why =>
+      new ReplayContract.Subject:
+        def name: String           = s"a host file backend (unsupported here: $why)"
+        def support: ReplaySupport = ReplaySupport.Verifiable
+        def perform(context: RunContext, slot: Int): Result[ujson.Value] = Left(BackendRefused("perform", "", why))
+        def observe(slot: Int): Result[String]                           = Left(BackendRefused("observe", "", why))
+        def initial(slot: Int): String                                   = ""
+        def once(slot: Int): String                                      = ""
+        def interfere(slot: Int): Unit                                   = ()
+    )
+
+  private def hostSubject(): ReplayContract.Subject =
+    val (backend, dir) = HarnessBackends.host()
+    FileBackendContract.EditSubject(
+      "a host file backend",
+      backend,
+      ReplaySupport.Verifiable,
+      (path, text) => Files.writeString(HarnessBackends.onHost(dir, path), text): Unit,
+      path => Right(new String(Files.readAllBytes(HarnessBackends.onHost(dir, path)), UTF_8))
+    )
 
 class StoreFileBackendReplaySpec extends AnyFlatSpec with ReplayContract:
   protected def newSubject(): ReplayContract.Subject =

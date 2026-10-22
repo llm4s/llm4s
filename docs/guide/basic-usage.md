@@ -72,6 +72,9 @@ object SimpleExample extends App {
 }
 ```
 
+The fragments in the rest of this guide use the imports of this example, plus `org.llm4s.types.Result`
+(and `org.llm4s.error.LLMError` where they name it), and a `client` built as above.
+
 **Before running, configure a provider** in `src/main/resources/application.conf`:
 
 ```hocon
@@ -96,14 +99,18 @@ export OPENAI_API_KEY=sk-proj-...
 
 For Anthropic, use a section with `provider = "anthropic"`, export `ANTHROPIC_API_KEY`, and name
 the section in `provider`. llm4s reads no `LLM_MODEL`. See
-[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
-[API keys](../getting-started/configuration.md#api-keys).
+[Named provider sections](../getting-started/configuration#named-provider-sections) and
+[API keys](../getting-started/configuration#api-keys).
 
 ### Multi-Provider Pattern
 
 LLM4S resolves whichever named provider you configure as the default:
 
 ```scala
+// Written against the LLMClient interface, not a provider
+def processWithAnyProvider(client: LLMClient): Result[Completion] =
+  client.complete(Conversation(Seq(UserMessage("What is Scala?"))))
+
 val startup = for {
   providerConfig <- Llm4sConfig.defaultProvider()
   registry       <- Llm4sConfig.modelRegistryService()
@@ -114,11 +121,12 @@ val startup = for {
 
 The same code works with any configured named provider without modifications: change
 `llm4s.providers.provider`, or load another section with `Llm4sConfig.provider("<name>")`. See
-[Switching providers](../getting-started/configuration.md#switching-providers).
+[Switching providers](../getting-started/configuration#switching-providers).
 
 ### With Explicit Model Selection
 
-If you want to override the configured model:
+The model comes from the section's `model`; to use another one, load a section that names it with
+`Llm4sConfig.provider("<name>")`. To adjust the generation settings of one call, pass `CompletionOptions`:
 
 ```scala
 val startup = for {
@@ -167,7 +175,7 @@ result match {
   case Right(completion) =>
     // Success! Access the response
     println(s"Content: ${completion.content}")
-    println(s"Stop reason: ${completion.stopReason}")
+    println(s"Model: ${completion.model}")
   case Left(error) =>
     // Handle the error
     println(s"Error: ${error.message}")
@@ -184,7 +192,7 @@ recoverable (worth retrying) or not:
 ```scala
 import org.llm4s.error._
 
-error match {
+def handle(error: LLMError): Unit = error match {
   case _: AuthenticationError => // the key was rejected: fix the credentials
   case _: RateLimitError      => // wait, then retry
   case _: NetworkError        => // transient: retry
@@ -193,13 +201,13 @@ error match {
 }
 
 // true for a RecoverableError (RateLimitError, NetworkError, TimeoutError, ...), false otherwise
-val retryable = LLMError.isRecoverable(error)
+def retryable(error: LLMError): Boolean = LLMError.isRecoverable(error)
 ```
 
 `isRecoverable` answers for every error. One that carries neither marker (`EmbeddingError`, `RerankError`,
 a custom `LLMError` that does not say) is not recoverable.
 
-See the [Error Handling guide](error-handling.md) for every error type, when it is raised, and how
+See the [Error Handling guide](error-handling) for every error type, when it is raised, and how
 to handle, convert and test them.
 
 ### Using For-Comprehensions
@@ -210,6 +218,8 @@ For cleaner code, use Scala's `for` comprehensions:
 val result = for {
   // Configure and create client
   providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   
   // Make the LLM call — complete takes a Conversation and optional CompletionOptions
@@ -236,6 +246,7 @@ If you have code using `Try`, convert it with the `TryOps` extension:
 
 ```scala
 import org.llm4s.types.TryOps
+import scala.util.Try
 
 val tryValue = Try("123".toInt)
 val result = tryValue.toResult  // Result[Int]
@@ -320,7 +331,7 @@ export EMBEDDING_MODEL=openai/text-embedding-3-small    # llm4s.embeddings.model
 ```
 
 `LLM_MODEL` is **not** among them. See
-[Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[Environment variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads).
 
 ### System Properties
 

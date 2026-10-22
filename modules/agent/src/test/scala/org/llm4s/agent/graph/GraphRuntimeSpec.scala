@@ -122,7 +122,15 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken)       = underlying.deleteThread(threadId, token)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+      underlying.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -386,9 +394,17 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       def effect(threadId: ThreadId, key: org.llm4s.agent.graph.EffectKey)       = store.effect(threadId, key)
       def latest(threadId: ThreadId) =
         store.latest(threadId).map(_.map(s => s.copy(pendingWrites = s.pendingWrites.map(change))))
-      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int)     = store.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long)              = store.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId, token: FencingToken)           = store.deleteThread(threadId, token)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+        store.deleteThread(threadId, token, fence)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = store.children(parent, after, limit)
+      def threads(query: org.llm4s.agent.graph.ThreadQuery)               = store.threads(query)
+      def incompleteThreads(
+        tenantId: Option[org.llm4s.agent.graph.TenantId],
+        after: Option[org.llm4s.agent.graph.ThreadCursor],
+        limit: Int
+      ) = store.incompleteThreads(tenantId, after, limit)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)

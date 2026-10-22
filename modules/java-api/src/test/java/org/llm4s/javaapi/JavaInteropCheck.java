@@ -159,6 +159,7 @@ public final class JavaInteropCheck {
       case COMPLETED -> log.add("completed:" + status.answer().orElseThrow());
       case BLOCKED -> log.add("blocked:" + status.guardrail().orElseThrow() + ":" + status.reason().orElseThrow());
       case STEP_LIMIT_REACHED -> log.add("step-limit");
+      case TOKEN_LIMIT_REACHED -> log.add("token-limit");
       case SUSPENDED -> log.add("suspended:" + status.pending().size());
     }
     log.add("answer:" + result.answer().orElse("-"));

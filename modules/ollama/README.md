@@ -17,7 +17,7 @@ the [installation guide](../../docs/getting-started/installation.md); this READM
 
 | Kind | Id | Needs | Default |
 |---|---|---|---|
-| Chat | `ollama` | `baseUrl` and `model`; **no API key** | none: `baseUrl` is required (e.g. `http://localhost:11434`) |
+| Chat | `ollama` | `model`; **no API key** | base URL `http://localhost:11434` |
 | Embeddings | `ollama` | nothing | base URL `http://localhost:11434`, model `nomic-embed-text` |
 
 ## Configuration
@@ -31,7 +31,7 @@ llm4s.providers {
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"
-    baseUrl  = "http://localhost:11434"
+    baseUrl  = ${?OLLAMA_BASE_URL}   # optional; unset, the default http://localhost:11434
   }
 }
 ```

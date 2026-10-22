@@ -54,6 +54,32 @@ class RunConfigSpec extends AnyFlatSpec with Matchers {
     refused(RunBudgets.default.withMaxSupersteps(0)) shouldBe refused(RunBudgets(maxSupersteps = 0))
   }
 
+  "maxTokens" should "default to no token budget, and be set by withMaxTokens" in {
+    RunBudgets.default.maxTokens shouldBe None
+    RunBudgets.default.withMaxTokens(500L).maxTokens shouldBe Some(500L)
+    RunBudgets(maxTokens = Some(7L)).withMaxTokens(None).maxTokens shouldBe None
+    RunBudgets(maxTokens = Some(7L)).withMaxSupersteps(3).withTimeout(1.second).maxTokens shouldBe Some(7L)
+  }
+
+  it should "be refused when not positive, by of, apply and withMaxTokens" in {
+    RunBudgets.of(maxTokens = Some(0L)).left.toOption.get shouldBe a[ValidationError]
+    RunBudgets.of(maxTokens = Some(-5L)).left.toOption.get.context("violations") should include(
+      "maxTokens must be positive"
+    )
+    RunBudgets.of(maxTokens = Some(1L)).map(_.maxTokens) shouldBe Right(Some(1L))
+    intercept[IllegalArgumentException](RunBudgets(maxTokens = Some(0L))).getMessage shouldBe
+      "requirement failed: maxTokens must be positive, was 0"
+    an[IllegalArgumentException] should be thrownBy RunBudgets.default.withMaxTokens(0L)
+    an[IllegalArgumentException] should be thrownBy RunBudgets.default.withMaxTokens(Some(-1L))
+  }
+
+  it should "leave the previous three-field apply compiling, with no token budget" in {
+    val positional = RunBudgets(10, Some(1.second), 2)
+    (positional.maxSupersteps, positional.timeout, positional.maxConcurrency, positional.maxTokens) shouldBe
+      ((10, Some(1.second), 2, None))
+    RunBudgets(10, Some(1.second), 2, Some(100L)).maxTokens shouldBe Some(100L)
+  }
+
   "RunConfig" should "generate a fresh run id per call" in {
     RunConfig().runId should not be RunConfig().runId
   }

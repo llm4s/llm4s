@@ -85,7 +85,7 @@ private[runner] object ProgramResolver {
   val ExecutableNotAllowed = "EXECUTABLE_NOT_ALLOWED"
   val ExecutableNotFound   = "EXECUTABLE_NOT_FOUND"
 
-  /** The name an allowlist entry or a command's first word is matched by; see [[WorkspaceSandboxConfig.programKey]]. */
+  /** The name an allowlist entry or a command's first word is matched by; see [[org.llm4s.shared.WorkspaceSandboxConfig.programKey WorkspaceSandboxConfig.programKey]]. */
   def programKey(name: String, windows: Boolean): String = WorkspaceSandboxConfig.programKey(name, windows)
 
   /**
@@ -113,6 +113,36 @@ private[runner] object ProgramResolver {
     untrustedRoots: Seq[Path]
   ): Either[CommandPolicy.Refusal, Path] =
     resolveIn(program, search, untrustedRoots, search.systemDirectories.map(_.toString))
+
+  /**
+   * Where the runner's own helper programs come from on Linux: git's configuration lister, `getfacl` and `setfacl`.
+   * They run unconfined (design §4.39), so never from `PATH`, whose entries (the runner user's home, for one) a
+   * confined command may be able to write: a program planted there would run with the runner's own rights.
+   */
+  val RunnerToolDirectories: Seq[Path] = Seq(Paths.get("/usr/bin"), Paths.get("/bin"))
+
+  /**
+   * [[RunnerToolDirectories]] on Linux, where commands are confined; None elsewhere, where the helpers are found as a
+   * command's program is ([[resolve]]): no command is confined there, so none can gain by planting one.
+   */
+  val HostRunnerToolDirectories: Option[Seq[Path]] =
+    Option.when(System.getProperty("os.name", "").startsWith("Linux"))(RunnerToolDirectories)
+
+  /**
+   * The absolute path of one of the runner's own helper programs, found only in `directories` (never `PATH`, never
+   * under `untrustedRoots`); None when it is not there.
+   */
+  def resolveRunnerTool(
+    program: String,
+    untrustedRoots: Seq[Path],
+    directories: Seq[Path] = RunnerToolDirectories
+  ): Option[Path] =
+    resolveIn(
+      program,
+      ProgramSearch(windows = false, directories, None, None, None),
+      untrustedRoots,
+      directories.map(_.toString)
+    ).toOption
 
   /** The `PATH` entries as written, in order, the empty ones as `""`. */
   private def pathEntries(search: ProgramSearch): Seq[String] =

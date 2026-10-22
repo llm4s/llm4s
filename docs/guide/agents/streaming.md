@@ -108,6 +108,13 @@ wrapper that retries or falls back (`wrapModelCall`) calls it again, so a higher
 same task means the text streamed so far for that task is discarded: clear what you have shown and
 start again. A task that `recover` runs again starts at attempt 1 under a new task id.
 
+## Subagents' events
+
+An agent with subagents sends `SubagentEvents.TaskStarted` (live) as each child starts and `SubagentEvents.TaskEnded`
+(durable, no content) when its task ends. With `nested = true` on `stream*` or `AgentRun.subscribe`, the listener also
+receives each child's events as `StreamEvent.Nested(child, event)`, matched with `EventHandlers.onChild`; see
+[Delegation: following children](delegation#following-children).
+
 ## `stream*` vs `subscribe`
 
 - `Agent.stream`, `streamResume` and `streamRecover` subscribe your listener during admission,
@@ -375,6 +382,10 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 
 `RunContext.progress(name, version, payload)` is the untyped form. A tool emits through its
 context's run: `Checked.progress(context.run, value)`.
+
+Progress is sent only while the task's run holds the thread. A node that keeps its `RunContext`, or
+a thread of its own, past the end of its run sends nothing: once the run has released the thread, or
+found its claim lost, `progress` is a no-op, so it never reaches a later run's subscribers.
 
 ### Typed handlers
 

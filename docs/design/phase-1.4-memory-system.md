@@ -233,7 +233,7 @@ val userContext = manager.getUserContext(Some("user1")).getOrElse("")
 
 // Run agent with context
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
   client <- LLMConnect.getClient(providerConfig)
   agent = new Agent(client)
   state <- agent.run(
@@ -324,14 +324,27 @@ MemoryStoreConfig.production(maxMemories = 100000)
 ### MemoryManagerConfig
 
 ```scala
-final case class MemoryManagerConfig(
-  autoRecordMessages: Boolean = true,        // Auto-record conversations
-  autoExtractEntities: Boolean = false,      // Auto-extract entities
-  defaultImportance: Double = 0.5,           // Default importance score
-  contextTokenBudget: Int = 2000,            // Max context tokens
-  consolidationEnabled: Boolean = false      // Enable consolidation
+final case class MemoryManagerConfig private (
+  autoExtractEntities: Boolean,              // Extract entities from each recorded user/assistant message
+  defaultImportance: Double,                 // Importance of a memory recorded without one
+  contextTokenBudget: Int,                   // getRelevantContext budget when no maxTokens is passed
+  consolidationConfig: ConsolidationConfig   // Group size and error handling of consolidateMemories
 )
+
+// Build with the companion apply (every option has a default) or a preset, change with with* setters
+MemoryManagerConfig(autoExtractEntities = false, defaultImportance = 0.5, contextTokenBudget = 2000,
+  consolidationConfig = ConsolidationConfig.default)
+MemoryManagerConfig.default.withContextTokenBudget(500)
+MemoryManagerConfig.default    // = MemoryManagerConfig()
+MemoryManagerConfig.testing    // no automatic entity extraction
+MemoryManagerConfig.fullFeatured // autoExtractEntities = true: one extra LLM call per recorded message
 ```
+
+Managers record only what the application passes to the `record*` methods, and nothing
+consolidates unless `consolidateMemories` is called. The `autoRecordMessages` and
+`consolidationEnabled` options this design once listed were never read and were removed in 0.5.0
+([#1579](https://github.com/llm4s/llm4s/issues/1579)). `.copy` is private, so the type can gain
+options without breaking callers ([#1847](https://github.com/llm4s/llm4s/issues/1847)).
 
 ## SQLite Backend (Phase 1.4.1)
 
@@ -356,7 +369,7 @@ val testStore = SQLiteMemoryStore.inMemory()
 
 // Use with SimpleMemoryManager
 val manager = store.flatMap { s =>
-  Right(SimpleMemoryManager(MemoryManagerConfig.default, s))
+  Right(SimpleMemoryManager.withStore(s, MemoryManagerConfig.default))
 }
 
 // Remember to close when done
@@ -477,9 +490,8 @@ import org.llm4s.agent.memory._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 
-// Enable consolidation with custom config
+// Custom consolidation config; consolidation runs only when consolidateMemories is called
 val config = MemoryManagerConfig(
-  consolidationEnabled = true,
   consolidationConfig = ConsolidationConfig(
     maxMemoriesPerGroup = 50,    // Max memories per consolidation group
     strictMode = false             // Best-effort (false) or fail-fast (true)
@@ -488,7 +500,7 @@ val config = MemoryManagerConfig(
 
 // Use with LLMMemoryManager
 val manager = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
   client         <- LLMConnect.getClient(providerConfig)
   store          <- VectorMemoryStore.inMemory()
 } yield LLMMemoryManager(config, store, client)

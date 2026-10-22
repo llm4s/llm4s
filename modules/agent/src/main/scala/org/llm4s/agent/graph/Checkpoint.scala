@@ -49,7 +49,17 @@ final case class Checkpoint private (
   /** The tenant the thread belongs to; checked at admission. */
   tenantId: Option[String] = None,
   /** The token of the claim whose run wrote this checkpoint. */
-  fencingToken: Option[FencingToken] = None
+  fencingToken: Option[FencingToken] = None,
+  /** Where a child thread came from; `None` for a top-level thread (format 7 and earlier: always `None`). */
+  origin: Option[RunOrigin] = None,
+  /** How the run this terminal checkpoint closed settled; `None` on every other checkpoint, and before format 8. */
+  outcome: Option[RunOutcome] = None,
+  /**
+   * Whether a cascade delete of the thread has begun (design 4.41, #2074): written under the thread's claim before its
+   * first descendant is deleted, so a cascade stopped part-way leaves the thread refusing every admission
+   * ([[GraphError.ThreadDeleting]]) until `deleteThread` finishes it. `false` on every other checkpoint.
+   */
+  deleting: Boolean = false
 ):
   def withFormatVersion(v: Int): Checkpoint                 = copy(formatVersion = v)
   def withId(i: String): Checkpoint                         = copy(id = i)
@@ -63,6 +73,11 @@ final case class Checkpoint private (
   def withTenantId(t: Option[String]): Checkpoint           = copy(tenantId = t)
   def withFencingToken(t: FencingToken): Checkpoint         = copy(fencingToken = Some(t))
   def withFencingToken(t: Option[FencingToken]): Checkpoint = copy(fencingToken = t)
+  def withOrigin(o: RunOrigin): Checkpoint                  = copy(origin = Some(o))
+  def withOrigin(o: Option[RunOrigin]): Checkpoint          = copy(origin = o)
+  def withOutcome(o: RunOutcome): Checkpoint                = copy(outcome = Some(o))
+  def withOutcome(o: Option[RunOutcome]): Checkpoint        = copy(outcome = o)
+  def withDeleting(d: Boolean): Checkpoint                  = copy(deleting = d)
 
 object Checkpoint:
 
@@ -76,12 +91,44 @@ object Checkpoint:
     createdAt: Instant,
     snapshot: GraphSnapshot,
     tenantId: Option[String] = None,
-    fencingToken: Option[FencingToken] = None
+    fencingToken: Option[FencingToken] = None,
+    origin: Option[RunOrigin] = None,
+    outcome: Option[RunOutcome] = None,
+    deleting: Boolean = false
+  ): Checkpoint =
+    new Checkpoint(
+      formatVersion,
+      id,
+      parent,
+      threadId,
+      runId,
+      status,
+      createdAt,
+      snapshot,
+      tenantId,
+      fencingToken,
+      origin,
+      outcome,
+      deleting
+    )
+
+  /** A checkpoint of a top-level thread recording no outcome, as before format 8. */
+  def apply(
+    formatVersion: Int,
+    id: String,
+    parent: Option[String],
+    threadId: String,
+    runId: String,
+    status: CheckpointStatus,
+    createdAt: Instant,
+    snapshot: GraphSnapshot,
+    tenantId: Option[String],
+    fencingToken: Option[FencingToken]
   ): Checkpoint =
     new Checkpoint(formatVersion, id, parent, threadId, runId, status, createdAt, snapshot, tenantId, fencingToken)
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 7
+  val CurrentFormat: Int = 8
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -96,15 +143,20 @@ object Checkpoint:
    * 6 -> 7: task lineages (#1921 follow-up) give each pending task and continuation origin a digest of what
    * scheduled it; nothing to rewrite, as tasks written before read with an empty lineage, but a build that
    * predates them refuses format 7 rather than key a task's effects without its lineage.
+   * 7 -> 8: child threads (#2045) record their [[RunOrigin]], terminal checkpoints how their run settled
+   * ([[RunOutcome]]), and a cascade delete marks its root `deleting` (#2074); nothing to rewrite, as all three default
+   * to none - every earlier thread is top-level, and none is being deleted - but a build that predates them refuses
+   * format 8 rather than drive a child thread as a top-level one, or admit a half-deleted thread.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(7)(
+    SchemaVersion(8)(
       1 -> addSuspension,
       2 -> addTenant,
       3 -> addFailedStatus,
       4 -> addFencingToken,
       5 -> addBreakpoints,
-      6 -> addTaskLineages
+      6 -> addTaskLineages,
+      7 -> addChildThreads
     )
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
@@ -155,6 +207,13 @@ object Checkpoint:
     Try {
       val upgraded = ujson.copy(json)
       upgraded("formatVersion") = 7
+      upgraded
+    }.toResult
+
+  private def addChildThreads(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("formatVersion") = 8
       upgraded
     }.toResult
 
@@ -233,6 +292,16 @@ final case class StoredCheckpoint(checkpoint: Checkpoint, pendingWrites: Vector[
  *    record for which [[releasesEffect]] holds, so replay evidence lives exactly as long as its task can
  *    run again (design §4.24). The runtime writes each record of a [[ReplayGuard]] as a commit of its
  *    own, with no checkpoint, pending write or event.
+ *  - `fence`, if present as `(other, otherToken)`, fences the commit by another thread's claim too: it applies only if
+ *    `otherToken` is `other`'s current claim, checked in the same atomic step as `token` and the write (one
+ *    transaction, or under one lock), and otherwise is `GraphError.StaleClaim(other, otherToken, otherCurrent)` with
+ *    nothing written - `token` checked first. The runtime fences every admission and settlement a parent drives on a
+ *    child thread - its first commit, which writes its [[Checkpoint.origin]], a reattachment's, a resume's and a
+ *    settlement's - by the parent's claim (design 4.41), so a stale task of a parent taken over never registers or
+ *    runs a child after a successor took the parent.
+ *  - `metadata`, if present, replaces the thread's [[ThreadMetadata]] (design 4.52), fenced like the rest of the
+ *    commit; `None` leaves it as it is. A thread keeps its metadata across commits until another replaces it, and
+ *    loses it only with the thread ([[Checkpointer.deleteThread]]).
  */
 final case class Commit private (
   token: FencingToken,
@@ -240,15 +309,21 @@ final case class Commit private (
   pendingWrites: Vector[PendingWrite],
   events: Vector[EventDraft],
   retractTurn: Boolean,
-  effects: Vector[EffectRecord]
+  effects: Vector[EffectRecord],
+  fence: Option[(ThreadId, FencingToken)],
+  metadata: Option[ThreadMetadata]
 ):
-  def withToken(t: FencingToken): Commit                 = copy(token = t)
-  def withCheckpoint(c: Checkpoint): Commit              = copy(checkpoint = Some(c))
-  def withCheckpoint(c: Option[Checkpoint]): Commit      = copy(checkpoint = c)
-  def withPendingWrites(w: Vector[PendingWrite]): Commit = copy(pendingWrites = w)
-  def withEvents(e: Vector[EventDraft]): Commit          = copy(events = e)
-  def withRetractTurn(r: Boolean): Commit                = copy(retractTurn = r)
-  def withEffects(e: Vector[EffectRecord]): Commit       = copy(effects = e)
+  def withToken(t: FencingToken): Commit                     = copy(token = t)
+  def withCheckpoint(c: Checkpoint): Commit                  = copy(checkpoint = Some(c))
+  def withCheckpoint(c: Option[Checkpoint]): Commit          = copy(checkpoint = c)
+  def withPendingWrites(w: Vector[PendingWrite]): Commit     = copy(pendingWrites = w)
+  def withEvents(e: Vector[EventDraft]): Commit              = copy(events = e)
+  def withRetractTurn(r: Boolean): Commit                    = copy(retractTurn = r)
+  def withEffects(e: Vector[EffectRecord]): Commit           = copy(effects = e)
+  def withFence(f: (ThreadId, FencingToken)): Commit         = copy(fence = Some(f))
+  def withFence(f: Option[(ThreadId, FencingToken)]): Commit = copy(fence = f)
+  def withMetadata(m: ThreadMetadata): Commit                = copy(metadata = Some(m))
+  def withMetadata(m: Option[ThreadMetadata]): Commit        = copy(metadata = m)
 
   /**
    * The tasks the new checkpoint can still run. A settled checkpoint (`Completed`, or `Failed`, which a Block
@@ -291,8 +366,29 @@ object Commit:
     pendingWrites: Vector[PendingWrite] = Vector.empty,
     events: Vector[EventDraft] = Vector.empty,
     retractTurn: Boolean = false,
-    effects: Vector[EffectRecord] = Vector.empty
-  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects)
+    effects: Vector[EffectRecord] = Vector.empty,
+    fence: Option[(ThreadId, FencingToken)] = None,
+    metadata: Option[ThreadMetadata] = None
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, metadata)
+
+  def apply(
+    token: FencingToken,
+    checkpoint: Option[Checkpoint],
+    pendingWrites: Vector[PendingWrite],
+    events: Vector[EventDraft],
+    retractTurn: Boolean,
+    effects: Vector[EffectRecord],
+    fence: Option[(ThreadId, FencingToken)]
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, fence, None)
+
+  def apply(
+    token: FencingToken,
+    checkpoint: Option[Checkpoint],
+    pendingWrites: Vector[PendingWrite],
+    events: Vector[EventDraft],
+    retractTurn: Boolean,
+    effects: Vector[EffectRecord]
+  ): Commit = new Commit(token, checkpoint, pendingWrites, events, retractTurn, effects, None, None)
 
   /** The superstep that scheduled a task: its id is `"<superstep>.<ordinal>"`; another id reads as long past. */
   private def scheduledAt(taskId: TaskId): Int =

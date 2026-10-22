@@ -20,6 +20,33 @@ A comprehensive, type-safe framework for building LLM-powered applications in Sc
 [Get Started](/getting-started/installation){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/llm4s/llm4s){: .btn .fs-5 .mb-4 .mb-md-0 }
 
+**Follow LLM4S**
+
+{% include follow-links.html style="buttons" %}
+
+---
+
+## Upcoming Events
+
+Meet the LLM4S community at a talk near you, or join the weekly Dev Hour online.
+
+{% include upcoming-events.html %}
+
+[Explore events](/events/){: .btn .btn-primary .mr-2 }
+[Follow the Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA){: .btn }
+
+{% include events-script.html %}
+
+---
+
+## LLM4S Around the World
+
+Snapshots from LLM4S talks held around the world. Select a picture to open it full size.
+
+{% include talk-snapshots.html %}
+
+[See all talks and events](/events/){: .btn .btn-primary }
+
 ---
 
 ## Why LLM4S?
@@ -310,8 +337,10 @@ Explore **69 working examples** covering all features:
 
 | Scala Version | JDK Version | Status |
 |---------------|-------------|--------|
-| 3.7.x | 21, 17 | ✅ Fully Supported |
-| 2.13.x | 21, 17 | ✅ Fully Supported |
+| 3.7.x | 21 | ✅ Supported (built with 3.7.1) |
+
+Scala 2.13 is not published: 1.0 targets Scala 3 only, and 2.13 support is deferred to after 1.0. JDK 21 is the
+minimum for every artifact; see [Scala and JDK support](/reference/v1-scope#scala-and-jdk-support).
 
 ### LLM Provider Support
 
@@ -329,6 +358,7 @@ Explore **69 working examples** covering all features:
 ## Community
 
 - **Discord**: [Join our community](https://discord.gg/4uvTPn6qww)
+- **Events**: [Talks and the weekly Dev Hour](/events/)
 - **GitHub**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Starter Kit**: [llm4s.g8](https://github.com/llm4s/llm4s.g8)
 - **License**: MIT

@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.duration._
 
 /**
- * Example using [[LLMClientRetry.completeWithRetry]] for completion with automatic retries.
+ * Example using [[org.llm4s.llmconnect.LLMClientRetry.completeWithRetry LLMClientRetry.completeWithRetry]] for completion with automatic retries.
  *
  * Run with Ollama (no API key) - the samples' default `ollama-local` section:
  * {{{

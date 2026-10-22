@@ -67,8 +67,8 @@ final private[llm4s] class AgentEventBuffer(capacity: Int, durableCapacity: Int 
             flushGap()
             queue.add(durable)
             durableQueued += 1
-          case StreamEvent.LiveGap(n) if liveQueued >= capacity => dropped += n
-          case _: StreamEvent.Live if liveQueued >= capacity    => dropped += 1
+          case StreamEvent.LiveGap(n) if liveQueued >= capacity                     => dropped += n
+          case _: (StreamEvent.Live | StreamEvent.Nested) if liveQueued >= capacity => dropped += 1
           case live =>
             flushGap()
             queueLive(live)

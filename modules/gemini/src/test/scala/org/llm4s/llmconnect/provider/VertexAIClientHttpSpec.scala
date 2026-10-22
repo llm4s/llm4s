@@ -78,6 +78,17 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     result.toOption.get.content shouldBe "Hello!"
   }
 
+  it should "report the sources of a grounded answer as citations (#1216)" in {
+    val body =
+      """{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"groundingMetadata":{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}}]}"""
+    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body))
+
+    client.complete(conversation("Hi"), CompletionOptions()).toOption.get.citations shouldBe List(
+      Citation(url = "https://src/a", title = Some("A")),
+      Citation(url = "https://src/b", title = Some("B"))
+    )
+  }
+
   it should "parse token usage from the response" in {
     val mockHttp = stub[Llm4sHttpClient]
     val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
@@ -270,6 +281,33 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     result.toOption.get.content should include("Hello")
     result.toOption.get.content should include("world")
     chunks should have size 2
+  }
+
+  it should "report grounding sources from the stream as citations" in {
+    val sseData =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}," +
+        "\"groundingMetadata\":" + ujson.write(
+          ujson.read(
+            """{"groundingChunks":[{"web":{"uri":"https://src/a","title":"A"}},{"web":{"uri":"https://src/b","title":"B"}}],"groundingSupports":[{"segment":{"startIndex":0,"endIndex":5},"groundingChunkIndices":[0]}]}"""
+          )
+        ) + "}]}\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+    val mockHttp    = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val client =
+      new VertexAIClient(
+        testConfig,
+        org.llm4s.metrics.MetricsCollector.noop,
+        ProviderExchangeLogging.Disabled,
+        mockHttp
+      )
+    client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.get.citations shouldBe List(
+      Citation(url = "https://src/a", title = Some("A")),
+      Citation(url = "https://src/b", title = Some("B"))
+    )
   }
 
   it should "parse token usage from the final SSE chunk" in {

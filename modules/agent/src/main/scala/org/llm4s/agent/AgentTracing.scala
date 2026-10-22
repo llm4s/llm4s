@@ -1,6 +1,6 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.events.AgentEvents
+import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, ToolLoop, TurnOutput }
 import org.llm4s.types.Result
@@ -21,17 +21,21 @@ import scala.util.{ Failure, Try }
  * usage as `TokenUsageRecorded(usage, model, "agent_completion")`, which it also sums into the run's
  * own usage (the shape of `AgentResult.usage`, for this run's calls only). On the run's terminal event it
  * takes the run's result from its handle (set just after the closing commit) and traces one
- * [[TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
+ * [[org.llm4s.trace.TraceEvent.AgentRunEnded TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
  * failed run also traces `ErrorOccurred`. A run that ends without a terminal event (a crash, or a
  * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered the run's
  * last event, at the run's end-of-run barrier, its error is traced as `ErrorOccurred` and logged at
  * WARN. Tracing failures are logged at WARN and never fail the run.
+ *
+ * `parent` is, for a delegated child's run, the parent thread and run whose `task` call drives it: its
+ * `AgentRunEnded` names them (design 4.47).
  */
 final private[agent] class AgentTracing(
   handle: RunHandle[TurnOutput],
   root: AgentId,
   loop: ToolLoop,
-  tracing: Tracing
+  tracing: Tracing,
+  parent: Option[(ThreadId, RunId)] = None
 ):
   private val delivered    = new CompletableFuture[Unit]()
   private val detached     = new AtomicBoolean(false)
@@ -95,7 +99,16 @@ final private[agent] class AgentTracing(
       case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
     status.left.foreach(error => if label == "failed" then traceError(error.message))
     trace(
-      TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, label, messages, usage.get)
+      TraceEvent.AgentRunEnded(
+        handle.threadId.value,
+        handle.runId.value,
+        active.value,
+        label,
+        messages,
+        usage.get,
+        parentThreadId = parent.map(_._1.value),
+        parentRunId = parent.map(_._2.value)
+      )
     )
 
   /**
@@ -157,8 +170,9 @@ private[agent] object AgentTracing:
   def toTrace(record: EventRecord): TraceEvent.CustomEvent =
     val traced = TracingSubscriber.toTrace(record)
     record.event match
-      case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) => traced.copy(name = name)
-      case _                                                        => traced
+      case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) || SubagentEvents.durable(name) =>
+        traced.copy(name = name)
+      case _ => traced
 
   private def stateOf(result: RunResult[TurnOutput]): ThreadState = result match
     case RunResult.Completed(s, _, _) => s
@@ -167,26 +181,27 @@ private[agent] object AgentTracing:
 
   /**
    * The `AgentRunEnded` status of a run whose terminal event is `terminal` and whose turn ended with
-   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `suspended`,
+   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `token_limit_reached`, `suspended`,
    * `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed` - a turn `await` refuses is `failed`.
    */
   def label(terminal: RunEvent, status: Result[AgentStatus]): String = status match
     case Right(_: AgentStatus.Completed)          => "completed"
     case Right(AgentStatus.StepLimitReached)      => "step_limit_reached"
+    case Right(AgentStatus.TokenLimitReached)     => "token_limit_reached"
     case Right(_: AgentStatus.Suspended)          => "suspended"
     case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
     case Left(_) =>
       terminal match
-        case RunEvent.RunCancelled(_) => "cancelled"
-        case RunEvent.RunTimedOut(_)  => "timed_out"
-        case _                        => "failed"
+        case RunEvent.RunCancelled(_, _) => "cancelled"
+        case RunEvent.RunTimedOut(_, _)  => "timed_out"
+        case _                           => "failed"
 
   /** The usage a terminal event carries for the attempts that committed nothing; `None` for any other event. */
   def lostUsage(event: RunEvent): Option[UsageSummary] = event match
-    case RunEvent.RunFailed(_, usage) => usage
-    case RunEvent.RunCancelled(usage) => usage
-    case RunEvent.RunTimedOut(usage)  => usage
-    case _                            => None
+    case RunEvent.RunFailed(_, usage, _) => usage
+    case RunEvent.RunCancelled(usage, _) => usage
+    case RunEvent.RunTimedOut(usage, _)  => usage
+    case _                               => None
 
   /** How long `detach` waits, after the run ends, for its last event to be traced. */
   val Drain: FiniteDuration = 5.seconds

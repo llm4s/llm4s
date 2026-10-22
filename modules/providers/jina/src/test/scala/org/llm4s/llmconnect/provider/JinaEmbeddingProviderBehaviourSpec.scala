@@ -12,7 +12,7 @@ import ujson.read
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /**
  * Behaviour the happy-path spec does not pin: exact request JSON per task, URL joining, the full
@@ -236,16 +236,35 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "return a transport error when nothing listens" in {
+  it should "return the HTTP client's NetworkError when nothing listens, so it reads as a network failure (#1781)" in {
     val err = JinaEmbeddingProvider
       .fromConfig(cfg("http://localhost:1/v1"))
       .embed(EmbeddingRequest(Seq("hi"), modelCfg))
       .left
       .toOption
       .get
-    err.code shouldBe None
-    err.message should startWith("HTTP request failed")
+    err shouldBe a[NetworkError]
     (err.message should not).include(secretKey)
+  }
+
+  it should "pass a timeout through, and report any other transport failure as an EmbeddingError" in {
+    def failingWith(error: org.llm4s.error.LLMError): Llm4sHttpClient = new Llm4sHttpClient {
+      private def fail[A]: Result[A]                                                                 = Left(error)
+      def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
+      def post(u: String, h: Map[String, String], b: String, t: FiniteDuration)                      = fail
+      def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
+      def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
+      def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
+      def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
+      def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
+      def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+    }
+    val late = org.llm4s.error.TimeoutError("POST jina: request timed out", 1.second, "http.POST")
+    embed(failingWith(late), Seq("a")).left.toOption.get shouldBe late
+
+    val invalid = embed(failingWith(org.llm4s.error.ValidationError("request", "bad URL")), Seq("a")).left.toOption.get
+    invalid shouldBe a[org.llm4s.llmconnect.model.EmbeddingError]
+    invalid.message should startWith("HTTP request failed")
   }
 
   "dimension handling" should "pass vectors through even when their length differs from the requested config (documented gap, as Voyage)" in {

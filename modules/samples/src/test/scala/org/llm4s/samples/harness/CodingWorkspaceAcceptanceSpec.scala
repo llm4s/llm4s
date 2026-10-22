@@ -109,8 +109,8 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
 
   private def approvals(result: AgentResult): Map[InterruptId, ujson.Value] =
     result.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map((id, _) => result.approve(id)).toMap
-      case other                                     => fail(s"not suspended: $other")
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map((id, _) => result.approve(id)).toMap
+      case other                                        => fail(s"not suspended: $other")
     }
 
   "The coding example" should "suspend at execute, resume approved in a fresh runtime, and run the command once" in {
@@ -123,7 +123,7 @@ class CodingWorkspaceAcceptanceSpec extends AnyFlatSpec with Matchers with Eithe
     val suspended =
       first.coder.agent.stream(thread, CodingWorkspace.Query, config)(seen1.handlers).flatMap(_.await()).value
     suspended.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) =>
+      case AgentStatus.Suspended(approvals, _, _, _, _) =>
         approvals.map(_._2.call.name) shouldBe Vector("execute")
         approvals.head._2.reason should include(s"execute ${CodingModel.CheckCommand}")
       case other => fail(s"not suspended: $other")

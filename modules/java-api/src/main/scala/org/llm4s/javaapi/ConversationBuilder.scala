@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, Message, Sys
 import java.util.Objects
 
 /**
- * Builder for constructing a [[Conversation]] without using Scala case-class
+ * Builder for constructing a [[org.llm4s.llmconnect.model.Conversation Conversation]] without using Scala case-class
  * syntax or sequence literals.
  *
  * {{{

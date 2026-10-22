@@ -72,12 +72,24 @@ object MemoryTestSupport:
     def effect(threadId: ThreadId, key: EffectKey)       = alive(underlying.effect(threadId, key))
     def history(threadId: ThreadId, before: Option[String], limit: Int) =
       alive(underlying.history(threadId, before, limit))
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) =
+      alive(underlying.children(parent, after, limit))
+    def threads(query: org.llm4s.agent.graph.ThreadQuery) =
+      alive(underlying.threads(query))
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) =
+      alive(underlying.incompleteThreads(tenantId, after, limit))
     def checkpoint(threadId: ThreadId, checkpointId: String) = alive(underlying.checkpoint(threadId, checkpointId))
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = alive(underlying.prune(threadId, policy))
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       alive(underlying.eventsAfter(threadId, afterSeq, limit))
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)    = alive(underlying.compactEvents(threadId, beforeSeq))
-    def deleteThread(threadId: ThreadId, token: FencingToken) = alive(underlying.deleteThread(threadId, token))
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = alive(underlying.compactEvents(threadId, beforeSeq))
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) = alive(
+      underlying.deleteThread(threadId, token, fence)
+    )
 
   /** A commit's effect records of `operation`, completed (`true`) or begun. */
   def effects(commit: Commit, operation: String, completed: Boolean): Boolean =

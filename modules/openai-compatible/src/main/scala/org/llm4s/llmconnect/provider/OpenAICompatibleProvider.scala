@@ -210,9 +210,9 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     )
 
   /**
-   * The validated [[OpenAICompatibleConfig]] a section describes - through
+   * The validated [[org.llm4s.llmconnect.config.OpenAICompatibleConfig OpenAICompatibleConfig]] a section describes - through
    * [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.fromValues]], so every rule of
-   * `OpenAICompatibleConfig.validate` holds. Chat ([[buildConfig]]) and [[OpenAICompatibleModelLister]] both
+   * `OpenAICompatibleConfig.validate` holds. Chat ([[buildConfig]]) and [[org.llm4s.config.OpenAICompatibleModelLister OpenAICompatibleModelLister]] both
    * build their config here, so neither can reach the network with a config the other would refuse; in
    * particular no token is exchanged, or sent, for a section whose `baseUrl` or `auth.tokenUrl` is not
    * `https`. `registryWindow` gives the model registry's context window for the resolved base URL, used when

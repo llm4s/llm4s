@@ -30,22 +30,26 @@ import scala.concurrent.duration._
  * - Supporting real-time streaming of command output
  * - Eliminating thread pool blocking during long commands
  *
- * Commands run without a shell, and only programs on the runner's allowlist run (#1756): the runner's
- * `WORKSPACE_SANDBOX_PROFILE` (unset, `permissive`) chooses the list, and `extraAllowedCommands` adds to it.
+ * Commands run without a shell, and only programs on the runner's allowlist run (#1756): `sandboxConfig`, when given,
+ * chooses the list (and the paths, limits and network a command gets, design §4.39); otherwise the runner's
+ * `WORKSPACE_SANDBOX_PROFILE` (unset, `permissive`) does. `extraAllowedCommands` adds to either.
  *
  * @param workspaceDir         the host directory mounted as the container's `/workspace`
  * @param imageName            the workspace-runner image
  * @param hostPort             the host port the container's 8080 is published on
  * @param extraAllowedCommands programs the runner may run besides its profile's allowlist (for example `sbt`),
  *                             passed to the container as `WORKSPACE_EXTRA_COMMANDS`; each is a bare program name,
- *                             never a shell or a launcher (see [[WorkspaceSandboxConfig.withExtraCommands]]), and
+ *                             never a shell or a launcher (see [[org.llm4s.shared.WorkspaceSandboxConfig.withExtraCommands WorkspaceSandboxConfig.withExtraCommands]]), and
  *                             a container is not started with a name the runner would refuse
+ * @param sandboxConfig        the runner's whole sandbox config, passed as `WORKSPACE_SANDBOX_CONFIG`; `None` leaves
+ *                             the runner on its profile
  */
 class ContainerisedWorkspace(
   val workspaceDir: String,
   val imageName: String,
   val hostPort: Int,
-  val extraAllowedCommands: Set[String] = Set.empty
+  val extraAllowedCommands: Set[String] = Set.empty,
+  val sandboxConfig: Option[WorkspaceSandboxConfig] = None
 ) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
   private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
@@ -177,9 +181,17 @@ class ContainerisedWorkspace(
 
     // Run the docker container with the workspace directory mounted
     val dockerProcess = ContainerisedWorkspace
-      .dockerRunArgs(containerName, hostPort, containerPort, workspaceDir, imageName, extraAllowedCommands)
+      .dockerRunArgs(
+        containerName,
+        hostPort,
+        containerPort,
+        workspaceDir,
+        imageName,
+        extraAllowedCommands,
+        sandboxConfig
+      )
       .left
-      .map(msg => new IllegalArgumentException(s"extraAllowedCommands: $msg"))
+      .map(msg => new IllegalArgumentException(s"sandbox config: $msg"))
       .toTry
       .flatMap(args =>
         Try {
@@ -622,7 +634,7 @@ object ContainerisedWorkspace {
   /**
    * The `docker run` command that starts a workspace-runner container.
    *
-   * @return the argument vector, or why `extraAllowedCommands` holds a name the runner would refuse
+   * @return the argument vector, or why the sandbox config or `extraAllowedCommands` is one the runner would refuse
    */
   private[workspace] def dockerRunArgs(
     containerName: String,
@@ -630,16 +642,23 @@ object ContainerisedWorkspace {
     containerPort: Int,
     workspaceDir: String,
     imageName: String,
-    extraAllowedCommands: Set[String]
+    extraAllowedCommands: Set[String],
+    sandboxConfig: Option[WorkspaceSandboxConfig]
   ): Either[String, Seq[String]] = {
     val extra = extraAllowedCommands.toSeq.sorted.mkString(",")
-    WorkspaceSandboxConfig.Permissive.withExtraCommands(extra).map { _ =>
+    for {
+      _ <- sandboxConfig.fold[Either[String, Unit]](Right(()))(WorkspaceSandboxConfig.validate)
+      _ <- sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive).withExtraCommands(extra)
+    } yield {
       val extraEnv =
         if (extra.isEmpty) Seq.empty
         else Seq("-e", s"${WorkspaceSandboxConfig.ExtraCommandsEnvVar}=$extra")
+      val configEnv =
+        sandboxConfig.toSeq.flatMap(c =>
+          Seq("-e", s"${WorkspaceSandboxConfig.ConfigEnvVar}=${upickle.default.write(c)}")
+        )
       Seq("docker", "run", "-d", "--name", containerName, "-p", s"$hostPort:$containerPort") ++
-        extraEnv ++
-        Seq("-v", s"$workspaceDir:/workspace", imageName)
+        extraEnv ++ configEnv ++ Seq("-v", s"$workspaceDir:/workspace", imageName)
     }
   }
 }

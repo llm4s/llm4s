@@ -86,8 +86,8 @@ object LocksFixture:
 
   /** Approves every pending approval of a suspended result. */
   def approveAll(parked: AgentResult): Map[InterruptId, ujson.Value] = parked.status match
-    case AgentStatus.Suspended(pending, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
-    case other                                   => throw new IllegalStateException(s"expected Suspended, got $other")
+    case AgentStatus.Suspended(pending, _, _, _, _) => pending.map(p => parked.approve(p._1)).toMap
+    case other => throw new IllegalStateException(s"expected Suspended, got $other")
 
   /** An approval of every interrupt parked in `thread`'s latest checkpoint, read from `store`. */
   def approvals(store: SqliteCheckpointer, thread: ThreadId): Map[InterruptId, ujson.Value] =

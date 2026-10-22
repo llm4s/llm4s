@@ -3,7 +3,7 @@ package org.llm4s.samples.docs
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ Completion, Conversation, TokenUsage }
-import org.llm4s.toolapi.ToolFunction
+import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
 
 /**
@@ -28,4 +28,5 @@ trait SnippetEnv {
   protected def model: EmbeddingModelConfig          = ???
   protected def question: String                     = ???
   protected def myTools: Seq[ToolFunction[_, _]]     = ???
+  protected def tools: ToolRegistry                  = ???
 }

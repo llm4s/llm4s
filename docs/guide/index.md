@@ -7,7 +7,13 @@ has_children: true
 
 # User Guide
 
-Comprehensive guides for LLM4S features.
+Comprehensive guides for LLM4S features. They describe the current release, {{ site.data.project.latest_release }}
+(Scala 3.7.x, JDK 21); new to LLM4S? Start with [Getting Started](/getting-started/), and upgrading from 0.4.x,
+with [Upgrading from 0.4.1 to 0.5.0](/migrations/0-4-1-to-0-5-0).
+
+Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent runtime in `llm4s-agent`, RAG in
+`llm4s-rag`, each provider in its own module, and so on); each guide names the module it needs, and
+[Installation](/getting-started/installation#optional-dependencies) lists them all.
 
 ## Available Guides
 
@@ -16,13 +22,16 @@ Comprehensive guides for LLM4S features.
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Java RAG](java-rag)** - Ingest documents and ask questions from Java with `llm4s-java-rag`: answers with their sources
 - **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
+- **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Testing with the Testkit](testing-with-the-testkit)** - Script an `LLMClient` in your tests: canned replies, tool calls, injected errors, recorded requests
 - **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
 - **[Comparing LLM4S](comparison)** - A sourced comparison with LangChain4j, Spring AI, Koog and Embabel, and a [migration guide](migrating-from-langchain4j)
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
+- **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
 - **[JSON Libraries](json-libraries)** - Use circe, play-json or zio-json with LLM4S: converting at the boundary, structured output and tools
 
 ### Agent Framework
@@ -32,11 +41,14 @@ Comprehensive guides for LLM4S features.
   - **[Memory System](agents/memory)** - Persistent context and knowledge across conversations
   - **[Handoffs](agents/handoffs)** - Agent-to-agent delegation for specialist routing
   - **[Streaming Events](agents/streaming)** - Real-time execution feedback for responsive UIs
+- **[Context Window Pruning](context-window-pruning)** - Keep a long conversation within the model's context window
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
+- **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`.
 
 ### RAG & Semantic Search
 
+- **[Embeddings](embeddings)** - Choose a provider and model, create an `EmbeddingClient`, embed documents and queries, and keep dimensions in step with the store
 - **[Vector Store](vector-store)** - Complete RAG toolkit for semantic search and retrieval
   - **Vector Backends**: SQLite (in-memory/file), PostgreSQL/pgvector, Qdrant
   - **Keyword Backends**: SQLite FTS5, PostgreSQL native full-text search
@@ -68,6 +80,7 @@ Comprehensive guides for LLM4S features.
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
+- **[Spark and Databricks](spark)** - enrich a DataFrame from a Spark job: a client per partition, `ReliableClient`, errors as data
 
 ### Java
 

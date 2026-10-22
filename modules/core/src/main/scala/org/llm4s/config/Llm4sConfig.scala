@@ -203,7 +203,7 @@ object Llm4sConfig {
     org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.defaultProviderName)
 
   /**
-   * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   * Loads the configured default named provider as a runtime [[org.llm4s.llmconnect.config.ProviderConfig ProviderConfig]].
    *
    * Only the default section is validated: another section's problem does not fail this.
    */
@@ -383,6 +383,23 @@ object Llm4sConfig {
     ProviderRegistry
   ): Result[(String, EmbeddingProviderConfig)] =
     org.llm4s.config.EmbeddingsConfigLoader.loadProvider(source)
+
+  /**
+   * [[embeddings()*]] for the model `modelSpec` names, `provider/model`, instead of the one
+   * `llm4s.embeddings.model` selects: the provider's `llm4s.embeddings.<provider>` block and its
+   * key are read as they are for that one. `llm4s-java-api`'s `Llm4s.createEmbeddingClient` loads
+   * through it.
+   */
+  private[llm4s] def embeddingsFor(modelSpec: String)(using
+    ProviderRegistry
+  ): Result[(String, EmbeddingProviderConfig)] =
+    embeddingsFor(ConfigSource.default, modelSpec)
+
+  /** [[embeddingsFor(modelSpec:String)*]] for a given source. */
+  private[llm4s] def embeddingsFor(source: ConfigSource, modelSpec: String)(using
+    ProviderRegistry
+  ): Result[(String, EmbeddingProviderConfig)] =
+    org.llm4s.config.EmbeddingsConfigLoader.loadProviderFor(source, modelSpec)
 
   /**
    * Loads configuration for locally-available embedding models from the current environment.

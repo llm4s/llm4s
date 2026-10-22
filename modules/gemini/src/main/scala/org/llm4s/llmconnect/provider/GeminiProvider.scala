@@ -23,10 +23,12 @@ object GeminiProvider extends ProviderDescriptor:
    * which is this provider under an alias - bound to `GOOGLE_API_KEY`, else `GEMINI_API_KEY`.
    */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
-      GeminiConfig.DEFAULT_BASE_URL,
-      Seq(GeminiConfigKeys.GOOGLE_API_KEY, GeminiConfigKeys.GEMINI_API_KEY)
-    )
+    ProviderConfigSpec
+      .apiKeyAndDefaultBaseUrl(
+        GeminiConfig.DEFAULT_BASE_URL,
+        Seq(GeminiConfigKeys.GOOGLE_API_KEY, GeminiConfigKeys.GEMINI_API_KEY)
+      )
+      .withExtras(Seq(GeminiGrounding.GoogleSearchConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(GeminiModelLister)
 
@@ -36,8 +38,9 @@ object GeminiProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      search  <- GeminiGrounding.googleSearch(providerName, section)
       config  <- GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
-    yield config
+    yield config.withGoogleSearch(search)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

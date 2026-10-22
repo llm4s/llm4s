@@ -76,8 +76,13 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   private val ToolRoundTrip       = "an assistant turn of only tool calls, then a `tool` message, is accepted"
   private val StreamShape         = "a stream delivers text, ends with a `finish_reason` and reports usage"
   private val StreamUsageChunk    = "(info) the stream's usage arrives in a chunk with no `choices`"
-  private val BadKey              = "a wrong API key is an AuthenticationError that never contains the key"
-  private val BadRequest          = "a malformed request is a 400 that the client reports as a ValidationError"
+  private val Penalties           = "`presence_penalty` and `frequency_penalty` are accepted"
+  private val JsonObject          = "`response_format: {type: json_object}` is accepted and the reply is JSON"
+  private val JsonSchemaFormat =
+    "`response_format: {type: json_schema, json_schema: {name, schema, strict}}` is accepted and the reply matches"
+  private val StreamOptions = "`chat_stream` accepts the penalties and `response_format` too"
+  private val BadKey        = "a wrong API key is an AuthenticationError that never contains the key"
+  private val BadRequest    = "a malformed request is a 400 that the client reports as a ValidationError"
 
   private val report = new ProbeReport(
     s"watsonx ($model, version=$apiVersion)",
@@ -93,6 +98,10 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
       ToolRoundTrip,
       StreamShape,
       StreamUsageChunk,
+      Penalties,
+      JsonObject,
+      JsonSchemaFormat,
+      StreamOptions,
       BadKey,
       BadRequest
     )
@@ -207,6 +216,29 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   )
 
   private def userMessage(text: String): ujson.Value = ujson.Arr(ujson.Obj("role" -> "user", "content" -> text))
+
+  // The client sends these only when a caller sets them (WatsonXClient's Scaladoc: "Penalties and response format").
+  private val askForJson = Conversation(
+    Seq(
+      SystemMessage("Reply with a JSON object only, with an integer field `sum`."),
+      UserMessage("What is 12 + 34?")
+    )
+  )
+
+  // names no field, so a `sum` in the reply comes from the schema
+  private val askForSchemaJson =
+    Conversation(Seq(SystemMessage("Reply with a JSON object only."), UserMessage("What is 12 + 34?")))
+
+  private val sumSchema = ujson.Obj(
+    "type"       -> "object",
+    "properties" -> ujson.Obj("sum" -> ujson.Obj("type" -> "integer")),
+    "required"   -> ujson.Arr("sum")
+  )
+
+  private def jsonReply(completion: Completion): ujson.Value =
+    withClue(s"the reply is not a JSON object: ${completion.content}\n") {
+      Try(ujson.read(completion.content)).toOption.filter(_.objOpt.isDefined).getOrElse(fail("not a JSON object"))
+    }
 
   // --- the probes ----------------------------------------------------------------------------------------------
 
@@ -353,6 +385,46 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
           events.exists(e => e.obj.get("usage").exists(!_.isNull) && e("choices").arr.isEmpty) shouldBe true
         }
       }
+    }
+  }
+
+  it should s"probe: $Penalties" in {
+    report.probe(Penalties, "WatsonXClient.createRequestBody: stop sending presence_penalty / frequency_penalty") {
+      requireAccount()
+      val options = CompletionOptions().withMaxTokens(20).withPresencePenalty(0.5).withFrequencyPenalty(0.5)
+      withClient()(_.complete(say("Say hi in one word"), options)).value.content should not be empty
+    }
+  }
+
+  it should s"probe: $JsonObject" in {
+    report.probe(JsonObject, "WatsonXClient.encodeResponseFormat: the json_object shape") {
+      requireAccount()
+      val options = CompletionOptions().withMaxTokens(60).withResponseFormat(ResponseFormat.Json)
+      jsonReply(withClient()(_.complete(askForJson, options)).value)
+    }
+  }
+
+  it should s"probe: $JsonSchemaFormat" in {
+    report.probe(JsonSchemaFormat, "WatsonXClient.encodeResponseFormat: the json_schema shape") {
+      requireAccount()
+      val format  = ResponseFormat.JsonSchema(sumSchema, name = "sum", strict = true)
+      val options = CompletionOptions().withMaxTokens(60).withResponseFormat(format)
+      val reply   = jsonReply(withClient()(_.complete(askForSchemaJson, options)).value)
+      withClue(s"the reply ignores the schema: ${reply.render()}\n")(
+        reply.obj.get("sum").flatMap(_.numOpt) should not be empty
+      )
+    }
+  }
+
+  it should s"probe: $StreamOptions" in {
+    report.probe(StreamOptions, "WatsonXClient.streamComplete: the same fields on chat_stream") {
+      requireAccount()
+      val options = CompletionOptions()
+        .withMaxTokens(60)
+        .withPresencePenalty(0.5)
+        .withFrequencyPenalty(0.5)
+        .withResponseFormat(ResponseFormat.Json)
+      jsonReply(withClient()(_.streamComplete(askForJson, options, _ => ())).value)
     }
   }
 

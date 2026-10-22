@@ -346,8 +346,8 @@ final case class Transcription(
 /**
  * Errors that can occur during speech-to-text processing.
  *
- * `EngineNotAvailable` is a [[RecoverableError]]; `UnsupportedFormat` and `InvalidInput` are
- * [[NonRecoverableError]]s. `ProcessingFailed` carries no marker, so `LLMError.isRecoverable` and the library's
+ * `EngineNotAvailable` is a [[org.llm4s.error.RecoverableError RecoverableError]]; `UnsupportedFormat` and `InvalidInput` are
+ * [[org.llm4s.error.NonRecoverableError NonRecoverableError]]s. `ProcessingFailed` carries no marker, so `LLMError.isRecoverable` and the library's
  * automatic retries treat it as not recoverable: the clients raise it for an empty transcription, audio with no
  * recognisable speech and an unparseable response, which sending the same audio again does not fix. Its
  * `retryable` flag still says `true`, for a caller that wants to offer the user a retry.

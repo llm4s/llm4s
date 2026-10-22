@@ -593,7 +593,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       case other                                   => fail(s"expected a cancellation, got $other")
     }
     val extracting =
-      LLMMemoryManager(MemoryManagerConfig.default.copy(autoExtractEntities = true), InMemoryStore.empty, cancelling)
+      LLMMemoryManager(MemoryManagerConfig.fullFeatured, InMemoryStore.empty, cancelling)
     extracting.recordMessage(UserMessage("Ada wrote programs"), "conv") match {
       case Left(_: org.llm4s.error.CancelledError) => succeed
       case other                                   => fail(s"expected a cancellation, got $other")
@@ -915,12 +915,10 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail fast in strict mode when consolidation fails" in {
-    val strictConfig = MemoryManagerConfig.testing.copy(
-      consolidationConfig = ConsolidationConfig.strict
-    )
-    val client  = new FailingMockLLMClient()
-    val store   = InMemoryStore.empty
-    val manager = LLMMemoryManager(strictConfig, store, client)
+    val strictConfig = MemoryManagerConfig.testing.withConsolidationConfig(ConsolidationConfig.strict)
+    val client       = new FailingMockLLMClient()
+    val store        = InMemoryStore.empty
+    val manager      = LLMMemoryManager(strictConfig, store, client)
 
     val result = withLLMMemoryManagerLoggerSilenced {
       for {

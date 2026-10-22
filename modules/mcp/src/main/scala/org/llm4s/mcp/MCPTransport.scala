@@ -200,7 +200,7 @@ class StreamableHTTPTransportImpl(
       val jsonResponseResult = if (isSSE) {
         // Server chose to respond with SSE stream
         logger.debug(s"StreamableHTTPTransport($name) received SSE stream response")
-        readSSEResponse(body)
+        readSSEResponse(request, body)
       } else {
         // Standard JSON response
         logger.debug(s"StreamableHTTPTransport($name) received JSON response")
@@ -254,12 +254,14 @@ class StreamableHTTPTransportImpl(
 
   /**
    * Reads an SSE reply event by event (W3C Server-Sent Events: `event:`, `data:`, `id:` and `retry:` lines,
-   * an empty line ending an event, `:` starting a comment) and returns the first event whose data is a
-   * JSON-RPC response, as soon as it has arrived. Other events - progress notifications, server requests,
-   * `[DONE]` - are skipped. A stream that ends without a response is an error; one that outlasts the
-   * deadline is a timed-out transport error from [[BoundedResponseBody]].
+   * an empty line ending an event, `:` starting a comment) and returns the first event whose data is the
+   * JSON-RPC response to `request`, as soon as it has arrived. Other events - progress notifications,
+   * server-to-client requests, a response to another id, `[DONE]` - are skipped
+   * ([[https://github.com/llm4s/llm4s/issues/1846 #1846]]). A stream that ends without the response is an
+   * error; one that outlasts the deadline is a timed-out transport error, and an event larger than the body's
+   * size bound an error, both from [[BoundedResponseBody]].
    */
-  private def readSSEResponse(body: BoundedResponseBody): Result[JsonRpcResponse] = {
+  private def readSSEResponse(request: JsonRpcRequest, body: BoundedResponseBody): Result[JsonRpcResponse] = {
     final case class SSEEvent(
       eventType: Option[String] = None,
       data: StringBuilder = new StringBuilder(),
@@ -271,24 +273,36 @@ class StreamableHTTPTransportImpl(
     def jsonRpcResponse(event: SSEEvent): Option[JsonRpcResponse] = {
       val dataContent = event.data.toString
       if (dataContent.nonEmpty && dataContent != "[DONE]") {
-        Try(read[JsonRpcResponse](dataContent)) match {
-          case Success(response) =>
-            logger.debug(
-              s"StreamableHTTPTransport($name) found JSON-RPC response in SSE event: ${event.eventType.getOrElse("unnamed")}"
-            )
-            Some(response)
-          case Failure(e) =>
-            // Skip non-JSON-RPC data (might be other SSE messages)
+        Try(ujson.read(dataContent)).toOption.filter(JsonRpcReplies.isResponseTo(request.id, _)) match {
+          case None =>
             logger.debugPayload(
-              s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data (${e.getMessage}): ",
+              s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data, or a message other than the response to id ${request.id}: ",
               dataContent
             )
             None
+          case Some(json) =>
+            jsonRpcResponseFrom(json, event)
         }
       } else {
         None
       }
     }
+
+    def jsonRpcResponseFrom(json: ujson.Value, event: SSEEvent): Option[JsonRpcResponse] =
+      Try(read[JsonRpcResponse](json)) match {
+        case Success(response) =>
+          logger.debug(
+            s"StreamableHTTPTransport($name) found JSON-RPC response in SSE event: ${event.eventType.getOrElse("unnamed")}"
+          )
+          Some(response)
+        case Failure(e) =>
+          // Shaped like the response but not readable as one, e.g. a malformed error object
+          logger.debugPayload(
+            s"StreamableHTTPTransport($name) skipping unreadable JSON-RPC response (${e.getMessage}): ",
+            event.data.toString
+          )
+          None
+      }
 
     def noResponse(events: Int): Result[JsonRpcResponse] =
       Left(
@@ -317,9 +331,13 @@ class StreamableHTTPTransportImpl(
             } else loop(current, events)
           } else if (trimmedLine.startsWith("data:")) {
             val data = if (trimmedLine.length > 5) trimmedLine.substring(5).trim else ""
-            if (current.data.nonEmpty) current.data.append("\n")
-            current.data.append(data)
-            loop(current, events)
+            if (current.data.length + data.length + 1 > BoundedResponseBody.MaxReplyChars)
+              Left(transportFailure(body.tooLarge()))
+            else {
+              if (current.data.nonEmpty) current.data.append("\n")
+              current.data.append(data)
+              loop(current, events)
+            }
           } else if (trimmedLine.startsWith("event:")) {
             val eventType = if (trimmedLine.length > 6) trimmedLine.substring(6).trim else ""
             loop(current.copy(eventType = Some(eventType)), events)
@@ -430,6 +448,23 @@ class StreamableHTTPTransportImpl(
   }
 
   def generateId(): String = requestId.incrementAndGet().toString
+}
+
+private[mcp] object JsonRpcReplies {
+
+  /**
+   * Whether `json` is the JSON-RPC response to the request with id `requestId` ([[https://github.com/llm4s/llm4s/issues/1846 #1846]]):
+   * an object with no `method` (a server-to-client request or notification has one) and the request's `id`.
+   * upickle ignores unknown keys, so without this check a server request or a response to another id read as
+   * this call's reply. A response with neither `result` nor `error` still matches, as it always has: it is
+   * the server's reply to this call, if a malformed one.
+   */
+  def isResponseTo(requestId: String, json: ujson.Value): Boolean = json match {
+    case obj: ujson.Obj =>
+      val fields = obj.value
+      !fields.contains("method") && fields.get("id").contains(ujson.Str(requestId))
+    case _ => false
+  }
 }
 
 // SSE transport implementation using HTTP (2024-11-05 spec)

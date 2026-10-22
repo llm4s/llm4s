@@ -183,9 +183,13 @@ class AgentKtPendingTest {
             return store.commit(threadId, commit)
         }
 
-        override fun deleteThread(threadId: String, token: Long): Either<LLMError, BoxedUnit> {
+        override fun deleteThread(
+            threadId: String,
+            token: Long,
+            fence: scala.Option<scala.Tuple2<String, Any>>,
+        ): Either<LLMError, BoxedUnit> {
             deleted.add(threadId)
-            return store.deleteThread(threadId, token)
+            return store.deleteThread(threadId, token, fence)
         }
     }
 
@@ -227,6 +231,7 @@ class AgentKtPendingTest {
             AgentStatusKind.COMPLETED -> "completed:" + result.answer().get()
             AgentStatusKind.BLOCKED -> "blocked:" + result.status().guardrail().get()
             AgentStatusKind.STEP_LIMIT_REACHED -> "step-limit"
+            AgentStatusKind.TOKEN_LIMIT_REACHED -> "token-limit"
             AgentStatusKind.SUSPENDED -> "suspended:" + result.status().pending().joinToString { it.toolName().get() }
         }
         assertEquals("suspended:deploy", describe(first))

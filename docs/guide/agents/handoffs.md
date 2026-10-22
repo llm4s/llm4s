@@ -327,6 +327,9 @@ The stored history is the same either way: `preserveContext = false` changes onl
 | Simple delegation | **Handoffs** |
 | Type-safe data flow | **Graph** |
 
+To hand a bounded task to another agent on a thread of its own, keeping control and getting back only its typed
+report, use [delegation](delegation) instead.
+
 For complex workflows, see the [multi-agent graph recipe](../../examples/cookbook/multi-agent-graph.html): agents as nodes of a typed graph, run in parallel and joined.
 
 ---

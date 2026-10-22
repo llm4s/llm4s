@@ -12,10 +12,11 @@ import java.util.Optional;
  * <pre>{@code
  * JAgentResult r = agent.run("What is 2+2?").get();
  * switch (r.status().kind()) {
- *     case COMPLETED          -> System.out.println(r.answer().orElseThrow());
- *     case BLOCKED            -> System.out.println("Blocked by " + r.status().guardrail().orElseThrow());
- *     case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
- *     case SUSPENDED          -> r.status().pending().forEach(p -> System.out.println(p.kind() + " " + p.id()));
+ *     case COMPLETED           -> System.out.println(r.answer().orElseThrow());
+ *     case BLOCKED             -> System.out.println("Blocked by " + r.status().guardrail().orElseThrow());
+ *     case STEP_LIMIT_REACHED  -> System.out.println("Hit the step limit");
+ *     case TOKEN_LIMIT_REACHED -> System.out.println("Hit the token budget");
+ *     case SUSPENDED           -> r.status().pending().forEach(p -> System.out.println(p.kind() + " " + p.id()));
  * }
  * }</pre>
  *

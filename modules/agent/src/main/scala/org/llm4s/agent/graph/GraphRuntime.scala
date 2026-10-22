@@ -1,11 +1,12 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
-import java.time.Clock
+import java.time.{ Clock, Instant }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CountDownLatch, ExecutorService, Executors, RejectedExecutionException, TimeUnit }
 import scala.annotation.tailrec
@@ -44,6 +45,20 @@ enum Durability:
 object GraphRuntime:
   private val logger = LoggerFactory.getLogger(classOf[GraphRuntime])
 
+  /** How many children a cascade or retention reads from the store at a time. */
+  private val ChildPage: Int = 256
+
+  /**
+   * `config` for a run of a child thread (design 4.42): a child keeps at least its newest event, so the terminal
+   * event of an attempt that committed nothing survives until the next `recoverChild` folds its usage - its
+   * retention's `maxEvents` is at least 1. Otherwise its retention is the one it was given. That floor does not hold
+   * off `maxAge`: what does is that a child's admission prunes only after the claim commit storing the fold (`Run.admit`).
+   */
+  private[agent] def childConfig(config: RunConfig): RunConfig =
+    config.withRetention(config.retention.map { policy =>
+      if policy.maxEvents.exists(_ < 1) then policy.withMaxEvents(1) else policy
+    })
+
   /**
    * The id of a new checkpoint that run `runId` writes over `parent`: `<runId>/<n>`, where `n` is one
    * more than the parent's - so `n` counts along the thread's history, and an id is never repeated on
@@ -62,7 +77,7 @@ object GraphRuntime:
 
   /**
    * A runtime over a new [[InMemoryCheckpointer]], holding its runs' claims by `claims`. Both use `clock`: the
-   * runtime stamps checkpoints and events with it, and the store judges claim expiry and [[prune]]'s ages by
+   * runtime stamps checkpoints and events with it, and the store judges claim expiry and [[GraphRuntime!.prune prune]]'s ages by
    * it, so a test that moves `clock` moves both.
    *
    * A [[GraphRuntime]] over a store of its own has two clocks: its `clock` stamps what it writes - each
@@ -101,6 +116,13 @@ object GraphRuntime:
  * refused with [[GraphError.TenantMismatch]] before anything else is reported - the thread's
  * status, or that a run is live on it - and the error names only the caller's tenant, so it
  * learns nothing about the thread.
+ *
+ * A thread whose latest checkpoint records a [[RunOrigin]] is a child thread, started by a tool call of its parent's
+ * run (design 4.41). It is driven only through that run: `start`, `recover`, `resume`, `fork`, `updateState` and
+ * `deleteThread` on it are refused with [[GraphError.ChildThread]], after the tenant check and before any claim, while
+ * `history`, `checkpoint`, `subscribe` and [[children]] read it as any thread. Deleting a thread deletes its children
+ * first, and child retention ([[RunConfig.withChildRetention]]) bounds how many settled children a thread keeps. Each
+ * run's terminal (`Completed` or `Failed`) checkpoint records how it settled ([[Checkpoint.outcome]]).
  *
  * Each call is a new run, and claims the thread in two steps before it runs anything. First it
  * asks the store for a [[RunClaim]]: a lease with an expiry and a [[FencingToken]], which the run
@@ -161,8 +183,8 @@ object GraphRuntime:
  * however long it takes in all. Every other store call is waited for as long as it takes: every
  * [[Checkpointer]] must return from each call within a bound it documents.
  *
- * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits. When it
- * passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
+ * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits; its tasks read it, by the
+ * runtime's `clock`, as [[RunContext.deadline]]. When it passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
  * [[RunEvent.RunTimedOut]]. The first of cancel and expiry to be recorded wins, so a run reports
  * exactly one. `DeadlineExceeded` is recoverable: `recover` with a new budget continues the run.
  *
@@ -343,7 +365,13 @@ final class GraphRuntime(
    * subscription before it with `Disconnected(lastSeq, DisconnectReason.TenantMismatch)`. A thread
    * with no checkpoint any more ends it with `ThreadDeleted`, and a failed read with `ReplayFailed`.
    */
-  def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024, config: RunConfig = RunConfig())(
+  def subscribe(
+    threadId: ThreadId,
+    afterSeq: Long = 0L,
+    capacity: Int = 1024,
+    config: RunConfig = RunConfig(),
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[Subscription] = admission(threadId) {
     val requested = config.tenantId.map(_.value)
@@ -373,7 +401,8 @@ final class GraphRuntime(
             capacity,
             listener,
             AbandonedWrites.none,
-            TenantScope.Of(requested, confirmed = false)
+            TenantScope.Of(requested, confirmed = false),
+            nested
           )
         )
     }
@@ -389,9 +418,12 @@ final class GraphRuntime(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean
   ): Result[Dispatched] =
-    validCapacity(capacity).flatMap(_ => hub.subscribe(threadId, afterSeq, capacity, listener, abandoned, scope))
+    validCapacity(capacity).flatMap(_ =>
+      hub.subscribe(threadId, afterSeq, capacity, listener, abandoned, scope, nested)
+    )
 
   private def validCapacity(capacity: Int): Result[Unit] =
     Either.cond(
@@ -414,13 +446,14 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = startOn(threadId, graph, input, config, durability, None, observer)
+  ): Result[RunHandle[O]] = startOn(threadId, graph, input, config, durability, None, observer, None)
 
   /**
    * Starts a run on `threadId` only if the thread is new: an existing thread of the caller's tenant
    * is refused with `existing`, no run started. Checked during admission, under the thread's
    * exclusivity and against the claim's parent checkpoint, so no other run can create the thread
-   * between the check and the claim. Another tenant's thread is still `TenantMismatch` first.
+   * between the check and the claim. Another tenant's thread is still `TenantMismatch` first. `amend`'s update is
+   * written with the thread's first checkpoint, as [[startChild]]'s is.
    */
   private[agent] def startNew[I, O](
     threadId: ThreadId,
@@ -428,8 +461,46 @@ final class GraphRuntime(
     input: I,
     config: RunConfig,
     existing: => LLMError,
-    observer: Option[Observer] = None
-  ): Result[RunHandle[O]] = startOn(threadId, graph, input, config, Durability.Sync, Some(() => existing), observer)
+    observer: Option[Observer] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+  ): Result[RunHandle[O]] =
+    startOn(threadId, graph, input, config, Durability.Sync, Some(() => existing), observer, None, amend = amend)
+
+  /**
+   * Starts the first run of the child thread `threadId`, recording `origin` - its `startedAt` stamped now, by the
+   * runtime's clock - on its first checkpoint and every later one (design 4.41): the only way a child thread is created. The thread must be new - an existing one is
+   * [[GraphError.ThreadExists]], checked as [[startNew]] checks - and the run is admitted as any other, with the
+   * parent's tenant in `config`. For the child runner (K2), which derives `threadId` with [[ThreadId.child]].
+   *
+   * `parentClaim` is the token of the parent run's claim on `origin.parent`: the child's first commit, which writes the
+   * origin and so registers the child, is fenced by it in the store ([[Commit.fence]], #2071). A parent claim taken
+   * over or released meanwhile refuses that commit, writing nothing, and the start is [[GraphError.ClaimLost]] on the
+   * parent, the child's own claim given back.
+   */
+  private[agent] def startChild[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    input: I,
+    origin: RunOrigin,
+    config: RunConfig,
+    observer: Option[Observer] = None,
+    notAfter: Option[Instant] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    parentClaim: Option[FencingToken] = None
+  ): Result[RunHandle[O]] =
+    startOn(
+      threadId,
+      graph,
+      input,
+      GraphRuntime.childConfig(config),
+      Durability.Sync,
+      Some(() => GraphError.ThreadExists(threadId.value)),
+      observer,
+      Some(origin),
+      notAfter,
+      amend,
+      parentClaim.map(origin.parent -> _)
+    )
 
   private def startOn[I, O](
     threadId: ThreadId,
@@ -438,30 +509,73 @@ final class GraphRuntime(
     config: RunConfig,
     durability: Durability,
     newOnly: Option[() => LLMError],
-    observer: Option[Observer]
+    observer: Option[Observer],
+    origin: Option[RunOrigin],
+    notAfter: Option[Instant] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    parentFence: Option[(ThreadId, FencingToken)] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
-    graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
-      case None =>
-        newRun(graph, threadId, config, durability, 0, admitting).admit(graph.start(input), None, _ => started(config))
-      case Some(stored) =>
-        checkTenant(threadId, stored, config).flatMap { _ =>
-          newOnly match
-            case Some(refusal) => Left(refusal())
-            case None =>
-              stored.checkpoint.status match
-                case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
-                case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-                case CheckpointStatus.Completed | CheckpointStatus.Failed =>
-                  graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
-                    newRun(graph, threadId, config, durability, done.superstep, admitting)
-                      .admit(
-                        graph.startAt(done.superstep, done.state, input),
-                        Some(stored.checkpoint.id),
-                        _ => started(config)
-                      )
-                  }
-        }
-    }
+    // a top-level start sets the thread's metadata (design 4.52) in its claim commit; a child's never does
+    val metadata =
+      if origin.isDefined || config.metadata.isEmpty then Right(None)
+      else ThreadMetadata.of(config.metadata).map(Some(_))
+    graph
+      .checkBreakpoints(config)
+      .flatMap(_ => metadata)
+      .flatMap(m => checkpointer.latest(threadId).map(m -> _))
+      .flatMap {
+        case (metadata, None) =>
+          // a child's origin records when it was first admitted, by this runtime's clock
+          newRun(
+            graph,
+            threadId,
+            config,
+            durability,
+            0,
+            admitting,
+            origin.map(_.withStartedAt(clock.instant())),
+            notAfter
+          )
+            // the child's first commit is fenced by its parent's claim (#2071)
+            .admit(
+              graph.start(input),
+              None,
+              _ => started(config),
+              amend = amended(_, amend),
+              fence = parentFence,
+              metadata = metadata
+            )
+        case (metadata, Some(stored)) =>
+          // the child runner's start of a thread that exists is ThreadExists, whatever the thread is
+          val admissible = if origin.isDefined then Right(()) else notChild(threadId, stored)
+          checkTenant(threadId, stored, config)
+            .flatMap(_ => admissible)
+            .flatMap(_ => notDeleting(threadId, stored))
+            .flatMap { _ =>
+              newOnly match
+                case Some(refusal) => Left(refusal())
+                case None =>
+                  stored.checkpoint.status match
+                    case CheckpointStatus.Running =>
+                      Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
+                    case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+                    case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+                      graph.restoreAtRest(stored.checkpoint.snapshot).flatMap { done =>
+                        newRun(graph, threadId, config, durability, done.superstep, admitting, None)
+                          .admit(
+                            graph.startAt(done.superstep, done.state, input),
+                            Some(stored.checkpoint.id),
+                            _ => started(config),
+                            // a settled parent's calls never run again (a new turn makes new keys), so retention may
+                            // delete its older settled children and settle abandoned ones (design 4.41), under this run's
+                            // claim: it finishes a pass a non-durable last superstep skipped, and removes children a
+                            // Block's retraction left
+                            retainChildren = true,
+                            metadata = metadata
+                          )
+                      }
+            }
+      }
   }
 
   /** Continues the incomplete execution on `threadId`; see the class description. */
@@ -471,44 +585,101 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
+  ): Result[RunHandle[O]] = recoverOn(threadId, graph, config, durability, observer, child = false)
+
+  /**
+   * [[recover]] on a child thread (design 4.41), which `recover` refuses: for the child runner (K2), reattaching a
+   * replayed call to the child its first run started. A top-level thread is refused with a `ValidationError`.
+   *
+   * `amend` is given the thread's state under the new run's claim, before retention and the claim's commit, and the
+   * update it returns commits with that claim's checkpoint (design 4.42): the child runner folds the usage of the
+   * attempts that committed nothing into the child's prior usage there, so a crash before the commit folds nothing and
+   * one after it leaves the fold recorded once. Reading events is up to `amend` ([[storedEvents]]).
+   */
+  private[agent] def recoverChild[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    config: RunConfig,
+    observer: Option[Observer] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    notAfter: Option[Instant] = None,
+    parentClaim: Option[FencingToken] = None
+  ): Result[RunHandle[O]] =
+    recoverOn(
+      threadId,
+      graph,
+      GraphRuntime.childConfig(config),
+      Durability.Sync,
+      observer,
+      child = true,
+      amend,
+      notAfter,
+      parentClaim
+    )
+
+  private def recoverOn[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    config: RunConfig,
+    durability: Durability,
+    observer: Option[Observer],
+    child: Boolean,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    notAfter: Option[Instant] = None,
+    parentClaim: Option[FencingToken] = None
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) =>
-        checkTenant(threadId, stored, config).flatMap { _ =>
-          stored.checkpoint.status match
-            case CheckpointStatus.Running =>
-              for
-                execution <- graph.restoreStored(stored.checkpoint)
-                reused    <- reusableWrites(graph, execution, stored)
-                run <- newRun(graph, threadId, config, durability, execution.superstep, admitting).admit(
-                  execution,
-                  Some(stored.checkpoint.id),
-                  // a claim that replaced an expired one is a takeover: its run may still be executing, even
-                  // when it had this run's id - a reused RunId names two runs, so the id is never filtered.
-                  // The store names it only if it was a claim of this run's tenant (#1926)
-                  granted =>
-                    RunEvent.RunRecovered(
-                      stored.checkpoint.id,
-                      config.tenantId.map(_.value),
-                      config.principal.map(_.value),
-                      granted.takenOverFrom.map(_.value)
-                    ),
-                  // read again under the claim: a holder whose claim expired but was not yet replaced
-                  // could still add pending writes after the read above, and only the claim stops it
-                  () =>
-                    checkpointer.latest(threadId).flatMap {
-                      case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
-                        reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
-                      // the thread moved on: the claim commit's parent no longer matches, so it conflicts
-                      case _ => Right(stored.pendingWrites -> reused)
-                    }
-                )
-              yield run
-            case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-            case CheckpointStatus.Completed | CheckpointStatus.Failed =>
-              Left(GraphError.NothingToRecover(threadId.value))
-        }
+        checkTenant(threadId, stored, config)
+          .flatMap(_ => childAs(threadId, stored, child))
+          .flatMap(_ => notDeleting(threadId, stored))
+          .flatMap { _ =>
+            stored.checkpoint.status match
+              case CheckpointStatus.Running =>
+                for
+                  execution <- graph.restoreStored(stored.checkpoint)
+                  reused    <- reusableWrites(graph, execution, stored)
+                  run <- newRun(
+                    graph,
+                    threadId,
+                    config,
+                    durability,
+                    execution.superstep,
+                    admitting,
+                    stored.checkpoint.origin,
+                    notAfter
+                  ).admit(
+                    execution,
+                    Some(stored.checkpoint.id),
+                    // a claim that replaced an expired one is a takeover: its run may still be executing, even
+                    // when it had this run's id - a reused RunId names two runs, so the id is never filtered.
+                    // The store names it only if it was a claim of this run's tenant (#1926)
+                    granted =>
+                      RunEvent.RunRecovered(
+                        stored.checkpoint.id,
+                        config.tenantId.map(_.value),
+                        config.principal.map(_.value),
+                        granted.takenOverFrom.map(_.value)
+                      ),
+                    // read again under the claim: a holder whose claim expired but was not yet replaced
+                    // could still add pending writes after the read above, and only the claim stops it
+                    () =>
+                      checkpointer.latest(threadId).flatMap {
+                        case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
+                          reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
+                        // the thread moved on: the claim commit's parent no longer matches, so it conflicts
+                        case _ => Right(stored.pendingWrites -> reused)
+                      },
+                    amend = amended(_, amend),
+                    // a child's reattachment is fenced by its parent's claim, as its first commit is (#2071)
+                    fence = parentFenceOf(stored, parentClaim)
+                  )
+                yield run
+              case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+              case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+                Left(GraphError.NothingToRecover(threadId.value))
+          }
     }
   }
 
@@ -523,47 +694,285 @@ final class GraphRuntime(
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync,
     observer: Option[Observer] = None
+  ): Result[RunHandle[O]] = resumeOn(threadId, graph, answers, config, durability, observer, child = false)
+
+  /**
+   * [[resume]] on a child thread (design 4.41), which `resume` refuses: for the child runner (K2). A top-level
+   * thread is refused with a `ValidationError`. `amend` adds an update to the resumed state, committed with the run's
+   * claim, as [[recoverChild]]'s does (the child's grant, design 4.45).
+   */
+  private[agent] def resumeChild[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig,
+    observer: Option[Observer] = None,
+    notAfter: Option[Instant] = None,
+    parentClaim: Option[FencingToken] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
+  ): Result[RunHandle[O]] =
+    resumeOn(
+      threadId,
+      graph,
+      answers,
+      GraphRuntime.childConfig(config),
+      Durability.Sync,
+      observer,
+      child = true,
+      notAfter,
+      parentClaim,
+      amend
+    )
+
+  private def resumeOn[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig,
+    durability: Durability,
+    observer: Option[Observer],
+    child: Boolean,
+    notAfter: Option[Instant] = None,
+    parentClaim: Option[FencingToken] = None,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty)
   ): Result[RunHandle[O]] = exclusively(threadId, config, observer) { admitting =>
     graph.checkBreakpoints(config).flatMap(_ => checkpointer.latest(threadId)).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
       case Some(stored) =>
-        checkTenant(threadId, stored, config).flatMap { _ =>
-          if stored.checkpoint.status != CheckpointStatus.Suspended then Left(GraphError.NotSuspended(threadId.value))
-          else
-            for
-              suspended <- graph.restoreStored(stored.checkpoint)
-              resumed   <- graph.resume(suspended, answers)
-              run <- newRun(graph, threadId, config, durability, resumed.superstep, admitting).admit(
-                resumed,
-                Some(stored.checkpoint.id),
-                _ =>
-                  RunEvent.RunResumed(
-                    suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
-                    config.tenantId.map(_.value),
-                    config.principal.map(_.value)
-                  )
-              )
-            yield run
-        }
+        checkTenant(threadId, stored, config)
+          .flatMap(_ => childAs(threadId, stored, child))
+          .flatMap(_ => notDeleting(threadId, stored))
+          .flatMap { _ =>
+            if stored.checkpoint.status != CheckpointStatus.Suspended then Left(GraphError.NotSuspended(threadId.value))
+            else
+              for
+                suspended <- graph.restoreStored(stored.checkpoint)
+                resumed   <- graph.resume(suspended, answers)
+                run <- newRun(
+                  graph,
+                  threadId,
+                  config,
+                  durability,
+                  resumed.superstep,
+                  admitting,
+                  stored.checkpoint.origin,
+                  notAfter
+                ).admit(
+                  resumed,
+                  Some(stored.checkpoint.id),
+                  _ =>
+                    RunEvent.RunResumed(
+                      suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+                      config.tenantId.map(_.value),
+                      config.principal.map(_.value)
+                    ),
+                  fence = parentFenceOf(stored, parentClaim),
+                  amend = amended(_, amend)
+                )
+              yield run
+          }
     }
   }
 
   /**
-   * Whether run `runId` ended as a Block ([[NodeResult.Block]]): the thread's latest checkpoint is that
-   * run's closing one, with status [[CheckpointStatus.Failed]]. An ordinary failure leaves no closing
+   * A top-level thread, or a child thread - its latest checkpoint records a [[RunOrigin]] - refused with
+   * [[GraphError.ChildThread]]: a child thread is driven only through its parent's run (design 4.41).
+   */
+  private def notChild(threadId: ThreadId, stored: StoredCheckpoint): Result[Unit] =
+    stored.checkpoint.origin.fold[Result[Unit]](Right(()))(origin =>
+      Left(GraphError.ChildThread(threadId.value, origin.parent.value))
+    )
+
+  /**
+   * A thread whose cascade delete began and did not finish - its latest checkpoint is [[Checkpoint.deleting]] - refused
+   * with [[GraphError.ThreadDeleting]] (design 4.41, #2074): some of its descendants may be gone, so no run may replay
+   * it. Only `deleteThread` proceeds on it.
+   */
+  private def notDeleting(threadId: ThreadId, stored: StoredCheckpoint): Result[Unit] =
+    Either.cond(!stored.checkpoint.deleting, (), GraphError.ThreadDeleting(threadId.value))
+
+  /** [[notChild]] for a top-level call; for a child runner's call (`child`), the thread must be a child thread. */
+  private def childAs(threadId: ThreadId, stored: StoredCheckpoint, child: Boolean): Result[Unit] =
+    if !child then notChild(threadId, stored)
+    else
+      Either.cond(
+        stored.checkpoint.origin.isDefined,
+        (),
+        ValidationError("threadId", s"'${threadId.value}' is not a child thread")
+      )
+
+  /** The fence on a child's parent's claim ([[Commit.fence]], #2071): the parent its origin names, with `parentClaim`. */
+  private def parentFenceOf(
+    stored: StoredCheckpoint,
+    parentClaim: Option[FencingToken]
+  ): Option[(ThreadId, FencingToken)] =
+    parentClaim.flatMap(token => stored.checkpoint.origin.map(_.parent -> token))
+
+  /**
+   * A store's refusal of a commit for its fence's claim, not the committing thread's, as [[GraphError.ClaimLost]] on
+   * the fence thread: taken out before [[Held.committing]], which would act on a `StaleClaim` as a loss of its own.
+   */
+  private def fenceRefused(threadId: ThreadId, fence: Option[(ThreadId, FencingToken)])(error: LLMError): LLMError =
+    (error, fence) match
+      case (GraphError.StaleClaim(above, aboveToken, current), Some((other, _)))
+          if other != threadId && other.value == above =>
+        GraphError.ClaimLost(above, aboveToken, current)
+      case _ => error
+
+  /** `execution` with the update `amend` makes to its state, at the same superstep: [[recoverChild]]'s `amend`. */
+  private def amended(execution: Execution, amend: ThreadState => Result[StateUpdate]): Result[Execution] =
+    amend(execution.state).flatMap { update =>
+      if update.operations.isEmpty then Right(execution)
+      else execution.state.applyUpdate(update).map(execution.edited(_, execution.superstep))
+    }
+
+  /** The runtime's clock's current instant: what a child runner measures its parent's deadline against. */
+  private[agent] def now(): Instant = clock.instant()
+
+  /** How long a claim of this runtime lives without renewal ([[ClaimPolicy.ttl]]). */
+  private[agent] def claimTtl: FiniteDuration = claims.ttl
+
+  /**
+   * Up to `limit` of `threadId`'s events after `afterSeq`, oldest first, straight from the store: for the child runner
+   * (design 4.42), which reads a child's terminal events, under the child's claim or after its run ended.
+   */
+  private[agent] def storedEvents(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+    checkpointer.eventsAfter(threadId, afterSeq, limit)
+
+  /**
+   * The child thread `threadId` as it rests (design 4.42): its latest checkpoint and that checkpoint's execution,
+   * restored through `graph`; `None` for a thread with none. Tenant-checked as [[history]] is; needs no claim.
+   */
+  private[agent] def childAtRest[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    config: RunConfig
+  ): Result[Option[(Checkpoint, Execution)]] = admission(threadId) {
+    checkpointer.latest(threadId).flatMap {
+      case None => Right(None)
+      case Some(stored) =>
+        checkTenant(threadId, stored, config)
+          .flatMap(_ => graph.restoreStored(stored.checkpoint))
+          .map(execution => Some(stored.checkpoint -> execution))
+    }
+  }
+
+  /**
+   * The id of the graph whose run wrote `threadId`'s latest checkpoint - for an agent, the agent's id - with no
+   * restore; `None` for a thread with none. Tenant-checked as [[childAtRest]] is. For `BoundAgent.run` on a
+   * caller-chosen thread (#2086), to name another agent's thread rather than report a failed restore.
+   */
+  private[agent] def storedGraphId(threadId: ThreadId, config: RunConfig): Result[Option[String]] =
+    admission(threadId) {
+      checkpointer.latest(threadId).flatMap {
+        case None         => Right(None)
+        case Some(stored) => checkTenant(threadId, stored, config).map(_ => Some(stored.checkpoint.snapshot.graphId))
+      }
+    }
+
+  /** A suspended `execution` of `graph` as the run result a live run that suspended there returned. */
+  private[agent] def suspendedResult[I, O](graph: CompiledGraph[I, O], execution: Execution): RunResult[O] =
+    RunResult.Suspended(execution.state, graph.pendingInterrupts(execution), execution)
+
+  /**
+   * Settles the child thread `threadId` (design 4.42) as `outcome`, a failure: a `Failed` checkpoint over its latest,
+   * with a [[RunEvent.RunFailed]] carrying `message`, under the child's own claim. Its state is the latest
+   * checkpoint's, with the update `amend` makes to it under that claim (the child runner folds the usage of the
+   * attempts that committed nothing into it). For the child runner under `ChildFailure.Report`, whose call commits
+   * once the child is settled, so no child is left `Running` behind a committed call.
+   *
+   * A child already settled is left as it is. A busy child is [[GraphError.ThreadBusy]], and one with no checkpoint
+   * [[GraphError.NothingToRecover]]; a top-level thread is refused with a `ValidationError`. With `parentClaim` the
+   * commit is fenced by the parent's claim too (#2071): a parent claim taken over or released meanwhile writes nothing,
+   * and is [[GraphError.ClaimLost]] on the parent, the child's claim given back.
+   */
+  private[agent] def settleChild[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig,
+    amend: ThreadState => Result[StateUpdate] = _ => Right(StateUpdate.empty),
+    owns: Checkpoint => Boolean = _ => true,
+    parentClaim: Option[FencingToken] = None
+  ): Result[Unit] =
+    def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(threadId)
+    // checked before the claim, and again under it: the thread may have been deleted and recreated in between
+    def valid(stored: StoredCheckpoint): Result[Unit] =
+      checkTenant(threadId, stored, config)
+        .flatMap(_ => childAs(threadId, stored, child = true))
+        .flatMap(_ =>
+          Either.cond(
+            owns(stored.checkpoint),
+            (),
+            ValidationError("threadId", s"'${threadId.value}' is not the child thread being settled")
+          )
+        )
+    val checked = latest.flatMap {
+      case None         => Left(GraphError.NothingToRecover(threadId.value))
+      case Some(stored) => valid(stored)
+    }
+    holding(threadId, config)(checked) { held =>
+      latest.flatMap {
+        case None                                 => Left(GraphError.NothingToRecover(threadId.value))
+        case Some(stored) if valid(stored).isLeft => valid(stored)
+        case Some(stored)
+            if stored.checkpoint.status == CheckpointStatus.Completed ||
+              stored.checkpoint.status == CheckpointStatus.Failed =>
+          Right(())
+        case Some(stored) =>
+          val open = stored.checkpoint
+          for
+            execution <- graph.restoreStored(open)
+            settled   <- amended(execution, amend)
+            snapshot  <- graph.snapshot(settled)
+            now = clock.instant()
+            saved = Checkpoint(
+              Checkpoint.CurrentFormat,
+              GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(open.id)), 1L),
+              Some(open.id),
+              threadId.value,
+              config.runId.value,
+              CheckpointStatus.Failed,
+              now,
+              snapshot,
+              open.tenantId,
+              Some(held.claim.token),
+              open.origin,
+              Some(outcome)
+            )
+            event  = EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
+            fence  = parentFenceOf(stored, parentClaim)
+            commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
+            _ <- held.committing(commit)(commitAndDeliver(threadId, commit).left.map(fenceRefused(threadId, fence)))
+          yield ()
+      }
+    }
+
+  /**
+   * Whether run `runId` ended as a guardrail's Block ([[NodeResult.Block]]): the thread's latest checkpoint is that
+   * run's closing one, its outcome [[RunOutcome.Blocked]]. An ordinary failure leaves no closing
    * checkpoint of its own, and a run started on the thread since makes this `false`.
    */
   private[agent] def endedBlocked(threadId: ThreadId, runId: RunId): Result[Boolean] =
     checkpointer
       .latest(threadId)
-      .map(_.exists(s => s.checkpoint.runId == runId.value && s.checkpoint.status == CheckpointStatus.Failed))
+      .map(
+        _.exists(s =>
+          s.checkpoint.runId == runId.value && s.checkpoint.outcome.exists(_.isInstanceOf[RunOutcome.Blocked])
+        )
+      )
 
   /**
    * Deletes `threadId` from the runtime's store - its checkpoint, pending writes, event log and claim -
-   * so its id names a new thread again. Refused, with nothing deleted, as admission refuses a run: a
-   * thread of another tenant is [[GraphError.TenantMismatch]], and one whose run is admitting or
-   * executing in this runtime, or holds a live claim in any runtime, is [[GraphError.ThreadBusy]].
-   * The thread is held exclusively, and claimed in the store under `config.runId`, while it is
+   * so its id names a new thread again, and before it every thread below it ([[children]], design 4.41): its
+   * children's children before its children, each under its own claim, all of them held before any is deleted. Refused,
+   * with nothing deleted, as admission refuses a run: a thread of another tenant is [[GraphError.TenantMismatch]], a
+   * child thread [[GraphError.ChildThread]] (delete its parent), and one whose run - or a run of any thread below
+   * it - is admitting or executing in this runtime, or holds a live claim in any runtime, is [[GraphError.ThreadBusy]].
+   * A delete that fails part-way leaves the thread and fewer descendants, the thread marked
+   * [[Checkpoint.deleting]] so that every admission refuses it with [[GraphError.ThreadDeleting]]; deleting again
+   * finishes it. The thread is held exclusively, and claimed in the store under `config.runId`, while it is
    * deleted, so no run starts on it meanwhile; and the store's delete is fenced by that claim's
    * token, so if the claim lapses before the delete lands - this runtime stalled past
    * `claims.ttl` - and another run takes the thread over, nothing of that run is deleted: the call
@@ -591,44 +1000,381 @@ final class GraphRuntime(
    * ([[Checkpointer.deleteThread]]); subscribe again from `0` to follow it.
    */
   def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
-    // a delete that happened removed the claim with the thread: there is nothing to give back
-    holding(threadId, config, consumesClaim = (_: Result[Unit]).isRight) {
+    deleteTree(threadId, config, child = false)
+  }
+
+  /**
+   * Deletes `threadId` and, first, every thread below it (design 4.41): its children's children before its
+   * children, then the thread. Every one of them is held - in this runtime and by a claim in the store - before any is
+   * deleted, so a descendant with a run live anywhere refuses the whole delete ([[GraphError.ThreadBusy]]) with nothing
+   * removed. Each delete is fenced by its own thread's claim; one that fails stops the cascade there, leaving the
+   * thread and fewer descendants, and deleting again finishes it. Before the first descendant goes, the thread is
+   * marked deleting under its claim ([[markDeleting]]), so a cascade stopped part-way leaves a thread every admission
+   * refuses ([[GraphError.ThreadDeleting]]) rather than one whose replay re-runs a deleted child (#2074). `child` is whether `threadId` is a child thread
+   * deleted by retention: a top-level delete refuses a child thread ([[GraphError.ChildThread]]), and retention only
+   * deletes children.
+   *
+   * The cascade is fenced by the claims above what it deletes, so it never deletes a child that a successor run on
+   * the thread above may reattach and would then run again (#2056 review, #2063). Before each delete it checks
+   * `fence` - retention's check of the parent's claim ([[keepChildren]]) - and, for a descendant, `threadId`'s own
+   * claim ([[Held.holds]]), stopping at the first that fails; and the store checks the claim above atomically with
+   * each delete ([[Checkpointer.deleteThread]]'s `fence`), so a takeover between the check and the delete deletes
+   * nothing: `above` - retention's parent and the parent's claim token - fences every delete of the tree, and
+   * without it, as for a top-level delete, `threadId`'s claim fences each descendant's. A fence that fails is
+   * [[GraphError.ThreadBusy]] on the thread above, with nothing more deleted.
+   */
+  private def deleteTree(
+    threadId: ThreadId,
+    config: RunConfig,
+    child: Boolean,
+    fence: () => Boolean = () => true,
+    above: Option[(ThreadId, FencingToken)] = None
+  ): Result[Unit] =
+    def checked: Result[Unit] =
       checkpointer
         .latest(threadId)
-        .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
-        .map { _ =>
-          // a claim of this runtime's that it failed to give back - a run's, ended - would refuse the
-          // delete until it lapsed; nothing holds the thread in this runtime now, so it is given back
-          // first, once the caller is known to be the thread's tenant
-          unreleased.remove(threadId.value).foreach(releaseClaim(threadId, _))
-        }
+        .flatMap(
+          _.fold[Result[Unit]](Right(()))(stored =>
+            checkTenant(threadId, stored, config).flatMap(_ => if child then Right(()) else notChild(threadId, stored))
+          )
+        )
+    // a delete that happened removed the claim with the thread: there is nothing to give back
+    holding(threadId, config, consumesClaim = (_: Result[Unit]).isRight) {
+      checked.map { _ =>
+        // a claim of this runtime's that it failed to give back - a run's, ended - would refuse the
+        // delete until it lapsed; nothing holds the thread in this runtime now, so it is given back
+        // first, once the caller is known to be the thread's tenant
+        unreleased.remove(threadId.value).foreach(releaseClaim(threadId, _))
+      }
     } { held =>
-      val claim = held.claim
       // checked again under the claim: another runtime may have created the thread, for another
       // tenant, between the read above and the claim. The delete names no parent checkpoint, but it
       // is fenced by the claim, so nothing can be committed between this read and the delete unless
-      // the claim was lost - and then the delete is refused
-      checkpointer
-        .latest(threadId)
-        .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
-        .flatMap { _ =>
-          // a claim that lapsed while this runtime stalled, and that another run took over: nothing
-          // of that run is deleted, and it is refused as any live claim is
-          // a delete not begun when the claim was found lost never reaches the store, and is refused so
-          val outcome = held.committing(Commit(claim.token))(checkpointer.deleteThread(threadId, claim.token)) match
-            case Left(stale: GraphError.StaleClaim) =>
-              busyAt(threadId, config, holder = afterLoss(stale.current))
-            case other => other
-          // after the store delete, so a subscription that joined while it was in flight ends too - while
-          // the thread is still held here, so no run of this runtime has begun on the next thread under
-          // the id. A delete that landed after its caller was given up on and let the thread go is not
-          // announced: a run may hold the thread again, and its subscriptions must not end. This
-          // runtime's subscriptions to the deleted thread then learn of it from the store, as another
-          // runtime's do
-          if outcome.isRight then held.stillHeld(hub.threadDeleted(threadId)): Unit
-          outcome
+      // the claim was lost - and then the delete is refused. Under the claim no run of the thread can
+      // start a child, so its descendants are settled from here on
+      def fenced: Result[Unit] =
+        Either.cond(fence(), (), GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Lapsed))
+      def rootHolds: Result[Unit] =
+        held.holds.left.map {
+          case stale: GraphError.StaleClaim => GraphError.ThreadBusy(threadId.value, None, afterLoss(stale.current))
+          case other                        => GraphError.CheckpointWriteFailed(threadId.value, other)
         }
+      checked
+        .flatMap(_ => descendants(threadId))
+        .flatMap(below =>
+          holdingAll(below, config) { heldBelow =>
+            // listed before they were held: a descendant's run may have made a child in between and let its
+            // claim go. Only a run of its parent makes a child, so with every listed thread held the tree can
+            // no longer grow; listed again now, a tree that grew refuses the delete rather than orphan the child
+            val unchanged = descendants(threadId).flatMap(now =>
+              Either.cond(now.toSet == below.toSet, (), GraphError.ThreadBusy(threadId.value, None))
+            )
+            // marked before the first descendant goes, so a cascade stopped part-way leaves a thread no admission
+            // replays (#2074); a thread with no descendants is deleted in one store call and needs no marker. Nor does
+            // a child retention deletes (`above`): it is prunable, so never admitted again whatever is left of it, and a
+            // checkpoint commit cannot be fenced by the parent's claim, so a stale pass could otherwise mark it
+            def marked: Result[Unit] =
+              if heldBelow.isEmpty || above.isDefined then Right(())
+              else fenced.flatMap(_ => rootHolds).flatMap(_ => markDeleting(held, config))
+            unchanged
+              .flatMap(_ => marked)
+              .flatMap(_ =>
+                heldBelow.foldLeft[Result[Unit]](Right(()))((done, child) =>
+                  done
+                    .flatMap(_ => fenced)
+                    .flatMap(_ => rootHolds)
+                    .flatMap(_ =>
+                      // retention's parent fences the whole tree; otherwise this thread's claim, whose loss the store
+                      // finds then is acted on as `rootHolds` would act on it
+                      above.fold(deleteHeld(child, config, Some(threadId -> held.claim.token), held.foundLost))(fence =>
+                        deleteHeld(child, config, Some(fence))
+                      )
+                    )
+                )
+              )
+          }
+        )
+        .flatMap(_ => fenced)
+        .flatMap(_ => deleteHeld(held, config, above))
     }
+
+  /**
+   * Marks the thread `held` holds as deleting (design 4.41, #2074): a copy of its latest checkpoint with
+   * [[Checkpoint.deleting]] set, committed under its claim, so admission refuses it ([[GraphError.ThreadDeleting]])
+   * from then until the delete finishes. A thread already marked - a cascade run again - or with no checkpoint is left
+   * as it is. The copy keeps the status, snapshot and origin, so reads and the child index see the thread unchanged.
+   */
+  private def markDeleting(held: Held, config: RunConfig): Result[Unit] =
+    val threadId = held.threadId
+    checkpointer.latest(threadId).flatMap {
+      case Some(stored) if !stored.checkpoint.deleting =>
+        val parentId = stored.checkpoint.id
+        val marker = stored.checkpoint
+          .withFormatVersion(Checkpoint.CurrentFormat)
+          .withId(GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(parentId)), 1L))
+          .withParent(Some(parentId))
+          .withRunId(config.runId.value)
+          .withCreatedAt(clock.instant())
+          .withFencingToken(held.claim.token)
+          .withDeleting(true)
+        val commit = Commit(held.claim.token, Some(marker))
+        held
+          .committing(commit)(checkpointer.commit(threadId, commit))
+          .left
+          .map(changeRefused(threadId, config))
+          .map(_ => ())
+      case _ => Right(())
+    }
+
+  /**
+   * Deletes the thread `held` holds, fenced by its claim; see [[deleteThread]]. A claim that lapsed while this runtime
+   * stalled, and that another run took over, deletes nothing of that run, and is refused as any live claim is; a
+   * delete not begun when the claim was found lost never reaches the store, and is refused so. `fence` is the claim
+   * above the thread that the store checks with the delete ([[deleteTree]]): one it refuses deleted nothing and is
+   * [[GraphError.ThreadBusy]] on that thread, a loss of the claim above, not of `held`'s, reported to `aboveLost`.
+   */
+  private def deleteHeld(
+    held: Held,
+    config: RunConfig,
+    fence: Option[(ThreadId, FencingToken)],
+    aboveLost: Option[FencingToken] => Unit = _ => ()
+  ): Result[Unit] =
+    val threadId = held.threadId
+    val claim    = held.claim
+    // a refusal for the fence's claim is taken out before `committing`, which would act on it as a loss of `held`'s
+    def fenceLost(error: LLMError): LLMError = (error, fence) match
+      case (stale: GraphError.StaleClaim, Some((above, _))) if above != threadId && stale.threadId == above.value =>
+        aboveLost(stale.current)
+        GraphError.ThreadBusy(above.value, None, afterLoss(stale.current))
+      case _ => error
+    val outcome = held.committing(Commit(claim.token))(
+      checkpointer.deleteThread(threadId, claim.token, fence).left.map(fenceLost)
+    ) match
+      case Left(stale: GraphError.StaleClaim) =>
+        busyAt(threadId, config, holder = afterLoss(stale.current))
+      case other => other
+    // after the store delete, so a subscription that joined while it was in flight ends too - while
+    // the thread is still held here, so no run of this runtime has begun on the next thread under
+    // the id. A delete that landed after its caller was given up on and let the thread go is not
+    // announced: a run may hold the thread again, and its subscriptions must not end. This
+    // runtime's subscriptions to the deleted thread then learn of it from the store, as another
+    // runtime's do
+    if outcome.isRight then held.stillHeld(hub.threadDeleted(threadId)): Unit
+    outcome
+
+  /**
+   * Holds every thread of `threads` - in this runtime, then by a claim in the store, one inside the other - and runs
+   * `body` with them all held, in order; a thread that cannot be held refuses the whole call before `body` runs. Each
+   * is checked first, as [[deleteTree]] checks a thread, and given back however `body` ends, unless deleted.
+   */
+  private def holdingAll(threads: Vector[ThreadId], config: RunConfig)(
+    body: Vector[Held] => Result[Unit]
+  ): Result[Unit] =
+    threads.headOption match
+      case None => body(Vector.empty)
+      case Some(threadId) =>
+        val check =
+          checkpointer.latest(threadId).flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
+        holding(threadId, config, consumesClaim = (_: Result[Unit]).isRight)(check) { held =>
+          holdingAll(threads.tail, config)(rest => body(held +: rest))
+        }
+
+  /** Every thread below `threadId`, deepest first: each child's descendants, then the child, in creation order. */
+  private def descendants(threadId: ThreadId): Result[Vector[ThreadId]] =
+    allChildren(threadId).flatMap { children =>
+      children.foldLeft[Result[Vector[ThreadId]]](Right(Vector.empty)) { (acc, child) =>
+        acc.flatMap(found => descendants(child.threadId).map(below => found ++ below :+ child.threadId))
+      }
+    }
+
+  /** Every direct child of `threadId`, oldest first, read a page at a time. */
+  private def allChildren(threadId: ThreadId): Result[Vector[ChildThread]] =
+    @tailrec def pages(after: Option[ThreadId], found: Vector[ChildThread]): Result[Vector[ChildThread]] =
+      checkpointer.children(threadId, after, GraphRuntime.ChildPage) match
+        case Left(error)                                       => Left(error)
+        case Right(page) if page.size < GraphRuntime.ChildPage => Right(found ++ page)
+        case Right(page)                                       => pages(page.lastOption.map(_.threadId), found ++ page)
+    pages(None, Vector.empty)
+
+  /**
+   * Child retention (design 4.41, rule 12): keeps the newest `config.childRetention` prunable children of `threadId` -
+   * settled (`Completed` or `Failed`, so with an outcome) - and deletes each older one with everything below it
+   * ([[deleteTree]]). Called only where every settled child is prunable - its call committed and will never run
+   * again: under the parent's claim at `start` admission, and before a run's terminal checkpoint once its last
+   * superstep is durable, or after it once an `Async` or `OnExit` run's commits drain ([[Run.retainBeforeSettling]]), or after a blocked run's closing checkpoint - never at `recover` or `resume` admission, when a child whose
+   * call has not committed must stay for that call's replay. Idempotent. Housekeeping: a failure is logged at WARN.
+   *
+   * A `Running` or `Suspended` child for which `abandon` holds - at `start` admission, every one listed, since no call
+   * of an earlier run can be replayed; at a terminal pass, those admission left busy - can never be reattached, so it
+   * is first settled `RunOutcome.Failed("abandoned", ...)` under its own claim ([[abandonChild]]) and then counts; one
+   * that is busy is skipped and returned, for the same run's terminal pass to revisit (#2073), and is otherwise left
+   * to the next `start`. Any other `Running` or `Suspended` child - a child of the current run - is never touched.
+   *
+   * The judgment holds for the children that existed while the parent's latest checkpoint was `base`, the one the
+   * caller judged by, and only while the caller holds the parent's claim. So the pass is fenced twice:
+   *  - by the parent's claim: `fenced` - the claim not found lost, and its token still the store's current claim - is
+   *    checked before the listing, after it, and before each child is settled or deleted (also inside that child's
+   *    cascade), and the pass stops at the first mismatch, so a stale worker whose claim was lost never deletes a child
+   *    that a successor run just made (#2056 review);
+   *  - against a successor: the parent is read before and after the listing, and the pass touches nothing unless its
+   *    latest is `base` both times - a successor run commits a checkpoint of its own before any of its calls starts a
+   *    child, and checkpoint ids are never reused, so such a listing holds none of a successor's children.
+   */
+  private def keepChildren(
+    threadId: ThreadId,
+    config: RunConfig,
+    base: Option[String],
+    token: FencingToken,
+    fenced: () => Boolean,
+    abandon: ThreadId => Boolean
+  ): Set[ThreadId] =
+    def atBase: Boolean =
+      Try(checkpointer.latest(threadId)).toResult.flatten.toOption.flatten.map(_.checkpoint.id) == base
+    def skipped(): Unit =
+      GraphRuntime.logger.debug(
+        s"Retention on ${threadId.value} skipped: its claim was lost or the thread moved on from ${base.getOrElse("none")}"
+      )
+    if !fenced() || !atBase then
+      skipped()
+      Set.empty
+    else
+      Try(allChildren(threadId)).toResult.flatten match
+        case Left(error) =>
+          GraphRuntime.logger.warn(s"Listing the children of ${threadId.value} for retention failed: ${error.message}")
+          Set.empty
+        case Right(_) if !fenced() || !atBase =>
+          skipped()
+          Set.empty
+        case Right(children) =>
+          // once a fence fails the pass touches nothing more
+          var stopped = false
+          def holds(): Boolean =
+            if !stopped && !fenced() then
+              stopped = true
+              skipped()
+            !stopped
+          val busy = Set.newBuilder[ThreadId]
+          // in creation order, and lazily, so nothing is settled once a fence fails
+          val prunable = children.iterator
+            .filter { c =>
+              c.status match
+                case CheckpointStatus.Completed | CheckpointStatus.Failed => true
+                case CheckpointStatus.Running | CheckpointStatus.Suspended =>
+                  abandon(c.threadId) && holds() && {
+                    val settled = abandonChild(c.threadId, threadId, token, config)
+                    if !settled then busy += c.threadId
+                    settled
+                  }
+            }
+            .map(_.threadId)
+            .toVector
+          prunable.dropRight(config.childRetention).iterator.takeWhile(_ => holds()).foreach { old =>
+            Try(deleteTree(old, config, child = true, () => holds(), Some(threadId -> token))).toResult.flatten.left
+              .foreach(error =>
+                GraphRuntime.logger.warn(
+                  s"Deleting the child ${old.value} of ${threadId.value} for retention failed: ${error.message}"
+                )
+              )
+          }
+          busy.result()
+
+  /**
+   * Settles `child`, a `Running` or `Suspended` child of `parent` that no run can reattach ([[keepChildren]]), as
+   * `RunOutcome.Failed("abandoned", ...)`: a `Failed` checkpoint over its latest, with the same snapshot and a
+   * [[RunEvent.RunFailed]], under the child's own claim, fenced by the parent's, whose token is `token` (#2071).
+   * Whether the child is now settled: one already settled is; one that is busy, gone, or whose commit fails - also
+   * for the parent's claim - is not.
+   */
+  private def abandonChild(child: ThreadId, parent: ThreadId, token: FencingToken, config: RunConfig): Boolean =
+    val message = s"abandoned: the run of parent thread '${parent.value}' that started it ended without it"
+    val outcome = settleUnreachable(child, parent, token, RunOutcome.Failed("abandoned", message), message, config)
+    outcome.left.foreach(error =>
+      GraphRuntime.logger.debug(
+        s"Settling the abandoned child ${child.value} of ${parent.value} skipped: ${error.message}"
+      )
+    )
+    outcome.toOption.flatten.isDefined
+
+  /**
+   * Settles `child`, a `Running` or `Suspended` child of `parent` that no call will reattach, as `outcome`, a
+   * `RunOutcome.Failed`: a `Failed` checkpoint over its latest, with the same snapshot and a [[RunEvent.RunFailed]]
+   * carrying `message`, under the child's own claim, fenced by the parent's, whose token is `token` (#2071). Needs no
+   * graph. The run that settled it: this settlement's, or the one that settled it first; `None` for a child with no
+   * checkpoint. A busy child is [[GraphError.ThreadBusy]]; a parent claim lost meanwhile writes nothing. For retention's
+   * abandon ([[abandonChild]]) and a timed-out delegating call's child (#2098).
+   */
+  private[graph] def settleUnreachable(
+    child: ThreadId,
+    parent: ThreadId,
+    token: FencingToken,
+    outcome: RunOutcome,
+    message: String,
+    config: RunConfig
+  ): Result[Option[RunId]] =
+    def latest: Result[Option[StoredCheckpoint]] = checkpointer.latest(child)
+    Try(
+      holding(child, config)(latest.flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(child, _, config)))) { held =>
+        latest.flatMap {
+          case None => Right(None)
+          case Some(stored)
+              if stored.checkpoint.status == CheckpointStatus.Completed ||
+                stored.checkpoint.status == CheckpointStatus.Failed =>
+            Right(Some(RunId(stored.checkpoint.runId)))
+          case Some(stored) =>
+            val open = stored.checkpoint
+            val now  = clock.instant()
+            val saved = Checkpoint(
+              Checkpoint.CurrentFormat,
+              GraphRuntime.checkpointId(config.runId, GraphRuntime.ordinal(Some(open.id)), 1L),
+              Some(open.id),
+              child.value,
+              config.runId.value,
+              CheckpointStatus.Failed,
+              now,
+              open.snapshot,
+              open.tenantId,
+              Some(held.claim.token),
+              open.origin,
+              Some(outcome)
+            )
+            val event =
+              EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
+            val fence  = Some(parent -> token)
+            val commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
+            held
+              .committing(commit)(commitAndDeliver(child, commit).left.map(fenceRefused(child, fence)))
+              .map(_ => Some(config.runId))
+        }
+      }
+    ).toResult.flatten
+
+  /**
+   * The parent's fence for a retention pass ([[keepChildren]]): its claim, whose token is `token`, is not found lost
+   * here (`lost`), and is still the thread's current claim in the store, which a renewal proves
+   * ([[Checkpointer.renew]]).
+   */
+  private def parentFence(threadId: ThreadId, token: FencingToken, lost: () => Boolean): () => Boolean =
+    () => !lost() && Try(checkpointer.renew(threadId, token, claims.ttl)).toResult.flatten.isRight
+
+  /**
+   * Up to `limit` of `threadId`'s direct children (design 4.41), oldest first, starting after child `after` when it is
+   * given: pass the last id of a page to read the next ([[Checkpointer.children]]). Tenant-checked as [[history]] is:
+   * a thread of another tenant is [[GraphError.TenantMismatch]]. A thread with no checkpoint has no children; `limit`
+   * must be positive (`ValidationError`). Allowed on a child thread, whose own children are listed. Needs no claim.
+   */
+  def children(
+    threadId: ThreadId,
+    after: Option[ThreadId] = None,
+    limit: Int = 100,
+    config: RunConfig = RunConfig()
+  ): Result[Vector[ChildThread]] = admission(threadId) {
+    if limit < 1 then Left(ValidationError("limit", s"must be at least 1, was $limit"))
+    else
+      checkpointer.latest(threadId).flatMap {
+        case None => Right(Vector.empty)
+        case Some(stored) =>
+          checkTenant(threadId, stored, config).flatMap(_ => checkpointer.children(threadId, after, limit))
+      }
   }
 
   /**
@@ -719,6 +1465,8 @@ final class GraphRuntime(
         case None => notFound(source, checkpointId)
         case Some(stored) =>
           checkTenant(source, stored, config)
+            .flatMap(_ => notChild(source, stored))
+            .flatMap(_ => notDeleting(source, stored))
             .flatMap(_ => checkpointer.checkpoint(source, checkpointId))
             .flatMap(
               _.fold[Result[Checkpoint]](notFound(source, checkpointId))(c => owned(source, c, config).map(_ => c))
@@ -748,6 +1496,8 @@ final class GraphRuntime(
               .withCreatedAt(now)
               .withTenantId(tenant)
               .withFencingToken(claim.token)
+              // a fork is a top-level thread of its own
+              .withOrigin(None)
             val event = EventDraft(
               config.runId.value,
               Some(forked.id),
@@ -809,6 +1559,8 @@ final class GraphRuntime(
         case Some(stored) =>
           for
             _ <- checkTenant(threadId, stored, config)
+            _ <- notChild(threadId, stored)
+            _ <- notDeleting(threadId, stored)
             _ <- Either.cond(
               stored.checkpoint.id == expected,
               (),
@@ -839,7 +1591,10 @@ final class GraphRuntime(
             now,
             snapshot,
             tenant,
-            Some(claim.token)
+            Some(claim.token),
+            stored.checkpoint.origin,
+            // the status is kept, and with it how the run it records settled
+            stored.checkpoint.outcome
           )
           val event = EventDraft(
             config.runId.value,
@@ -863,6 +1618,40 @@ final class GraphRuntime(
       }
     }
   }
+
+  /**
+   * Replaces `threadId`'s metadata with `metadata` (design 4.52), which the thread registry searches by
+   * ([[Checkpointer.threads]]); the thread's checkpoints and state are unchanged. It is a change, held and fenced as
+   * [[updateState]] is: the thread is held in this runtime and claimed in the store, and the commit carries the claim's
+   * token, so a run holding the thread, here or in another runtime, refuses it with [[GraphError.ThreadBusy]], as does
+   * a claim that lapses before the commit lands. A thread of another tenant is [[GraphError.TenantMismatch]]; a child
+   * thread [[GraphError.ChildThread]]; a thread whose cascade delete has begun [[GraphError.ThreadDeleting]]; a thread
+   * with no checkpoint a `ValidationError` (start it first, with `RunConfig.metadata`). Every refusal leaves the
+   * thread unchanged.
+   */
+  def updateMetadata(threadId: ThreadId, metadata: ThreadMetadata, config: RunConfig = RunConfig()): Result[Unit] =
+    admission(threadId) {
+      def checked: Result[Unit] =
+        checkpointer.latest(threadId).flatMap {
+          case None =>
+            Left(ValidationError("threadId", s"thread '${threadId.value}' has no checkpoint: start it first"))
+          case Some(stored) =>
+            checkTenant(threadId, stored, config)
+              .flatMap(_ => notChild(threadId, stored))
+              .flatMap(_ => notDeleting(threadId, stored))
+        }
+      holding(threadId, config)(checked) { held =>
+        // checked again under the claim: the thread may have been deleted or recreated meanwhile
+        checked.flatMap { _ =>
+          val commit = Commit(held.claim.token).withMetadata(metadata)
+          held
+            .committing(commit)(commitAndDeliver(threadId, commit))
+            .left
+            .map(changeRefused(threadId, config))
+            .map(_ => ())
+        }
+      }
+    }
 
   /**
    * Removes the checkpoints and events of `threadId` that `policy` does not keep, by the store's clock
@@ -1012,7 +1801,11 @@ final class GraphRuntime(
                       // the write, if in flight, is given up on: counted before the thread is released
                       gate.orphan()
                       Left(GraphError.ThreadBusy(threadId.value, None, afterLoss(lostTo.get)))
-                  }(() => body(Held(threadId, claim, gate, reservation, current => claimLost(current))))
+                  }(() =>
+                    body(
+                      Held(threadId, claim, gate, reservation, current => claimLost(current), () => lost.get.isDefined)
+                    )
+                  )
                 outcome = Some(result)
                 result
               }
@@ -1023,12 +1816,35 @@ final class GraphRuntime(
    * A change's hold on its thread ([[holding]]): its store claim, and the fence its one write passes.
    */
   final private class Held(
-    threadId: ThreadId,
+    val threadId: ThreadId,
     val claim: RunClaim,
     gate: Committer,
     reservation: (Option[String], RunId),
-    lost: Option[FencingToken] => Unit
+    lost: Option[FencingToken] => Unit,
+    isLost: () => Boolean
   ):
+
+    /**
+     * Whether the change still holds its claim, checked in the store: not found lost here, and its token still the
+     * thread's current claim, which a renewal proves ([[Checkpointer.renew]]). A renewal the store refuses as stale is
+     * a loss found then, acted on as the heartbeat's is. Fences work done under this claim on other threads - a
+     * cascade's deletes of the thread's descendants - which the claim's own fence on its one write cannot cover.
+     */
+    def holds: Result[Unit] =
+      if isLost() then Left(GraphError.StaleClaim(threadId.value, claim.token, None))
+      else
+        Try(checkpointer.renew(threadId, claim.token, claims.ttl)).toResult.flatten match
+          case Left(stale: GraphError.StaleClaim) =>
+            lost(stale.current)
+            Left(stale)
+          case other => other.map(_ => ())
+
+    /**
+     * A loss of this claim that the store found when it refused a write fenced by it on another thread - a cascade's
+     * delete of a descendant ([[deleteHeld]]) - acted on as a refused renewal is.
+     */
+    def foundLost(current: Option[FencingToken]): Unit = lost(current)
+
     /**
      * Makes `write`, the change's write to the store, unless the claim has been found lost: then it is
      * never begun, and is [[GraphError.StaleClaim]], as a write the store refused for a lost claim would
@@ -1337,7 +2153,8 @@ final class GraphRuntime(
                 admitted.foreach(_.releaseClaim())
                 release(threadId)
             }) { _ =>
-              observation = observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope))
+              observation =
+                observer.map(o => hub.observe(threadId, o.capacity, o.listener, abandoned.apply, runScope, o.nested))
               // the observer takes its place in the log at the first commit fenced by the run's claim
               admit(Admitting(signal, token => observation.foreach(_.claimed(token)))).map { run =>
                 admitted = Some(run)
@@ -1347,8 +2164,8 @@ final class GraphRuntime(
                   run.runId,
                   run.claimSeq,
                   signal,
-                  (afterSeq, capacity, listener) =>
-                    dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope),
+                  (afterSeq, capacity, nested, listener) =>
+                    dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope, nested),
                   subscription
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
@@ -1408,6 +2225,8 @@ final class GraphRuntime(
    */
   private def release(threadId: ThreadId): Unit =
     withLock(activeLock) {
+      // a run's children are over once it releases the thread, even while an orphan keeps the mark (#2074)
+      hub.forgetChildren(threadId)
       if !orphans.contains(threadId.value) then hub.release(threadId)
       releasingLocally(threadId)
       active.remove(threadId.value)
@@ -1481,9 +2300,11 @@ final class GraphRuntime(
     config: RunConfig,
     durability: Durability,
     firstSuperstep: Int,
-    admitting: Admitting
+    admitting: Admitting,
+    origin: Option[RunOrigin],
+    notAfter: Option[Instant] = None
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting, origin, notAfter)
 
   /**
    * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
@@ -2013,7 +2834,15 @@ final class GraphRuntime(
     config: RunConfig,
     committer: Committer,
     firstSuperstep: Int,
-    admitting: Admitting
+    admitting: Admitting,
+    /** The child thread's origin, written on every checkpoint of the run; `None` on a top-level thread. */
+    origin: Option[RunOrigin],
+    /**
+     * An absolute cap on the run's deadline, by the runtime's clock: a child's parent's deadline (design 4.42). The
+     * deadline fixed at the claim is the sooner of it and `budgets.timeout` from then, so admission's own latency never
+     * moves a child's deadline past its parent's.
+     */
+    notAfter: Option[Instant] = None
   ):
     private val signal      = admitting.signal
     val runId               = config.runId
@@ -2038,6 +2867,19 @@ final class GraphRuntime(
     /** When `budgets.timeout` expires, as a `System.nanoTime` value; fixed by the claim. */
     var deadline: Option[Long] = None
 
+    /** The same deadline by the runtime's `clock`, for [[RunContext.deadline]]; fixed by the claim. */
+    private var deadlineAt: Option[Instant] = None
+
+    /** The thread's state the claim continues from, for [[RunContext.admitted]]; set by the claim. */
+    private var admittedState: Option[ThreadState] = None
+
+    /**
+     * The earlier run's children that `start` admission's retention pass found busy (#2073): the only `Running` or
+     * `Suspended` children the run's terminal pass may abandon ([[retainBeforeSettling]]). Set at admission, before
+     * the run starts any child, so it never holds one of this run's.
+     */
+    @volatile private var abandonLater: Set[ThreadId] = Set.empty
+
     /**
      * Claims the thread in two steps: a [[RunClaim]] from the store, then a synchronous commit of
      * `execution` as a new checkpoint whose parent is `parent`, carrying `carried` pending writes over
@@ -2054,13 +2896,19 @@ final class GraphRuntime(
      * claim's commit is fenced against it, and given up once the loss is old enough ([[boundedByLoss]]). A
      * claim's commit the store refuses as stale is a loss found then: admission fails
      * [[GraphError.ClaimLost]], naming the current claim the store named unless the heartbeat recorded the
-     * loss first, so the two agree on one claim.
+     * loss first, so the two agree on one claim. `fence` is another thread's claim the store checks with the claim's
+     * commit ([[Commit.fence]]): a refusal for it wrote nothing and is [[GraphError.ClaimLost]] on that thread, not a
+     * loss of this run's claim, which is given back as usual.
      */
     def admit(
       execution: Execution,
       parent: Option[String],
       event: RunClaim => RunEvent,
-      carry: () => Result[(Vector[PendingWrite], Map[TaskId, ReusedWrite])] = () => Right(Vector.empty -> Map.empty)
+      carry: () => Result[(Vector[PendingWrite], Map[TaskId, ReusedWrite])] = () => Right(Vector.empty -> Map.empty),
+      retainChildren: Boolean = false,
+      amend: Execution => Result[Execution] = Right(_),
+      fence: Option[(ThreadId, FencingToken)] = None,
+      metadata: Option[ThreadMetadata] = None
     ): Result[Run[I, O]] =
       val sentAt = ticker()
       claimThread(threadId, config).flatMap { granted =>
@@ -2079,14 +2927,40 @@ final class GraphRuntime(
               claimLost
             )
           )
-          val outcome = boundedByLoss(() =>
-            // the tasks created for the run before its claim get the claim's root lineage (design §4.24)
-            carry().flatMap { (carried, reused) =>
-              // under the store claim, before the run's first event: nothing of the run exists to be pruned
-              config.retention.foreach(retain)
-              committed(execution.stampedBy(granted.token.value), parent, event(granted), carried, reused)
-            }
-          )
+          val outcome =
+            boundedByLoss(() =>
+              // the tasks created for the run before its claim get the claim's root lineage (design §4.24)
+              carry().flatMap((carried, reused) => amend(execution).map((carried, reused, _))).flatMap {
+                (carried, reused, execution) =>
+                  // a top-level thread is pruned under the store claim, before the run's first event: nothing of the
+                  // run exists to be pruned. A child thread only after the claim commit, which stores what `amend`
+                  // folded from the events retention would remove (design 4.42): a commit that fails prunes nothing
+                  val child = origin.isDefined
+                  if !child then config.retention.foreach(retain)
+                  if retainChildren then
+                    abandonLater = keepChildren(
+                      threadId,
+                      config,
+                      parent,
+                      granted.token,
+                      parentFence(threadId, granted.token, () => lostAt.get.isDefined),
+                      abandon = _ => true
+                    )
+                  committed(
+                    execution.stampedBy(granted.token.value),
+                    parent,
+                    event(granted),
+                    carried,
+                    reused,
+                    fence,
+                    metadata
+                  )
+                    .map { run =>
+                      if child then config.retention.foreach(retain)
+                      run
+                    }
+              }
+            )
           admitted = outcome.isRight
           outcome
         }
@@ -2113,7 +2987,9 @@ final class GraphRuntime(
       parent: Option[String],
       event: RunEvent,
       carried: Vector[PendingWrite],
-      reused: Map[TaskId, ReusedWrite]
+      reused: Map[TaskId, ReusedWrite],
+      fence: Option[(ThreadId, FencingToken)],
+      metadata: Option[ThreadMetadata]
     ): Result[Run[I, O]] =
       for
         claimed <- newCheckpoint(execution, parent, CheckpointStatus.Running)
@@ -2122,9 +2998,13 @@ final class GraphRuntime(
           Some(claimed),
           carried.map(_.copy(checkpointId = claimed.id)),
           Vector(draft(Some(claimed.id), None, event))
-        )
+        ).withFence(fence).withMetadata(metadata)
         // through the committer's fence, so that a claim found lost before it begins never lands
-        records <- committer.begun(claim)(reason => Left(reason))(commitAndDeliver(threadId, claim)) match
+        // a refusal for the claim above is ClaimLost on that thread: nothing was written, and this run's claim is
+        // given back as usual
+        records <- committer.begun(claim)(reason => Left(reason))(
+          commitAndDeliver(threadId, claim).left.map(fenceRefused(threadId, fence))
+        ) match
           case Left(lost: GraphError.ClaimLost) => Left(lost)
           // the claim lapsed, or another run took it over, before its commit landed: the loss is recorded
           // as the heartbeat records one, so a loss it declared meanwhile and this refusal name one claim
@@ -2160,13 +3040,24 @@ final class GraphRuntime(
         position = execution -> claimed.id
         claimedReused = reused
         claimSeq = seq
-        deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
+        val nowNanos = System.nanoTime()
+        // read only for a run with a deadline, as before the cap existed
+        lazy val nowAt = clock.instant()
+        // the time left until the cap, from now, by the runtime's clock; never negative
+        val capped = notAfter.map(at => java.time.Duration.between(nowAt, at).toNanos.max(0L))
+        val left   = (config.budgets.timeout.map(_.toNanos) ++ capped).minOption
+        deadline = left.map(nowNanos + _)
+        deadlineAt = left.map(nowAt.plusNanos)
+        admittedState = Some(execution.state)
         this
 
     /**
-     * Prunes the thread to `policy` as the run is admitted - under the store claim, before the run's claim commit, so no
-     * other run writes meanwhile and nothing of this run exists yet to be pruned, by any limit; a failure is logged,
-     * never the run's. `keepAll` removes nothing, so it is skipped.
+     * Prunes the thread to `policy` as the run is admitted, under the store claim, so no other run writes meanwhile; a
+     * failure is logged, never the run's. `keepAll` removes nothing, so it is skipped. A top-level thread is pruned
+     * before the run's claim commit, so nothing of this run exists yet to be pruned, by any limit. A child thread is
+     * pruned only after it, before the run is launched (design 4.42): the claim checkpoint stores the usage the child
+     * runner folded from the terminal events this removes, so a crash before it removes nothing unfolded; the claim's
+     * own checkpoint and event count against the limits, and `maxEvents` is at least 1 ([[GraphRuntime.childConfig]]).
      */
     private def retain(policy: RetentionPolicy): Unit =
       if policy != RetentionPolicy.keepAll then
@@ -2192,11 +3083,16 @@ final class GraphRuntime(
     /** The usage of the attempts that committed nothing, for the run's terminal event; `None` when there is none. */
     private def lostUsage: Option[UsageSummary] = Option.when(failedUsage.get.requestCount > 0)(failedUsage.get)
 
+    // the agent model steps of the tasks that failed, for the terminal event with their usage (design 4.45)
+    private val failedSteps = new java.util.concurrent.atomic.AtomicLong(0L)
+
     /** Keeps the usage `context`'s task recorded, when the task commits nothing: no pending write will carry it. */
     private def uncommitted(context: RunContext): Unit =
-      if !context.usage.isEmpty then failedUsage.updateAndGet(_.merge(context.usage.summary)): Unit
+      if !context.usage.lostIsEmpty then
+        failedUsage.updateAndGet(_.merge(context.usage.lost))
+        failedSteps.addAndGet(context.usage.lostSteps): Unit
 
-    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage)
+    private def failed(message: String): RunEvent = RunEvent.RunFailed(message, lostUsage, failedSteps.get)
 
     /**
      * When the claim was found lost, at any stage of the run, as a `System.nanoTime` value; set once. The
@@ -2500,17 +3396,55 @@ final class GraphRuntime(
       graph.finish(execution) match
         case RunResult.Failed(_, error) => fail(execution, error)
         case result =>
-          val (status, event) = result match
+          val (status, event, outcome) = result match
             case suspended: RunResult.Suspended =>
-              CheckpointStatus.Suspended -> RunEvent.RunSuspended(suspended.interrupts.map(_.id.value))
-            case _ => CheckpointStatus.Completed -> RunEvent.RunCompleted
-          newCheckpoint(execution, Some(checkpointId), status) match
+              (CheckpointStatus.Suspended, RunEvent.RunSuspended(suspended.interrupts.map(_.id.value)), None)
+            case RunResult.Completed(_, output, _) =>
+              (CheckpointStatus.Completed, RunEvent.RunCompleted, Some(graph.outcomeOf(output)))
+            case _ => (CheckpointStatus.Completed, RunEvent.RunCompleted, Some(RunOutcome.Answered))
+          newCheckpoint(execution, Some(checkpointId), status, outcome) match
             case Left(error)                                                       => fail(execution, error)
             case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
             case Right(saved) =>
+              val completed = status == CheckpointStatus.Completed
+              if completed && !committer.drains then retainBeforeSettling(checkpointId)
               submit(saved, event)
               closeCommitter()
-              committer.failure.fold(result)(e => RunResult.Failed(execution.state, writeFailed(e, None)))
+              committer.failure match
+                case Some(e) => RunResult.Failed(execution.state, writeFailed(e, None))
+                case None    =>
+                  // Async or OnExit: the buffered commits have drained, so the terminal checkpoint is stored
+                  if completed && committer.drains then retainBeforeSettling(saved.id)
+                  result
+
+    /**
+     * Child retention before the run settles (design 4.41): once `lastCommitted`, the checkpoint of the run's last
+     * superstep, is durable - the thread's latest in the store - it schedules no task, so every call the run made has
+     * committed and none will run again, and every settled child is prunable ([[keepChildren]]). Run before the
+     * terminal checkpoint commits, so a parent that gets no later turn is bounded too; a crash during it leaves the
+     * thread `Running` at that checkpoint, and `recover` reaches this point again with nothing to run and repeats the
+     * pass, which is idempotent. Under `Durability.Async` or `OnExit` that checkpoint is not yet durable there - a crash
+     * could replay its calls - so [[end]] runs the pass instead once the run's buffered commits have drained, with
+     * `lastCommitted` the stored terminal checkpoint, still under the run's claim (#2067); a drain that fails leaves it
+     * to the next `start`. The pass also settles as abandoned, and so may prune, the earlier run's children that
+     * admission skipped as busy and whose claims are free by now ([[abandonLater]], #2073); one still busy is left to
+     * the next `start`. It never abandons a child of this run. A run a node blocked ([[block]]) runs it too, once its
+     * closing `Failed` checkpoint is stored, with `lastCommitted` that checkpoint: a blocked turn is never recovered,
+     * so its calls never run again (#2074). A run that fails runs no pass, since `recover` may replay its calls.
+     */
+    private def retainBeforeSettling(lastCommitted: String): Unit =
+      val left = keepChildren(
+        threadId,
+        config,
+        Some(lastCommitted),
+        token,
+        parentFence(threadId, token, () => lostAt.get.isDefined),
+        abandon = abandonLater.contains
+      )
+      if left.nonEmpty then
+        GraphRuntime.logger.debug(
+          s"Retention on ${threadId.value} left ${left.size} busy abandoned children to the next start"
+        )
 
     /**
      * Ends a run a task blocked: the superstep's updates are committed, so `execution` is the state the
@@ -2520,16 +3454,19 @@ final class GraphRuntime(
      * The caller gets `error` itself.
      */
     private def block(execution: Execution, parent: String, error: LLMError): RunResult[O] =
-      newCheckpoint(execution, Some(parent), CheckpointStatus.Failed) match
+      newCheckpoint(execution, Some(parent), CheckpointStatus.Failed, Some(RunOutcome.blocked(error))) match
         case Left(storeError)                                                  => fail(execution, storeError)
         case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
         case Right(saved)                                                      =>
           // the blocked turn leaves the history with it: nothing of it stays readable or forkable
           submit(saved, failed(error.message), retractTurn = true)
           closeCommitter()
-          committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
-            RunResult.Failed(execution.state, writeFailed(e, Some(error)))
-          )
+          committer.failure.fold[RunResult[O]] {
+            // the closing checkpoint is stored and the blocked turn's calls never run again, so every settled child is
+            // prunable, as at the next start (#2074); a failure, which `recover` may replay, runs no pass
+            retainBeforeSettling(saved.id)
+            RunResult.Failed(execution.state, error)
+          }(e => RunResult.Failed(execution.state, writeFailed(e, Some(error))))
 
     /** Runs `task`, recording its write; its digest is that of the write exactly as recorded (design §4.24). */
     private def runTask(task: Task, execution: Execution, checkpointId: String): Result[Settled] =
@@ -2540,7 +3477,9 @@ final class GraphRuntime(
         sink,
         journal = effectJournal,
         owner = Some(task.arrivalId -> task.arrivalLineage),
-        resumeDigest = task.resumeDigest
+        resumeDigest = task.resumeDigest,
+        deadline = deadlineAt,
+        admitted = admittedState
       )
       def settled(executed: Result[TaskResult]): Result[Settled] =
         executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
@@ -2612,10 +3551,15 @@ final class GraphRuntime(
           }
           .map(_ => ())
 
+    /**
+     * The run's next checkpoint. Every checkpoint carries the thread's [[RunOrigin]], as it carries its tenant; only the
+     * terminal one that settles the run carries an `outcome`, so a later run's checkpoints clear it.
+     */
     private def newCheckpoint(
       execution: Execution,
       parent: Option[String],
-      status: CheckpointStatus
+      status: CheckpointStatus,
+      outcome: Option[RunOutcome] = None
     ): Result[Checkpoint] =
       graph.snapshot(execution).map { snapshot =>
         checkpoints += 1
@@ -2630,7 +3574,9 @@ final class GraphRuntime(
           clock.instant(),
           snapshot,
           config.tenantId.map(_.value),
-          claim.map(_.token)
+          claim.map(_.token),
+          origin,
+          outcome
         )
       }
 
@@ -2676,13 +3622,13 @@ final class GraphRuntime(
         case StopCause.Cancelled | StopCause.Finishing =>
           closeStopped(
             execution,
-            RunEvent.RunCancelled(lostUsage),
+            RunEvent.RunCancelled(lostUsage, failedSteps.get),
             GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
           )
         case StopCause.Expired =>
           closeStopped(
             execution,
-            RunEvent.RunTimedOut(lostUsage),
+            RunEvent.RunTimedOut(lostUsage, failedSteps.get),
             GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
           )
       Thread.currentThread().interrupt()
@@ -2755,20 +3701,36 @@ final class GraphRuntime(
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
       def discardCustom(): Unit = withLock(lock)(buffered.clear())
-      // once the claim is found lost, a node that ignores the stop sends nothing more: a later run - of the
-      // same id, perhaps - may hold the thread. Checked under the hub's lock, so never after its claim (#1918)
+      // once the claim is found lost, or released, a node that ignores the stop or keeps its context sends
+      // nothing more: a later run - of the same id, perhaps - may hold the thread. Checked under the hub's lock,
+      // so never after a later run's claim (#1918, #1737)
       def progress(name: String, version: Int, payload: ujson.Value): Unit =
-        hub.live(
+        hub.live(threadId, liveEvent(name, version, payload), () => !claimWasLost && !claimReleased.get)
+      // a child's start, remembered for a nested subscriber attaching mid-child (#2074): fenced as a nested event is,
+      // so a child that outlives its parent's run never announces itself into a later run's subscriptions
+      override def childStarted(child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
+        hub.childStarted(
           threadId,
-          StreamEvent.Live(
-            threadId.value,
-            runId.value,
-            token,
-            task.id.value,
-            task.node.value,
-            name,
-            version,
-            ujson.copy(payload)
-          ),
-          () => !claimWasLost
+          child,
+          liveEvent(name, version, payload),
+          () => !claimWasLost && !claimReleased.get
         )
+      private def liveEvent(name: String, version: Int, payload: ujson.Value): StreamEvent.Live =
+        StreamEvent.Live(
+          threadId.value,
+          runId.value,
+          token,
+          task.id.value,
+          task.node.value,
+          name,
+          version,
+          ujson.copy(payload)
+        )
+      // a child's event, forwarded from the child's run (design 4.47): fenced like progress, and also once the run has
+      // released its claim, so a child that outlives its parent's run (it ignored a cancel past the drain) sends
+      // nothing into a later run's subscriptions
+      override def nested(event: StreamEvent.Nested): Unit =
+        hub.nested(threadId, event, token, () => !claimWasLost && !claimReleased.get)
+      // a timed-out delegating call's child (#2098), under its own claim, fenced by this run's
+      override def settleChild(child: ThreadId, outcome: RunOutcome, message: String): Result[Option[RunId]] =
+        settleUnreachable(child, threadId, token, outcome, message, config.withRunId(RunId.random()))

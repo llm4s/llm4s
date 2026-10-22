@@ -134,6 +134,7 @@ result.map { r =>
     case AgentStatus.Completed(answer)         => println(answer)
     case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
     case AgentStatus.StepLimitReached          => println("Hit the step limit")
+    case AgentStatus.TokenLimitReached         => println("Hit the run's token budget")
     case AgentStatus.Suspended(approvals, qs, asked, held) => println("Waiting for a person")
   }
 }
@@ -173,6 +174,7 @@ target answers in its own format, or freely.
 ## Safety Defaults
 
 - **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
+- **Run token budget**: off by default. `RunConfig().withBudgets(RunBudgets.default.withMaxTokens(n))` bounds the input and output tokens one run (`run`, `recover` or `resume`) may use, counted from the thread's usage when the run started. Before each model call - the loop's own, and every call a middleware makes through `next` or `ModelContext.accounted` - the run's tokens are compared with it, and at the budget the turn ends `AgentStatus.TokenLimitReached` without calling the model. A call in flight is never interrupted, so a run can overshoot the budget by one model call. A completion that reports no usage is charged an estimate of the whole request (messages, tool definitions and response schema) and the whole answer, never zero. A retrying client (`ReliableClient`) is one call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in mind. Each run brings its own budget, like its `timeout`; a task reads the run's deadline as `RunContext.deadline`.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
@@ -204,7 +206,7 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
 `answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
 `JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
-`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `TOKEN_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
 `reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
 status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its tool
 questions, middleware questions and breakpoints; it is empty for any other status, and
@@ -344,6 +346,30 @@ val charge = AgentTool(chargeSpec) { (args, context) =>
 }
 ```
 
+A plain `ToolFunction` - one built with `ToolBuilder`, a built-in tool, an MCP tool - reads the same call as
+`params.call`, a `ToolCallInfo` with the call's `toolCallId` and `idempotencyKey`. It is `None` when the function runs
+outside an agent, through `ToolRegistry.execute`, which has no call to describe:
+
+```scala
+import org.llm4s.toolapi.{ Schema, ToolBuilder }
+
+val charge = ToolBuilder[Map[String, Any], String]("charge", "Charges a card", chargeSchema)
+  .withHandler { params =>
+    for
+      amount  <- params.getDouble("amount")
+      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey))
+    yield receipt.id
+  }
+  .buildSafe()
+```
+
+Two tools pass it on by themselves. `HTTPTool` adds `Idempotency-Key: <key>` to a POST, PUT, PATCH or DELETE it
+sends as an agent's call, unless the call's own headers set one. An MCP tool sends it to its server in the
+`tools/call` request's `_meta`, as `llm4s.org/idempotencyKey` (with `llm4s.org/toolCallId`), never among the
+arguments; an llm4s `MCPServer` hands it to its tool as `params.call`, and another server can read it there or
+ignore it. Tools defined from Java (`llm4s-java-api`) and Kotlin (`llm4s-kotlin-api`) do not see it yet
+([#1740](https://github.com/llm4s/llm4s/issues/1740)).
+
 The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
 issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
 with the call. A call of a later model request gets a new key even when the provider reuses its
@@ -432,10 +458,43 @@ The harness keeps an agent's files in a `FileBackend` (`org.llm4s.agent.harness`
 (`StateFileBackend`, the default), a long-term store (`StoreFileBackend`, for `/memories/`), several at
 once (`CompositeBackend`), files the application ships, read-only (`StaticFileBackend`: mount it at `/app`
 and point `SkillsConfig.withSources` and `InstructionsConfig.withPaths` there, since on state files only a tool
-call writes a file), or one chosen per run (`FileBackend.resolved`). Each backend declares the locks
-its mutations hold, replays its external effects through `ReplayGuard`, and enforces its own size
-limits. A backend over a host directory is not part of this release; it is tracked in
-[#1964](https://github.com/llm4s/llm4s/issues/1964).
+call writes a file), a directory of the host (`HostFileBackend`), or one chosen per run
+(`FileBackend.resolved`). Each backend declares the locks its mutations hold, replays its external
+effects through `ReplayGuard`, and enforces its own size limits.
+
+`HostFileBackend.open(root, lockDirectory)` exposes a trusted directory as `/`
+([design §4.40](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.40-host-file-backend.md)).
+It is the root's only writer: it holds an OS lock on the root until `close()`, and any other open of
+the same root, or of one inside or around it, in this process or another, is refused with
+`HostRootInUse`. Give every process on the host one `lockDirectory`, outside every root, on a local
+file system that nothing prunes. It refuses symbolic links, files with other hard links, mounts beneath
+the root and volumes that make 8.3 short names; on Windows, which reports no hard-link counts, pass
+`allowUncheckedIdentity = true` only for a root with no hard links. It is not a security boundary:
+never give it a root an untrusted process can write, and run untrusted commands in the workspace
+sandbox.
+
+The backend holds the root's lock until `close()`, so give it a managed lifetime: one that closes it
+however the work ends. Until it is closed, every other open of the root is refused.
+
+```scala
+import org.llm4s.agent.graph.tool.ToolSet
+import org.llm4s.agent.harness.{FileTools, HostFileBackend}
+import java.nio.file.Path
+import scala.util.Using
+
+HostFileBackend.open(Path.of("/srv/project"), Path.of("/var/lib/myapp/llm4s-locks")).flatMap { opened =>
+  Using.resource(opened) { project => // closed when the block ends, whether it succeeds or fails
+    for {
+      tools  <- ToolSet.of(FileTools(project)*)
+      agent  <- Agent.builder("coder", client).withTools(tools).build()
+      result <- agent.run("Summarise README.md")
+    } yield result
+  }
+}
+```
+
+An application that keeps an agent for longer keeps the backend beside it, and closes it when it shuts
+the agent down.
 
 ### Harness File Tools
 
@@ -707,8 +766,10 @@ for {
   results, skills under `/skills` and instructions in `/AGENTS.md`. `HarnessProfile()` is the file
   tools alone. Change either with the `with*` setters: `withBackend`, `withSandbox` (adds `execute`),
   `withTools(ToolSelection.Only(...))`, `withTodos(None)`, `withToolTimeout`, `withRetention`, ...
-- **The order is fixed**, outermost first: permissions, summarisation, offload, skills, instructions,
-  todos, then the builder's own middleware. With no permission rules there is no
+- **Subagents.** `deepAgents` also offers the general-purpose subagent through the `task` tool;
+  `HarnessProfile()` offers none. See [Subagents in a harness](delegation#subagents-in-a-harness).
+- **The order is fixed**, outermost first: permissions, subagent delegation, summarisation, offload,
+  skills, instructions, todos, then the builder's own middleware. With no permission rules there is no
   `PermissionMiddleware`; with rules, a call no rule allows is denied.
 - **The prompt** is the profile's (plan, act and verify; context; tool safety), `PromptMode.Replace`
   or `Suffix`. `withSystemPrompt` beside a harness is refused.
@@ -984,6 +1045,7 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 | [BuiltinToolsAgentExample](/examples/#agent-examples) | Built-in tools |
 | [DeepResearchExample](/examples/#deep-research) | The harness on state files: plan, offload, summary, memory, recover after a stop |
 | [CodingWorkspaceExample](/examples/#coding-workspace) | The harness in a workspace: permissions, approval of `execute`, resume |
+| [ParallelDeepResearchExample](/examples/#parallel-deep-research) | Typed subagents in parallel: bounds, a child's approval through the lead, nested streams, recover after a stop |
 
 [Browse all examples →](/examples/)
 

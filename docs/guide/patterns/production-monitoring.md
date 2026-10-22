@@ -491,8 +491,8 @@ ORDER BY grounding_score DESC;
 ## See Also
 
 - [Cost Tracking & Optimization](../issues/#11) - Detailed cost analysis
-- [Error Recovery](./error-recovery.md) - Handle failures
-- [Security Best Practices](./security-best-practices.md) - Audit logging
+- [Error Recovery](./error-recovery) - Handle failures
+- [Security Best Practices](./security-best-practices) - Audit logging
 
 ---
 

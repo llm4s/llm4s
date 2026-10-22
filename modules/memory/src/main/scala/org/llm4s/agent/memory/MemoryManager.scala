@@ -244,7 +244,10 @@ object MemoryStats {
 /**
  * Configuration for memory manager behavior.
  *
- * A plain value built in code; this module reads no configuration file. Every option is read by
+ * A plain value built in code; this module reads no configuration file. Build one with
+ * `MemoryManagerConfig(...)` (every option has a default) or a preset, and change it with the
+ * `with*` setters; there is no public constructor or `copy`, so the type can gain options without
+ * breaking callers. Every option is read by
  * the managers that extend the shared record/retrieve operations ([[SimpleMemoryManager]] and
  * [[LLMMemoryManager]]).
  *
@@ -253,6 +256,7 @@ object MemoryStats {
  *                            message it records, passing the conversation id. System and tool
  *                            messages are not analysed. Extraction is best-effort: if it fails,
  *                            the message stays recorded and the failure is logged as a warning.
+ *                            A cancellation is not a failure: it is returned, so the caller stops.
  *                            [[SimpleMemoryManager]] extracts nothing, so the option only changes
  *                            what [[LLMMemoryManager]] stores (one extra LLM call per message).
  * @param defaultImportance Importance score given to memories recorded without one
@@ -260,53 +264,28 @@ object MemoryStats {
  *                           `maxTokens`. An explicit `maxTokens` always wins.
  * @param consolidationConfig How `consolidateMemories` groups memories and handles errors
  */
-final class MemoryManagerConfig(
-  val autoExtractEntities: Boolean = false,
-  val defaultImportance: Double = 0.5,
-  val contextTokenBudget: Int = MemoryManager.DefaultContextTokenBudget,
-  val consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
+final case class MemoryManagerConfig private (
+  autoExtractEntities: Boolean,
+  defaultImportance: Double,
+  contextTokenBudget: Int,
+  consolidationConfig: ConsolidationConfig
 ) {
 
-  /**
-   * Copy with any subset of the options changed.
-   */
-  def copy(
-    autoExtractEntities: Boolean = this.autoExtractEntities,
-    defaultImportance: Double = this.defaultImportance,
-    contextTokenBudget: Int = this.contextTokenBudget,
-    consolidationConfig: ConsolidationConfig = this.consolidationConfig
-  ): MemoryManagerConfig = new MemoryManagerConfig(
-    autoExtractEntities,
-    defaultImportance,
-    contextTokenBudget,
-    consolidationConfig
-  )
+  /** Set whether `recordMessage` also extracts entities from user and assistant messages. */
+  def withAutoExtractEntities(enabled: Boolean): MemoryManagerConfig =
+    copy(autoExtractEntities = enabled)
 
-  override def equals(obj: Any): Boolean = obj match {
-    case that: MemoryManagerConfig =>
-      this.autoExtractEntities == that.autoExtractEntities &&
-      this.defaultImportance == that.defaultImportance &&
-      this.contextTokenBudget == that.contextTokenBudget &&
-      this.consolidationConfig == that.consolidationConfig
-    case _ => false
-  }
+  /** Set the importance given to memories recorded without one. */
+  def withDefaultImportance(importance: Double): MemoryManagerConfig =
+    copy(defaultImportance = importance)
 
-  override def hashCode(): Int = {
-    val state = Seq(
-      autoExtractEntities,
-      defaultImportance,
-      contextTokenBudget,
-      consolidationConfig
-    )
-    state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
-  }
+  /** Set the token budget `getRelevantContext` uses when the call passes no `maxTokens`. */
+  def withContextTokenBudget(tokens: Int): MemoryManagerConfig =
+    copy(contextTokenBudget = tokens)
 
-  override def toString: String =
-    s"MemoryManagerConfig(" +
-      s"autoExtractEntities=$autoExtractEntities, " +
-      s"defaultImportance=$defaultImportance, " +
-      s"contextTokenBudget=$contextTokenBudget, " +
-      s"consolidationConfig=$consolidationConfig)"
+  /** Set how `consolidateMemories` groups memories and handles errors. */
+  def withConsolidationConfig(consolidation: ConsolidationConfig): MemoryManagerConfig =
+    copy(consolidationConfig = consolidation)
 }
 
 /**
@@ -356,21 +335,18 @@ object MemoryManagerConfig {
   /**
    * Default configuration.
    */
-  val default: MemoryManagerConfig = new MemoryManagerConfig()
+  val default: MemoryManagerConfig = MemoryManagerConfig()
 
   /**
    * Configuration for testing: no automatic entity extraction, so no LLM call is made unless a
    * test asks for one.
    */
-  val testing: MemoryManagerConfig = new MemoryManagerConfig(
-    autoExtractEntities = false
-  )
+  val testing: MemoryManagerConfig = MemoryManagerConfig(autoExtractEntities = false)
 
   /**
    * Full-featured configuration: entities are extracted from every recorded user and assistant
-   * message.
+   * message. With [[LLMMemoryManager]] that is one extra LLM call per recorded user or assistant
+   * message, on top of whatever the application itself sends.
    */
-  val fullFeatured: MemoryManagerConfig = new MemoryManagerConfig(
-    autoExtractEntities = true
-  )
+  val fullFeatured: MemoryManagerConfig = MemoryManagerConfig(autoExtractEntities = true)
 }

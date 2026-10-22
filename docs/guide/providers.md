@@ -39,7 +39,7 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **Ollama** | Local | Private, no API key, offline | Easy |
 | **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 
-Missing a vendor? See [Writing a Provider](writing-a-provider.md) to publish your own provider module.
+Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
 
 ---
 
@@ -54,7 +54,7 @@ A section's API key comes from its own `apiKey` when it sets one, and otherwise 
 vendor's shared key, `llm4s.credentials.<provider>.apiKey`, which each provider module binds to
 the vendor's conventional variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). So with the
 variable exported, a section needs only `provider` and `model`. The library reads no `LLM_MODEL`.
-See [API keys](../getting-started/configuration.md#api-keys) for the full table and for a
+See [API keys](../getting-started/configuration#api-keys) for the full table and for a
 second account.
 
 ```hocon
@@ -87,8 +87,8 @@ Only the section being loaded is validated, so a section with no key available -
 provider module is not on the classpath - fails only when it is loaded: with the file above and
 just `OPENAI_API_KEY` set, `defaultProvider()` succeeds and `provider("claude")` fails with an
 error naming `ANTHROPIC_API_KEY` and `claude`'s `apiKey`. See
-[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
-[Switching providers](../getting-started/configuration.md#switching-providers) for the full story.
+[Named provider sections](../getting-started/configuration#named-provider-sections) and
+[Switching providers](../getting-started/configuration#switching-providers) for the full story.
 
 ### Available Models
 
@@ -121,7 +121,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-openai-azure-openai-and-requesty).
+[installation guide](../getting-started/installation#for-openai-azure-openai-and-requesty).
 
 ### Setup
 
@@ -170,6 +170,9 @@ because the section binds it.
 `CompletionOptions.reasoning` is sent as `reasoning_effort` to OpenAI's reasoning models:
 
 ```scala
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+
+// client: LLMClient, conversation: Conversation
 client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.High))
 ```
 
@@ -229,7 +232,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-anthropic).
+[installation guide](../getting-started/installation#for-anthropic).
 
 ### Setup
 
@@ -281,6 +284,24 @@ Claude models generally score higher on reasoning benchmarks.
 - Excellent vision capabilities
 - Supports prompt caching for repeated queries
 
+### Web search
+
+Set `webSearch = true` in an `anthropic` section and every request carries Anthropic's server-side web search
+tool (`web_search_20250305`). The model then decides per request whether to search, and the sources its answer
+cites arrive on `Completion.citations` (see [Citations and grounding sources](#citations-and-grounding-sources)):
+
+```hocon
+llm4s.providers.claude-search {
+  provider  = "anthropic"
+  model     = "claude-sonnet-4-5"
+  webSearch = true
+}
+```
+
+It is off by default. Anthropic bills each search on top of tokens, and an organization administrator has to
+allow web search in the Console first. The tool is sent beside your own tools; Anthropic runs the search itself,
+so it never reaches a `ToolRegistry` and the completion's `toolCalls` do not include it.
+
 ---
 
 ## Google Gemini
@@ -293,7 +314,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-gemini" % llm4sVersion
 ```
 
 In `0.4.1` and earlier they are part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-gemini-and-vertex-ai).
+[installation guide](../getting-started/installation#for-gemini-and-vertex-ai).
 
 ### Setup
 
@@ -348,6 +369,25 @@ Great for cost-conscious projects and high-volume applications.
 - Strong code generation capabilities
 
 ---
+
+### Google Search grounding
+
+Set `googleSearch = true` in a `gemini` or `vertexai` section and every request carries Gemini's Google
+Search tool (`google_search`; `googleSearch` on Vertex AI). The model then decides per request whether to
+search, and the sources behind a grounded answer arrive on `Completion.citations` (see
+[Citations and grounding sources](#citations-and-grounding-sources)):
+
+```hocon
+llm4s.providers.gemini-search {
+  provider     = "gemini"
+  model        = "gemini-2.5-flash"
+  googleSearch = true
+}
+```
+
+It is off by default. Google bills grounded requests separately, and the citation URLs it returns are
+`vertexaisearch.cloud.google.com` redirects, not the pages themselves. The tool is sent beside any function
+declarations; a model that does not support search together with function calling rejects that request.
 
 ## Google Vertex AI
 
@@ -465,10 +505,18 @@ Behaviour to know about:
   Whether a model supports tools depends on the model; a model that does not is answered by the service,
   and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
   given a generated one.
-- **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
-  `budgetTokens` are dropped without error; the chat API documents some of them, and this client does
-  not expose them yet. `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
-  1.0) when set.
+- **Sampling options.** `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
+  1.0) when set. `presencePenalty` and `frequencyPenalty` go as `presence_penalty` and `frequency_penalty`
+  when not 0.0, their default, so leaving them alone sends nothing new; the service checks their range.
+- **Structured output.** `responseFormat` goes as `response_format`: `ResponseFormat.Json` as
+  `{"type": "json_object"}`, and `ResponseFormat.JsonSchema(schema, name, strict)` as
+  `{"type": "json_schema", "json_schema": {"name": ..., "schema": ..., "strict": ...}}`, the shapes IBM's
+  Python SDK and LangChain integration send (IBM's Node.js SDK names only `json_object`). JSON mode needs
+  the prompt to ask for JSON too; the client adds no instruction. Whether a model honours either format
+  depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
+- **Ignored options.** `reasoning` and `budgetTokens` are dropped without error. The chat API has
+  `reasoning_effort` and `include_reasoning`, which this client does not send yet, and it does not read a
+  reply's `reasoning_content`.
 - **Abnormal endings.** A stream that ends without a `finish_reason`, or whose `finish_reason` is
   `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
   partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`
@@ -589,7 +637,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint).
+[installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint).
 
 ### Setup
 
@@ -700,7 +748,7 @@ Any server that speaks the OpenAI `/chat/completions` API works with
 `provider = "openai-compatible"` - hosted APIs such as Groq, Together, Fireworks, xAI or NVIDIA
 NIM, local servers such as vLLM, LM Studio or llama.cpp, or an internal gateway. It needs no code
 and no module of its own, only `llm4s-openai-compatible`, which ships in the release after `0.4.1`
-(see the [installation guide](../getting-started/installation.md#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
+(see the [installation guide](../getting-started/installation#for-deepseek-zai-openrouter-mistral-cohere-and-any-openai-compatible-endpoint)):
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
@@ -832,6 +880,10 @@ separates the provider, so `LLM_MODEL=openai-compatible/openai/gpt-oss-120b` nam
 Then load it by name, or as the default:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.types.Result
+
 val groq: Result[ProviderConfig]  = Llm4sConfig.provider("groq-main")
 val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 ```
@@ -1259,6 +1311,8 @@ Fireworks), and hosted catalogues retire models regularly. List what the endpoin
 the section's key and headers:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 Llm4sConfig.listModels("groq-main")   // GET <baseUrl>/models
 ```
 
@@ -1448,7 +1502,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
 ```
 
 In `0.4.1` and earlier it is part of `llm4s-core`. See the
-[installation guide](../getting-started/installation.md#for-ollama-local-models).
+[installation guide](../getting-started/installation#for-ollama-local-models).
 
 ### Setup
 
@@ -1460,8 +1514,8 @@ ollama pull mistral        # Downloads model
 ollama serve               # Runs on http://localhost:11434
 ```
 
-3. **Add a named section** to `application.conf` and select it as the default. No API key needed,
-   but `baseUrl` is required - Ollama sections have no default (below).
+3. **Add a named section** to `application.conf` and select it as the default. No API key is
+   needed, and `baseUrl` defaults to `http://localhost:11434`, where `ollama serve` listens.
 
 ### Configuration
 
@@ -1475,8 +1529,8 @@ llm4s {
     ollama-local {
       provider = "ollama"
       model    = "mistral"
-      baseUrl  = "http://localhost:11434"   # required
-      # baseUrl = ${?OLLAMA_BASE_URL}       # optional: let your own variable override it
+      # baseUrl = "http://gpu-box:11434"  # optional: the default is http://localhost:11434
+      # baseUrl = ${?OLLAMA_BASE_URL}       # optional: let OLLAMA_BASE_URL override the default
     }
   }
 }
@@ -1658,12 +1712,22 @@ it is. Thinking also counts toward token estimates (`ConversationTokenCounter`),
 resend it.
 
 ```scala
-for {
-  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
-  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
-  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
-  answer <- client.complete(next, options)             // the provider gets it back
-} yield answer
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, ToolCall, ToolMessage }
+import org.llm4s.types.Result
+
+def toolTurn(
+  client: LLMClient,
+  conversation: Conversation,
+  options: CompletionOptions,
+  runTools: Seq[ToolCall] => Seq[ToolMessage]          // your tool execution
+): Result[Completion] =
+  for {
+    first <- client.complete(conversation, options)   // a tool-call turn, with thinking
+    results = runTools(first.message.toolCalls)
+    next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+    answer <- client.complete(next, options)           // the provider gets it back
+  } yield answer
 ```
 
 ---
@@ -1697,12 +1761,16 @@ provider's call). `hasSpan` says whether both are present.
 | OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them with no request option; Azure and Requesty return them only if the deployment does. |
 | OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
-| Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
+| Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
+| Anthropic | With `webSearch = true` in the section (see [Web search](#web-search)): one citation per source a text block cites - for a `web_search_result_location` its `url`, `title` and `cited_text`, for a `search_result_location` its `source` as `url`. Document citations (`char_location`, `page_location`, `content_block_location`) name a document, not a URL, and are skipped. No indices: Anthropic attaches a citation to a text block, not to a position in it. Read from `complete` and from a stream (`citations_delta`). |
+| Ollama, Bedrock, watsonx | Empty. |
 
 Things to know:
 
-- **Streaming.** A completion assembled from streamed chunks has no citations: neither OpenAI nor
-  OpenRouter documents where a stream carries them, so streamed chunks are not read. (A model that does not
+- **Streaming.** For OpenAI and OpenRouter, a completion assembled from streamed chunks has no citations:
+  neither documents where a stream carries them, so streamed chunks are not read. Gemini and Vertex AI send
+  `groundingMetadata` in a streamed chunk (usually the last), and the streamed completion carries it. Anthropic
+  streams each citation as a `citations_delta`, and the streamed completion carries them. (A model that does not
   stream natively is answered with one ordinary call, and that completion keeps its citations.)
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
@@ -1760,6 +1828,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 **Good:**
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+
 // Keys come from the vendor's variable or the section's own ${?VAR} binding - never hardcoded
 val providerConfig = Llm4sConfig.defaultProvider()
 ```
@@ -1818,7 +1888,7 @@ place. Defaults when `baseUrl` is omitted:
 | `openrouter` | `https://openrouter.ai/api/v1` |
 | `zai` | `https://api.z.ai/api/paas/v4` |
 | `requesty` | `https://router.requesty.ai/v1` |
-| `ollama` | none - required |
+| `ollama` | `http://localhost:11434` |
 | `openai-compatible` | none - required |
 
 ---
@@ -1858,6 +1928,11 @@ place. Defaults when `baseUrl` is omitted:
 Configure one named section per provider, then load the default or any section by name:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
+
+// conversation: the Conversation to send
 for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
@@ -1870,7 +1945,7 @@ for {
 
 Each section is validated when it is loaded, so here both must have a key available;
 a problem in either surfaces as the `Left` of this `for`. See
-[Switching providers](../getting-started/configuration.md#switching-providers).
+[Switching providers](../getting-started/configuration#switching-providers).
 
 This enables:
 - **Fallback logic** - Use OpenAI, fall back to Anthropic

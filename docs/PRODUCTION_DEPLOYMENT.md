@@ -32,7 +32,7 @@ LLM4S follows a configuration boundary principle: all configuration loading happ
 API keys belong in environment variables or a secrets manager—never in source control. A section's
 key is its own `apiKey` when it sets one, and otherwise its vendor's shared
 `llm4s.credentials.<provider>.apiKey`, which each provider module binds to the vendor's variable
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...; see [API keys](getting-started/configuration.md#api-keys)).
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...; see [API keys](getting-started/configuration#api-keys)).
 That default is convenient in development. **In production, give every section its own `apiKey`**:
 a section meant for a second account whose key is missing would otherwise fall back to the shared
 key and silently bill the default account. llm4s logs at INFO which path each key came from
@@ -58,7 +58,7 @@ precedence):
 Environment variables are not a layer of their own: one is read only where a `${?VAR}` substitution
 binds it - in your `application.conf`, or in a module's `reference.conf` (tracing, embeddings,
 tools and each provider's vendor key bind theirs there; see
-[the variables llm4s reads](getting-started/configuration.md#environment-variables-llm4s-reads)).
+[the variables llm4s reads](getting-started/configuration#environment-variables-llm4s-reads)).
 
 ### Production application.conf
 
@@ -517,7 +517,7 @@ llm4s.providers {
   ollama-local {
     provider = "ollama"
     model    = "llama3.2"
-    baseUrl  = "http://localhost:11434"   # required for Ollama
+    baseUrl  = "http://localhost:11434"   # the default; set it when Ollama runs elsewhere
   }
 }
 ```
@@ -733,11 +733,11 @@ Before deploying to production, verify:
 
 ## Related Documentation
 
-- [Configuration Guide](getting-started/configuration.md) - Complete configuration reference
-- [Configuration Boundary](reference/configuration-boundary.md) - Architecture pattern explanation
+- [Configuration Guide](getting-started/configuration) - Complete configuration reference
+- [Configuration Boundary](reference/configuration-boundary) - Architecture pattern explanation
 - [Langfuse Workflow Patterns](langfuse-workflow-patterns.md) - Tracing event sequences
-- [Roadmap](reference/roadmap.md) - Planned reliability and security features
-- [Agent Framework](guide/agents/index.md) - Agent lifecycle and state management
+- [Roadmap](reference/roadmap) - Planned reliability and security features
+- [Agent Framework](guide/agents/) - Agent lifecycle and state management
 
 ---
 
@@ -750,7 +750,7 @@ Current limitations to be aware of in production:
 - **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart and import saved messages with `history`; the in-memory runtime does not survive a restart (durable checkpointers are Stage 2 of the typed agent runtime)
 - **Advanced semantic/embedding caching not included** - Add Redis/vector cache for high-volume RAG
 
-These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap.md#production-readiness).
+These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap#production-readiness-pillars).
 
 This guide will evolve as LLM4S approaches v1.0.
 

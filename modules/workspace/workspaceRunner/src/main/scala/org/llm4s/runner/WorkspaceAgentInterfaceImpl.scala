@@ -25,12 +25,14 @@ import scala.util.chaining._
  * @param isWindows     True if the host OS is Windows.  Used to route built-in commands
  *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
  *                      no standalone `.exe` on Windows.
- * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
+ * @param sandboxConfig Optional sandbox config; if None, uses [[org.llm4s.shared.WorkspaceSandboxConfig.Permissive WorkspaceSandboxConfig.Permissive]]
  * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
  * @param gateWait      how long a command or a file operation waits at the command gate before it is refused
  *                      (`WORKSPACE_BUSY`)
  * @param startProcess  starts a process for the [[ProcessRegistry]]; the platform's, bar in tests
  * @param commitAfterGate how long after its gate wait a file change may still commit; past it, it is refused unchanged
+ * @param confiner      the sandbox helper every `execute` command is started through (design §4.39); the platform's:
+ *                      on Linux the helper, elsewhere None, and commands run unconfined
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -39,12 +41,39 @@ class WorkspaceAgentInterfaceImpl(
   programSearch: ProgramSearch = ProgramSearch.host(),
   gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait,
   startProcess: java.lang.ProcessBuilder => Process = _.start(),
-  commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate
+  commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate,
+  confiner: Option[Confiner] = Confiner.platform()
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
+
+  /**
+   * Where each confined command gets its own scratch directory (its TMPDIR and the helper's status file): made by the
+   * runner under `/var/tmp`, never `/tmp` (which commands may share), the workspace or the home directory. Only each
+   * command's own `tmp` is granted to it. A failure refuses every confined command `SANDBOX_UNAVAILABLE`.
+   */
+  private[runner] lazy val scratchParent: scala.util.Try[Path] = {
+    scratchParentMade = true
+    Confiner.scratchParent(Confiner.ScratchBase, effective(rootPath), commandWritable)
+  }
+
+  /**
+   * The system paths a confined command may write (`/tmp` when commands share it, the home directory), by real path:
+   * the runner's own files (the scratch parent, git's empty directory) must lie outside every one. Empty unconfined.
+   */
+  private lazy val commandWritable: List[Path] = confiner.toList.flatMap { c =>
+    CommandConfinement.writablePaths(CommandConfinement.systemRules(home, javaHome, effective(rootPath), c.sharedTmp))
+  }
+  @volatile private var scratchParentMade = false
+
+  /** Removes the scratch parent, if it was made, with whatever is left in it; at the runner's shutdown. */
+  private[runner] def deleteScratch(): Unit =
+    if (scratchParentMade) scratchParent.foreach(CommandScratch(_).delete())
+
+  private val home: Path             = Paths.get(System.getProperty("user.home")).toAbsolutePath
+  private val javaHome: Option[Path] = Option(System.getProperty("java.home")).map(Paths.get(_))
 
   private val config        = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
   private val defaultLimits = config.limits
@@ -275,9 +304,9 @@ class WorkspaceAgentInterfaceImpl(
     finally { fileLock.unlock(); commitBy.remove() }
   }
 
-  /** The current [[FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
+  /** The current [[org.llm4s.shared.FileSnapshotResponse.hash FileSnapshotResponse.hash]] of `resolved`, its bytes read as a stream. */
   /**
-   * The [[FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
+   * The [[org.llm4s.shared.FileSnapshotResponse.hash FileSnapshotResponse.hash]] of what `resolved` names, a link followed (to nothing, for a dangling one): a file
    * over `maxFileSize` is `oversized`, never read, so no snapshot or comparison reads more than the limit.
    */
   /**
@@ -545,9 +574,9 @@ class WorkspaceAgentInterfaceImpl(
   }
 
   /**
-   * `getfacl` and `setfacl`, as absolute paths resolved as a command's program is ([[ProgramResolver]]): from trusted
-   * directories only, never the workspace or a relative `PATH` entry, so an agent cannot plant its own. `None` where
-   * either is missing, and then no POSIX ACL is copied.
+   * `getfacl` and `setfacl`, as absolute paths: on Linux from `/usr/bin` or `/bin` only, never `PATH`, since they run
+   * unconfined; elsewhere from trusted directories, as a command's program is. Never the workspace, so an agent cannot
+   * plant its own. `None` where either is missing, and then no POSIX ACL is copied.
    */
   private lazy val aclTools: Option[(Path, Path)] =
     WorkspaceAgentInterfaceImpl.aclTools(programSearch, Seq(rootPath, effective(rootPath)))
@@ -1563,7 +1592,7 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Check a command and build the process that runs it, using direct argument-vector
    * execution (no shell interpolation).  The first token of the command must appear in
-   * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
+   * `config.allowedCommands` (see [[org.llm4s.shared.WorkspaceSandboxConfig.allowedCommands WorkspaceSandboxConfig.allowedCommands]]);
    * absolute/relative paths to executables are rejected, and the runner looks
    * the program up itself in trusted directories only (see layer 10).
    *
@@ -1801,7 +1830,41 @@ class WorkspaceAgentInterfaceImpl(
       sandboxGit(builder, finalArgv.head, argv.tail, realRoot)
     }
 
-    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
+    // Layer 12 (#1983): on Linux the command starts through llm4s-confine, which applies Landlock (and, without
+    // networkAllowed, a no-network seccomp filter) to it and everything it starts. Never run unconfined there.
+    val scratch = confiner.map { c =>
+      if (!Files.isExecutable(c.helper))
+        throw new WorkspaceAgentException(
+          s"Commands are confined on Linux and the sandbox helper ${c.helper} is missing; the command was not run",
+          "SANDBOX_UNAVAILABLE",
+          None
+        )
+      val parent = scratchParent.fold(
+        e =>
+          throw new WorkspaceAgentException(
+            s"Commands are confined on Linux and the runner has no scratch directory for them " +
+              s"(${e.getMessage}); the command was not run",
+            "SANDBOX_UNAVAILABLE",
+            None
+          ),
+        identity
+      )
+      val s = CommandScratch(Files.createTempDirectory(parent, "llm4s-cmd-"))
+      Try {
+        Files.createDirectories(s.tmp)
+        val confinedRoot = effective(rootPath) // real: every link resolved, as the grants must be
+        val rules = CommandConfinement.systemRules(home, javaHome, confinedRoot, c.sharedTmp) ++
+          CommandConfinement.workspaceRules(config, confinedRoot) :+
+          CommandConfinement.Rule(CommandConfinement.Grant.ReadWrite, s.tmp.toRealPath())
+        builder.command(
+          (CommandConfinement.helperArgs(c.helper, s.status, rules, noNetwork = !config.networkAllowed) ++
+            builder.command().asScala).asJava
+        ): Unit
+        builder.environment().put("TMPDIR", s.tmp.toString): Unit
+      }.recover { case e => s.delete(); throw e }.get
+      s
+    }
+    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout), scratch)
   }
 
   /**
@@ -1814,17 +1877,25 @@ class WorkspaceAgentInterfaceImpl(
     def failed(why: String): Nothing =
       throw new WorkspaceAgentException(s"git was not run: $why.", "EXECUTION_FAILED", None)
 
-    val empty = GitSandbox.checkedEmptyDirectory(realRoot).fold(failed, identity)
+    val empty = GitSandbox.checkedEmptyDirectory(realRoot, commandWritable).fold(failed, identity)
     GitSandbox.environment(builder.environment(), empty)
+    // The lister runs unconfined, so on Linux it is the system's git, never the command's from PATH: a confined
+    // command may write a PATH directory (the home), and its own git there must never run with the runner's rights.
+    def lister: String =
+      ProgramResolver.HostRunnerToolDirectories.filterNot(_ => programSearch.windows).fold(git) { dirs =>
+        ProgramResolver
+          .resolveRunnerTool("git", Seq(rootPath, realRoot), dirs)
+          .fold(failed("there is no git in /usr/bin or /bin to list its configuration"))(_.toString)
+      }
     val drivers =
       if (!GitSandbox.hasSubcommand(args)) Nil
       else
         GitSandbox
-          .listConfiguration(builder, git, empty)
+          .listConfiguration(builder, lister, empty, realRoot)
           .fold(failed, identity)
           .pipe(GitSandbox.driverOverrides)
           .fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), identity)
-    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty) ++ drivers)).asJava)
+    builder.command((git +: GitSandbox.arguments(args, GitSandbox.fixedOverrides(empty, realRoot) ++ drivers)).asJava)
   }
 
   /**
@@ -1840,6 +1911,14 @@ class WorkspaceAgentInterfaceImpl(
   ): ExecuteCommandResponse = {
     val prepared =
       prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
+    // the command's scratch directory goes however it ends: refused at the gate, failed, timed out or completed
+    val outcome = Try(run(prepared, maxOutputBytes))
+    prepared.scratch.foreach(_.delete())
+    outcome.get
+  }
+
+  /** [[executeCommand]] once prepared: started through the registry, its output collected. */
+  private def run(prepared: PreparedCommand, maxOutputBytes: Option[Long]): ExecuteCommandResponse = {
     val builder   = prepared.builder
     val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(prepared.timeout)
     val limit     = WebSocketCommandExecutor.outputLimit(maxOutputBytes, defaultLimits.maxOutputSize)
@@ -1937,6 +2016,15 @@ class WorkspaceAgentInterfaceImpl(
           )
       }.get
 
+    // the helper could not confine it (status 125 and its status file): the program never ran
+    prepared.scratch.flatMap(_.unavailable(exitCode)).foreach { reason =>
+      throw new WorkspaceAgentException(
+        s"The command could not be confined, so it was not run: $reason",
+        "SANDBOX_UNAVAILABLE",
+        None
+      )
+    }
+
     val duration          = System.currentTimeMillis() - startTime
     val isStdoutTruncated = stdoutTruncated.get()
     val isStderrTruncated = stderrTruncated.get()
@@ -1969,8 +2057,14 @@ class WorkspaceAgentInterfaceImpl(
  * @param builder the process to start: the command's argument vector (never a shell over the command string), its
  *                working directory, its checked environment and the null device as standard input
  * @param timeout the caller's timeout, else the sandbox's `defaultCommandTimeout`
+ * @param scratch the command's own scratch directory when it is confined (Linux); the caller deletes it once the
+ *                command has ended or will never start
  */
-final private[runner] case class PreparedCommand(builder: java.lang.ProcessBuilder, timeout: FiniteDuration)
+final private[runner] case class PreparedCommand(
+  builder: java.lang.ProcessBuilder,
+  timeout: FiniteDuration,
+  scratch: Option[CommandScratch] = None
+)
 
 private[runner] object WorkspaceAgentInterfaceImpl {
 
@@ -2050,12 +2144,24 @@ private[runner] object WorkspaceAgentInterfaceImpl {
       }
     }: Unit
 
-  /** `getfacl` and `setfacl` from trusted directories, never under `untrustedRoots`; `None` on Windows or if missing. */
-  private[runner] def aclTools(search: ProgramSearch, untrustedRoots: Seq[Path]): Option[(Path, Path)] =
+  /**
+   * `getfacl` and `setfacl`: with `systemDirectories` (on Linux, [[ProgramResolver.HostRunnerToolDirectories]]) from
+   * those only, never `PATH`; without, as a command's program is resolved. Never under `untrustedRoots`; `None` on
+   * Windows or if missing.
+   */
+  private[runner] def aclTools(
+    search: ProgramSearch,
+    untrustedRoots: Seq[Path],
+    systemDirectories: Option[Seq[Path]] = ProgramResolver.HostRunnerToolDirectories
+  ): Option[(Path, Path)] = {
+    def find(tool: String): Option[Path] = systemDirectories.fold(
+      ProgramResolver.resolve(tool, search, untrustedRoots).toOption
+    )(ProgramResolver.resolveRunnerTool(tool, untrustedRoots, _))
     if (search.windows) None
     else
       for {
-        get <- ProgramResolver.resolve("getfacl", search, untrustedRoots).toOption
-        set <- ProgramResolver.resolve("setfacl", search, untrustedRoots).toOption
+        get <- find("getfacl")
+        set <- find("setfacl")
       } yield (get, set)
+  }
 }

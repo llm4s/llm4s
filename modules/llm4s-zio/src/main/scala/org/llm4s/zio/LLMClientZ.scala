@@ -11,7 +11,7 @@ import zio.{ IO, Queue, Unsafe, ZIO, ZLayer }
 import zio.stream.{ Take, ZStream }
 
 /**
- * ZIO wrapper for [[LLMClient]].
+ * ZIO wrapper for [[org.llm4s.llmconnect.LLMClient LLMClient]].
  *
  * Blocking LLM calls are shifted to ZIO's blocking thread pool via
  * `ZIO.attemptBlockingInterrupt`, keeping the fiber executor free. Interrupting the fiber (or a
@@ -27,7 +27,7 @@ trait LLMClientZ {
   ): ZIO[Any, LLMError, Completion]
 
   /**
-   * Streams chunks incrementally as a [[ZStream]].
+   * Streams chunks incrementally as a `ZStream`.
    *
    * The underlying blocking call runs on an interruptible blocking thread and pushes each chunk
    * into a bounded queue (backpressure: the provider thread blocks while the consumer lags).
@@ -50,7 +50,7 @@ trait LLMClientZ {
 
 object LLMClientZ {
 
-  /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
+  /** Wraps an already-constructed [[org.llm4s.llmconnect.LLMClient LLMClient]]. Does not manage its lifecycle. */
   def apply(underlying: LLMClient): LLMClientZ = new Impl(underlying)
 
   /**
@@ -61,7 +61,7 @@ object LLMClientZ {
   private val StreamBufferSize = 64
 
   /**
-   * ZLayer that acquires an [[LLMClient]] from the environment (via [[Llm4sConfig]])
+   * ZLayer that acquires an [[org.llm4s.llmconnect.LLMClient LLMClient]] from the environment (via [[org.llm4s.config.Llm4sConfig Llm4sConfig]])
    * on the blocking thread pool and finalises it on scope exit.
    */
   val layer: ZLayer[Any, LLMError, LLMClientZ] =

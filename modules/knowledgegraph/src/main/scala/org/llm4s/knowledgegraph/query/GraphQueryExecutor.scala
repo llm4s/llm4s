@@ -5,7 +5,7 @@ import org.llm4s.knowledgegraph.storage.{ GraphFilter, GraphStore, TraversalConf
 import org.llm4s.types.Result
 
 /**
- * Executes [[GraphQuery]] operations against a [[GraphStore]].
+ * Executes [[GraphQuery]] operations against a [[org.llm4s.knowledgegraph.storage.GraphStore GraphStore]].
  *
  * This component bridges the structured query ADT with the engine-agnostic
  * storage layer, translating each query variant into the appropriate

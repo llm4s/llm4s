@@ -44,20 +44,20 @@ import scala.util.{ Try, Using }
  *
  * == Thinking ==
  *
- * A reply's `message.thinking` becomes the returned message's [[AssistantMessage.thinking]] (and so
- * [[Completion.thinking]]); streamed, each line's `thinking` is a [[StreamedChunk.thinkingDelta]] and
+ * A reply's `message.thinking` becomes the returned message's [[org.llm4s.llmconnect.model.AssistantMessage.thinking AssistantMessage.thinking]] (and so
+ * [[org.llm4s.llmconnect.model.Completion.thinking Completion.thinking]]); streamed, each line's `thinking` is a [[org.llm4s.llmconnect.model.StreamedChunk.thinkingDelta StreamedChunk.thinkingDelta]] and
  * the accumulated text is the message's thinking. An assistant message's thinking text is sent back
  * as its `thinking`, as Ollama's tool-calling guide asks: a thinking model's follow-up request after
  * a tool call carries its earlier reasoning with the content and tool calls (#1381).
  *
  * == Structured output ==
  *
- * [[CompletionOptions.responseFormat]] is honoured through the top-level `format`
+ * [[org.llm4s.llmconnect.model.CompletionOptions.responseFormat CompletionOptions.responseFormat]] is honoured through the top-level `format`
  * field of `/api/chat`, on both the streaming and non-streaming paths:
  *
  *  - `None` sends no `format` key.
- *  - [[ResponseFormat.Json]] sends `"format": "json"` (JSON mode).
- *  - [[ResponseFormat.JsonSchema]] sends `"format": <schema object>` (structured outputs,
+ *  - [[org.llm4s.llmconnect.model.ResponseFormat.Json ResponseFormat.Json]] sends `"format": "json"` (JSON mode).
+ *  - [[org.llm4s.llmconnect.model.ResponseFormat.JsonSchema ResponseFormat.JsonSchema]] sends `"format": <schema object>` (structured outputs,
  *    which requires Ollama 0.5 or later; older servers reject or ignore the object).
  *    The `name` and `strict` parameters have no Ollama equivalent and are ignored.
  *
@@ -71,7 +71,7 @@ import scala.util.{ Try, Using }
  *
  * Non-streaming requests time out after 120 seconds; streaming requests
  * after 600 seconds. A section's `timeouts { request = ..., stream = ... }` block overrides
- * either ([[OllamaConfig.timeouts]]).
+ * either ([[org.llm4s.llmconnect.config.OllamaConfig.timeouts OllamaConfig.timeouts]]).
  *
  * @param config  Ollama configuration containing the model name and base URL.
  * @param metrics Receives per-call latency and token-usage events.
@@ -545,7 +545,7 @@ object OllamaClient {
       case Some(_) => Left(malformed("`tool_calls` is not an array"))
     }
 
-  /** Value of the `/api/chat` `format` field for a [[ResponseFormat]]; `name` and `strict` are not sent. */
+  /** Value of the `/api/chat` `format` field for a [[org.llm4s.llmconnect.model.ResponseFormat ResponseFormat]]; `name` and `strict` are not sent. */
   private[provider] def encodeFormat(format: ResponseFormat): ujson.Value = format match {
     case ResponseFormat.Json                     => ujson.Str("json")
     case ResponseFormat.JsonSchema(schema, _, _) => schema

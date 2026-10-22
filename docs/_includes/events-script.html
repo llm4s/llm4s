@@ -1,0 +1,79 @@
+<script>
+// Keeps the events lists current between site builds, and fills in the next Dev Hour and the
+// countdown. Without JavaScript the page still shows the lists as split when the site was built.
+(function () {
+  function isoDay(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  // Dev Hour is every Sunday at 09:00 London time; this finds the next one (or the one in
+  // progress), allowing for British Summer Time without a time zone library.
+  function nextDevHour(now) {
+    var hourFormat = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hourCycle: 'h23' });
+    for (var i = 0; i < 9; i++) {
+      var guess = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i, 9));
+      if (guess.getUTCDay() !== 0) continue;
+      var start = new Date(guess.getTime() - (Number(hourFormat.format(guess)) - 9) * 3600000);
+      if (start.getTime() + 3600000 > now.getTime()) return start;
+    }
+    return null;
+  }
+
+  var now = new Date();
+  var today = isoDay(now);
+
+  // Move events that have ended since the build from "upcoming" to the top of "past".
+  var upcoming = document.getElementById('events-upcoming');
+  var past = document.getElementById('events-past');
+  if (upcoming) {
+    Array.prototype.slice.call(upcoming.children).forEach(function (card) {
+      if (card.getAttribute('data-end') < today) {
+        if (past) past.insertBefore(card, past.firstChild); else card.remove();
+      }
+    });
+    var limit = Number(upcoming.getAttribute('data-limit'));
+    if (limit) {
+      Array.prototype.slice.call(upcoming.children, limit).forEach(function (card) { card.hidden = true; });
+    }
+    var empty = document.getElementById('events-upcoming-empty');
+    if (empty) empty.hidden = upcoming.children.length > 0;
+  }
+
+  var devHour = nextDevHour(now);
+  var localTime = { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  if (devHour) {
+    document.querySelectorAll('[data-dev-hour-next]').forEach(function (el) {
+      el.textContent = devHour <= now
+        ? 'happening now'
+        : devHour.toLocaleString(undefined, localTime) + ' in your time zone';
+    });
+  }
+
+  // Count down to whichever starts first: the next talk or the next Dev Hour.
+  var countdown = document.getElementById('event-countdown');
+  if (!countdown) return;
+  var target = devHour, name = 'LLM4S Dev Hour';
+  if (upcoming) {
+    Array.prototype.forEach.call(upcoming.children, function (card) {
+      var start = new Date(card.getAttribute('data-start'));
+      if (start > now && (!target || start < target)) {
+        target = start;
+        name = card.getAttribute('data-name');
+      }
+    });
+  }
+  if (!target) return;
+  countdown.querySelector('[data-countdown-name]').textContent = name;
+
+  function tick() {
+    var left = Math.max(0, target.getTime() - Date.now());
+    var minutes = Math.floor(left / 60000);
+    countdown.querySelector('[data-unit="days"]').textContent = Math.floor(minutes / 1440);
+    countdown.querySelector('[data-unit="hours"]').textContent = Math.floor(minutes / 60) % 24;
+    countdown.querySelector('[data-unit="minutes"]').textContent = minutes % 60;
+  }
+  tick();
+  setInterval(tick, 30000);
+  countdown.hidden = false;
+})();
+</script>

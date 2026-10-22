@@ -7,7 +7,8 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import java.time.{ Clock, Instant, ZoneOffset }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
 
@@ -164,8 +165,16 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long)    = underlying.compactEvents(threadId, beforeSeq)
-      def deleteThread(threadId: ThreadId, token: FencingToken) = underlying.deleteThread(threadId, token)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+        underlying.deleteThread(threadId, token, fence)
+      def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+      def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+      def incompleteThreads(
+        tenantId: Option[org.llm4s.agent.graph.TenantId],
+        after: Option[org.llm4s.agent.graph.ThreadCursor],
+        limit: Int
+      ) = underlying.incompleteThreads(tenantId, after, limit)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
@@ -181,6 +190,59 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.failed._2 shouldBe a[GraphError.Cancelled]
     val stops = events(underlying).filter(e => e == RunEvent.RunCancelled(None) || e == RunEvent.RunTimedOut(None))
     stops shouldBe Vector(RunEvent.RunCancelled(None))
+  }
+
+  /** A one-node graph whose node records the `RunContext.deadline` it saw, then fails while `failing` is set. */
+  private def deadlineGraph(
+    seen: AtomicReference[Option[Instant]],
+    failing: AtomicBoolean
+  ): CompiledGraph[Unit, Unit] = {
+    val b = GraphBuilder("deadline", "v1")
+    val node = b.node[Unit]("n") { (_, _, context) =>
+      seen.set(context.deadline)
+      if failing.get then NodeResult.Fail(org.llm4s.error.ValidationError("n", "failing")) else continue(Command.empty)
+    }
+    b.compile(node)(_ => Right(())).value
+  }
+
+  "RunContext.deadline" should "be the runtime clock's instant at admission plus the run's timeout" in {
+    val now     = Instant.parse("2026-10-19T12:00:00Z")
+    val runtime = GraphRuntime.inMemory(Clock.fixed(now, ZoneOffset.UTC))
+    val seen    = new AtomicReference[Option[Instant]](null)
+    val g       = deadlineGraph(seen, new AtomicBoolean(false))
+    await(runtime.start(thread, g, (), budgets(RunBudgets(timeout = Some(90.seconds)))).value).completed
+    seen.get shouldBe Some(now.plusSeconds(90))
+  }
+
+  it should "be None on a run without a timeout, and outside a runtime" in {
+    val seen = new AtomicReference[Option[Instant]](null)
+    val g    = deadlineGraph(seen, new AtomicBoolean(false))
+    await(GraphRuntime.inMemory().start(thread, g, ()).value).completed
+    seen.get shouldBe None
+
+    seen.set(null)
+    drive(g, g.start(()), budgets(RunBudgets(timeout = Some(1.minute)))).completed
+    seen.get shouldBe None
+  }
+
+  it should "be fixed again by each run's own admission, so a recover brings its own deadline" in {
+    val now = new AtomicReference(Instant.parse("2026-10-19T12:00:00Z"))
+    val clock = new Clock {
+      def getZone: java.time.ZoneId                        = ZoneOffset.UTC
+      override def withZone(zone: java.time.ZoneId): Clock = this
+      def instant: Instant                                 = now.get
+    }
+    val runtime = GraphRuntime.inMemory(clock)
+    val seen    = new AtomicReference[Option[Instant]](null)
+    val failing = new AtomicBoolean(true)
+    val g       = deadlineGraph(seen, failing)
+    await(runtime.start(thread, g, (), budgets(RunBudgets(timeout = Some(1.minute)))).value).failed
+    seen.get shouldBe Some(Instant.parse("2026-10-19T12:01:00Z"))
+
+    now.set(Instant.parse("2026-10-19T13:00:00Z"))
+    failing.set(false)
+    await(runtime.recover(thread, g, budgets(RunBudgets(timeout = Some(5.minutes)))).value).completed
+    seen.get shouldBe Some(Instant.parse("2026-10-19T13:05:00Z"))
   }
 
   "maxConcurrency" should "bound the tasks of a superstep that run at once" in {

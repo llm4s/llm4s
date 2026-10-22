@@ -35,6 +35,7 @@ object RunnerMain extends cask.MainRoutes {
   private val isWindows: Boolean = System.getProperty("os.name").contains("Windows")
 
   // Resolve sandbox config:
+  // - WORKSPACE_SANDBOX_CONFIG, a whole config as JSON (validated), replaces the profile; setting both fails fast
   // - If WORKSPACE_SANDBOX_PROFILE is not set or empty -> default to permissive (backwards compatible)
   // - If set to a known profile name -> use that profile (validated)
   // - If set to an unknown name -> log error and fail fast (do NOT silently weaken sandbox)
@@ -58,13 +59,27 @@ object RunnerMain extends cask.MainRoutes {
   }
 
   private def profileConfig: Option[WorkspaceSandboxConfig] = {
-    val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim)
+    val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim).filter(_.nonEmpty)
+    val rawJson    = Option(System.getenv(WorkspaceSandboxConfig.ConfigEnvVar)).map(_.trim).filter(_.nonEmpty)
 
-    rawProfile match {
-      case None | Some("") =>
+    (rawJson, rawProfile) match {
+      case (Some(_), Some(_)) =>
+        val msg = s"Set ${WorkspaceSandboxConfig.ConfigEnvVar} or WORKSPACE_SANDBOX_PROFILE, not both"
+        logger.error(msg)
+        throw new IllegalArgumentException(msg)
+
+      case (Some(json), None) =>
+        WorkspaceSandboxConfig.fromJson(json) match {
+          case Right(cfg) => Some(cfg)
+          case Left(msg) =>
+            logger.error(msg)
+            throw new IllegalArgumentException(msg)
+        }
+
+      case (None, None) =>
         None // let WorkspaceAgentInterfaceImpl apply default Permissive
 
-      case Some(value) =>
+      case (None, Some(value)) =>
         WorkspaceSandboxConfig.fromProfileName(value) match {
           case Right(cfg) =>
             WorkspaceSandboxConfig.validate(cfg) match {
@@ -83,6 +98,19 @@ object RunnerMain extends cask.MainRoutes {
 
   // Initialize workspace interface
   private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
+
+  // said once, at startup: whether execute commands are kernel-confined here (design §4.39)
+  Confiner.platform() match {
+    case Some(c) =>
+      logger.info(s"Commands are confined by ${c.helper} (Landlock, and seccomp when networkAllowed=false)")
+      if (!c.sharedTmp)
+        logger.warn(
+          "This JVM does not run with both -XX:+DisableAttachMechanism and -XX:+PerfDisableSharedMem, so commands " +
+            "are not granted /tmp: JVM tools that write there (sbt) fail confined. Start the runner with both flags " +
+            "and java.io.tmpdir outside /tmp (the image does) (design §4.39)"
+        )
+    case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
+  }
 
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
@@ -422,6 +450,7 @@ object RunnerMain extends cask.MainRoutes {
 
     // Kill all remaining processes, through the registry: each stays tracked until it exits
     workspaceInterface.processes.killAll()
+    workspaceInterface.deleteScratch()
     clientEarlyCancels.clear()
 
     Try {

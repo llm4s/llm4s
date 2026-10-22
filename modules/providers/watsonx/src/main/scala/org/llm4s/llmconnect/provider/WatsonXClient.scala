@@ -64,17 +64,34 @@ import scala.util.{ Try, Using }
  * `CompletionOptions.tools` are sent as `tools` (`type: function`, `function: {name, description,
  * parameters}`; the OpenAI `strict` flag is dropped) with `tool_choice_option: "auto"`. Tool calls in a reply
  * (`message.tool_calls`, whole, or streamed as `delta.tool_calls` pieces merged by `index`) become
- * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[ToolMessage]] as a `tool` message
+ * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] as a `tool` message
  * with its `tool_call_id`. `arguments` is a JSON string on the wire (SDK-evidenced: NODE types/messages.ts:19-24)
  * and a JSON object in a `ToolCall`. A call without an `id` gets a generated one, defensively: the SDK's type makes
  * `id` required (NODE types/messages.ts:29-30), and a stream sends it on a call's first piece only (LCIBM
  * chat_models.py:324). Whether the model calls tools, or supports them at all, depends on the model.
  *
+ * == Penalties and response format ==
+ *
+ * `presencePenalty` and `frequencyPenalty` are sent as `presence_penalty` and `frequency_penalty` when not 0.0,
+ * their default, so a request that leaves them alone is unchanged (SDK-evidenced: NODE vml_v1.ts:2808,2815 for
+ * `textChat` and 3032,3039 for `textChatStream`; PY `foundation_models/schema/_api.py:270,273`; LCIBM
+ * chat_models.py:939,969,1664,1670). Their range is the service's to check.
+ *
+ * `responseFormat` is sent as `response_format` ([[WatsonXClient.encodeResponseFormat]]): `ResponseFormat.Json` as
+ * `{"type":"json_object"}` (NODE types/vml_v1.ts:3283-3310; PY `schema/_api.py:225`; LCIBM chat_models.py:2147-2149),
+ * and `ResponseFormat.JsonSchema` as `{"type":"json_schema","json_schema":{"name","schema","strict"}}` (PY
+ * `schema/_api.py:226,231-234,255-257`; LCIBM chat_models.py:2160-2182). The Node SDK's type names only
+ * `json_object` but takes any string, so `json_schema` rests on the Python SDK and IBM's LangChain integration.
+ * IBM's SDK notes that JSON mode needs the prompt to ask for JSON as well (NODE types/vml_v1.ts:3284-3292); this
+ * client adds no instruction. Whether a model honours either format depends on the model.
+ *
  * == Unsupported options ==
  *
- * Ignored without error: `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
- * `budgetTokens`. The chat API documents some of these (penalties, `response_format`); this client does not
- * expose them yet.
+ * Ignored without error: `reasoning` and `budgetTokens`, as an OpenAI-compatible dialect without a reasoning
+ * mapping ignores them. The chat API has `reasoning_effort` (`low`, `medium`, `high`) and `include_reasoning`
+ * (NODE types/vml_v1.ts:858-864; PY `schema/_api.py:289-290`), with `reasoning_content` in a reply (NODE
+ * types/vml_v1.ts:3384); sending them, and reading the reasoning back, is not done yet. Budget tokens have no
+ * counterpart.
  *
  * == Finish reasons and stream endings ==
  *
@@ -93,7 +110,7 @@ import scala.util.{ Try, Using }
  * == Timeouts ==
  *
  * A chat call times out after two minutes and a streamed one after ten, unless the section's
- * `timeouts { request = ..., stream = ... }` block sets either ([[WatsonXConfig.timeouts]]). The IAM
+ * `timeouts { request = ..., stream = ... }` block sets either ([[org.llm4s.llmconnect.config.WatsonXConfig.timeouts WatsonXConfig.timeouts]]). The IAM
  * token exchange keeps its own 30 seconds.
  *
  * @param config          model, credentials, project or space and endpoints.
@@ -441,6 +458,10 @@ class WatsonXClient(
     // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
     options.maxTokens.foreach(max => body("max_tokens") = max)
     if (options.topP != 1.0) body("top_p") = options.topP
+    // SDK-evidenced (see the class Scaladoc): sent only when set away from their 0.0 default
+    if (options.presencePenalty != 0.0) body("presence_penalty") = options.presencePenalty
+    if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
+    options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
       // SDK-evidenced: IBM's LangChain integration sends "auto" by default (LCIBM chat_models.py:1764). The Node
@@ -595,6 +616,20 @@ object WatsonXClient {
   private[provider] def encodeTool(tool: ujson.Value): ujson.Value = {
     val function = ujson.Obj.from(tool("function").obj.filterNot(_._1 == "strict"))
     ujson.Obj("type" -> "function", "function" -> function)
+  }
+
+  /**
+   * A [[ResponseFormat]] as the chat API's `response_format`: `{"type":"json_object"}` for JSON mode, and
+   * `{"type":"json_schema","json_schema":{"name","schema","strict"}}` for a schema (SDK-evidenced: PY
+   * `foundation_models/schema/_api.py:224-257`; LCIBM chat_models.py:2147-2149, 2160-2182).
+   */
+  private[provider] def encodeResponseFormat(format: ResponseFormat): ujson.Value = format match {
+    case ResponseFormat.Json => ujson.Obj("type" -> "json_object")
+    case js: ResponseFormat.JsonSchema =>
+      ujson.Obj(
+        "type"        -> "json_schema",
+        "json_schema" -> ujson.Obj("name" -> js.name, "schema" -> js.schema, "strict" -> js.strict)
+      )
   }
 
   /**

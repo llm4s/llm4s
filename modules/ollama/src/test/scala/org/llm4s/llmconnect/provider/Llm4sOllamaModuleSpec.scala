@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{
@@ -68,6 +68,21 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
           """llm4s.providers.local { provider = "ollama", model = "llama3.1", baseUrl = "http://localhost:11434" }"""
         )
         .map(_.getClass.getSimpleName) shouldBe Right("OllamaConfig")
+    }
+
+    "default a section's baseUrl to the local server, and let OLLAMA_BASE_URL override it (#1991)" in {
+      given ProviderRegistry = ProviderRegistry.default
+      def baseUrl(section: String, env: Map[String, String] = Map.empty) =
+        ProviderTestConfig
+          .loadProvider("local", s"""llm4s.providers.local { provider = "ollama", model = "llama3.1"$section }""", env)
+          .map(_.asInstanceOf[OllamaConfig].baseUrl)
+
+      baseUrl("") shouldBe Right("http://localhost:11434")
+      baseUrl(""", baseUrl = "http://gpu-box:11434"""") shouldBe Right("http://gpu-box:11434")
+
+      val bound = ", baseUrl = ${?OLLAMA_BASE_URL}"
+      baseUrl(bound) shouldBe Right("http://localhost:11434")
+      baseUrl(bound, Map("OLLAMA_BASE_URL" -> "http://ollama:11434")) shouldBe Right("http://ollama:11434")
     }
 
     "refuse a config belonging to another provider" in {

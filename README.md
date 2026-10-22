@@ -96,6 +96,10 @@ The path to 1.0 is focused on stable API boundaries, provider capability parity 
 - **Performance**: JVM speed with functional elegance.
 - **Ecosystem Interoperability**: Seamless integration with enterprise JVM systems and cloud-native tooling.
 
+Choosing between JVM libraries? [Comparing LLM4S](https://llm4s.org/guide/comparison) sets LLM4S beside LangChain4j,
+Spring AI, Koog and Embabel, with a source and a date for every claim, and
+[Migrating from LangChain4j](https://llm4s.org/guide/migrating-from-langchain4j) maps its concepts to LLM4S.
+
 ## Features
 
 - **Multi-Provider Support**: Connect to multiple LLM providers, including OpenAI, Anthropic, Azure OpenAI, Google Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Requesty, Z.ai, and Ollama.
@@ -160,6 +164,30 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 </p>
 
 <br>
+
+### Use LLM4S in your project
+
+LLM4S is on Maven Central; the current release is **0.5.1**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
+`llm4s-core` holds no provider client, so add the module of the provider you call next to it:
+
+```scala
+// build.sbt
+ThisBuild / scalaVersion := "3.7.1"
+
+val llm4sVersion = "0.5.1"
+
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion  // or llm4s-anthropic, llm4s-gemini, llm4s-ollama, ...
+)
+```
+
+Providers are named sections in your `application.conf` (see [Setup your LLM Environment](#setup-your-llm-environment)).
+To start from a generated project instead, use the [starter kit](#usage-using-starter-kit-llm4sg8). The
+[installation guide](https://llm4s.org/getting-started/installation) has Maven, Gradle, the BOM (`llm4s-bom`) and
+every optional module; the [Scala CLI quick start](https://llm4s.org/getting-started/scala-cli) makes a first call
+from a single file, and [first steps](https://llm4s.org/getting-started/first-example) walks through the API.
+The sections below, from pre-commit hooks to the containerised demo, are for working on LLM4S itself.
 
 ### Setting Up Pre-commit Hooks
 
@@ -286,7 +314,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ### Run containerized demo
 
 ```bash
-sbt docker:publishLocal
+sbt workspaceRunner/Docker/publishLocal
 sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
 ```
 
@@ -443,7 +471,7 @@ sbt new llm4s/llm4s.g8 \
 --name=<your.project.name> \
 --package=<your.organization> \
 --version=<your.project.version> \
---llm4s_version=0.3.2 \
+--llm4s_version=0.5.1 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=<your.project.name> \
@@ -451,6 +479,12 @@ sbt new llm4s/llm4s.g8 \
 ```
 
 to create new project.
+
+Since 0.5.0 `llm4s-core` ships no provider, so the generated `build.sbt` needs `llm4s-core` and at least one provider
+module at the same version. The template is being moved to 0.5.x
+([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)), which adds `llm4s-ollama` and `llm4s-openai` itself; a
+template from before that lists `llm4s-core` only (and defaults to llm4s 0.4.0 if you leave out `--llm4s_version`),
+so add the provider you use, for example `llm4s-openai` at 0.5.1.
 
 For more information about the template, including compatibility matrix and documentation, visit the [template repository](https://github.com/llm4s/llm4s.g8).
 Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using starter kit.
@@ -646,6 +680,8 @@ See the talks being given by maintainers and open source developers globally and
 
 Stay updated with talks, workshops, and presentations about **LLM4S** happening globally. These sessions dive into the architecture, features, and future plans of the project.
 
+The [Events page on llm4s.org](https://llm4s.org/events/) shows what's coming up next, including the next Dev Hour.
+
 <p align="center">
   <img src="docs/image_assets/talks/LondonScalaTalks_2025_Rory_szork_demo.jpeg" alt="London Scala Talks 2025 – Rory Szork Demo Slide" width="400" style="margin-right: 10px;"/>
   <img src="docs/image_assets/talks/BayAreaScalaConference_IntroSlide.JPG" alt="Bay Area Scala Conference 2025 – Introductory Slide" width="400" style="margin-right: 10px;"/>
@@ -663,8 +699,12 @@ Stay updated with talks, workshops, and presentations about **LLM4S** happening 
   <img src="docs/image_assets/talks/GEN_AI_London_2025/Banner_GenAI_London_Building_Reliable_AI_Systems__From_Hype_to_Practical_Toolkits_Kannupriya_Kalra.png" alt="GenAI_London_Building_Reliable_AI_Systems, London" width="400"/>
   <img src="docs/image_assets/gsoc_assets/gsoc_2025/talks/gsoc_mentor_summit_2025/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala/Banner_LLM4S x GSoC 2025 Engineering GenAI Agents in Functional Scala_Kannupriya_Kalra.png" alt="Google Summer of Code 2025 – LLM4S Mentor Summit Banner" width="400"/>
   <img src="docs/image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Banner_LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem_Kannupriya_Kalra.png" alt="Oaisys AI Practitioners Conference 2025 – LLM4S Building Reliable AI Systems (Kannupriya Kalra)" width="400" style="margin-right: 10px;"/>
-  <img src="docs\image_assets\talks\AI_Compute_&_Hardware_Conference\Banner_Functional_Intelligence_Building_Scalable_AI_Systems_for_the_Hardware_Era_2025_Kannupriya_Kalra.jpg" alt="AI Compute & Hardware 2025 Conference - Functional Intelligence: Building Scalable AI Systems for the Hardware Era" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/AI_Compute_%26_Hardware_Conference/Banner_Functional_Intelligence_Building_Scalable_AI_Systems_for_the_Hardware_Era_2025_Kannupriya_Kalra.jpg" alt="AI Compute & Hardware 2025 Conference - Functional Intelligence: Building Scalable AI Systems for the Hardware Era" width="400" style="margin-right: 10px;"/>
   <img src="docs/image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_with_Kannupriya_Kalra_Microsoft_Global_Hackathon_2026.png" alt="Microsoft Global Hackathon 2026 – Build with LLMs: Open Source AI for the JVM" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_Speaker_Announcement_2026_Kannupriya_Kalra.png" alt="VIPS-TC 2026 speaker announcement featuring Kannupriya Kalra" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/VIPS_TC_2026/Poster_VIPS_TC_E_Cell_Orientation_2026_Kannupriya_Kalra.jpg" alt="VIPS-TC E-Cell Orientation 2026 event poster featuring Kannupriya Kalra" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png" alt="E-Cell Orientation & Pitch Roulette, VIPS-TC – LLM4S Foundation: A Retrospective" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png" alt="DataverseHub 2026 – LLM4S Foundation: A Retrospective" width="400" style="margin-right: 10px;"/>
 
 </p>
 <p align="center">
@@ -693,8 +733,11 @@ Stay updated with talks, workshops, and presentations about **LLM4S** happening 
 | **29-30-Nov-2025** | Oaisys Conf 2025: AI Practitioners Conference | LLM4S: Building Reliable AI Systems in the JVM Ecosystem | MCCIA, Pune, India 🇮🇳 | Kannupriya Kalra, Shubham Vishwakarma | [Event Website](https://theoaisys.com/#registration), [LinkedIn Post](https://www.linkedin.com/posts/kannupriyakalra_ai-genai-llm-ugcPost-7400455606865911808-JWd7?utm_source=share), [X/Twitter Post](https://x.com/KannupriyaKalra/status/1994683063054500035?s=20), [Mastodon Post](https://functional.cafe/@kannupriyakalra/115631876757606748), [Bluesky Post](https://bsky.app/profile/kannupriyakalra.bsky.social/post/3m6qx6fkwcs2y), [Reddit Post](https://www.reddit.com/r/scala/comments/1p9ovvk/upcoming_talk_llm4s_reliable_genai_for_the_jvm/) | Recording pending. [View Slides](docs/image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem.pdf), [Download Slides](docs/image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem.pptx) | – |
 | **10-Dec-2025** |AI Compute & Hardware Conference 2025 | Functional Intelligence: Building Scalable AI Systems for the Hardware Era | Samsung HQ, San Jose, California, USA 🇺🇸 | Kannupriya Kalra | [Event Website](https://luma.com/ql64e6yo?tk=RWbeu7), [Event details on Meetup](https://www.meetup.com/bay-area-computer-vision-and-deep-learning-meet-up/events/312286702/?eventOrigin=group_upcoming_events), [LinkedIn Post](https://www.linkedin.com/posts/kannupriyakalra_scala-genai-llm4s-activity-7403208643388903424-nV1c), [X/Twitter Post](https://x.com/KannupriyaKalra/status/1997431694006333475?s=20), [Mastodon Post](https://functional.cafe/@kannupriyakalra/115674987787442544), [Bluesky Post](https://bsky.app/profile/kannupriyakalra.bsky.social/post/3m7dzzdii222w), [Reddit Post](https://www.reddit.com/r/scala/comments/1pg5fn0/talk_at_samsung_semiconductor_san_jose_functional/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button) | Recording pending. Slides pending | – |
 | **16-Sep-2026** | Microsoft Global Hackathon 2026 | Build with LLMs: Open Source AI for the JVM | Microsoft Silicon Valley Campus, 1045 La Avenida St, Mountain View, CA 94043, USA 🇺🇸 | Kannupriya Kalra | [Event Website](https://techcommunity.microsoft.com/blog/mvp-blog/microsoft-global-hackathon-2026-where-mvp-and-rd-community-expertise-meets-innov/4542420), [LinkedIn Post](https://www.linkedin.com/feed/update/urn:li:activity:7505713170179784705/), [X/Twitter Post](https://x.com/llm4sfoundation/status/2099956953363653058?s=20), [Bluesky Post](https://bsky.app/profile/llm4s-foundation.bsky.social/post/3mvlhgkfs3s25), [Mastodon Post](https://mastodon.social/@llm4s_foundation/117276944163595609) | Recording pending. [View Slides](docs/image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_Kannupriya_Kalra.pdf), [Download Slides](docs/image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_Kannupriya_Kalra.pptx) | – |
+| **23-Oct-2026** | E-Cell Orientation & Pitch Roulette \| Vivekananda Institute of Professional Studies-Technical Campus (VIPS-TC) | LLM4S Foundation: A Retrospective | Vivekananda Institute of Professional Studies-Technical Campus (VIPS-TC), Pitampura, Delhi, India 🇮🇳 · 10:00 am–3:00 pm | Kannupriya Kalra | [Contact E-Cell VIPS-TC](mailto:ecell@vips.edu)<br>[Event](https://e-cellvips.netlify.app/events/ecell-orientation-2026)<br>[Instagram post 1](https://www.instagram.com/p/DewrJQZToeq/)<br>[Instagram post 2](https://www.instagram.com/p/DexAULBE9OR/)<br>[LinkedIn post 1](https://lnkd.in/p/ggdeiydS)<br>[LinkedIn post 2](https://lnkd.in/p/g7SJV_Gy)<br>[LinkedIn post 3](https://lnkd.in/p/gGPUwZM9)<br>[LinkedIn post 4](https://lnkd.in/p/gC8qGGaS)<br>[Bluesky](https://bsky.app/profile/llm4s-foundation.bsky.social/post/3myfjtq5klc2e)<br>[Reddit](https://www.reddit.com/r/scala/s/8gN6AKtv7J)<br>[X/Twitter](https://x.com/llm4sfoundation/status/2112952346674430300?s=20)<br>[Mastodon](https://mastodon.social/@llm4s_foundation/117479898546636829) | Upcoming — Recording pending | – |
 | **25-Oct-2026** | DataverseHub | LLM4S Foundation: A Retrospective | [Apple India, Waverock Building, Tower 2.2, TSIIC Limited, No. 115, Nanakramguda, Serilingampally Mandal, Gachibowli, Hyderabad 500008, Telangana, India 🇮🇳](https://maps.apple.com/place?_provider=9902&address=Apple+India+Private+Limited%2C+Waverock+Building%2C+Tower+2.2%2C+TSIIC+Limited%2C+No.+115%2C+Nanakramguda+Serilingampally+Mandal+Gachibowli%2C+Hyderabad%2C+500008%2C+Telangana%2C+India&coordinate=17.418562%2C78.346864&map=explore&name=Hyderabad+2&place-id=IA10DFA47139804AF) · 12:00–1:00 pm | Kannupriya Kalra | [Event Page](https://dataversehub.in/events/llm4s-foundation-a-retrospective), [Event Image](https://dataversehub.in/api/drive-image?id=1TBOJ_M-x1rWtLx_kGLshY3b8rIggtGbx) | Upcoming — Recording pending | – |
-| **27-Nov-2026** | LLMday + Prompt Engineering Conference London Q4 2026 | LLM4S 1.0: From Idea to Production AI in Scala/JVM | Everyman Canary Wharf, London, UK 🇬🇧 | Kannupriya Kalra, Rory Graves | [Event Website](https://llmday.com/2026-london-q4/Kannupriya_Kalra__Rory_Graves_LLM4S_Foundation__The_Trade_Desk_LLM4S_10_From_Idea_to_Production_AI_i) | Upcoming — Recording pending | – |
+| **17-Nov-2026** | Open Source Singapore | LLM4S 1.0: From Idea to Production AI in Scala/JVM | Singapore 🇸🇬 | Kannupriya Kalra | [Open Source Singapore Events](https://luma.com/ossg?period=past) | Upcoming — Recording pending | – |
+| **25-Nov-2026** | London Scala Users Group | LLM4S 1.0: From Idea to Production AI in Scala/JVM | London, UK 🇬🇧 | Kannupriya Kalra, Rory Graves | [Meetup Group](https://www.meetup.com/london-scala/) | Upcoming — Recording pending | – |
+| **26-Nov-2026** | LLMday + Prompt Engineering Conference London Q4 2026 | LLM4S 1.0: From Idea to Production AI in Scala/JVM | Everyman Canary Wharf, London, UK 🇬🇧 | Kannupriya Kalra, Rory Graves | [Event Website](https://llmday.com/2026-london-q4/Kannupriya_Kalra__Rory_Graves_LLM4S_Foundation__The_Trade_Desk_LLM4S_10_From_Idea_to_Production_AI_i) | Upcoming — Recording pending | – |
 
 
 > 📝 *Want to invite us for a talk or workshop? Reach out via our respective emails or connect on Discord: [https://discord.gg/4uvTPn6qww](https://discord.gg/4uvTPn6qww)*

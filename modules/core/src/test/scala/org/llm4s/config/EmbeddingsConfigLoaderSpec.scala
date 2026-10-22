@@ -447,4 +447,52 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       result.left.value.message should include("Missing embedding config")
     }
   }
+
+  // --------------------------------------------------------------------------
+  // A model the caller names (#1781): `Llm4sConfig.embeddingsFor`
+  // --------------------------------------------------------------------------
+
+  "EmbeddingsConfigLoader.loadProviderFor" should {
+
+    val keyOnly = """llm4s.embeddings.fixtureembedding.apiKey = "vk-test-key""""
+
+    "load the named model's provider section and key, with no llm4s.embeddings.model set" in {
+      val (provider, cfg) =
+        Llm4sConfig.embeddingsFor(ConfigSource.string(keyOnly), "fixtureembedding/fixture-embed-large").value
+      provider shouldBe "fixtureembedding"
+      cfg.model shouldBe "fixture-embed-large"
+      cfg.apiKey shouldBe "vk-test-key"
+      cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
+    }
+
+    "use the named model over the one llm4s.embeddings.model selects, and take an alias in any case" in {
+      val hocon = s"""$keyOnly\nllm4s.embeddings.model = "fixtureembedding/fixture-embed-small""""
+      EmbeddingsConfigLoader
+        .loadProviderFor(ConfigSource.string(hocon), " Fixture-Embedding-AI/fixture-embed-large ")
+        .value shouldBe ("fixtureembedding" -> EmbeddingsConfigLoader
+        .loadProvider(ConfigSource.string(hocon))
+        .value
+        ._2
+        .copy(model = "fixture-embed-large"))
+    }
+
+    "refuse a model that is not provider/model" in {
+      Seq("fixture-embed-large", "fixtureembedding/", "/fixture-embed-large", "", null).foreach { spec =>
+        val error = EmbeddingsConfigLoader.loadProviderFor(ConfigSource.string(keyOnly), spec).left.value
+        withClue(String.valueOf(spec))(error.message should include("Expected 'provider/model'"))
+      }
+    }
+
+    "report an unregistered provider without naming a config key it did not come from" in {
+      val error =
+        EmbeddingsConfigLoader.loadProviderFor(ConfigSource.string(keyOnly), "nosuchprovider/model").left.value
+      error.message should include("'nosuchprovider' is not registered")
+      (error.message should not).include("(from ")
+    }
+
+    "refuse a provider with no key, naming its variable" in {
+      val error = EmbeddingsConfigLoader.loadProviderFor(ConfigSource.string(""), "fixtureembedding/x").left.value
+      error.message should include("FIXTURE_EMBEDDING_API_KEY")
+    }
+  }
 }

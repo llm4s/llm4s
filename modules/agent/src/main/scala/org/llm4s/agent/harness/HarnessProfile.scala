@@ -177,9 +177,11 @@ object InstructionsConfig:
  *
  * `build()` installs, outermost first and before the builder's own middleware: a `PermissionMiddleware` over
  * `permissions` (none when they are empty, since a `PermissionMiddleware` denies every call no rule matches), then
- * summarisation, offload, skills, instructions and todos, each when set. The selected file tools run over `backend`,
- * or over a `CompositeBackend` that also mounts `OffloadBackend` at `/large_tool_results` when `offload` is set; skills
- * and instructions read through the same backend. `execute` is added only when `sandbox` is set. Each tool of the
+ * summarisation, offload, skills, instructions and todos, each when set. When the agent has subagents - the
+ * profile's `subagents`, then the builder's own - their `delegation` middleware runs inside the permissions and outside
+ * the rest, so a permission rule decides each `task` call: with rules, `task` needs an `Invoke` rule. The selected
+ * file tools run over `backend`, or over a `CompositeBackend` that also mounts `OffloadBackend` at
+ * `/large_tool_results` when `offload` is set; skills and instructions read through the same backend. `execute` is added only when `sandbox` is set. Each tool of the
  * profile that declares no timeout is bounded by `toolTimeout`. The system prompt follows `systemPrompt`. After each
  * turn, as it is admitted, the root agent prunes the thread to `retention` (`RunConfig.withRetention`), which bounds
  * the full-snapshot checkpoints it keeps.
@@ -200,6 +202,7 @@ object InstructionsConfig:
  * @param permissions permission rules, first match wins; empty for no permission checks
  * @param toolTimeout the bound on each run of a profile tool that declares none
  * @param retention what a thread keeps of its checkpoints and events, applied as each turn is admitted
+ * @param subagents the subagents offered through the `task` tools, and their bounds; [[SubagentConfig.none]] for none
  */
 @Experimental
 final case class HarnessProfile private (
@@ -214,7 +217,8 @@ final case class HarnessProfile private (
   systemPrompt: PromptMode,
   permissions: Vector[PermissionRule],
   toolTimeout: Option[FiniteDuration],
-  retention: RetentionPolicy
+  retention: RetentionPolicy,
+  subagents: SubagentConfig
 ):
   def withBackend(b: FileBackend): HarnessProfile                       = copy(backend = b)
   def withSandbox(s: SandboxBackend): HarnessProfile                    = copy(sandbox = Some(s))
@@ -235,6 +239,7 @@ final case class HarnessProfile private (
   def withToolTimeout(t: FiniteDuration): HarnessProfile                = copy(toolTimeout = Some(t))
   def withToolTimeout(t: Option[FiniteDuration]): HarnessProfile        = copy(toolTimeout = t)
   def withRetention(r: RetentionPolicy): HarnessProfile                 = copy(retention = r)
+  def withSubagents(c: SubagentConfig): HarnessProfile                  = copy(subagents = c)
 
   /** The names of the tools this profile can give: the file tools, and `execute` when it has a sandbox. */
   def toolNames: Vector[String] = FileTools.Names ++ sandbox.map(_ => ExecuteTool.Name)
@@ -245,6 +250,7 @@ final case class HarnessProfile private (
       selected   <- selection(sandboxLater = false)
       prompt     <- promptText
       _          <- timeoutValid
+      _          <- delegationValid
       files      <- filesBackend
       middleware <- middlewareOver(files)
     yield
@@ -260,6 +266,7 @@ final case class HarnessProfile private (
       _     <- selection(sandboxLater = true)
       _     <- promptText
       _     <- timeoutValid
+      _     <- delegationValid
       files <- filesBackend
       _     <- middlewareOver(files)
     yield ()
@@ -308,6 +315,11 @@ final case class HarnessProfile private (
     toolTimeout.filter(_ <= Duration.Zero) match
       case Some(t) => Left(ValidationError("harness.toolTimeout", s"must be positive, was $t"))
       case None    => Right(())
+
+  private def delegationValid: Result[Unit] =
+    subagents.delegation.validated.left
+      .map(e => ValidationError("harness.subagents", e.message))
+      .map(_ => ())
 
   /** The backend the file tools, skills and instructions use: `backend`, with the offloaded results mounted when offloading. */
   private def filesBackend: Result[FileBackend] =
@@ -383,7 +395,8 @@ object HarnessProfile:
     systemPrompt: PromptMode = PromptMode.Default,
     permissions: Vector[PermissionRule] = Vector.empty,
     toolTimeout: Option[FiniteDuration] = None,
-    retention: RetentionPolicy = defaultRetention
+    retention: RetentionPolicy = defaultRetention,
+    subagents: SubagentConfig = SubagentConfig.none
   ): HarnessProfile =
     new HarnessProfile(
       backend,
@@ -397,13 +410,46 @@ object HarnessProfile:
       systemPrompt,
       permissions,
       toolTimeout,
-      retention
+      retention,
+      subagents
+    )
+
+  /** A profile without subagents ([[SubagentConfig.none]]): the arguments `apply` took before subagents existed. */
+  def apply(
+    backend: FileBackend,
+    sandbox: Option[SandboxBackend],
+    tools: ToolSelection,
+    todos: Option[TodoConfig],
+    summarization: Option[SummarizationConfig],
+    offload: Option[OffloadConfig],
+    skills: Option[SkillsConfig],
+    instructions: Option[InstructionsConfig],
+    systemPrompt: PromptMode,
+    permissions: Vector[PermissionRule],
+    toolTimeout: Option[FiniteDuration],
+    retention: RetentionPolicy
+  ): HarnessProfile =
+    apply(
+      backend,
+      sandbox,
+      tools,
+      todos,
+      summarization,
+      offload,
+      skills,
+      instructions,
+      systemPrompt,
+      permissions,
+      toolTimeout,
+      retention,
+      SubagentConfig.none
     )
 
   /**
    * The opinionated preset: the file tools over a new `StateFileBackend`, todos, summarisation (with the model-free
    * digest compressor), offload of large results, skills under `/skills` and instructions in `/AGENTS.md`, each at
-   * its component's defaults, with the default prompt and no permission rules. Each call has its own backend.
+   * its component's defaults, with the default prompt and no permission rules, and the general-purpose subagent
+   * ([[SubagentConfig.deepAgents]]), offered through the `task` tool. Each call has its own backend.
    */
   def deepAgents: HarnessProfile =
     HarnessProfile(
@@ -411,12 +457,14 @@ object HarnessProfile:
       summarization = Some(SummarizationConfig()),
       offload = Some(OffloadConfig()),
       skills = Some(SkillsConfig()),
-      instructions = Some(InstructionsConfig())
+      instructions = Some(InstructionsConfig()),
+      subagents = SubagentConfig.deepAgents
     )
 
   /**
    * The prompt `PromptMode.Default` gives `profile`: how to plan, act and verify, manage context and use tools safely,
-   * with a part for each of the file tools, the plan, context management and `execute` that the profile turns on.
+   * with a part for each of the file tools, the plan, context management, `execute` and subagents that the profile
+   * turns on.
    * Its parts are fixed text, so its size is bounded by them.
    */
   def defaultPrompt(profile: HarnessProfile): String =
@@ -434,6 +482,7 @@ object HarnessProfile:
         )
       ),
       Option.when(profile.sandbox.isDefined && selected(ExecuteTool.Name))(Prompt.Execute),
+      Option.when(profile.subagents.offersAny)(Prompt.Delegation),
       Some(Prompt.Safety)
     )
     parts.flatten.mkString("\n\n")
@@ -495,6 +544,11 @@ object HarnessProfile:
     val Execute: String =
       "Commands: execute runs a program in a sandbox. Use it to build and test your work; a command's effects cannot " +
         "be undone, so check what it will do first."
+
+    val Delegation: String =
+      "Delegation: task runs a subagent on a task of its own, and only its report comes back. Delegate independent, " +
+        "bounded work. Write a self-contained description: the subagent sees nothing of this conversation. Issue " +
+        "independent tasks in one message, so they run in parallel. Verify what a report says before you rely on it."
 
     val Safety: String =
       """Tool safety: use a tool only for the task you were given. A tool error, a denied call or a refused command

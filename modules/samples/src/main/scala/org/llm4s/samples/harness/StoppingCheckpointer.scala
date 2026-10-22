@@ -1,6 +1,7 @@
 package org.llm4s.samples.harness
 
 import org.llm4s.agent.AgentId
+import org.llm4s.agent.events.{ SubagentEvents, TaskEnded }
 import org.llm4s.agent.graph._
 import org.llm4s.agent.graph.toolloop.ToolLoop
 import org.llm4s.error.ProcessingError
@@ -8,6 +9,7 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 /**
  * A store that stops for good at the first commit `at` picks, before or after writing it, as the store of a process
@@ -49,6 +51,16 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
   def effect(threadId: ThreadId, key: EffectKey): Result[Option[EffectRecord]] = alive(underlying.effect(threadId, key))
   def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
     alive(underlying.history(threadId, before, limit))
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
+    alive(underlying.children(parent, after, limit))
+  def threads(query: org.llm4s.agent.graph.ThreadQuery) =
+    alive(underlying.threads(query))
+  def incompleteThreads(
+    tenantId: Option[org.llm4s.agent.graph.TenantId],
+    after: Option[org.llm4s.agent.graph.ThreadCursor],
+    limit: Int
+  ) =
+    alive(underlying.incompleteThreads(tenantId, after, limit))
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     alive(underlying.checkpoint(threadId, checkpointId))
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = alive(underlying.prune(threadId, policy))
@@ -56,8 +68,8 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
     alive(underlying.eventsAfter(threadId, afterSeq, limit))
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
     alive(underlying.compactEvents(threadId, beforeSeq))
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] =
-    alive(underlying.deleteThread(threadId, token))
+  def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
+    alive(underlying.deleteThread(threadId, token, fence))
 }
 
 object StoppingCheckpointer {
@@ -82,6 +94,19 @@ object StoppingCheckpointer {
   /** A commit with the result of one of agent `agent`'s tool calls. */
   def ranTool(commit: Commit, agent: AgentId): Boolean =
     commit.pendingWrites.exists(_.nodeId == ToolLoop.callToolNode(agent).value)
+
+  /**
+   * A commit with the report of a task subagent `agent` completed: the delegating call's result, committed with its
+   * durable `TaskEnded` (design §4.47).
+   */
+  def reports(commit: Commit, agent: AgentId): Boolean =
+    commit.events.exists(_.event match {
+      case RunEvent.Custom(name, _, payload) if name == SubagentEvents.TaskEnded.name =>
+        Try(upickle.default.read[TaskEnded](payload)).toOption.exists(e =>
+          e.child.agent == agent && e.status == "completed"
+        )
+      case _ => false
+    })
 
   /** A commit that records a completed external effect of `operation`, such as `memory.record`. */
   def completes(commit: Commit, operation: String): Boolean =

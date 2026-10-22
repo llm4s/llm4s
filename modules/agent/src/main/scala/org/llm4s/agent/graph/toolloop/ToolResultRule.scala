@@ -6,7 +6,7 @@ import org.llm4s.types.Result
 
 /**
  * The rule every conversation the loop sends to a model obeys (design §5.3, §9 "Dangling tool
- * calls"): each tool call of an assistant message has exactly one [[ToolMessage]] in the run of
+ * calls"): each tool call of an assistant message has exactly one [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] in the run of
  * tool messages straight after that message, every tool message in that run answers one of its
  * calls, and no tool message stands anywhere else.
  *

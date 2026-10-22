@@ -14,8 +14,8 @@ import scala.util.Try
 
 /**
  * What a backend operation knows: the run, the thread state it may read, and - for a tool call - the
- * call, whose key names each external effect it performs. Built from a [[ToolContext]] by a tool, or
- * from a [[RunContext]] and [[ThreadState]] by a hook.
+ * call, whose key names each external effect it performs. Built from a [[org.llm4s.agent.graph.tool.ToolContext ToolContext]] by a tool, or
+ * from a [[org.llm4s.agent.graph.RunContext RunContext]] and [[org.llm4s.agent.graph.ThreadState ThreadState]] by a hook.
  */
 @Experimental
 final class FileContext private (val run: RunContext, val state: ThreadState, val tool: Option[ToolContext]):
@@ -68,13 +68,13 @@ object FileContext:
     new FileContext(run, ThreadState.empty(Map.empty), None)
 
 /**
- * Where an agent's files live: thread state ([[StateFileBackend]]), a [[LongTermStore]]
- * ([[StoreFileBackend]]), several at once
+ * Where an agent's files live: thread state ([[StateFileBackend]]), a host directory
+ * ([[HostFileBackend]]), a [[LongTermStore]] ([[StoreFileBackend]]), several at once
  * ([[CompositeBackend]]), or one chosen per run ([[FileBackend.resolved]]).
  *
  * A backend owns the four obligations of every mutation, so the tools that call it need not know them:
  *
- *  - '''Order.''' `locks(path)` are the [[LockKey]]s a mutation of `path` holds; a tool declares them
+ *  - '''Order.''' `locks(path)` are the [[org.llm4s.agent.graph.tool.LockKey LockKey]]s a mutation of `path` holds; a tool declares them
  *    with `AgentToolSpec.withLocks`, so mutations of one path in one batch apply in call order. Reads
  *    take no lock.
  *  - '''Replay.''' A mutation outside thread state runs through C4's replay guard of its target's class,

@@ -55,7 +55,7 @@ and is run in CI:
 | [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
 | [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
-| [Embeddings](#embeddings) | 5 | Vector search, RAG |
+| [Embeddings](#embeddings) | 6 | Vector search, RAG |
 | [RAG in a Box](#rag-in-a-box) | - | Production RAG server (external project) |
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
 | [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
@@ -303,6 +303,24 @@ sbt "samples/runMain org.llm4s.samples.basic.ProviderFallbackExample"
 
 ---
 
+### ProviderDiscoveryExample
+
+**File:** [`ProviderDiscoveryExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/ProviderDiscoveryExample.scala)
+
+Inspect providers and embedding providers discovered from the classpath, and compare with explicit registration.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.ProviderDiscoveryExample"
+```
+
+**What it demonstrates:**
+- Dynamic provider discovery via `ProviderRegistry.discover()`
+- Inspecting `ProviderRegistryReport` (`report.describe`, `ids`, `embeddingIds`)
+- Contrasting classpath discovery with explicit module registration (`ProviderRegistry.ofModules`)
+- Diagnosing missing providers, collisions, and load failures without API keys or network access
+
+---
+
 
 
 ## Agent Examples
@@ -500,6 +518,33 @@ sbt "samples/runMain org.llm4s.samples.harness.CodingWorkspaceExample llm4s/work
 
 `CodingWorkspaceAcceptanceSpec` runs the same agent on a scripted model over an in-memory workspace;
 `CodingWorkspaceIntegrationSpec` (`sbt testWorkspace`) runs the scenario against the container.
+
+---
+
+### ParallelDeepResearchExample {#parallel-deep-research}
+
+**File:** [`ParallelDeepResearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/harness/ParallelDeepResearchExample.scala)
+
+The subagents exit example ([design §4.49](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md)):
+deep research ported to parallel specialists. A lead on `HarnessProfile.deepAgents` gives each question to a typed
+`researcher` subagent (granted the lead's `fetch_page`), all in one message, at most two at once, and has a `critic`
+subagent review the draft before it answers with a typed brief. Its first "process" stops once the first child's
+report is committed; the second `recover`s the lead from the same SQLite file without running the finished child
+again, and asks you about any fetch outside the allowed site.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.harness.ParallelDeepResearchExample"
+```
+
+**What it demonstrates:**
+- `TypedAgent[I, O]` specialists through `task_<id>` tools: typed input and typed reports, nothing else crosses
+- `DelegationConfig(maxConcurrentChildren = 2)` bounding a batch of three
+- A child's approval suspending the lead, answered through `Agent.resume`; a child's failure as a tool error
+- The merged stream (`nested = true`): `TaskStarted`, each child's text, `TaskEnded`
+- `recover` in a fresh runtime that reuses finished children, and `forget` deleting every child thread
+
+`ParallelDeepResearchAcceptanceSpec` runs the same agent on a scripted model: parallel, crash, failure, approval,
+cancel, streams and cleanup.
 
 ---
 
@@ -976,6 +1021,27 @@ sbt "samples/runMain org.llm4s.samples.embeddingsupport.EmbeddingExample"
 
 ---
 
+### HybridSearchExample {#hybrid-search}
+
+**File:** [`HybridSearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/HybridSearchExample.scala)
+
+Runs one query through `HybridSearcher` with each fusion strategy (`VectorOnly`, `KeywordOnly`, `RRF`,
+`WeightedScore`) and prints the rank, id and scores of each result. Fully offline: the embeddings are
+hand-written 3-dimensional vectors, so no API key or network is needed.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.rag.HybridSearchExample"
+```
+
+**What it demonstrates:**
+- `HybridSearcher.inMemory()` and indexing a document into both the vector store and the keyword index
+- A query where vector and keyword search disagree about the best document
+- How RRF and weighted-score fusion reconcile the two lists, and how the weights move the winner
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/HybridSearchExample.scala)
+
+---
+
 ### S3LoaderExample {#s3-loader}
 
 **File:** [`S3LoaderExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/S3LoaderExample.scala)
@@ -1107,7 +1173,7 @@ sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ### Agent event streams
 
 `agent.stream` with `withStreaming()`: text deltas live, model and tool events as they commit. See the
-[streaming guide](../guide/agents/streaming.md).
+[streaming guide](../guide/agents/streaming).
 
 | Example | Shows |
 |---------|-------|
@@ -1279,7 +1345,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
 Only the section being loaded is validated, so a section whose key you have not set does no
-harm until you select it. See [Configuration](../getting-started/configuration.md#running-the-samples) for more.
+harm until you select it. See [Configuration](../getting-started/configuration#running-the-samples) for more.
 
 The chat-tui sample is the exception: `ChatTuiConfig` reads `LLM_MODEL=<provider>/<model>` and
 the matching API-key variable itself, and falls back to `Llm4sConfig.defaultProvider()` when

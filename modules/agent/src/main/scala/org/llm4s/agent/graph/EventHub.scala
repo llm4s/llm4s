@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
+import org.llm4s.agent.events.SubagentEvents
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.{ Result, TryOps }
 
@@ -213,9 +215,11 @@ private[graph] trait Dispatched extends Subscription:
  * then (orphans, which may hang in the store), once the last of them returns - so the hub keeps no state
  * for idle threads. A mark kept for an orphan is still the top of a hand-over that has finished, and
  * the orphan is above it, so a subscription made meanwhile joins with it and never waits for the
- * orphan. A live event sent on a thread with no mark - only a node's own thread outliving its run
- * sends one - is held unmarked until the next commit is handed to the subscription, and placed just
- * before it.
+ * orphan. The runtime sends no live event on a thread with no mark: a run's claim is handed over before
+ * any of its nodes runs, and progress sent once the run has released the thread - by a node that keeps
+ * its context, or a thread of its own, past its run - is dropped ([[live]]'s `current`, #1737). One that
+ * reaches the hub anyway is held unmarked until the next commit is handed to the subscription, and
+ * placed just before it.
  *
  * '''Commits made elsewhere''' ([[WatchPolicy]]). Another runtime or process sharing the store
  * commits without this hub knowing, so the hub hands over only this runtime's commits. While `watch`
@@ -274,6 +278,16 @@ final private[graph] class EventHub(
    */
   private var handed = Map.empty[String, Long]
 
+  /**
+   * The delegated children a task of the run holding each thread announced and whose call's `TaskEnded` is not yet
+   * handed over - running, or settled with the call's result still to commit - by thread then child thread: the live
+   * `TaskStarted` that announced each, and the child it names (design 4.47, #2074). A subscription made with
+   * `nested = true` is given, at attach, that `TaskStarted` and one `Nested(child, LiveGap(0))` for each, since it
+   * missed the child's earlier live events, so it never gets a `TaskEnded` without its start. Guarded by `hubLock`;
+   * [[forgetEnded]] forgets a child at its `TaskEnded`, [[forgetChildren]] and [[release]] the thread's.
+   */
+  private var running = Map.empty[String, Map[String, (StreamEvent.Live, ChildRef)]]
+
   /** Starts a dispatcher that replays events with `seq > afterSeq`, then delivers new ones. */
   def subscribe(
     threadId: ThreadId,
@@ -281,14 +295,20 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean = false
   ): Result[Dispatched] =
-    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope)
+    val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener, abandoned, scope, nested = nested)
     // joined before the dispatcher starts, so no live event sent after this returns is missed, and
     // marked with what the hub has handed over so far, so every live event it holds is placed
     withLock(hubLock) {
       dispatcher.seedHanded(handed.get(threadId.value))
       join(threadId, dispatcher)
+      // a child running now has sent live events this subscription never gets: its start, then a gap (#2074)
+      if nested then
+        running.getOrElse(threadId.value, Map.empty).values.foreach { (started, child) =>
+          dispatcher.offerPair(started, StreamEvent.Nested(child, StreamEvent.LiveGap(0)), started.token)
+        }
     }
     Try(dispatcher.start()).toResult.left
       .map { error =>
@@ -318,7 +338,8 @@ final private[graph] class EventHub(
     capacity: Int,
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
-    scope: TenantScope
+    scope: TenantScope,
+    nested: Boolean = false
   ): Observation =
     val dispatcher =
       new Dispatcher(
@@ -328,7 +349,8 @@ final private[graph] class EventHub(
         listener,
         abandoned,
         scope,
-        preJoined = true
+        preJoined = true,
+        nested = nested
       )
     withLock(hubLock)(join(threadId, dispatcher))
     new Observation(dispatcher)
@@ -405,6 +427,8 @@ final private[graph] class EventHub(
             // every gap is read: the whole hand-over, to every subscriber, under this one hold
             handed = handed.updated(threadId.value, handed.get(threadId.value).fold(top)(math.max(_, top)))
             dispatchers.foreach(_.offerDurable(records, reads))
+            // a call's TaskEnded is now the log's: a late nested subscription replays it, so its child is over (#2074)
+            forgetEnded(threadId, records)
           unread
         }
         if missing.nonEmpty then
@@ -459,6 +483,17 @@ final private[graph] class EventHub(
   def release(threadId: ThreadId): Unit =
     withLock(hubLock) {
       handed = handed - threadId.value
+      running = running - threadId.value
+    }
+
+  /**
+   * Forgets the thread's running children ([[running]]). The runtime calls it whenever a run releases the thread, even
+   * while a commit the run gave up on keeps the hand-over mark ([[release]] waits for it): the run's children are over
+   * for any subscription made from then on, and a store call that hangs must not leave them announced.
+   */
+  def forgetChildren(threadId: ThreadId): Unit =
+    withLock(hubLock) {
+      running = running - threadId.value
     }
 
   /**
@@ -489,15 +524,57 @@ final private[graph] class EventHub(
 
   /**
    * Offers live progress to the thread's subscribers, if `current` - whether the sending run still holds
-   * its claim, as far as it knows - is true; never blocks on a listener. `current` is read holding
-   * `hubLock`, which every hand-over holds, so the event is either queued everywhere ahead of a later
-   * run's claim or not at all: a run of this runtime is admitted to a thread only once an earlier run's
-   * loss has been found, so a node of the lost run that ignores the interrupt and outlives it sends
-   * nothing after the next run's claim (#1918). `current` must not block, nor take a lock.
+   * its claim, as far as it knows: it has neither found it lost nor released it - is true; never blocks on
+   * a listener. `current` is read holding `hubLock`, which every hand-over holds, so the event is either
+   * queued everywhere ahead of a later run's claim or not at all: a run of this runtime is admitted to a
+   * thread only once an earlier run's loss has been found or its claim released, so a node of the lost
+   * run that ignores the interrupt and outlives it (#1918), or one that keeps its context past its run
+   * (#1737), sends nothing after the next run's claim. `current` must not block, nor take a lock.
    */
   def live(threadId: ThreadId, event: StreamEvent.Live, current: () => Boolean = () => true): Unit =
     withLock(hubLock) {
-      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event))
+      if current() then subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(event, event.token))
+    }
+
+  /**
+   * Offers a delegated child's event (design 4.47), sent by a task of the run holding `threadId` under the claim
+   * `token`, to the thread's subscribers made with `nested = true`, as [[live]] offers live progress: in their live
+   * slots, behind what is queued, a `LiveGap` on overflow, never stored.
+   */
+  def nested(threadId: ThreadId, event: StreamEvent.Nested, token: FencingToken, current: () => Boolean): Unit =
+    withLock(hubLock) {
+      if current() then
+        subscribers.getOrElse(threadId.value, Vector.empty).filter(_.nested).foreach(_.offerLive(event, token))
+    }
+
+  /**
+   * Offers `started`, the live `TaskStarted` of `child`, to the thread's subscribers as [[live]] does, and remembers the
+   * child as running until its call's `TaskEnded` is handed over ([[forgetEnded]]), so that a nested subscription made
+   * meanwhile is told of it ([[running]]).
+   */
+  def childStarted(threadId: ThreadId, child: ChildRef, started: StreamEvent.Live, current: () => Boolean): Unit =
+    withLock(hubLock) {
+      if current() then
+        subscribers.getOrElse(threadId.value, Vector.empty).foreach(_.offerLive(started, started.token))
+        val children = running.getOrElse(threadId.value, Map.empty).updated(child.threadId.value, started -> child)
+        running = running.updated(threadId.value, children)
+    }
+
+  /**
+   * Forgets each child whose call's `TaskEnded` is among `records`, handed over now; the caller holds `hubLock`. A
+   * subscription made from here on reads that `TaskEnded` in its replay. Only the entry of the run that committed it
+   * (its claim's token) goes: a stale run's `TaskEnded` never removes a successor run's announcement of the same child.
+   */
+  private def forgetEnded(threadId: ThreadId, records: Vector[EventRecord]): Unit =
+    records.foreach { record =>
+      SubagentEvents.TaskEnded.unapply(StreamEvent.Durable(record)).foreach { ended =>
+        val child = ended.child.threadId.value
+        running = running.updatedWith(threadId.value)(
+          _.map(children =>
+            if children.get(child).exists(_._1.token == record.token) then children - child else children
+          ).filter(_.nonEmpty)
+        )
+      }
     }
 
   /** Joins the live set; the caller holds `hubLock`. */
@@ -533,7 +610,10 @@ final private[graph] class EventHub(
    * none has been handed to the dispatcher since, until the first one is. An unplaced event was sent
    * after the dispatcher joined, so after every event its replay finds to be history.
    */
-  final private case class Held(after: Option[Long], event: StreamEvent.Live | StreamEvent.LiveGap)
+  final private case class Held(after: Option[Long], event: LiveItem | StreamEvent.LiveGap)
+
+  /** What takes a live slot: live progress, and a child's event forwarded to a nested subscriber. */
+  private type LiveItem = StreamEvent.Live | StreamEvent.Nested
 
   /**
    * One subscriber. It is in the live set from [[subscribe]] on, but until it has replayed it only
@@ -558,7 +638,9 @@ final private[graph] class EventHub(
     listener: StreamEvent => Unit,
     abandoned: EventRecord => Boolean,
     scope: TenantScope,
-    preJoined: Boolean = false
+    preJoined: Boolean = false,
+    /** Whether the subscriber takes delegated children's events ([[StreamEvent.Nested]]). */
+    val nested: Boolean = false
   ) extends Dispatched:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
@@ -608,7 +690,7 @@ final private[graph] class EventHub(
      * Whether `event` was sent under an older claim than this observer's run's: by a node of a lost run,
      * which ignored the interrupt and outlived it, whatever its `RunId` (#1918). Holding `lock`.
      */
-    private def superseded(event: StreamEvent.Live): Boolean = observing.exists(_.value > event.token.value)
+    private def superseded(token: FencingToken): Boolean = observing.exists(_.value > token.value)
 
     /** The store watch, once started; and whether the dispatcher has ended, which stops it. */
     @volatile private var watcher  = Option.empty[Thread]
@@ -845,10 +927,11 @@ final private[graph] class EventHub(
      */
     private def follows(seq: Long): Boolean = seq == lastQueuedSeq + 1 || (lastQueuedSeq == 0 && seq > 0)
 
-    def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
+    /** Offers a live item sent under the claim `token`. */
+    def offerLive(event: LiveItem, token: FencingToken): Unit = withLock(lock) {
       // an observer not yet anchored: no node of its run has run, so the event is another run's; and once
       // anchored, an event of an older claim than its run's is a lost run's, whatever its `RunId` (#1918)
-      if cancelled || !anchored || superseded(event) then ()
+      if cancelled || !anchored || superseded(token) then ()
       else if !joined then hold(event)
       else if !halted then
         // the gap marker needs one slot and the event one
@@ -860,8 +943,36 @@ final private[graph] class EventHub(
         notEmpty.signal()
     }
 
+    /**
+     * Offers `first` then `second`, sent under the claim `token`, as one: both or neither (then counted as two dropped).
+     * For the `TaskStarted` and `Nested(child, LiveGap(0))` a nested subscription is given at attach (#2074): the gap
+     * must never be split from its start, even at the minimum capacity of 2. The pair needs no slot kept back for a
+     * later gap marker - an event offered after it finds the slots full and is counted, as any overflow is - only one
+     * for a gap already pending.
+     */
+    def offerPair(first: LiveItem, second: LiveItem, token: FencingToken): Unit = withLock(lock) {
+      if cancelled || !anchored || superseded(token) then ()
+      else if !halted then
+        val needed = 2 + (if droppedLive > 0 then 1 else 0)
+        if !joined then
+          if capacity - held.size >= needed then
+            if droppedLive > 0 then
+              held = held :+ Held(handedSeq, StreamEvent.LiveGap(droppedLive))
+              droppedLive = 0
+            held = held :+ Held(handedSeq, first) :+ Held(handedSeq, second)
+          else droppedLive += 2
+        else
+          if capacity - liveQueued >= needed then
+            flushGap()
+            queue.add(first)
+            queue.add(second)
+            liveQueued += 2
+          else droppedLive += 2
+          notEmpty.signal()
+    }
+
     /** Holds `event` while replaying, under the same two-free-slots rule as the queue's live slots. */
-    private def hold(event: StreamEvent.Live): Unit =
+    private def hold(event: LiveItem): Unit =
       if capacity - held.size >= 2 then
         if droppedLive > 0 then
           held = held :+ Held(handedSeq, StreamEvent.LiveGap(droppedLive))

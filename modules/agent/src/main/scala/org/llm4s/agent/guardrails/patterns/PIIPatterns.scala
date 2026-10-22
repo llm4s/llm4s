@@ -177,6 +177,11 @@ object PIIPatterns {
   /**
    * Detect all PII matches in text using specified patterns.
    *
+   * The types are matched independently, so text that two types match (a nine-digit run is both SSN- and
+   * passport-shaped) is returned, and counted, once per type. A finding is one match of one type: the number of
+   * findings is not the number of distinct stretches of PII, and [[maskAll]] writes one placeholder for an
+   * overlapping stretch. Derive distinct stretches from the indices when that is what you need.
+   *
    * @param text Text to scan
    * @param types PII types to detect (default: SSN, CreditCard, Email, Phone)
    * @return Sequence of matches with type and location
@@ -231,6 +236,9 @@ object PIIPatterns {
 
   /**
    * Get a summary of PII found in text.
+   *
+   * Counts [[detect]]'s matches by type, so text that two types match counts once for each (see [[detect]]): the sum
+   * of the counts is how often the patterns fired, not how many placeholders [[maskAll]] would write.
    *
    * @param text Text to scan
    * @param types PII types to detect

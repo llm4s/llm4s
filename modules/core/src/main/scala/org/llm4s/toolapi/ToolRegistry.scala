@@ -5,6 +5,7 @@ import org.llm4s.annotation.Stable
 import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
 import scala.concurrent.duration._
 import org.llm4s.error.CancelledError
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.unused
 import scala.util.{ Failure, Success, Try }
@@ -213,7 +214,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             // (the caller's own timeoutError below still resolves the promise), but the
             // uncaught exception would otherwise propagate to this virtual thread's
             // default uncaught-exception handler for no useful purpose.
-            // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+            // scalafix:off DisableSyntax.NoKeywordCatch
             val resultOrEx: Either[Throwable, Either[ToolCallError, ujson.Value]] =
               try Right(runOneAttempt(request))
               catch {
@@ -470,15 +471,17 @@ object ToolRegistry {
    * How long to wait before the next attempt, or `None` when `result` is final: a success, an error that is
    * not retryable (cancellation included), or the last attempt the policy allows. `attempt` is 0 for the
    * initial try. Shared by the synchronous and the asynchronous retry loops so that they cannot disagree.
+   * `sample` draws the policy's jitter from `[0, 1)`; it is only called when a retry follows, and tests inject it.
    */
   private[toolapi] def retryDelay(
     result: Either[ToolCallError, ujson.Value],
     attempt: Int,
-    policy: ToolRetryPolicy
+    policy: ToolRetryPolicy,
+    sample: () => Double = () => ThreadLocalRandom.current().nextDouble()
   ): Option[FiniteDuration] =
     result match {
       case Left(err) if ToolCallError.isRetryable(err) && attempt + 1 < policy.maxAttempts =>
-        Some(policy.delayBeforeAttempt(attempt + 1))
+        Some(policy.jitteredDelayBeforeAttempt(attempt + 1, sample()))
       case _ => None
     }
 

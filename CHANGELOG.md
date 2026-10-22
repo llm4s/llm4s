@@ -14,18 +14,193 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
   `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
+- Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
+  `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
+- `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
+  and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
+- `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
+  `fence` on the claim above, checked atomically with the delete, and a store checks `Commit.fence` atomically with
+  the commit; [migration](docs/reference/migration.md#child-threads-2045).
+- `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
+- Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
+  `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
+- `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
+  `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
+- `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
+  patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
+- `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
+  matches and `RunBudgets` patterns break; [migration](docs/reference/migration.md#token-budgets-and-the-runs-deadline-2047).
+- `AgentStatus.Suspended` gains a fifth field, `delegated`: positional patterns need another binder; [migration](docs/reference/migration.md#child-suspension-through-the-parent-2050).
+- `StreamEvent.Nested`, two fields on `TraceEvent.AgentRunEnded`, and OpenTelemetry span names `invoke_agent <agent>` /
+  `execute_tool <tool>`: exhaustive matches, positional patterns and dashboards break; [migration](docs/reference/migration.md#nested-streams-and-tracing-2051).
+- `HarnessProfile.deepAgents` offers a `task` tool (a tool named `task` clashes; permission rules need an `Invoke` rule for it),
+  and `withDelegation` beside a harness is refused; [migration](docs/reference/migration.md#subagents-in-the-harness-profile-2052).
+- `LLMClientPekko.streamComplete` materializes `Future[Done]` instead of `NotUsed`: code that names the type, or keeps
+  the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
+
+### Agent subagents (Phase 4)
+
+- **Added** child threads: `RunOrigin` on checkpoints (format 8), `ThreadId.child`, `Checkpointer.children` /
+  `Agent.children`, cascade delete, child retention and a durable `Checkpoint.outcome` [#2045](https://github.com/llm4s/llm4s/issues/2045); [design §4.41](docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md).
+- **Added** a per-run token budget, `RunBudgets.maxTokens`, ending the turn `AgentStatus.TokenLimitReached`, and the run's
+  deadline as `RunContext.deadline` [#2047](https://github.com/llm4s/llm4s/issues/2047); [design §4.43](docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md).
+- **Added** child-run supervision: a child started at most once and reattached on replay, cancelled with its parent,
+  held to its deadline (`RunContext.deadline`), usage rolled up once; a tool's own model calls now count in the thread's usage [#2046](https://github.com/llm4s/llm4s/issues/2046); [design §4.42](docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md).
+- **Added** `TypedAgent[I, O]` subagents, offered with `AgentBuilder.withSubagents` through the `task` / `task_<id>` tools,
+  run in parallel on child threads within `DelegationConfig`'s bounds, or alone with `BoundAgent.run` (on a caller-chosen thread too, replay-stable for graph nodes) / `resume` / `recover` [#2048](https://github.com/llm4s/llm4s/issues/2048), [#2069](https://github.com/llm4s/llm4s/issues/2069), [#2077](https://github.com/llm4s/llm4s/issues/2077); [design §4.44](docs/design/typed-agent-runtime/4.44-stage-4-slice-d1-typed-agent-and-task.md).
+- **Added** explicit inheritance: `TypedAgent.withInheritance` grants parent tools, middleware, a whole-life `TaskBudget` capped by the
+  parent's remainder and delegation; ancestors' permissions only narrow; `Agent.delegation` shows the `DelegationPlan` [#2049](https://github.com/llm4s/llm4s/issues/2049); [design §4.45](docs/design/typed-agent-runtime/4.45-stage-4-slice-d2-inheritance.md).
+- **Added** child suspension through the parent: a child's approvals and questions suspend the parent, listed in
+  `AgentStatus.Suspended.delegated` under composite ids that the answer helpers and `Agent.resume` take [#2050](https://github.com/llm4s/llm4s/issues/2050); [design §4.46](docs/design/typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md).
+- **Added** nested streams (`nested = true`, `StreamEvent.Nested`, `EventHandlers.onChild`, `nestedEvents`), `Agent.subscribeChild`,
+  `SubagentEvents.TaskStarted` / `TaskEnded` (the child-task metric) and parent ids in tracing [#2051](https://github.com/llm4s/llm4s/issues/2051); [design §4.47](docs/design/typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md).
+- **Added** subagents in `HarnessProfile` (`withSubagents(SubagentConfig)`): `deepAgents` offers the general-purpose subagent
+  through `task`, plus specialists and `llm4s.agent.harness.subagents` config [#2052](https://github.com/llm4s/llm4s/issues/2052); [design §4.48](docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md).
+- **Added** the exit example, `ParallelDeepResearchExample`: typed specialists in parallel under bounds, a crash, a child's failure,
+  approval and cancel, nested streams, with an acceptance suite on a scripted model [#2053](https://github.com/llm4s/llm4s/issues/2053); [design §4.49](docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md).
+
+### Production adapters (Stage 5)
+
+- **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
+  claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
+  `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
 
 ### Agent harness (Phase 3)
 
 - **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
   and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
+- **Added** `HostFileBackend`, a `FileBackend` over a host directory with one writer per root: `open` locks the root
+  against any overlapping open, in any process [#1964](https://github.com/llm4s/llm4s/issues/1964); [design §4.40](docs/design/typed-agent-runtime/4.40-host-file-backend.md).
+- **Changed** on Linux workspace commands run under Landlock and seccomp: `readOnlyPaths`/`allowedPaths` bind them, and
+  **commands have no network unless `networkAllowed = true`** [#1983](https://github.com/llm4s/llm4s/issues/1983).
+- **Fixed** the workspace runner's `git` accepts a workspace owned by another user (a Linux host's bind mount), naming the
+  workspace root as `safe.directory` [#2014](https://github.com/llm4s/llm4s/issues/2014).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
   `StaticFileBackend` (read-only application files, e.g. skills) [#1916](https://github.com/llm4s/llm4s/issues/1916); [design §4.38](docs/design/typed-agent-runtime/4.38-stage-3-slice-p2-exit-examples.md).
+
+### Streaming integrations
+
+- **Fixed** a `llm4s-pekko` stream leaking its producer thread when provider code swallows the interrupt: once the
+  stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
+- **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
+  returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
+
+### Agent runtime
+
+- **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
+  `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
+  recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
+- **Added** the call's id and idempotency key for `ToolFunction` tools run by an agent: `SafeParameterExtractor.call`
+  (a `ToolCallInfo`, `None` outside an agent) and `ToolFunction.execute(args, call)`; `HTTPTool` sends it as
+  `Idempotency-Key` on writes, and MCP tools forward it in `tools/call` `_meta` (`llm4s.org/idempotencyKey`), which an
+  llm4s `MCPServer` reads back [#1740](https://github.com/llm4s/llm4s/issues/1740).
+- **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
+  thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
+- **Fixed** `RunContext.progress` from a node that keeps its context past its run reaching a later run's subscribers:
+  once the run has released the thread it is a no-op, as it already was once the claim was lost [#1737](https://github.com/llm4s/llm4s/issues/1737).
+
+### Providers
+
+- **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
+  `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
+- **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
+  on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
+- **Changed** an `ollama` section's `baseUrl` to default to `http://localhost:11434`, so a local section needs only
+  `provider` and `model`; `OLLAMA_BASE_URL` is the one documented variable (`baseUrl = ${?OLLAMA_BASE_URL}`) [#1991](https://github.com/llm4s/llm4s/issues/1991).
+- **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider
+  as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
+- **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
+  (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
+
+### Java & Kotlin APIs
+
+- **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
+  `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
+  "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- **Added** agent tools defined from Java: `@Tool`/`@Param` methods (`JTool.fromAnnotated`) and lambdas
+  (`JTool.builder(...).param(...).handler(...)`), given to `Llm4s.createAgentWithTools`; arguments are read into Java
+  values without a JSON library, and a handler's exception is a tool error the model sees [#1484](https://github.com/llm4s/llm4s/issues/1484).
+- **Added** token streaming to the Java facade: `JLlmClient.stream(..., CompletionStreamListener)` returns a
+  cancellable `CompletionStream` (`onPartial`, then `onComplete` or `onError` once), and `streamAsPublisher` a cold
+  `Flow.Publisher<String>` that holds the provider for a slow subscriber [#1485](https://github.com/llm4s/llm4s/issues/1485).
+- **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
+  overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
+- **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
+  files or text, `ask` for an answer with its sources [#1491](https://github.com/llm4s/llm4s/issues/1491); see [Java RAG](docs/guide/java-rag.md).
+- **Added** Spring Boot configuration metadata to `llm4s-spring-boot-starter`, so IDEs complete and document the
+  `llm4s.*` properties; a spec keeps it in step with the bound properties [#1467](https://github.com/llm4s/llm4s/issues/1467).
+- **Added** `Llm4s.createEmbeddingClient("provider/model")`, a Java embedding client for a model you name; `llm4s.embeddings.model`
+  need not be set [#1781](https://github.com/llm4s/llm4s/issues/1781); see the [Java guide](docs/guide/java.md#embeddings).
+- **Changed** a Java embedding client to accept a model its provider module does not list (Ollama's `bge-m3`): BREAKING,
+  `JEmbeddingClient.dimensions()` is an `OptionalInt`, empty for such a model [#1781](https://github.com/llm4s/llm4s/issues/1781).
+- **Added** `Llm4s.wrapClient(JLlmClient)` to `llm4s-kotlin-api`: a client built in code with the Java builders
+  (`ollama()`, `openAi()`, ...) becomes an `LLMClientKt` [#1850](https://github.com/llm4s/llm4s/issues/1850); see the [Java guide](docs/guide/java.md#configure-in-code).
+- **Added** Spring Boot 4 support to `llm4s-spring-boot-starter`, in the same artifact: on Boot 4, where `HealthIndicator`
+  moved to `org.springframework.boot.health.contributor`, the `llmHealthIndicator` bean is an `LlmBoot4HealthIndicator`
+  reporting what `LlmHealthIndicator` does on 3.x. CI runs the starter's specs on Spring Boot 4.0.8 and 4.1.1 as well as
+  3.3.6 and 3.5.16 [#1467](https://github.com/llm4s/llm4s/issues/1467); see the [Spring Boot guide](docs/guide/spring-boot.md#what-the-starter-gives-you).
+
+### Tools
+
+- **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
+  Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
+  derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
+  core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
+  `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
+  sample `TypedCalculatorExample`.
+- **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
+  of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
+  [#1514](https://github.com/llm4s/llm4s/issues/1514).
+- **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
+  default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
+  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
+
+### MCP
+
+- **Fixed** the Streamable HTTP client taking the first SSE event that parsed as a response as the reply: it now
+  returns only the response to its own request id, skipping server-to-client requests and other ids, and bounds a
+  reply at 10 MiB [#1846](https://github.com/llm4s/llm4s/issues/1846).
+
+### Documentation & samples
+
+- **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
+  `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
+  the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).
+- **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
+  `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
+- **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with
+  tests pinning it, in `SafeParameterExtractor`, `ToolCall` and the structured-output limits [#1597](https://github.com/llm4s/llm4s/issues/1597).
+- **Added** a lightweight RFC process for public API changes ([docs/rfcs](docs/rfcs/README.md)): when one is required, a
+  template, a 7-day final comment period, an index with the earlier frozen-API decisions, and RFC 0001 on when
+  `llm4s-agent` gets its MiMa baseline [#1480](https://github.com/llm4s/llm4s/issues/1480).
+- **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
+  [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
+  and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+
+### Memory
+
+- **Changed** `MemoryManagerConfig` to a private constructor with `with*` setters (`.copy` is private) [#1847](https://github.com/llm4s/llm4s/issues/1847).
+- **Fixed** `autoExtractEntities` swallowing a cancellation: `recordMessage` returns the `CancelledError` (also a failure ending
+  while the thread is interrupted, or a thrown `InterruptedException`) and the interrupt flag stays set [#1847](https://github.com/llm4s/llm4s/issues/1847).
+
+### Security
+
+- **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
+  (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
+  start of a line was read [#1844](https://github.com/llm4s/llm4s/issues/1844).
 
 ### Build & tooling
 
 - **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
+- **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
+  run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
+- **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,
+  Kotlin and the Gradle sample `21`, from 52/17), so JDK 21, already the minimum, is enforced at load time; `scripts/check-doc-support.sh`
+  checks the targets and docs agree [#1493](https://github.com/llm4s/llm4s/issues/1493); [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support).
 
 ## [0.5.1] - 2026-10-15
 

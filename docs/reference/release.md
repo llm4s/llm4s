@@ -224,6 +224,10 @@ it never overwrites. Write whatever the release deserves once it exists.
   trailing slash and the connection is the SSH form. All three were fixed after 0.4.1 (#1588).
 - Check Scaladex: `https://index.scala-lang.org/llm4s/llm4s` should list the new version once Scaladex has picked it up.
   See [Discoverability](#discoverability-scaladex-and-github) when it does not.
+- Compile the Scala CLI quick start against the published artifacts: `gh workflow run scala-cli-quickstart.yml`.
+  It checks that `modules/samples/scala-cli/hello.scala` pins the release now on Maven Central (the prepare commit
+  bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
+  `scripts/check-scala-cli-quickstart.sh --central --compile`.
 
 ### Discoverability: Scaladex and GitHub
 

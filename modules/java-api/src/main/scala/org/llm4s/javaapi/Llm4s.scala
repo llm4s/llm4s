@@ -2,18 +2,15 @@ package org.llm4s.javaapi
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
-import org.llm4s.llmconnect.config.{
-  EmbeddingModelConfig,
-  EmbeddingProviderConfig,
-  ModelDimensionRegistry,
-  ProviderConfig
-}
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.Result
 
-import java.util.Objects
+import scala.jdk.CollectionConverters.*
+
+import java.util.{ Objects, OptionalInt }
 
 /**
  * Entry-point factory for Java callers.
@@ -46,8 +43,9 @@ import java.util.Objects
 object Llm4s {
 
   /**
-   * Creates a [[JLlmClient]] from the default provider configured via
-   * environment variables (e.g. `LLM_MODEL`, `OPENAI_API_KEY`).
+   * Creates a [[JLlmClient]] from the default provider: the section of `application.conf` that
+   * `llm4s.providers.provider` names. A provider's API key comes from its section's `apiKey`, else from
+   * `llm4s.credentials` (bound to the vendor's usual environment variable, e.g. `OPENAI_API_KEY`).
    */
   def createDefaultClient(): LlmResult[JLlmClient] = {
     val result = for {
@@ -80,7 +78,7 @@ object Llm4s {
   def azureOpenAi(): AzureOpenAiClientBuilder = new AzureOpenAiClientBuilder(ClientSettings.EMPTY)
 
   /**
-   * Creates a [[JLlmClient]] from an explicit [[ProviderConfig]].  Useful
+   * Creates a [[JLlmClient]] from an explicit [[org.llm4s.llmconnect.config.ProviderConfig ProviderConfig]].  Useful
    * when the caller constructs the config programmatically rather than relying
    * on environment variables.
    */
@@ -97,7 +95,7 @@ object Llm4s {
     FacadeInternals.createClient(config, metrics)
 
   /**
-   * Wraps a Scala [[LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
+   * Wraps a Scala [[org.llm4s.llmconnect.LLMClient LLMClient]] you built yourself - a `ReliableClient` around a provider's client, your own
    * implementation, or a test double - in a [[JLlmClient]]. Closing the wrapper closes `client`.
    *
    * @throws NullPointerException when `client` is `null`
@@ -111,25 +109,32 @@ object Llm4s {
    * `EMBEDDING_MODEL` sets; the provider's key comes from its `llm4s.embeddings.<provider>` block or its vendor
    * variable, such as `OPENAI_API_KEY`.
    *
-   * Does not throw and sends no request: no model configured, an embedding provider that is not on the classpath, a
-   * missing key, or a model whose dimensions its provider module does not declare is a failed [[LlmResult]] of kind
-   * `CONFIGURATION`, whose message says what to set.
+   * Does not throw and sends no request: no model configured, an embedding provider that is not on the classpath or a
+   * missing key is a failed [[LlmResult]] of kind `CONFIGURATION`, whose message says what to set. A model its provider
+   * module does not list, such as an Ollama model you pulled yourself, is created: its
+   * [[JEmbeddingClient.dimensions dimensions()]] is empty, and its vectors are as long as the provider makes them.
    */
   def createDefaultEmbeddingClient(): LlmResult[JEmbeddingClient] =
-    FacadeInternals.result(Llm4sConfig.embeddings().flatMap(embeddingClientFor))
-
-  /** The client for the provider and config `llm4s.embeddings` selected, its dimensions as the provider declares them. */
-  private def embeddingClientFor(selected: (String, EmbeddingProviderConfig)): Result[JEmbeddingClient] = {
-    val (provider, config) = selected
-    for {
-      dimensions <- ModelDimensionRegistry.getDimension(provider, config.model)
-      registry   <- Llm4sConfig.modelRegistryService()
-      client     <- EmbeddingClient.from(provider, config)(using registry)
-    } yield wrapEmbeddingClient(client, EmbeddingModelConfig(config.model, dimensions))
-  }
+    FacadeInternals.result(FacadeInternals.embeddingClient(Llm4sConfig.embeddings()))
 
   /**
-   * Wraps a Scala [[EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
+   * Creates a [[JEmbeddingClient]] for `model`, `provider/model` (for example `openai/text-embedding-3-large` or
+   * `ollama/bge-m3`), rather than the model `llm4s.embeddings.model` names - which need not be set. Everything else
+   * comes from configuration as for [[createDefaultEmbeddingClient]]: the provider's key from its
+   * `llm4s.embeddings.<provider>` block or its vendor variable, such as `OPENAI_API_KEY`, and its base URL and timeouts
+   * from that block.
+   *
+   * Does not throw and sends no request: a `null` model is a failed result of kind `VALIDATION`; a model not in the form
+   * `provider/model`, an embedding provider that is not on the classpath, or a missing key is one of kind
+   * `CONFIGURATION`, whose message says what to set. A model its provider module does not list is created, as for
+   * [[createDefaultEmbeddingClient]].
+   */
+  def createEmbeddingClient(model: String): LlmResult[JEmbeddingClient] =
+    if (model == null) LlmResult.failure(ValidationError.required("model"))
+    else FacadeInternals.result(FacadeInternals.embeddingClient(Llm4sConfig.embeddingsFor(model)))
+
+  /**
+   * Wraps a Scala [[org.llm4s.llmconnect.EmbeddingClient EmbeddingClient]] you built yourself - over your own `EmbeddingProvider`, or a test double - in a
    * [[JEmbeddingClient]] that asks for `model` and reports its dimensions.
    *
    * @throws NullPointerException when either argument is `null`
@@ -138,7 +143,8 @@ object Llm4s {
     new JEmbeddingClient(
       FacadeToken.INSTANCE,
       Objects.requireNonNull(client, "client must not be null"),
-      Objects.requireNonNull(model, "model must not be null")
+      Objects.requireNonNull(model, "model must not be null").name,
+      OptionalInt.of(model.dimensions)
     )
 
   /**
@@ -167,6 +173,29 @@ object Llm4s {
     val builder = Agent.builder("assistant", client.underlying).withTools(tools)
     new JAgent(FacadeToken.INSTANCE, (if (streaming) builder.withStreaming() else builder).build())
   }
+
+  /**
+   * Wraps a [[JLlmClient]] in a [[JAgent]] that can call `tools`, defined from Java with [[JTool.builder]] or
+   * [[JTool.fromAnnotated]] (#1484). A `null` argument, a tool listed twice, two tools with one name, or tools the
+   * agent cannot offer together is a failed result, not an agent that fails every run.
+   *
+   * {{{
+   * JAgent agent = Llm4s.createAgentWithTools(client, List.of(weather)).get();
+   * }}}
+   */
+  def createAgentWithTools(client: JLlmClient, tools: java.util.List[JTool]): LlmResult[JAgent] =
+    FacadeInternals.result(for {
+      c  <- Option(client).toRight(org.llm4s.error.ValidationError.required("client"))
+      ts <- Option(tools).map(_.asScala.toVector).toRight(org.llm4s.error.ValidationError.required("tools"))
+      _  <- Either.cond(!ts.contains(null), (), org.llm4s.error.ValidationError("tools", "a tool is null"))
+      _ <- ts
+        .groupBy(_.name())
+        .collectFirst { case (n, same) if same.size > 1 => n }
+        .toLeft(())
+        .left
+        .map(n => org.llm4s.error.ValidationError("tools", s"two tools are named '$n'"))
+      agent <- Agent.builder("assistant", c.underlying).withTools(new ToolRegistry(ts.map(_.function))).build()
+    } yield new JAgent(FacadeToken.INSTANCE, Right(agent)))
 
   /**
    * Wraps an `Agent` built with `Agent.builder`, for what the factories above do not set: its

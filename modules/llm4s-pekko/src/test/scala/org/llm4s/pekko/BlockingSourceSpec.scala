@@ -4,7 +4,7 @@ import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{ Keep, Sink, Source }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
-import org.llm4s.error.{ LLMError, NetworkError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ValidationError }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -182,6 +182,42 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
   }
 
+  /**
+   * Keeps emitting through every interrupt - as provider code that catches `InterruptedException`, clears the flag
+   * and carries on calling back does - counting the emits refused; returns once it has tried `n` items.
+   */
+  final private class SwallowsInterrupts(n: Int) extends Producer[Int] {
+    val thread: AtomicReference[Thread] = new AtomicReference[Thread](null)
+    val started: AtomicInteger          = new AtomicInteger(0)
+    val refused: AtomicInteger          = new AtomicInteger(0)
+    def run(emitter: Emitter[Int]): Either[LLMError, Unit] = {
+      thread.set(Thread.currentThread())
+      (1 to n).foreach { i =>
+        started.incrementAndGet()
+        CancelledError.catchInterrupt(emitter.emit(i)) match {
+          case Right(_) => ()
+          case Left(_) =>
+            Thread.interrupted(): Unit // swallowed
+            refused.incrementAndGet(): Unit
+        }
+      }
+      Right(())
+    }
+    def abandon(): Unit = ()
+  }
+
+  it should "not leak the thread of a producer that swallows the interrupt and keeps emitting" in {
+    val producer = new SwallowsInterrupts(1000)
+    val probe    = source(2, producer).runWith(TestSink[Int]())
+    // the buffer is full and the producer blocked on its next emit when the consumer cancels
+    Fixtures.awaitCondition(producer.started.get == 3 && Fixtures.isWaiting(producer.thread.get)) shouldBe true
+    probe.cancel()
+    // every emit after the stop is refused at once, so the producer runs to its end instead of blocking for good
+    ended(producer.thread.get) shouldBe true
+    producer.started.get shouldBe 1000
+    producer.refused.get shouldBe 998
+  }
+
   it should "stop the producer when a stage downstream finishes early" in {
     val producer = new Emits(1 to 100)
     val taken    = source(4, producer).take(3).runWith(Sink.seq)
@@ -304,5 +340,64 @@ class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     val (done, items) = source(0, new Emits(Seq(1))).toMat(Sink.seq)(Keep.both).run()
     Await.result(items.failed, Patience) shouldBe a[LLMException]
     Await.result(done, Patience) shouldBe Done
+  }
+
+  // ---- a producer thread that cannot be started ----------------------------------------------------------------
+
+  /** A source whose producer thread fails to start with `cause`, recording the thread it was asked to start. */
+  private def failingToStart[T](
+    cause: Throwable,
+    producer: Producer[T],
+    asked: AtomicReference[Thread]
+  ): Source[T, Future[Done]] =
+    BlockingSource(
+      "blocking-source-test",
+      4,
+      startThread = t => {
+        asked.set(t)
+        throw cause
+      }
+    )(() => producer)
+
+  it should "fail the stream and complete its Future[Done] when the producer thread cannot be started" in {
+    // the JVM's own failure when it cannot create a native thread: fatal, so neither `Try` nor Pekko would catch it
+    val cause         = new OutOfMemoryError("unable to create native thread")
+    val producer      = new Emits(Seq(1, 2))
+    val asked         = new AtomicReference[Thread](null)
+    val (done, probe) = failingToStart(cause, producer, asked).toMat(TestSink[Int]())(Keep.both).run()
+    probe.within(Patience) {
+      probe.request(1)
+      probe.expectError() shouldBe theSameInstanceAs(cause)
+    }
+    Await.result(done, Patience) shouldBe Done
+    // the producer was never run, but is abandoned once like any other, and its thread never started
+    producer.started.get shouldBe 0
+    producer.thread.get shouldBe null
+    Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
+    asked.get should not be null
+    asked.get.getState shouldBe Thread.State.NEW
+  }
+
+  it should "fail the stream with a non-fatal start failure, and complete its Future[Done]" in {
+    val cause    = new IllegalStateException("thread start refused")
+    val producer = new Emits(Seq(1))
+    val (done, items) =
+      failingToStart(cause, producer, new AtomicReference[Thread](null)).toMat(Sink.seq)(Keep.both).run()
+    Await.result(items.failed, Patience) shouldBe theSameInstanceAs(cause)
+    Await.result(done, Patience) shouldBe Done
+    Fixtures.awaitCondition(producer.abandoned.get == 1) shouldBe true
+    producer.abandoned.get shouldBe 1
+  }
+
+  it should "start the producer's thread through the start hook, and run the stream as usual" in {
+    val started  = new AtomicInteger(0)
+    val producer = new Emits(Seq(1, 2))
+    val s = BlockingSource("blocking-source-test", 4, startThread = t => { started.incrementAndGet(); t.start() })(() =>
+      producer
+    )
+    val (done, items) = s.toMat(Sink.seq)(Keep.both).run()
+    Await.result(items, Patience) shouldBe Seq(1, 2)
+    Await.result(done, Patience) shouldBe Done
+    started.get shouldBe 1
   }
 }

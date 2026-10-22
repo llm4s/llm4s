@@ -158,8 +158,12 @@ lazy val commonSettings = Seq(
   mimaFailOnNoPrevious    := false,
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
-  // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
-  Compile / doc / scalacOptions ++= Seq("-Wconf:cat=scaladoc:silent"),
+  // The Java sources (core's annotations, java-api's value types and enums) at the same JDK 21 bytecode level as the
+  // Scala ones (`Common.javaRelease`, #1493), whichever JDK runs the build.
+  javacOptions ++= Seq("--release", javaRelease),
+  // No `-Wconf` for `doc`: Scala 3's Scaladoc skips `-Wconf` and `-Werror` ("Skipping unused scalacOptions"), so
+  // they can neither silence nor fail a Scaladoc warning. CI's ScalaDoc job fails on a warning in an llm4s source
+  // with scripts/check-scaladoc-warnings.sh instead (#1967).
   semanticdbEnabled                      := true,
   Test / scalafix / unmanagedSources     := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,
@@ -308,12 +312,15 @@ lazy val llm4s = (project in file("."))
     testkit,
     agentTestkit,
     agentCheckpointSqlite,
+    agentCheckpointPostgres,
     agentMemory,
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
     javaApi,
+    javaRag,
     springBootStarter,
+    springBootStarterBoot4,
     samples,
     configPolicy,
     workspaceShared,
@@ -1136,8 +1143,8 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
 //
 // It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
-// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
-// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582), as every llm4s artifact does: the whole build
+// emits JDK 21 bytecode (`Common.javaRelease`, #1493).
 //
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
@@ -1164,8 +1171,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
 // `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
 // agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
+// `llm4s-agent-tools` is test-only too (#1473): `TypedToolSpec` compares a typed tool's schema and argument errors
+// with the hand-built calculator's.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test", agent % Test)
+  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,
@@ -1293,6 +1302,24 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     ),
     appLogging,
     publish / skip := true,
+    // llm4s-confine (design §4.39), compiled for this machine so the runner's tests confine commands as the image does.
+    // Linux only: elsewhere commands run unconfined and the helper is never used. A Linux machine without `cc` fails
+    // here, by design: on Linux an unconfined command is refused, so the tests could not run.
+    Test / resourceGenerators += Def.task {
+      val log = streams.value.log
+      if (!sys.props.getOrElse("os.name", "").startsWith("Linux")) Nil
+      else {
+        val src = (Compile / sourceDirectory).value / "c" / "llm4s-confine.c"
+        val out = target.value / "llm4s-confine"
+        if (!out.exists || src.lastModified > out.lastModified) {
+          val cmd = Seq("cc", "-O2", "-Wall", "-Wextra", "-Werror", "-o", out.getAbsolutePath, src.getAbsolutePath)
+          log.info(s"Compiling ${src.getName}")
+          if (scala.sys.process.Process(cmd).! != 0) sys.error(s"Could not compile ${src}: ${cmd.mkString(" ")}")
+        }
+        sys.props("llm4s.workspace.confine") = out.getAbsolutePath
+        Nil
+      }
+    }.taskValue,
     // Not measured: Docker entry point, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.runner.*) and exercised only by containerised integration tests.
     coverageDisabled
@@ -1377,6 +1404,8 @@ lazy val samples = (project in file("modules//samples"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
+    javaRag,
     // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
     // examples' acceptance suites script their model with it.
     testkit      % Test,
@@ -1632,8 +1661,9 @@ lazy val agentTestkit = (project in file("modules/agent-testkit"))
 // version `llm4s-memory` already uses. It needs no service, so no suite needs a `modules/it` tier: its tests,
 // including the one that kills a forked JVM mid-run and recovers in this one, run with `sbt test`.
 lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqlite"))
-  // test->test: the ReplayContract reference subjects live in agent-testkit's tests
-  .dependsOn(agent, agentTestkit % "test->compile;test->test")
+  // test->test: the ReplayContract reference subjects live in agent-testkit's tests, and the child-supervision
+  // behaviours (design 4.42), which run on every store, in agent's
+  .dependsOn(agent % "compile->compile;test->test", agentTestkit % "test->compile;test->test")
   .settings(
     name := "llm4s-agent-checkpoint-sqlite",
     commonSettings,
@@ -1646,6 +1676,34 @@ lazy val agentCheckpointSqlite = (project in file("modules/agent-checkpoint-sqli
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.sqlite,
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
+// `llm4s-agent-checkpoint-postgres` (#2130, design 4.50) is the networked `Checkpointer`: `PostgresCheckpointer`,
+// shared by runtimes on several machines, claims and retention judged by the database's clock. Its own module, as
+// every checkpoint adapter is, so `llm4s-agent` stays free of a JDBC driver; the driver and HikariCP are declared
+// here at the versions `llm4s-memory-postgres` uses. The suites that need a server - the `CheckpointerContract`, the
+// concurrency and cross-process cases - are in `modules/it` (`@Docker`); this module's own tests are the pure ones
+// (configuration, schema steps, statements, bounds).
+lazy val agentCheckpointPostgres = (project in file("modules/agent-checkpoint-postgres"))
+  .dependsOn(agent)
+  .settings(
+    name := "llm4s-agent-checkpoint-postgres",
+    commonSettings,
+    // Measured 32.11% statement coverage (`sbt coverage agentCheckpointPostgres/test
+    // agentCheckpointPostgres/coverageReport`) on its first version: the in-module suite is the server-free part. The
+    // real signal is `modules/it`'s contract, concurrency, clock, schema and cross-process suites, which run on every
+    // PR against the pgvector service container and are not counted here. Floor is the measured value rounded down
+    // to the nearest 5. Never lower it.
+    coverageFloor(30),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.postgres,
+      Deps.hikariCP,
       Deps.ujson,
       Deps.scalatest % Test
     )
@@ -1763,7 +1821,9 @@ lazy val it = (project in file("modules/it"))
     agentTestkit % Test,
     // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
     testkit               % Test,
-    agentCheckpointSqlite % Test
+    agentCheckpointSqlite % Test,
+    // the PostgreSQL checkpointer's contract, concurrency and cross-process suites (design 4.50)
+    agentCheckpointPostgres % Test
   )
   .settings(
     name := "llm4s-it",
@@ -1849,6 +1909,7 @@ lazy val docs = (project in file("modules/docs"))
     agent,
     agentTestkit,
     agentCheckpointSqlite,
+    agentCheckpointPostgres,
     agentMemory,
     agentTools,
     knowledgegraphNeo4j,
@@ -1856,6 +1917,7 @@ lazy val docs = (project in file("modules/docs"))
     llm4sZio,
     llm4sPekko,
     javaApi,
+    javaRag,
     springBootStarter
   )
   .settings(
@@ -1863,7 +1925,7 @@ lazy val docs = (project in file("modules/docs"))
     commonSettings,
     publish / skip := true,
     // Provided-scope in spring-boot-starter, so not on the classpath it exports.
-    libraryDependencies += Deps.springBootActuator,
+    libraryDependencies ++= Seq(Deps.springBootActuator, Deps.springBoot4HealthApi),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
@@ -1899,6 +1961,7 @@ lazy val docs = (project in file("modules/docs"))
         (agent / Compile / sources).value ++
         (agentTestkit / Compile / sources).value ++
         (agentCheckpointSqlite / Compile / sources).value ++
+        (agentCheckpointPostgres / Compile / sources).value ++
         (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
@@ -1906,6 +1969,7 @@ lazy val docs = (project in file("modules/docs"))
         (llm4sZio / Compile / sources).value ++
         (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
+        (javaRag / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
@@ -1929,6 +1993,30 @@ lazy val javaApi = (project in file("modules/java-api"))
     // Measured 100.00% statement coverage (with the integration spec) (`sbt coverage javaApi/test javaApi/coverageReport`);
     // floor is the measured value rounded down to the nearest 5.
     coverageFloor(100),
+    // JavaGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
+    // process-wide. Run the suites one at a time, so another suite's snippets and stream threads cannot print into it.
+    Test / parallelExecution := false,
+    libraryDependencies ++= Seq(
+      Deps.scalatest       % Test,
+      Deps.junitJupiterApi % Test
+    )
+  )
+
+// The Java facade for RAG (#1491): `JRag` over `llm4s-rag`'s pipeline. A module of its own, not part of
+// `llm4s-java-api`, so a Java caller who only wants chat does not receive Tika, POI, PDFBox, the AWS SDKs and the
+// JDBC drivers `llm4s-rag` brings. Experimental, like any new module until it has users.
+lazy val javaRag = (project in file("modules/java-rag"))
+  // java-api's test classes: `GuideDocs`, which reads docs/guide/java-rag.md for `JavaRagGuideSpec`, and its test
+  // `application.conf`, whose canned providers let the guide's first snippet build from configuration.
+  .dependsOn(javaApi % "compile->compile;test->test", rag)
+  .settings(
+    name := "llm4s-java-rag",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage javaRag/test javaRag/coverageReport`); floor is the measured
+    // value rounded down to the nearest 5.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
@@ -1963,8 +2051,37 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       Deps.springBootTestAutoConfigure % Test,
       Deps.springBootActuator          % Test,
       // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
-      Deps.springBootActuatorAutoConfigure % Test
-    )
+      Deps.springBootActuatorAutoConfigure % Test,
+      // Spring Boot 4's HealthIndicator, for LlmBoot4HealthIndicator; Boot 4 applications have it (#1467).
+      Deps.springBoot4HealthApi % Provided
+    ),
+    // The specs name the health and metrics types Spring Boot 4 moved through BootLine; this is its Boot 3 one.
+    Test / unmanagedSourceDirectories += (Test / sourceDirectory).value / "scala-boot3"
+  )
+
+// The starter's specs on Spring Boot 4 (#1467). It tests the starter's classes as published, compiled against Boot 3,
+// on a Boot 4 classpath: the specs are the starter's own, recompiled here with boot4/src/test's BootLine. The Boot
+// release is `Versions.springBoot4`; CI's "Spring Boot 4.x" job runs this on the 4.0 line and on the latest 4.x.
+lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/boot4"))
+  .dependsOn(
+    springBootStarter,
+    observabilityMicrometer,
+    core            % "test->test",
+    providerTestkit % Test,
+    bedrock         % Test
+  )
+  .settings(
+    name := "llm4s-spring-boot-starter-boot4-tests",
+    commonSettings,
+    publish / skip := true,
+    // Coverage of the starter is measured on its own specs (springBootStarter's floor); these run the same specs.
+    coverageDisabled,
+    libraryDependencies ++= Seq(Deps.scalatest % Test) ++ Deps.springBoot4.map(_ % Test),
+    Test / unmanagedSourceDirectories ++= {
+      val starterTest = (springBootStarter / Test / sourceDirectory).value
+      Seq(starterTest / "scala", starterTest / "java")
+    },
+    Test / unmanagedResourceDirectories += (springBootStarter / Test / resourceDirectory).value
   )
 
 lazy val benchmarks = (project in file("modules/benchmarks"))

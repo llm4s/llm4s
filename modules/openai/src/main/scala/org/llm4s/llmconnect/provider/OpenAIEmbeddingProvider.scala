@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -107,7 +107,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       val headers = Map("Authorization" -> s"Bearer ${cfg.apiKey}", "Content-Type" -> "application/json")
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
-      // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
+      // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
+      // failure is an EmbeddingError.
       // A blank key would be sent as `Authorization: Bearer `: refused before any request.
       val respEither: Result[org.llm4s.http.HttpResponse] =
         requireApiKey(cfg).flatMap(_ =>
@@ -115,7 +116,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
             .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
             .left
             .map {
-              case cancelled: CancelledError => cancelled
+              // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+              case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
               case e =>
                 EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai")
             }

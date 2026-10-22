@@ -294,7 +294,11 @@ registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(4), config
   `TimeoutException`. Not retried: an unknown tool, invalid or null arguments, a tool's own error result, and a
   cancellation. `maxAttempts` counts the first try.
 - **How long it waits.** Before retry *n* the wait is `baseDelay * backoffFactor^(n-1)`, so the first retry waits
-  `baseDelay`. There is no jitter. Each attempt gets its own `timeout`.
+  `baseDelay`. Each attempt gets its own `timeout`.
+- **Jitter.** Many callers retrying a failing backend on the same schedule hit it again at the same moment. Set
+  `jitter` (or `.withJitter`) to a fraction from 0.0 to 1.0 to randomise each wait: it is drawn uniformly between
+  `(1 - jitter) * d` and `d`, where `d` is the wait above, so `0.5` is "equal jitter" and `1.0` is "full jitter". The
+  default, `0.0`, keeps the exact schedule; the wait is never longer than without jitter.
 - **`executeAsync` and `executeAll` hold no thread while backing off.** An attempt occupies a thread of your
   `ExecutionContext` for as long as it runs; the wait between attempts is a scheduled delay, and the next attempt is
   dispatched to your `ExecutionContext` when it elapses. A small pool therefore keeps serving other work while many

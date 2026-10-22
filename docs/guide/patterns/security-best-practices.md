@@ -550,8 +550,8 @@ object DataRetention {
 
 ## See Also
 
-- [Production Monitoring](./production-monitoring.md) - Monitor security events
-- [Multi-Agent Orchestration](./multi-agent-orchestration.md) - Secure agent communication
+- [Production Monitoring](./production-monitoring) - Monitor security events
+- [Multi-Agent Orchestration](./multi-agent-orchestration) - Secure agent communication
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/) - Web application security
 
 ---

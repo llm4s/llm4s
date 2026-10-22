@@ -81,7 +81,7 @@ val apiKey = sys.env("OPENAI_API_KEY")
 
 The API key reaches `Llm4sConfig` through configuration: `llm4s-openai` binds `OPENAI_API_KEY` to
 `llm4s.credentials.openai.apiKey`, which a named provider section without its own `apiKey` uses -
-see [API keys](../getting-started/configuration.md#api-keys).
+see [API keys](../getting-started/configuration#api-keys).
 
 ### 5. Provider Abstraction
 

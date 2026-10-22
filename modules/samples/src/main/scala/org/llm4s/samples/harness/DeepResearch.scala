@@ -183,6 +183,8 @@ object DeepResearch {
       .withOffload(OffloadConfig(thresholdTokens = 1000))
       .withSummarization(SummarizationConfig(trigger = SummaryTrigger.Messages(12), keepRecent = 4))
       .withPermissions(rules)
+      // one agent: Stage 3's example does not delegate (design 4.48's general-purpose subagent is off)
+      .withSubagents(SubagentConfig.none)
 
   /**
    * The research agent: `client` is the model, `runtime` the store it checkpoints to, `memories` the tenant's memory

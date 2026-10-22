@@ -71,7 +71,7 @@ object RetryPolicy {
 
   /**
    * The delay the provider asked for before retrying `error`, if it gave one: a rate limit's
-   * `retryDelay` (its `Retry-After`, else [[RateLimitError.DefaultRetryDelay]]), or a service
+   * `retryDelay` (its `Retry-After`, else [[org.llm4s.error.RateLimitError.DefaultRetryDelay RateLimitError.DefaultRetryDelay]]), or a service
    * error's explicit `retryAfter`. A service error without one gets the policy's own backoff,
    * not its generic default.
    */

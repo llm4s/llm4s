@@ -39,6 +39,7 @@ object ProviderChatRenderReproApp:
   import Msg._
 
   object App extends TuiApp[Model, Msg]:
+    /** Subscribes to key input and terminal resizes, and builds the seeded model. */
     override def init(ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
       Sub.InputKey(ConsoleInputKey.apply, ConsoleInputError.apply, ctx)
       Sub.TerminalResize(250L, Resize.apply, ctx)
@@ -55,9 +56,11 @@ object ProviderChatRenderReproApp:
     override def update(model: Model, msg: Msg, ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
       ProviderChatRenderReproUpdate(model, msg, ctx)
 
+    /** Renders the model. */
     override def view(model: Model): RootNode =
       ProviderChatRenderReproView(model)
 
+    /** Turns a submitted prompt line into a message. */
     override def toMsg(input: PromptLine): Result[Msg] =
       input.value.trim match
         case ""                     => Right(RunCommand("help"))

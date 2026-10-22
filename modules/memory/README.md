@@ -54,10 +54,12 @@ environment. Stores and managers are built in code, at the application edge:
   with `MemoryStoreConfig.default`, `.testing` (a 1,000-memory cap) and `.production(maxMemories)`
   (cleanup on, threshold at 90% of the cap).
 - `MemoryManagerConfig(autoExtractEntities = false, defaultImportance = 0.5, contextTokenBudget = 2000,
-  consolidationConfig)` for the manager. Every option is read: `defaultImportance` scores memories
+  consolidationConfig)` for the manager, changed with `with*` setters (no public constructor or
+  `copy`). Every option is read: `defaultImportance` scores memories
   recorded without an importance, `contextTokenBudget` bounds `getRelevantContext` when a call passes
   no `maxTokens`, `autoExtractEntities` makes `recordMessage` run `extractEntities` over each user and
-  assistant message (only `LLMMemoryManager` extracts anything), and `consolidateMemories` reads
+  assistant message (only `LLMMemoryManager` extracts anything, at one extra LLM call per message;
+  `MemoryManagerConfig.fullFeatured` turns it on), and `consolidateMemories` reads
   `consolidationConfig.strictMode` and `consolidationConfig.maxMemoriesPerGroup`. `autoRecordMessages`
   and `consolidationEnabled` were removed: no manager can record messages it is not given, and
   nothing consolidates unless `consolidateMemories` is called

@@ -64,6 +64,16 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     s.toString shouldBe "STEP_LIMIT_REACHED"
   }
 
+  it should "carry nothing for a turn that reached its token budget" in {
+    val s = FacadeInternals.agentStatus(AgentStatus.TokenLimitReached)
+    pending(AgentStatusKind.TOKEN_LIMIT_REACHED, s)
+    s.answer shouldBe Optional.empty
+    s.guardrail shouldBe Optional.empty
+    s.reason shouldBe Optional.empty
+    s.toString shouldBe "TOKEN_LIMIT_REACHED"
+    FacadeInternals.pending(AgentStatus.TokenLimitReached).asScala shouldBe empty
+  }
+
   it should "list a suspended turn's interrupts as FacadeInternals.pending does, approvals first" in {
     val c = SuspensionFixtures.call("c1", "deploy", "x")
     val suspended = AgentStatus.Suspended(
@@ -104,9 +114,10 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     s should not be "COMPLETED(a)"
   }
 
-  "AgentStatusKind" should "be a Java enum with the four cases, in order" in {
+  "AgentStatusKind" should "be a Java enum with the five cases, in order" in {
     classOf[AgentStatusKind].isEnum shouldBe true
-    AgentStatusKind.values().toList.map(_.name) shouldBe List("COMPLETED", "BLOCKED", "STEP_LIMIT_REACHED", "SUSPENDED")
+    AgentStatusKind.values().toList.map(_.name) shouldBe
+      List("COMPLETED", "BLOCKED", "STEP_LIMIT_REACHED", "TOKEN_LIMIT_REACHED", "SUSPENDED")
   }
 
   "JMessage" should "read each role of the history" in {
@@ -317,8 +328,9 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
       """assistant::call-1=echo{"input":"hi"}:-""",
       """tool:call-1:{"echoed":"echoed: hi"}""",
       "assistant:echoed::-",
-      "usage:2:10:1",
-      "model:m:2:10:1"
+      // the tool-call completion reports no usage, so it is charged an estimate (#2084)
+      "usage:2:94:1",
+      "model:m:2:94:1"
     )
   }
 

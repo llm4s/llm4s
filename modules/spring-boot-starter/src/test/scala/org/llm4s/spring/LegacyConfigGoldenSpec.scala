@@ -3,7 +3,7 @@ package org.llm4s.spring
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig, ProviderConfig }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.HealthIndicator
+import BootLine.HealthIndicator
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -41,7 +41,7 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
   private def failure(p: Llm4sProperties): String = ProviderConfigParser.parse(p).getError().getMessage
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[ActuatorAutoConfiguration]))
 
   private def healthDetails(ctx: AssertableApplicationContext): (String, String) = {
     val details = ctx.getBean(classOf[HealthIndicator]).health().getDetails

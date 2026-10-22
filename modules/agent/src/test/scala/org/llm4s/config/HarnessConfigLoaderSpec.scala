@@ -29,7 +29,8 @@ class HarnessConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValue
       p.systemPrompt,
       p.permissions,
       p.toolTimeout,
-      p.retention
+      p.retention,
+      p.subagents
     )
 
   "The reference.conf defaults" should "be the deepAgents preset's settings" in {
@@ -90,5 +91,36 @@ class HarnessConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValue
     refused("""toolTimeout = "soon"""", "llm4s.agent.harness.toolTimeout")
     refused("""retention.maxCheckpoints = 0""", "maxCheckpoints must be at least 1")
     refused("""offload.maxTotalBytes = "lots"""", "llm4s.agent.harness.offload")
+    refused("""subagents.maxDepth = 0""", "maxDepth must be positive")
+    refused("""subagents.maxReportBytes = 10""", "maxReportBytes must be at least 64")
+    refused("""subagents.maxTasksPerTurn = "many"""", "llm4s.agent.harness.subagents")
+    refused("""subagents.generalPurpose.enabled = "maybe"""", "llm4s.agent.harness.subagents.generalPurpose.enabled")
+  }
+
+  "Subagent settings" should "default to the general-purpose subagent under the default bounds (#2052)" in {
+    load("").value.subagents shouldBe SubagentConfig.deepAgents
+  }
+
+  they should "turn the general-purpose subagent off and change each bound they name" in {
+    val loaded = load(
+      """llm4s.agent.harness.subagents {
+        |  generalPurpose.enabled = false
+        |  maxConcurrentChildren = 2
+        |  maxTasksPerTurn = 8
+        |  maxDepth = 2
+        |  maxReportBytes = 4096
+        |  childRetention = 10
+        |}""".stripMargin
+    ).value
+    loaded.subagents.generalPurpose shouldBe None
+    loaded.subagents.specialists shouldBe empty
+    loaded.subagents.delegation shouldBe
+      org.llm4s.agent.delegation.DelegationConfig(
+        maxConcurrentChildren = 2,
+        maxTasksPerTurn = 8,
+        maxDepth = 2,
+        maxReportBytes = 4096,
+        childRetention = 10
+      )
   }
 }

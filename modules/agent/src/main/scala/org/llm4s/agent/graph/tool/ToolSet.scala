@@ -9,8 +9,16 @@ import org.llm4s.types.Result
  * only through [[ToolSet.of]], so every name is valid and unique, every argument schema is an
  * object, and every schema keyword is one the validator checks.
  */
-final class ToolSet private (val tools: Vector[AgentTool[?]], val validator: ToolArgumentValidator):
+final class ToolSet private (
+  val tools: Vector[AgentTool[?]],
+  val validator: ToolArgumentValidator,
+  /** Tools checked by another validator than [[validator]], by name: a subagent's granted tools (design 4.45). */
+  private[agent] val byTool: Map[String, ToolArgumentValidator] = Map.empty
+):
   private val byName: Map[String, AgentTool[?]] = tools.map(t => t.spec.name -> t).toMap
+
+  /** The validator that checks the arguments of tool `name`. */
+  private[agent] def validatorOf(name: String): ToolArgumentValidator = byTool.getOrElse(name, validator)
 
   def get(name: String): Option[AgentTool[?]] = byName.get(name)
 
@@ -52,7 +60,14 @@ object ToolSet:
    * every tool's parameters as an object), or a keyword in a tool's
    * [[AgentToolSpec.argumentSchema]] that `validator` does not support.
    */
-  def of(validator: ToolArgumentValidator, tools: AgentTool[?]*): Result[ToolSet] =
+  def of(validator: ToolArgumentValidator, tools: AgentTool[?]*): Result[ToolSet] = of(validator, Map.empty, tools*)
+
+  /** [[of]], with the tools `byTool` names checked by their own validator rather than `validator` (design 4.45). */
+  private[agent] def of(
+    validator: ToolArgumentValidator,
+    byTool: Map[String, ToolArgumentValidator],
+    tools: AgentTool[?]*
+  ): Result[ToolSet] =
     val all   = tools.toVector
     val names = all.map(_.spec.name)
     val invalid = names.distinct.collect {
@@ -66,10 +81,12 @@ object ToolSet:
         s"tool '${t.spec.name}': argument schema must be an object (type: object)"
     }
     val unsupported = all.flatMap { t =>
-      validator
+      byTool
+        .getOrElse(t.spec.name, validator)
         .unsupported(t.spec.argumentSchema)
         .map(path => s"tool '${t.spec.name}': unsupported schema keyword at $path")
     }
     invalid ++ duplicates ++ notObject ++ unsupported match
-      case Vector() => Right(new ToolSet(all, validator))
+      // kept whole: the loop adds the middleware's tools to the set later, a granted middleware's among them
+      case Vector() => Right(new ToolSet(all, validator, byTool))
       case problems => Left(ValidationError("tool set", problems.toList))

@@ -109,7 +109,7 @@ trait LongTermStore extends AppliedKeys:
   def search(ns: Namespace, query: String, limit: Int): Result[Listing[StoreEntry]]
 
   /**
-   * In one transaction, serialisable within `ns`, fenced by `token` (C4's [[AppliedKeys]]): a `token`
+   * In one transaction, serialisable within `ns`, fenced by `token` (C4's [[org.llm4s.agent.graph.AppliedKeys AppliedKeys]]): a `token`
    * older than the newest seen for `effect.scope` is refused with a `Left` and changes nothing;
    * otherwise it becomes the newest, and then: if `effect` was applied, its recorded outcome and no
    * write; otherwise `change`, decided against the namespace as it is now, which may refuse (`Left`:

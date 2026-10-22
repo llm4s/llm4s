@@ -7,7 +7,7 @@ import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
 /**
- * Shared utility for parsing LLM JSON output into a [[Graph]].
+ * Shared utility for parsing LLM JSON output into a [[org.llm4s.knowledgegraph.Graph Graph]].
  *
  * Both [[KnowledgeGraphGenerator]] and [[SchemaGuidedExtractor]] produce the same
  * JSON structure from the LLM. This object centralises the parsing and validation
@@ -27,7 +27,7 @@ private[extraction] object GraphJsonParser {
   private def preview(reply: String): String = Redaction.safeBody(reply, MaxLoggedReplyChars)
 
   /**
-   * Parses a JSON string (optionally wrapped in a markdown code fence) into a [[Graph]].
+   * Parses a JSON string (optionally wrapped in a markdown code fence) into a [[org.llm4s.knowledgegraph.Graph Graph]].
    *
    * Expected JSON structure:
    * {{{
@@ -38,8 +38,8 @@ private[extraction] object GraphJsonParser {
    * }}}
    *
    * @param jsonStr   Raw string returned by the LLM (may contain ```json fences)
-   * @param errorCode Error code used in [[ProcessingError]] on failure
-   * @return The parsed and integrity-validated [[Graph]], or a [[ProcessingError]]
+   * @param errorCode Error code used in [[org.llm4s.error.ProcessingError ProcessingError]] on failure
+   * @return The parsed and integrity-validated [[org.llm4s.knowledgegraph.Graph Graph]], or a [[org.llm4s.error.ProcessingError ProcessingError]]
    */
   def parse(jsonStr: String, errorCode: String): Result[Graph] = {
     val cleanJson = jsonStr.trim

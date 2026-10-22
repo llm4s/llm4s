@@ -519,17 +519,8 @@ class LangfuseTracing(
         "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("")),
         "userId"      -> "llm4s-user",
         "sessionId"   -> sessionId,
-        "metadata" -> ujson.Obj(
-          "framework"     -> "llm4s",
-          "agent"         -> run.agent,
-          "status"        -> run.status,
-          "thread_id"     -> run.threadId,
-          "message_count" -> run.messages.size,
-          "input_tokens"  -> run.usage.inputTokens.toDouble,
-          "output_tokens" -> run.usage.outputTokens.toDouble,
-          "total_cost"    -> run.usage.totalCost.toDouble
-        ),
-        "tags" -> ujson.Arr("llm4s", "agent", "conversation")
+        "metadata"    -> LangfuseTracing.runMetadata(run),
+        "tags"        -> ujson.Arr("llm4s", "agent", "conversation")
       )
     )
     batchEvents += mainTrace
@@ -610,6 +601,26 @@ class LangfuseTracing(
  * Factory methods for [[LangfuseTracing]].
  */
 object LangfuseTracing {
+
+  /**
+   * The metadata of the trace an ended agent run becomes: its agent, status, thread and totals, and - for a delegated
+   * child run - `parent_thread_id` and `parent_run_id`, which link it to the parent run's trace.
+   */
+  private[trace] def runMetadata(run: TraceEvent.AgentRunEnded): ujson.Obj = {
+    val metadata = ujson.Obj(
+      "framework"     -> "llm4s",
+      "agent"         -> run.agent,
+      "status"        -> run.status,
+      "thread_id"     -> run.threadId,
+      "message_count" -> run.messages.size,
+      "input_tokens"  -> run.usage.inputTokens.toDouble,
+      "output_tokens" -> run.usage.outputTokens.toDouble,
+      "total_cost"    -> run.usage.totalCost.toDouble
+    )
+    run.parentThreadId.foreach(id => metadata("parent_thread_id") = id)
+    run.parentRunId.foreach(id => metadata("parent_run_id") = id)
+    metadata
+  }
 
   /**
    * Create a LangfuseTracing instance from configuration.

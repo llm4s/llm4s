@@ -58,14 +58,19 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
 
   "OpenTelemetryTracing" should {
 
-    "map an ended agent run to an Agent Run span" in {
+    "map an ended agent run to an invoke_agent span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
       val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
       val event = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
 
       tracing.getSpanKind(event) shouldBe io.opentelemetry.api.trace.SpanKind.INTERNAL
       val (name, attributes) = tracing.mapEventToAttributes(event)
-      name shouldBe "Agent Run"
+      name shouldBe "invoke_agent assistant"
+      attributes.get(key("gen_ai.operation.name")) shouldBe "invoke_agent"
+      attributes.get(key("gen_ai.agent.name")) shouldBe "assistant"
+      attributes.get(key("gen_ai.conversation.id")) shouldBe "thread-1"
+      attributes.get(key("llm4s.parent.run_id")) shouldBe null
+      attributes.get(key("llm4s.parent.thread_id")) shouldBe null
       attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("thread_id")) shouldBe "thread-1"
       attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("run_id")) shouldBe "run-1"
       attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("agent")) shouldBe "assistant"
@@ -77,4 +82,56 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
       tracing.traceEvent(event) shouldBe Right(())
       tracing.shutdown()
     }
+
+    "carry a child run's parent ids on its invoke_agent span" in {
+      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val event = TraceEvent.AgentRunEnded(
+        "parent/~task/researcher/abc",
+        "child-run",
+        "researcher",
+        "completed",
+        Seq.empty,
+        UsageSummary(),
+        parentThreadId = Some("parent"),
+        parentRunId = Some("parent-run")
+      )
+      val (name, attributes) = tracing.mapEventToAttributes(event)
+      name shouldBe "invoke_agent researcher"
+      attributes.get(key("gen_ai.conversation.id")) shouldBe "parent/~task/researcher/abc"
+      attributes.get(key("llm4s.parent.thread_id")) shouldBe "parent"
+      attributes.get(key("llm4s.parent.run_id")) shouldBe "parent-run"
+      tracing.shutdown()
+    }
+
+    "map a tool execution to an execute_tool span" in {
+      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val (name, attributes) = tracing.mapEventToAttributes(
+        TraceEvent.ToolExecuted("search", "{}", "[]", scala.concurrent.duration.Duration(3, "ms"), success = true)
+      )
+      name shouldBe "execute_tool search"
+      attributes.get(key("gen_ai.operation.name")) shouldBe "execute_tool"
+      attributes.get(key("gen_ai.tool.name")) shouldBe "search"
+      tracing.shutdown()
+    }
+
+    "map an agent's tool_executed event to an execute_tool span" in {
+      val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
+      val data = ujson.Obj(
+        "threadId" -> "thread-1",
+        "runId"    -> "run-1",
+        "name"     -> "agent.tool_executed",
+        "version"  -> 1,
+        "payload"  -> ujson.Obj("agent" -> "assistant", "toolCallId" -> "call-1", "tool" -> "task")
+      )
+      val (name, attributes) = tracing.mapEventToAttributes(TraceEvent.CustomEvent("agent.tool_executed", data))
+      name shouldBe "execute_tool task"
+      attributes.get(key("gen_ai.operation.name")) shouldBe "execute_tool"
+      attributes.get(key("gen_ai.tool.name")) shouldBe "task"
+      attributes.get(key("gen_ai.tool.call.id")) shouldBe "call-1"
+      attributes.get(key("gen_ai.agent.name")) shouldBe "assistant"
+      attributes.get(key("gen_ai.conversation.id")) shouldBe "thread-1"
+      tracing.shutdown()
+    }
   }
+
+  private def key(name: String) = io.opentelemetry.api.common.AttributeKey.stringKey(name)

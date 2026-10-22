@@ -184,7 +184,7 @@ llm4s {
 }
 ```
 
-See [Running the samples](../getting-started/configuration.md#running-the-samples).
+See [Running the samples](../getting-started/configuration#running-the-samples).
 
 ### Understanding the Output
 
@@ -518,6 +518,6 @@ class BenchmarkRunner(llmClient: LLMClient, embeddingClient: EmbeddingClient) {
 
 ## Next Steps
 
-- **[Vector Store Guide](vector-store.md)** - Configure vector backends
+- **[Vector Store Guide](vector-store)** - Configure vector backends
 - **[Benchmark Results](../rag-benchmark-results.md)** - Detailed benchmark data
 - **[Examples Gallery](/examples/)** - RAG implementation examples

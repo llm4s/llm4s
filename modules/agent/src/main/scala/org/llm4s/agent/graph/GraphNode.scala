@@ -1,8 +1,11 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.LLMError
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
+
+import scala.annotation.unused
 
 /**
  * A handle to a node that consumes `I`, issued by a [[GraphBuilder]].
@@ -105,8 +108,34 @@ private[graph] trait NodeEventSink:
   def custom(name: String, version: Int, payload: ujson.Value): Unit
   def progress(name: String, version: Int, payload: ujson.Value): Unit
 
+  /**
+   * Forwards a delegated child's event to the task's thread's nested subscribers (design 4.47), live, as `progress`
+   * does; a no-op outside a runtime.
+   */
+  def nested(event: StreamEvent.Nested): Unit = ()
+
+  /**
+   * Sends `child`'s live `TaskStarted` (`name`, `version`, `payload`) as `progress` does, and remembers the child as
+   * running until its call's `TaskEnded` is handed over or the run releases the thread, for a nested subscriber that
+   * attaches meanwhile (design 4.47, #2074).
+   */
+  def childStarted(@unused child: ChildRef, name: String, version: Int, payload: ujson.Value): Unit =
+    progress(name, version, payload)
+
   /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
   def discardCustom(): Unit
+
+  /**
+   * Settles `child`, a child thread of the task's thread that no call will reattach, as `outcome`, fenced by the run's
+   * claim (`GraphRuntime.settleUnreachable`, #2098): the run that settled it. Outside a runtime there is no child to
+   * settle: `None`.
+   */
+  def settleChild(
+    @unused child: ThreadId,
+    @unused outcome: RunOutcome,
+    @unused message: String
+  ): Result[Option[RunId]] =
+    Right(None)
 
 private[graph] object NodeEventSink:
   val none: NodeEventSink = new NodeEventSink:

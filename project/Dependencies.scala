@@ -14,6 +14,7 @@ object Versions {
   val scalatest               = "3.2.20"
   val scalamock               = "7.5.5"
   val scalatestplusScalacheck = "3.2.19.0"
+  val junitJupiter            = "5.12.2"
   val fansi                   = "0.5.1"
   val ox                      = "1.0.9"
   val postgres                = "42.7.11"
@@ -79,6 +80,12 @@ object Versions {
   // tested at both ends; nothing else reads the property.
   val springBootBaseline = "3.3.6"
   val springBoot         = sys.props.getOrElse("llm4s.springBootVersion", springBootBaseline)
+
+  // Spring Boot 4: the same artifact, compiled against Boot 3 above, also carries a Boot 4 health indicator, compiled
+  // against this release's spring-boot-health. `springBootStarterBoot4` runs the starter's specs on Boot 4: on this
+  // release by default, and CI's "Spring Boot 4.x" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
+  val springBoot4Baseline = "4.0.8"
+  val springBoot4         = sys.props.getOrElse("llm4s.springBoot4Version", springBoot4Baseline)
 }
 
 object Deps {
@@ -92,13 +99,15 @@ object Deps {
   val scalatest               = "org.scalatest"           %% "scalatest"       % Versions.scalatest
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
-  val fansi                   = "com.lihaoyi"             %% "fansi"           % Versions.fansi
-  val ox                      = "com.softwaremill.ox"     %% "core"            % Versions.ox
-  val postgres                = "org.postgresql"           % "postgresql"      % Versions.postgres
-  val sqlite                  = "org.xerial"               % "sqlite-jdbc"     % Versions.sqlite
-  val config                  = "com.typesafe"             % "config"          % Versions.config
-  val hikariCP                = "com.zaxxer"               % "HikariCP"        % Versions.hikariCP
-  val pureConfig              = "com.github.pureconfig"   %% "pureconfig-core" % Versions.pureconfig
+  // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
+  val junitJupiterApi = "org.junit.jupiter"      % "junit-jupiter-api" % Versions.junitJupiter
+  val fansi           = "com.lihaoyi"           %% "fansi"             % Versions.fansi
+  val ox              = "com.softwaremill.ox"   %% "core"              % Versions.ox
+  val postgres        = "org.postgresql"         % "postgresql"        % Versions.postgres
+  val sqlite          = "org.xerial"             % "sqlite-jdbc"       % Versions.sqlite
+  val config          = "com.typesafe"           % "config"            % Versions.config
+  val hikariCP        = "com.zaxxer"             % "HikariCP"          % Versions.hikariCP
+  val pureConfig      = "com.github.pureconfig" %% "pureconfig-core"   % Versions.pureconfig
 
   val openaiJava = "com.openai"         % "openai-java"    % Versions.openaiJava
   val anthropic  = "com.anthropic"      % "anthropic-java" % Versions.anthropic
@@ -165,6 +174,20 @@ object Deps {
     "org.springframework.boot" % "spring-boot-actuator-autoconfigure" % Versions.springBoot
   val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
   val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
+  // Spring Boot 4's HealthIndicator, for the starter's Boot 4 indicator. Intransitive: the starter compiles against
+  // Boot 3, and this jar's own dependencies are Boot 4's.
+  val springBoot4HealthApi =
+    ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).intransitive()
+  // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
+  val springBoot4: Seq[ModuleID] = Seq(
+    "spring-boot-autoconfigure",
+    "spring-boot-actuator",
+    "spring-boot-actuator-autoconfigure",
+    "spring-boot-health",
+    "spring-boot-micrometer-metrics",
+    "spring-boot-starter-test",
+    "spring-boot-test-autoconfigure"
+  ).map(name => "org.springframework.boot" % name % Versions.springBoot4)
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().
@@ -173,7 +196,23 @@ object Deps {
 object Common {
   val scala3 = "3.7.1"
 
+  /**
+   * The minimum JDK of every llm4s artifact, and the bytecode level the build emits for it (#1493).
+   *
+   * llm4s needs JDK 21: `llm4s-core` starts virtual threads (`ToolRegistry`, `Thread.ofVirtual`) and `llm4s-agent`
+   * depends on Ox, whose own classes are JDK 21 bytecode (class-file version 65). Without a pinned level the Scala
+   * compiler emitted version 52 (Java 8) and `javac` the version of whichever JDK ran the build, so the bytecode said
+   * nothing about the floor, and a release built on a newer JDK would have shipped Java classes that JDK 21 cannot
+   * load. Pinning it makes a JDK older than 21 fail at once with `UnsupportedClassVersionError`, and keeps the build
+   * from using an API newer than 21 when it runs on a newer JDK. scripts/check-doc-support.sh fails when a project
+   * or a Gradle build targets anything else, or a doc names another floor; `JavaReleaseSpec` (core, java-api) reads
+   * the compiled classes' version.
+   */
+  val javaRelease = "21"
+
   private val scala3CompilerOptions = Seq(
+    "-java-output-version",
+    javaRelease,
     "-explain",
     "-explain-types",
     "-Wunused:nowarn",

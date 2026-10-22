@@ -1,5 +1,9 @@
 blank_issues_enabled: false
 contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/llm4s/llm4s/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately, never in a public issue. SECURITY.md explains how and what to include.
+
   - name: 🎥 Getting Started Video
     url: https://www.youtube.com/watch?v=SXybj2P3_DE
     about: Watch the LLM4S teaser talk at Bay Area Scala Conference

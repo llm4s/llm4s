@@ -144,7 +144,7 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
     }
     val core   = new EmbeddingClient(provider)(using ModelRegistryService.fromModels(Nil))
     val client = Llm4s.wrapEmbeddingClient(core, EmbeddingModelConfig("mine", 2))
-    (client.model, client.dimensions) shouldBe (("mine", 2))
+    (client.model, client.dimensions) shouldBe (("mine", java.util.OptionalInt.of(2)))
     client.embed(java.util.List.of("a")).get().vectors.get(0).toList shouldBe List(1.0f, 0.0f)
     asked.get.model shouldBe EmbeddingModelConfig("mine", 2)
   }

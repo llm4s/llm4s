@@ -35,11 +35,21 @@ import scala.concurrent.{ ExecutionContext, Future }
  *
  * @example
  * {{{
+ * import org.llm4s.chunking.ChunkerFactory
+ * import org.llm4s.config.Llm4sConfig
+ * import org.llm4s.model.ModelRegistryService
+ * import org.llm4s.rag.RAG
+ * import org.llm4s.rag.RAG.RAGConfigOps // `build` is an extension of RAGConfig; without this import it is not found
+ *
+ * // `build` also needs a ModelRegistryService and a ProviderRegistry in scope. The registry
+ * // below comes from `Llm4sConfig.modelRegistryService()`; ProviderRegistry.default is a given already.
+ * given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
+ *
  * // Create pipeline
  * val rag = RAG.builder()
  *   .withEmbeddings("openai")
  *   .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
- *   .build()
+ *   .build
  *   .toOption.get
  *
  * // Ingest documents
@@ -52,7 +62,7 @@ import scala.concurrent.{ ExecutionContext, Future }
  * val ragWithLLM = RAG.builder()
  *   .withEmbeddings("openai")
  *   .withLLM(llmClient)
- *   .build()
+ *   .build
  *   .toOption.get
  *
  * val answer = ragWithLLM.queryWithAnswer("What is X?")
@@ -214,8 +224,8 @@ final class RAG private (
   /**
    * Ingest documents from a DocumentLoader.
    *
-   * A document that fails to load or ingest is counted in the returned [[LoadStats]] (or, with
-   * `failFast`, returned as the `Left`). A [[LoadResult.ListingFailure]] - the loader could not
+   * A document that fails to load or ingest is counted in the returned [[org.llm4s.rag.loader.LoadStats LoadStats]] (or, with
+   * `failFast`, returned as the `Left`). A [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] - the loader could not
    * enumerate its documents at all - is always returned as the `Left`.
    *
    * @param loader The document loader to ingest from
@@ -311,15 +321,15 @@ final class RAG private (
    * deletion pass removes only documents the source no longer lists, never ones it could not
    * read:
    *
-   *  - If the loader reports a [[LoadResult.ListingFailure]] - it could not enumerate its
+   *  - If the loader reports a [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] - it could not enumerate its
    *    documents, e.g. an S3 listing with no credentials or a missing bucket - sync stops there
    *    and returns that error, and deletes nothing: an unlistable source is not an empty one.
    *    Documents synced before the failure (earlier S3 pages) stay synced.
-   *  - A document that is listed but whose read fails - a [[LoadResult.Failure]] with a
+   *  - A document that is listed but whose read fails - a [[org.llm4s.rag.loader.LoadResult.Failure LoadResult.Failure]] with a
    *    `documentId`, e.g. a transient S3 `GetObject` error or a failed extraction - keeps its
-   *    indexed version. It is not deleted, and not counted in the returned [[SyncStats]]: it was
+   *    indexed version. It is not deleted, and not counted in the returned [[org.llm4s.rag.loader.SyncStats SyncStats]]: it was
    *    neither verified unchanged nor updated. The next sync that reads it picks up any change.
-   *  - A [[LoadResult.Failure]] with no `documentId` could be any document, so sync cannot tell
+   *  - A [[org.llm4s.rag.loader.LoadResult.Failure LoadResult.Failure]] with no `documentId` could be any document, so sync cannot tell
    *    which unlisted documents are really gone: it skips the deletion pass for that run, and
    *    logs a warning. Adds and updates still apply.
    *
@@ -447,13 +457,13 @@ final class RAG private (
    * when you want to ensure a clean slate.
    *
    * '''The index is cleared only after the loader has been read in full.''' If the loader
-   * reports a [[LoadResult.ListingFailure]] (at any point, including a later S3 page), or - with
-   * `failFast` - any [[LoadResult.Failure]], refresh returns that error as the `Left` and leaves
+   * reports a [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] (at any point, including a later S3 page), or - with
+   * `failFast` - any [[org.llm4s.rag.loader.LoadResult.Failure LoadResult.Failure]], refresh returns that error as the `Left` and leaves
    * the existing index and registry untouched. Without `failFast`, a document that fails to read
    * is left out of the rebuilt index, as a clean slate implies, and logged at WARN; use [[sync]]
    * to keep a document's indexed version while its source is unreadable.
    *
-   * '''Memory:''' to give that guarantee, refresh holds every loaded [[Document]] - its extracted
+   * '''Memory:''' to give that guarantee, refresh holds every loaded [[org.llm4s.rag.loader.Document Document]] - its extracted
    * text and metadata, not the raw bytes - in memory before it clears anything. For a source too
    * large for that, use [[sync]], which streams one document at a time.
    *
@@ -542,7 +552,7 @@ final class RAG private (
    * Processes documents in batches with configurable parallelism.
    * Uses the parallelism and batchSize settings from LoadingConfig.
    *
-   * As with [[ingest]], a [[LoadResult.ListingFailure]] is returned as the `Left`; as the
+   * As with [[ingest]], a [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] is returned as the `Left`; as the
    * results are collected first, nothing is ingested in that case.
    *
    * @param loader The document loader to ingest from
@@ -641,7 +651,7 @@ final class RAG private (
    * Performs change detection in parallel, but applies updates sequentially
    * to avoid conflicts in the vector store.
    *
-   * As with [[sync]], a [[LoadResult.ListingFailure]] is returned as the `Left`; as the
+   * As with [[sync]], a [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] is returned as the `Left`; as the
    * results are collected first, nothing is added, updated or deleted in that case. A document
    * whose read fails keeps its indexed version, and a read failure that does not name its
    * document skips the deletion pass, as in [[sync]]. Unlike [[sync]], it holds every loaded
@@ -759,7 +769,7 @@ final class RAG private (
    * Async full refresh: [[refresh]], run on `ec`.
    *
    * It gives the same guarantee: the loader is read in full before the index is cleared, so a
-   * [[LoadResult.ListingFailure]] (or, with `failFast`, any read failure) is returned as the
+   * [[org.llm4s.rag.loader.LoadResult.ListingFailure LoadResult.ListingFailure]] (or, with `failFast`, any read failure) is returned as the
    * `Left` with the index untouched - and it holds every loaded document in memory to do so.
    *
    * @param loader The document loader to refresh from
@@ -1447,6 +1457,11 @@ object RAG {
 
   /**
    * Create a RAG builder with default configuration.
+   *
+   * The result is a [[RAGConfig]], not a RAG: turn it into one with `.build`, which is an extension
+   * supplied by [[RAGConfigOps]] and is not found unless `import org.llm4s.rag.RAG.RAGConfigOps` is in scope.
+   * `build` also needs a `ModelRegistryService` given (`ProviderRegistry.default` is a given already), and it
+   * takes only a `using` clause, so it is written `.build`, not `.build()`.
    */
   def builder(): RAGConfig = RAGConfig.default
 
@@ -1494,10 +1509,32 @@ object RAG {
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]],
     existingSearcher: Option[HybridSearcher]
   )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
+    createEmbeddings(config, existingClient, resolveEmbeddingProvider).flatMap { (embeddingClient, model) =>
+      assemble(config, embeddingClient, model, resolveRerankerConfig, existingSearcher)
+    }
+
+  /**
+   * Not part of the API: a pipeline over an embedding client and model the caller already has, resolving no provider
+   * through a registry. `llm4s-java-rag` builds its pipelines with it, since a Java caller hands it a client of any
+   * provider rather than a provider id. Every other setting comes from `config`, as for [[build]];
+   * `config.embeddingProvider`, `embeddingModel` and `embeddingDimensions` are not read.
+   */
+  private[llm4s] def buildWithEmbeddings(
+    config: RAGConfig,
+    embeddingClient: EmbeddingClient,
+    embeddingModel: EmbeddingModelConfig
+  ): Result[RAG] =
+    assemble(config, embeddingClient, embeddingModel, () => Right(None), None)
+
+  private def assemble(
+    config: RAGConfig,
+    embeddingClient: EmbeddingClient,
+    embeddingModelConfig: EmbeddingModelConfig,
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]],
+    existingSearcher: Option[HybridSearcher]
+  ): Result[RAG] = {
+    val chunker = createChunker(config, embeddingClient, embeddingModelConfig)
     for {
-      embeddings <- createEmbeddings(config, existingClient, resolveEmbeddingProvider)
-      (embeddingClient, embeddingModelConfig) = embeddings
-      chunker                                 = createChunker(config, embeddingClient, embeddingModelConfig)
       hybridSearcher <- existingSearcher.fold(createHybridSearcher(config))(Right(_))
       reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
@@ -1524,6 +1561,7 @@ object RAG {
           Right(())
         }
     } yield rag
+  }
 
   private def createRegistry(@scala.annotation.unused config: RAGConfig): Result[DocumentRegistry] =
     // For now, use in-memory registry

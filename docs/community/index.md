@@ -142,6 +142,8 @@ Using LLM4S in production? We'd love to hear about it! Share your story in Disco
 
 ## 📅 Events
 
+The [Events page](/events/) lists upcoming talks, the next Dev Hour, and recordings and slides of past talks.
+
 ### LLM4S Dev Hours
 
 Regular virtual meetups for the community:
@@ -220,6 +222,16 @@ For feature requests:
 - **GitHub**: [Watch the repo](https://github.com/llm4s/llm4s) for releases
 - **Discord**: Join for real-time updates
 - **Roadmap**: [View the roadmap](/reference/roadmap)
+
+### Follow LLM4S
+
+{% include follow-links.html style="buttons" %}
+
+### Follow our co-founder, Kannupriya Kalra
+
+{% include follow-links.html style="buttons" cofounder=true %}
+
+Discord: `kannupriyakalra_46520`
 
 ### Release Notifications
 

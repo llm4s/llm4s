@@ -1,0 +1,89 @@
+# Photos, banners and slides from LLM4S events, shown in the Events page's gallery (newest first).
+# Also the home page's "LLM4S Around the World" (_includes/talk-snapshots.html). Holds the README's talk snapshots,
+# the Bay Area launch photos and the other talk images under image_assets; keep the README in step.
+# Fields: src (site-relative, URL-encoded), caption, date (YYYY-MM-DD, for ordering).
+
+- date: 2025-02-25
+  src: /image_assets/talks/BayAreaScalaConference_tubiOffice.jpeg
+  caption: "Bay Area Scala, Tubi office, San Francisco: where LLM4S was introduced"
+- date: 2025-02-25
+  src: /image_assets/talks/BayAreaScalaConference_IntroSlide.JPG
+  caption: Bay Area Scala, San Francisco – introductory slide
+- date: 2025-02-25
+  src: /image_assets/talks/BayAreaScalaConference_GenAiSlide.jpeg
+  caption: Bay Area Scala, San Francisco – generative AI slide
+- date: 2025-04-20
+  src: /image_assets/talks/ScalaIndia_Talk_Banner.png
+  caption: Scala India 2025 – talk banner
+- date: 2025-05-28
+  src: /image_assets/talks/Scalac_FunctionalWorld2025_Poland.png
+  caption: Functional World 2025 by Scalac, Gdańsk, Poland
+- date: 2025-06-13
+  src: /image_assets/talks/DallasScalaEnthusiastsConference_Talk_Banner.png
+  caption: Dallas Scala Enthusiasts 2025 – talk banner
+- date: 2025-08-13
+  src: /image_assets/talks/LondonScalaTalks_LLM4S_talk_2025_Banner.png
+  caption: London Scala Users Group 2025 – LLM4S session banner
+- date: 2025-08-13
+  src: /image_assets/talks/LondonScalaTalks_2025_Rory_szork_demo.jpeg
+  caption: London Scala Users Group 2025 – Rory Graves's Szork demo
+- date: 2025-08-13
+  src: /image_assets/talks/LondonScalaTalks_2025_kannupriya_multimodal_slide.jpeg
+  caption: London Scala Users Group 2025 – Kannupriya Kalra's multimodal slide
+- date: 2025-08-21
+  src: /image_assets/talks/ScalaDays2025_Talk_Banner.jpg
+  caption: Scala Days 2025, Lausanne – official talk banner
+- date: 2025-08-21
+  src: /image_assets/talks/scaladays2025-llm4s-team.jpg
+  caption: Scala Days 2025, Lausanne – the LLM4S team
+- date: 2025-08-21
+  src: /image_assets/talks/scaladays2025-szork-innerworld-slide.jpg
+  caption: Scala Days 2025, Lausanne – Szork inner-world demo slide
+- date: 2025-08-25
+  src: /image_assets/talks/ZurichScalaEnthusiasts_2025_Banner.jpg
+  caption: Zürich Scala Enthusiasts 2025 – banner
+- date: 2025-09-18
+  src: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/GSoC_2025_Lighting_talks_switzerland.jpg
+  caption: GSoC 2025 Lightning Talks, hosted by the Scala Center, Lausanne
+- date: 2025-10-12
+  src: /image_assets/talks/ICFP2025_Mentoring_in_the_Scala_Ecosystem_Insights_from_GSoC_Kannupriya_Kalra.png
+  caption: "ICFP/SPLASH 2025, Singapore – Mentoring in the Scala Ecosystem"
+- date: 2025-10-23
+  src: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_mentor_summit_2025/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala/Banner_LLM4S%20x%20GSoC%202025%20Engineering%20GenAI%20Agents%20in%20Functional%20Scala_Kannupriya_Kalra.png
+  caption: GSoC Mentor Summit 2025, Munich – LLM4S banner
+- date: 2025-10-24
+  src: /image_assets/talks/GEN_AI_London_2025/Banner_GenAI_London_Building_Reliable_AI_Systems__From_Hype_to_Practical_Toolkits_Kannupriya_Kalra.png
+  caption: "GEN AI London 2025 – Building Reliable AI Systems"
+- date: 2025-11-29
+  src: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Banner_LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem_Kannupriya_Kalra.png
+  caption: "Oaisys AI Practitioners Conference 2025, Pune – LLM4S: Building Reliable AI Systems in the JVM Ecosystem"
+- date: 2025-12-10
+  src: /image_assets/talks/AI_Compute_%26_Hardware_Conference/Banner_Functional_Intelligence_Building_Scalable_AI_Systems_for_the_Hardware_Era_2025_Kannupriya_Kalra.jpg
+  caption: "AI Compute & Hardware Conference 2025, San Jose – Functional Intelligence"
+- date: 2026-09-16
+  src: /image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_with_Kannupriya_Kalra_Microsoft_Global_Hackathon_2026.png
+  caption: "Microsoft Global Hackathon 2026 – Build with LLMs: Open Source AI for the JVM"
+- date: 2026-10-23
+  src: /image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
+  caption: "E-Cell Orientation & Pitch Roulette, VIPS-TC – LLM4S Foundation: A Retrospective"
+- date: 2026-10-25
+  src: /image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
+  caption: "DataverseHub 2026, Hyderabad – LLM4S Foundation: A Retrospective"
+- date: 2025-08-13
+  src: /image_assets/talks/LondonScalaTalks_2025_Banner.jpg
+  caption: London Scala Users Group 2025 – banner
+- date: 2025-08-13
+  src: /image_assets/talks/LondonScalaTalks_2025_Flyer.jpg
+  caption: London Scala Users Group 2025 – flyer
+- date: 2025-11-29
+  src: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Show_and_Tell_Oaisys_AI_Conf_%202025_Kannupriya_Kalra.png
+  caption: "Oaisys AI Practitioners Conference 2025, Pune – Show and Tell, Kannupriya Kalra"
+- date: 2025-11-29
+  src: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Show_and_Tell_Oaisys_AI_Conf_2025_Shubham_Vishwakarma.png
+  caption: "Oaisys AI Practitioners Conference 2025, Pune – Show and Tell, Shubham Vishwakarma"
+- date: 2025-11-29
+  src: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Shubham_Vishwakarma_AI_Conf2025_OAISYS_Speaker_VenueShot.jpg
+  caption: "Oaisys AI Practitioners Conference 2025, Pune – Shubham Vishwakarma at the venue"
+- date: 2026-10-23
+  src: /image_assets/talks/VIPS_TC_2026/Poster_VIPS_TC_E_Cell_Orientation_2026_Kannupriya_Kalra.jpg
+  caption: "E-Cell Orientation & Pitch Roulette, VIPS-TC 2026 – poster"

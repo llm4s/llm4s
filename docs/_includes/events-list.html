@@ -1,0 +1,20 @@
+{%- comment -%}
+The events of _data/events.yml as a list of cards. Parameters:
+  which   "upcoming" (soonest first) or "past" (newest first), split at build time;
+          events-script.html re-sorts in the browser, so the split stays right between builds
+  limit   show at most this many (the script applies it after re-sorting)
+  images  show banners
+{%- endcomment -%}
+{%- assign today = site.time | date: "%Y-%m-%d" -%}
+{%- assign events = site.data.events -%}
+{%- if include.which == "past" -%}{%- assign events = events | reverse -%}{%- endif -%}
+<ul class="event-list" id="events-{{ include.which }}" data-list="{{ include.which }}"{% if include.limit %} data-limit="{{ include.limit }}"{% endif %}>
+{%- for e in events -%}
+{%- if e.end -%}{%- assign last = e.end | date: "%Y-%m-%d" -%}{%- else -%}{%- assign last = e.start | date: "%Y-%m-%d" -%}{%- endif -%}
+{%- if include.which == "past" -%}
+{%- if last < today -%}{%- include event-card.html event=e images=include.images -%}{%- endif -%}
+{%- else -%}
+{%- if last >= today -%}{%- include event-card.html event=e images=include.images -%}{%- endif -%}
+{%- endif -%}
+{%- endfor -%}
+</ul>

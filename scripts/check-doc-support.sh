@@ -16,8 +16,12 @@
 #               `sbt +task` may appear only if some project cross-builds. docs/reference/v1-scope.md must
 #               state the version.
 #   2. JDK    - the JDKs CI runs are the literal `java-version:` values and inline `java: [..]` matrix lists
-#               in .github/workflows/ci.yml. Every `JDK N` / `Java N` in the docs must be one of them, and a
+#               in .github/workflows/ci.yml. Every `JDK N` / `Java N` / `JDK (N` in the docs must be one of them, and a
 #               floor (`JDK N+`, `JDK N or newer/later`, `requires JDK N`) must be the oldest of them.
+#               That floor is also the bytecode level (#1493): every project with Scala or Java sources must pass
+#               the Scala compiler `-java-output-version <floor>` (or `-release`) and `javac` `--release <floor>`
+#               in Compile, and every Gradle build under modules/ (`*.gradle.kts`) that sets a Java release,
+#               a Kotlin `JvmTarget.JVM_N` or a toolchain must set the floor.
 #   3. Module - every module in CLAUDE.md's repository-structure block is a directory, and every project
 #               base directory under modules/ is named there (itself or through a parent directory).
 #   4. sbt    - every documented `sbt` command line, and every alias body, is replayed against the model:
@@ -39,7 +43,7 @@
 #   - version grammar: lists (`Scala 3.7.1 and 2.13`), ranges and ceilings (`JDK 21-25`, `JDK 25 or older`),
 #     comparisons (`at least JDK 21`, `JDK >= 21`), patch versions (`JDK 21.0.2`), and a denial in another
 #     clause or sentence (`Scala 2.13, which is not supported`);
-#   - the JVM release target in scalacOptions/javacOptions, and workflows other than ci.yml.
+#   - workflows other than ci.yml, and text outside CLAUDE.md, README.md, docs/ and the modules' README.md files.
 #
 # Usage: scripts/check-doc-support.sh [--model FILE] [REPO_ROOT]
 #   --model FILE   a model written by `sbt "dumpBuildModel FILE"` (also $DOC_SUPPORT_MODEL). Without one the
@@ -120,6 +124,7 @@ def read(rel):
 
 
 FILES = [p for p in [pathlib.Path("CLAUDE.md"), pathlib.Path("README.md")] + sorted(pathlib.Path("docs").rglob("*.md"))
+         + sorted(p for p in pathlib.Path("modules").rglob("README.md") if not {"target", "build", "node_modules"} & set(p.parts))
          if p.exists() and p.as_posix() not in SKIP_FILES and not p.as_posix().startswith(SKIP_DIRS)]
 TEXTS = {p: p.read_text(encoding="utf-8") for p in FILES}
 
@@ -143,6 +148,8 @@ class Project:
         self.no_aggregate = set(raw.get("noAggregate", []))
         self.scala = raw.get("scalaVersion", "")
         self.cross = list(raw.get("crossScalaVersions", []))
+        self.scalac = list(raw.get("scalacOptions", []))
+        self.javac = list(raw.get("javacOptions", []))
 
     def config_name(self, ident):
         """The configuration `ident` names here (`Test` or, old syntax, `test`), or None."""
@@ -228,7 +235,7 @@ if not ci_jdks:
     fail(CI_WORKFLOW, 1, "no literal java-version or `java: [..]` matrix found; cannot establish the JDK CI runs")
 FLOOR = min(ci_jdks) if ci_jdks else None
 RUNS = ", ".join(str(j) for j in sorted(ci_jdks))
-JDK_RE = re.compile(r"(?:(?P<req>\brequires?\s+)|(?<![\w./-]))(?:OpenJDK|JDK|JRE|Java)[ -]?(?P<n>\d{1,2})(?![\d\w]|\.\d)"
+JDK_RE = re.compile(r"(?:(?P<req>\brequires?\s+)|(?<![\w./-]))(?:OpenJDK|JDK|JRE|Java)(?:[ -]|\s\()?(?P<n>\d{1,2})(?![\d\w]|\.\d)"
                     r"(?P<floor>\+|\s+or\s+(?:newer|later|above|higher))?", re.I)
 for p, text in TEXTS.items() if ci_jdks else ():
     for m in JDK_RE.finditer(text):
@@ -239,6 +246,49 @@ for p, text in TEXTS.items() if ci_jdks else ():
             fail(p.as_posix(), line, f"gives JDK {n} as the minimum, but the oldest JDK CI runs is {FLOOR}")
         elif n not in ci_jdks:
             fail(p.as_posix(), line, f"documents JDK {n}, but CI runs JDK {RUNS}")
+
+
+def option_value(options, names):
+    """The value of the last of `names` in `options`, given as `-name value`, `-name:value` or `-name=value`."""
+    found = None
+    for i, opt in enumerate(options):
+        for name in names:
+            if opt == name and i + 1 < len(options):
+                found = options[i + 1]
+            elif opt.startswith((name + ":", name + "=")):
+                found = opt[len(name) + 1:]
+    return found
+
+
+def has_sources(base, suffix):
+    root = pathlib.Path(base) / "src"
+    return root.is_dir() and any(f.is_file() for f in root.rglob("*" + suffix))
+
+
+for proj in sorted(PROJECTS.values(), key=lambda q: q.id) if FLOOR else ():
+    if has_sources(proj.base, ".scala") or has_sources(proj.base, ".java"):
+        level = option_value(proj.scalac, ("-java-output-version", "-release", "--release"))
+        if level != str(FLOOR):
+            fail(MODEL_NAME, 1, f"project `{proj.id}` compiles Scala for JDK {level or 'the compiler default'} "
+                                f"(`-java-output-version`), but the documented minimum is JDK {FLOOR}")
+    if has_sources(proj.base, ".java"):
+        level = option_value(proj.javac, ("--release", "-release"))
+        if level != str(FLOOR):
+            fail(MODEL_NAME, 1, f"project `{proj.id}` compiles Java for JDK {level or 'the building JDK'} "
+                                f"(`javac --release`), but the documented minimum is JDK {FLOOR}")
+
+GRADLE_TARGETS = re.compile(r"\brelease\.set\(\s*(\d+)\s*\)|\brelease\s*=\s*(\d+)\b|JvmTarget\.JVM_(\d+)\b"
+                            r"|\bjvmToolchain\(\s*(\d+)\s*\)|JavaLanguageVersion\.of\(\s*(\d+)\s*\)"
+                            r"|JavaVersion\.VERSION_(\d+)\b")
+for gradle in sorted(pathlib.Path("modules").rglob("*.gradle.kts")) if FLOOR else ():
+    if {"build", ".gradle"} & set(gradle.parts):
+        continue
+    text = gradle.read_text(encoding="utf-8")
+    for m in GRADLE_TARGETS.finditer(text):
+        n = int(next(g for g in m.groups() if g))
+        if n != FLOOR and not exempt(line_at(text, m.start())[0]):
+            fail(gradle.as_posix(), line_of(text, m.start()),
+                 f"targets JDK {n} (`{m.group(0)}`), but the documented minimum is JDK {FLOOR}")
 
 # ---------------------------------------------------------------- 3. modules
 claude = read("CLAUDE.md")
@@ -503,6 +553,6 @@ if errors:
           f"build is regenerated by running this script without --model. A line that describes the past may be "
           f"marked `doc-support: ignore`.", file=sys.stderr)
     sys.exit(1)
-print(f"Support matrix verified: Scala {SCALA}, JDK {RUNS} (floor {FLOOR}), {len(doc_paths)} documented modules, "
+print(f"Support matrix verified: Scala {SCALA}, JDK {RUNS} (floor {FLOOR}, also the bytecode level), {len(doc_paths)} documented modules, "
       f"{len(PROJECTS)} projects, {len(ALIASES)} aliases, {len(COMMANDS)} commands and {len(ALL_KEYS)} keys known.")
 PYEOF

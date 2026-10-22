@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
  * every error message.
  */
 class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
+  import SafeParameterExtractorEdgeCasesSpec.Big
 
   private def extractor(json: String): SafeParameterExtractor = SafeParameterExtractor(ujson.read(json))
 
@@ -95,6 +96,28 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
         extractor(json).getInt("n") shouldBe Right(expected)
         extractor(json).getOptionalInt("n") shouldBe Right(Some(expected))
     }
+  }
+
+  // ---- integers above 2^53 (#1597): a ujson number is a double, so a tool argument loses precision when it is parsed
+
+  "A tool argument above 2^53" should "be rounded to the nearest double as soon as the arguments are parsed" in {
+    // the behaviour #1597 documents: the rounding happens in ujson.read, before any getter sees the value
+    extractor(s"""{"id":$Big}""").getDouble("id") shouldBe Right(9007199254740992.0)
+    extractor(s"""{"id":$Big}""").getDouble("id").map(_.toLong) should not be Right(Big)
+  }
+
+  it should "never reach an integer getter, which refuses it rather than passing on a rounded value" in {
+    extractor(s"""{"id":$Big}""").getIntEnhanced("id") shouldBe Left(TypeMismatch("id", "integer", "number"))
+    extractor(s"""{"id":$Big}""").getOptionalInt("id") shouldBe Left(TypeMismatch("id", "integer", "number"))
+  }
+
+  it should "arrive exactly when the schema declares the id as a string" in {
+    extractor(s"""{"id":"$Big"}""").getString("id").map(_.toLong) shouldBe Right(Big)
+  }
+
+  it should "survive up to 2^53 as a number" in {
+    val max = 9007199254740992L // 2^53
+    extractor(s"""{"id":$max}""").getDouble("id").map(_.toLong) shouldBe Right(max)
   }
 
   it should "reject NaN and the infinities, which JSON text cannot carry but a ujson tree can" in {
@@ -337,4 +360,10 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     extractor("""{"x":"anything"}""").validateRequired("x" -> "uuid") shouldBe Right(())
     extractor("""{}""").validateRequired("x" -> "uuid").isLeft shouldBe true
   }
+}
+
+object SafeParameterExtractorEdgeCasesSpec {
+
+  /** 2^53 + 1, the first integer a double cannot hold. */
+  private val Big = 9007199254740993L
 }

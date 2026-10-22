@@ -20,7 +20,7 @@ Ready-made tools for agents: a calculator, the date and time, UUIDs, JSON, files
 ---
 
 The built-in tools live in the `llm4s-agent-tools` module (see
-[installation](../getting-started/installation.md#for-built-in-tools-web-search-http-filesystem-shell)). They depend
+[installation](../getting-started/installation#for-built-in-tools-web-search-http-filesystem-shell)). They depend
 on `llm4s-core` only, not on the agent runtime, so they work with plain tool calling through a `ToolRegistry` as well
 as with an `Agent`. Some of them can read your files, call your network or run programs, so decide which ones a model
 gets before you register anything: [section 6](#6-safety-what-each-tool-can-do) says what each can do.
@@ -391,7 +391,8 @@ The built-in tools are built with `ToolBuilder`, the same way you build yours, a
 val registry = BuiltinTools.coreSafe.map(core => new ToolRegistry(core :+ myTool))
 ```
 
-See [Agents](agents/#agent-with-tools) for how a tool is defined and used, and
+[Build Your Own Tool](custom-tools) walks through writing one: the `Schema` DSL, reading arguments, returning
+errors and testing it. See [Agents](agents/#agent-with-tools) for how a tool is used in a run, and
 [Error Handling](error-handling) for working with the `Result` these methods return.
 
 ## Related

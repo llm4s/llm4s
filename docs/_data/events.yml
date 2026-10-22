@@ -1,0 +1,196 @@
+# Talks, workshops and other LLM4S events, shown on /events/ and on the home page.
+#
+# Keep entries in date order. Fields:
+#   start       first day, YYYY-MM-DD (required)
+#   end         last day, for multi-day events
+#   starts_at   start time with its UTC offset (ISO 8601), when known; the home page counts down to it
+#   time        local time as shown to readers, e.g. "12:00-13:00 IST"
+#   event       the conference or meetup (required)
+#   title       the talk (required)
+#   location    venue and city (required)
+#   speakers    list of names (required)
+#   url         the event's page
+#   recording   the recording
+#   slides      list of {label, url}; paths under /image_assets are site-relative
+#   image       banner, site-relative
+#
+# An event is upcoming until the end of its last day; the page re-sorts in the browser, so a
+# finished event moves to "Past talks" without a rebuild. The weekly Dev Hour is not listed here:
+# the page computes its next session (see _includes/events-script.html).
+
+- start: 2025-02-25
+  event: Bay Area Scala
+  title: "Let's Teach LLMs to Write Great Scala! (original version)"
+  location: Tubi office, San Francisco, California, USA 🇺🇸
+  speakers: [Kannupriya Kalra]
+  url: https://lu.ma/5fz2y9or
+  recording: https://www.youtube.com/watch?v=SXybj2P3_DE&t=779s
+  image: /image_assets/talks/BayAreaScalaConference_IntroSlide.JPG
+
+- start: 2025-04-20
+  event: Scala India
+  title: "Let's Teach LLMs to Write Great Scala! (updated from February 2025)"
+  location: India 🇮🇳
+  speakers: [Kannupriya Kalra]
+  url: https://www.linkedin.com/posts/activity-7318299169914249216-Sec-
+  recording: https://www.youtube.com/watch?v=PiUaVKuV0dM
+  image: /image_assets/talks/ScalaIndia_Talk_Banner.png
+
+- start: 2025-05-28
+  event: Functional World 2025 by Scalac
+  title: "Let's Teach LLMs to Write Great Scala! (updated from April 2025)"
+  location: Gdańsk, Poland 🇵🇱
+  speakers: [Kannupriya Kalra]
+  url: https://www.meetup.com/functionalworld/events/307654612/
+  recording: https://www.youtube.com/watch?v=cNAmsIpSsgk
+  image: /image_assets/talks/Scalac_FunctionalWorld2025_Poland.png
+
+- start: 2025-06-13
+  event: Dallas Scala Enthusiasts
+  title: "Let's Teach LLMs to Write Great Scala! (updated from May 2025)"
+  location: Dallas, Texas, USA 🇺🇸
+  speakers: [Kannupriya Kalra]
+  url: https://www.meetup.com/dallas-scala-enthusiasts/events/307717420/
+  recording: https://www.youtube.com/watch?v=-PnsSSWTye0
+  image: /image_assets/talks/DallasScalaEnthusiastsConference_Talk_Banner.png
+
+- start: 2025-08-13
+  event: London Scala Users Group
+  title: "Scala Meets GenAI: Build the Cool Stuff with LLM4S"
+  location: The Trade Desk office, London, UK 🇬🇧
+  speakers: [Kannupriya Kalra, Rory Graves]
+  url: https://www.meetup.com/london-scala/events/308564399/
+  image: /image_assets/talks/LondonScalaTalks_LLM4S_talk_2025_Banner.png
+
+- start: 2025-08-21
+  event: Scala Days 2025
+  title: "Scala Meets GenAI: Build the Cool Stuff with LLM4S"
+  location: SwissTech Convention Center, EPFL, Lausanne, Switzerland 🇨🇭
+  speakers: [Kannupriya Kalra, Rory Graves]
+  url: https://scaladays.org/editions/2025/talks/scala-meets-genai-build-the
+  recording: https://www.youtube.com/watch?v=5od95FbNjiI
+  image: /image_assets/talks/ScalaDays2025_Talk_Banner.jpg
+
+- start: 2025-08-25
+  event: Zürich Scala Enthusiasts
+  title: "Fork It Till You Make It: Career Building with Scala OSS"
+  location: Rivero AG, Zürich, Switzerland 🇨🇭
+  speakers: [Kannupriya Kalra]
+  url: https://lnkd.in/emMVS8Mj
+  image: /image_assets/talks/ZurichScalaEnthusiasts_2025_Banner.jpg
+
+- start: 2025-09-18
+  event: Scala Center Talks
+  title: "Lightning Talks Powered by GSoC 2025 for Scala"
+  location: EPFL, Lausanne, Switzerland 🇨🇭
+  speakers: [Kannupriya Kalra]
+  url: https://luma.com/3eda0rsz
+  slides:
+    - label: Multimodal support
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/slides/Anshuman_Awasthi_LLM4S_Support_image_voice_and_other_LLM_modalities.pdf
+    - label: Agentic toolkit
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/slides/Elvan_Konukseven_LLM4S_Implement_an_agentic_toolkit_for_Large_Language_Models.pdf
+    - label: RAG in a box
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/slides/Gopi_Trinadh_Maddikunta_LLM4S_RAG_in_a_box.pdf
+    - label: Tracing
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/slides/Shubham_Vishwakarma_LLM4S_Tracing_support.pdf
+  image: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_lighting_talks_2025/GSoC_2025_Lighting_talks_switzerland.jpg
+
+- start: 2025-10-12
+  end: 2025-10-18
+  event: ICFP/SPLASH 2025 (The Scala Workshop 2025)
+  title: "Mentoring in the Scala Ecosystem: Insights from Google Summer of Code"
+  location: Marina Bay Sands Convention Center, Singapore 🇸🇬
+  speakers: [Kannupriya Kalra]
+  url: https://2025.workshop.scala-lang.org/#program
+  recording: https://www.youtube.com/live/OtFPJNFJSsA?t=26236
+  image: /image_assets/talks/ICFP2025_Mentoring_in_the_Scala_Ecosystem_Insights_from_GSoC_Kannupriya_Kalra.png
+
+- start: 2025-10-23
+  end: 2025-10-25
+  event: Google Summer of Code Mentor Summit 2025
+  title: "LLM4S x GSoC 2025: Engineering GenAI Agents in Functional Scala"
+  location: Google office, Munich, Germany 🇩🇪
+  speakers: [Kannupriya Kalra]
+  url: https://sites.google.com/view/2025mentorsummit/home
+  slides:
+    - label: Slides
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_mentor_summit_2025/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala_by_Kannupriya_Kalra.pdf
+    - label: All speakers' slides
+      url: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_mentor_summit_2025/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala/GSoC_2025_Lightning_Talk_Mentor_Summit_Slides_Germany.pdf
+  image: /image_assets/gsoc_assets/gsoc_2025/talks/gsoc_mentor_summit_2025/LLM4S_x_GSoC_2025_Engineering_GenAI_Agents_in_Functional_Scala/Banner_LLM4S%20x%20GSoC%202025%20Engineering%20GenAI%20Agents%20in%20Functional%20Scala_Kannupriya_Kalra.png
+
+- start: 2025-10-24
+  event: GEN AI London 2025
+  title: "Building Reliable AI Systems: From Hype to Practical Toolkits"
+  location: Queen Elizabeth II Centre, Westminster, London, UK 🇬🇧
+  speakers: [Kannupriya Kalra]
+  url: https://www.genailondon.uk/speakers
+  slides:
+    - label: Slides
+      url: /image_assets/talks/GEN_AI_London_2025/Kannupriya_Kalra_GenAI_London_Building%20Reliable%20AI%20Systems_From_Hype_to_Practical_Toolkits.pdf
+  image: /image_assets/talks/GEN_AI_London_2025/Banner_GenAI_London_Building_Reliable_AI_Systems__From_Hype_to_Practical_Toolkits_Kannupriya_Kalra.png
+
+- start: 2025-11-29
+  end: 2025-11-30
+  event: "Oaisys Conf 2025: AI Practitioners Conference"
+  title: "LLM4S: Building Reliable AI Systems in the JVM Ecosystem"
+  location: MCCIA, Pune, India 🇮🇳
+  speakers: [Kannupriya Kalra, Shubham Vishwakarma]
+  url: https://theoaisys.com/
+  slides:
+    - label: Slides
+      url: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem.pdf
+  image: /image_assets/talks/Oaisys_2025_AI_Practitioners_Conference/Banner_LLM4S_Building_Reliable_AI_Systems_in_the_JVM_Ecosystem_Kannupriya_Kalra.png
+
+- start: 2025-12-10
+  event: AI Compute & Hardware Conference 2025
+  title: "Functional Intelligence: Building Scalable AI Systems for the Hardware Era"
+  location: Samsung HQ, San Jose, California, USA 🇺🇸
+  speakers: [Kannupriya Kalra]
+  url: https://luma.com/ql64e6yo
+  image: /image_assets/talks/AI_Compute_%26_Hardware_Conference/Banner_Functional_Intelligence_Building_Scalable_AI_Systems_for_the_Hardware_Era_2025_Kannupriya_Kalra.jpg
+
+- start: 2026-09-16
+  event: Microsoft Global Hackathon 2026
+  title: "Build with LLMs: Open Source AI for the JVM"
+  location: Microsoft Silicon Valley Campus, Mountain View, California, USA 🇺🇸
+  speakers: [Kannupriya Kalra]
+  url: https://techcommunity.microsoft.com/blog/mvp-blog/microsoft-global-hackathon-2026-where-mvp-and-rd-community-expertise-meets-innov/4542420
+  slides:
+    - label: Slides
+      url: /image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_Kannupriya_Kalra.pdf
+  image: /image_assets/talks/Microsoft_Global_Hackathon_2026/Build_with_LLMs_Open_Source_AI_for_the_JVM_with_Kannupriya_Kalra_Microsoft_Global_Hackathon_2026.png
+
+- start: 2026-10-23
+  starts_at: "2026-10-23T10:00:00+05:30"
+  time: "10:00-15:00 IST"
+  event: "E-Cell Orientation & Pitch Roulette, VIPS-TC"
+  title: "LLM4S Foundation: A Retrospective"
+  location: VIPS Technical Campus, Pitampura, Delhi, India 🇮🇳
+  speakers: [Kannupriya Kalra]
+  image: /image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
+
+- start: 2026-10-25
+  starts_at: "2026-10-25T12:00:00+05:30"
+  time: "12:00-13:00 IST"
+  event: DataverseHub
+  title: "LLM4S Foundation: A Retrospective"
+  location: Apple India, Gachibowli, Hyderabad, India 🇮🇳
+  speakers: [Kannupriya Kalra]
+  url: https://dataversehub.in/events/llm4s-foundation-a-retrospective
+  image: /image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
+
+- start: 2026-11-17
+  event: Open Source Singapore
+  title: "LLM4S 1.0: From Idea to Production AI in Scala/JVM"
+  location: Singapore 🇸🇬
+  speakers: [Kannupriya Kalra]
+  url: https://luma.com/ossg
+
+- start: 2026-11-27
+  event: LLMday + Prompt Engineering Conference London Q4 2026
+  title: "LLM4S 1.0: From Idea to Production AI in Scala/JVM"
+  location: Everyman Canary Wharf, London, UK 🇬🇧
+  speakers: [Kannupriya Kalra, Rory Graves]
+  url: https://llmday.com/2026-london-q4/Kannupriya_Kalra__Rory_Graves_LLM4S_Foundation__The_Trade_Desk_LLM4S_10_From_Idea_to_Production_AI_i

@@ -130,8 +130,8 @@ The [migration guide](migration) records each such removal.
 will target the frozen spine rather than the full tree. The minimum JDK is 21 and CI runs only JDK 21; see [Scala and JDK support](v1-scope#scala-and-jdk-support).
 `llm4s-provider-testkit` in particular needs it: its interruption checks and `LocalProviderTestServer` run on virtual threads
 ([#1582](https://github.com/llm4s/llm4s/issues/1582)), and so does `llm4s-agent-testkit`, whose
-contract cases run on virtual threads. Whether some artifacts get a lower floor before 1.0 is decided in
-[#1493](https://github.com/llm4s/llm4s/issues/1493).
+contract cases run on virtual threads. Every artifact is compiled to JDK 21 bytecode, and none has a lower floor
+([#1493](https://github.com/llm4s/llm4s/issues/1493)).
 
 Both are part of what you build against: an older Scala 3 compiler cannot read the TASTy of a library
 built with a newer one, and a newer JDK's class files do not load on an older JVM. So the Scala 3 minor

@@ -266,13 +266,24 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] = {
+    def deleteThread(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      fence: Option[(ThreadId, org.llm4s.agent.graph.FencingToken)]
+    ): Result[Unit] = {
       deleted.add(threadId)
       if (throwOnDelete) throw new NoClassDefFoundError("store driver")
-      underlying.deleteThread(threadId, token)
+      underlying.deleteThread(threadId, token, fence)
     }
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 

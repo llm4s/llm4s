@@ -1,9 +1,10 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.{ DelegatedQuestion, DelegatedRequest }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
@@ -87,9 +88,14 @@ final class AgentRun private[agent] (
    * `Durability.Async` write it abandoned may land afterwards, and is then not one of the turn's events
    * - it is never delivered here, even by a replay - but is visible only in the thread's log
    * ([[org.llm4s.agent.graph.GraphRuntime.subscribe]]).
+   *
+   * With `nested`, it also receives every event of each child the turn delegates to after this call, as
+   * `StreamEvent.Nested` (design 4.47; see [[Agent.stream]]).
    */
-  def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
-    subscribeEnding(capacity, () => ())(listener)
+  def subscribe(capacity: Int = Agent.StreamCapacity, nested: Boolean = false)(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    subscribeEnding(capacity, () => (), nested)(listener)
 
   /**
    * [[subscribe]], calling `onEnd` once when the subscription ends - after the turn's terminal event or
@@ -97,11 +103,11 @@ final class AgentRun private[agent] (
    * returned subscription is cancelled. For the bridges (fs2, ZIO, Pekko) that observe a run they do
    * not own and must end without a terminal event too.
    */
-  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit)(
+  private[llm4s] def subscribeEnding(capacity: Int, onEnd: () => Unit, nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[Subscription] =
     val scope = RunScope(runId, listener, onEnd)
-    handle.subscribe(capacity)(scope).map { s =>
+    handle.subscribe(capacity, nested)(scope).map { s =>
       scope.attach(s)
       scopes.add(scope)
       // the caller's cancel ends the scope too, or `await` would wait out the drain for a terminal event it never sees
@@ -166,14 +172,29 @@ final class AgentRun private[agent] (
 
   /** The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent. */
   private def summary(state: ThreadState, active: Option[AgentId], status: AgentStatus): Result[AgentResult] =
+    AgentRun.result(threadId, runId, root, state, active, status)
+
+private[agent] object AgentRun:
+  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
+
+  /**
+   * The result of run `runId` on `threadId`, which ended with `status`: `state`'s messages and usage, with `active` or
+   * else the thread's active agent, else `root`. What [[AgentRun.await]] returns, and what the child runner rebuilds
+   * from a child thread's latest checkpoint (design 4.42).
+   */
+  def result(
+    threadId: ThreadId,
+    runId: RunId,
+    root: AgentId,
+    state: ThreadState,
+    active: Option[AgentId],
+    status: AgentStatus
+  ): Result[AgentResult] =
     for
       messages <- state.get(Messages.key).map(_.map(_.message))
       usage    <- state.get(LoopKeys.usage)
       stored   <- state.get(LoopKeys.activeAgent)
     yield AgentResult(threadId, runId, active.orElse(stored).getOrElse(root), status, messages, usage)
-
-private[agent] object AgentRun:
-  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
 
   /**
    * `body`, run with the calling thread's interrupt flag cleared; a flag that was set is set again
@@ -191,6 +212,7 @@ private[agent] object AgentRun:
    * of the observer the run was admitted with, and ends the handle's observation after the run;
    * `await` drains it when `drain` is set. The bridges (fs2, ZIO) pass `drain = false`: they end on
    * the scope's `onEnd`, and their release awaits the run without waiting on their own listener.
+   * `parent` is a delegated child run's parent thread and run, which its tracing names (design 4.47).
    */
   def apply(
     handle: RunHandle[TurnOutput],
@@ -199,7 +221,8 @@ private[agent] object AgentRun:
     runtime: GraphRuntime,
     tracing: Option[Tracing],
     scope: Option[RunScope],
-    drain: Boolean
+    drain: Boolean,
+    parent: Option[(ThreadId, RunId)] = None
   ): AgentRun =
     scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
@@ -207,7 +230,7 @@ private[agent] object AgentRun:
       loop,
       root,
       runtime,
-      tracing.map(AgentTracing(handle, root, loop, _)),
+      tracing.map(AgentTracing(handle, root, loop, _, parent)),
       scope.filter(_ => drain)
     )
 
@@ -222,23 +245,58 @@ private[agent] object AgentRun:
     result match
       case RunResult.Completed(state, output, _) =>
         output.outcome match
-          case TurnOutcome.Completed =>
-            state.get(Messages.key).flatMap { stored =>
-              stored.reverseIterator
-                .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
-                .toRight(ValidationError("agent", "the turn completed without an assistant message"))
-            }
-          case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
+          case TurnOutcome.Completed         => completedStatus(state)
+          case TurnOutcome.StepLimitReached  => Right(AgentStatus.StepLimitReached)
+          case TurnOutcome.TokenLimitReached => Right(AgentStatus.TokenLimitReached)
       case suspended: RunResult.Suspended =>
         for
           approvals   <- loop.requests(suspended)
           questions   <- loop.questions(suspended)
           middleware  <- loop.middlewareQuestions(suspended)
           breakpoints <- loop.breakpoints(suspended)
-        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints)
+          delegated   <- delegatedOf(loop, suspended)
+        yield AgentStatus.Suspended(approvals, questions, middleware, breakpoints, delegated)
       case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
         Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
       case RunResult.Failed(_, error) => Left(error)
+
+  /**
+   * The interrupts of the children `suspended`'s `task` calls wait on, flattened under composite ids (design 4.46).
+   */
+  private def delegatedOf(
+    loop: ToolLoop,
+    suspended: RunResult.Suspended
+  ): Result[Vector[(InterruptId, DelegatedRequest)]] =
+    loop.delegatedQuestions(suspended).flatMap { asks =>
+      asks.foldLeft[Result[Vector[(InterruptId, DelegatedRequest)]]](Right(Vector.empty)) { case (acc, (id, request)) =>
+        acc.flatMap(found =>
+          ToolLoop.question[DelegatedQuestion](request).map(q => found ++ DelegatedQuestion.flatten(id, q))
+        )
+      }
+    }
+
+  /**
+   * The status of a settled turn, rebuilt from the thread alone (design 4.41): `outcome`, recorded on the turn's
+   * terminal checkpoint ([[org.llm4s.agent.graph.Checkpoint.outcome]]), and `state`, that checkpoint's state, where
+   * an answer is. Equal to the status [[AgentRun.await]] returned live: `Completed` with the last assistant message's
+   * content, `StepLimitReached`, `TokenLimitReached`, or `Blocked`. A turn whose live result was `Left` - its answer
+   * failed its output schema, or a hook's failure blocked it - is `Left` again: `GraphError.OutputInvalid` with every error, or a
+   * `ProcessingError` naming the failure's kind and message.
+   */
+  def settledStatus(outcome: RunOutcome, state: ThreadState): Result[AgentStatus] = outcome match
+    case RunOutcome.Answered          => completedStatus(state)
+    case RunOutcome.StepLimitReached  => Right(AgentStatus.StepLimitReached)
+    case RunOutcome.TokenLimitReached => Right(AgentStatus.TokenLimitReached)
+    case RunOutcome.Blocked(g, r)     => Right(AgentStatus.Blocked(g, r))
+    case RunOutcome.OutputInvalid(es) => Left(GraphError.OutputInvalid(es))
+    case RunOutcome.Failed(kind, msg) => Left(ProcessingError("agent turn", s"$kind: $msg"))
+
+  private def completedStatus(state: ThreadState): Result[AgentStatus] =
+    state.get(Messages.key).flatMap { stored =>
+      stored.reverseIterator
+        .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
+        .toRight(ValidationError("agent", "the turn completed without an assistant message"))
+    }
 
   /** The current turn's messages: from the last user message on. */
   def turnMessages(state: ThreadState): Result[Vector[Message]] =

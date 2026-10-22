@@ -250,7 +250,7 @@ class OpenAIClient private[provider] (
     logger.debug(s"$clientDescription closed")
   }
 
-  /** Runs one SDK call, logging and mapping any failure to an [[LLMError]]. */
+  /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
       val error = OpenAIClient.mapError(e, providerName, credentialSecrets)
@@ -814,7 +814,7 @@ object OpenAIClient {
   }
 
   /**
-   * Maps an SDK failure to an [[LLMError]]. An HTTP error from the service keeps its status
+   * Maps an SDK failure to an [[org.llm4s.error.LLMError LLMError]]. An HTTP error from the service keeps its status
    * code, body and headers, so a 401 becomes an `AuthenticationError`, a 429 a `RateLimitError`
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
@@ -856,7 +856,7 @@ object OpenAIClient {
   /**
    * The configured values an error built from a remote reply must not repeat: the API key, or with
    * workload identity a literal identity token and the ids `toString` redacts (those long enough to scrub
-   * without garbling the body, [[Redaction.identifiers]]).
+   * without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
    */
   private[provider] def credentialSecrets(config: ProviderConfig): Seq[String] = config match {
     case openAI: OpenAIConfig =>

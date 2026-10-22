@@ -10,7 +10,8 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
-[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915).
+[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
+growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so is [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708).
 
 ## Multimodal content parts (#1913)
 
@@ -42,6 +43,112 @@ In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)
 - **A client refuses what it cannot send, before sending**: a part kind, source or format its wire format cannot carry is `UnsupportedContentPartError`. A provider's own limits (how many images, how large a request, which formats a model reads) are the provider's: its 400 or 413 comes back as a typed `ValidationError` or `ServiceError` with its message. The guide's [table](../guide/multimodal.html#what-each-provider-sends) lists what each takes.
 - **An agent thread holds at most 20 MiB of inline media** (`Messages.MaxInlineBytes`): media added past it is replaced by a text part naming what was removed. Context budgets (`ConversationTokenCounter`, `ContextPruning`) count media by estimate.
 - **Inline media is bounded** at 5 MiB per part by `ContentPart.image` / `ContentPart.document`, which return a `Result`. Every agent checkpoint copies the thread's messages, so larger media goes at a `MediaSource.Url` or in a `MediaSource.ProviderFile`. See [Multimodal content](../guide/multimodal.html).
+## Subagents and isolation (Phase 4)
+
+Not in a release yet. Stage 4 lets an agent delegate to child agents on threads of their own ([#2044](https://github.com/llm4s/llm4s/issues/2044)). Each slice adds its breaks here.
+
+### Child threads (#2045)
+
+A thread can now be a child thread: its checkpoints record a `RunOrigin` naming its parent ([design 4.41](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.41-stage-4-slice-k1-child-threads.md)).
+
+- **Checkpoint format 8 and SQLite schema 6, with no way back.** Format 8 adds `Checkpoint.origin`, `Checkpoint.outcome` (how a settled run ended, written with every terminal checkpoint) and `Checkpoint.deleting` (a cascade delete that has begun; admission refuses such a thread with `GraphError.ThreadDeleting` until `deleteThread` finishes it); schema 6 adds `parent_thread_id` and `child_order` to `llm4s_checkpoint_threads`. Existing threads read and continue unchanged: format 7 reads as a top-level thread with no outcome, and the schema step backfills nothing. An older build refuses a format-8 checkpoint (`UnsupportedCheckpointFormat`) and a schema-6 file, so upgrade every process sharing a store together.
+- **A `Checkpointer` implements `children`.** `children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]]` is a new abstract method: list the threads whose latest checkpoint's `origin.parent` is `parent`, in the order each first named it, paged after `after`, never a deleted one, and refuse an unknown `after` with a `ValidationError`. Index the parent as you commit a checkpoint (`checkpoint.origin.map(_.parent)`). A store that only forwards to another forwards this too. `CheckpointerContract` checks it.
+- **`deleteThread` and `Agent.forget` cascade.** Deleting a thread first deletes every child thread below it; a child with a live run anywhere refuses the whole delete with `ThreadBusy`, deleting nothing.
+- **`Checkpointer.deleteThread(threadId, token)` is `deleteThread(threadId, token, fence: Option[(ThreadId, FencingToken)])`** ([#2063](https://github.com/llm4s/llm4s/issues/2063)). With `Some((other, otherToken))` a store deletes only if `token` is the thread's current claim and `otherToken` is `other`'s, both checked in the same lock or transaction as the delete; otherwise it returns `GraphError.StaleClaim` - for the thread when its own claim is stale (checked first), else for `other` - and deletes nothing. `None` is the previous behaviour. The runtime fences a cascade's deletes by the root's claim and retention's by the parent's. A wrapper forwards it: `def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) = underlying.deleteThread(threadId, token, fence)`. `CheckpointerContract` checks it.
+- **A store checks `Commit.fence`** ([#2071](https://github.com/llm4s/llm4s/issues/2071)). `Commit` gains `fence: Option[(ThreadId, FencingToken)]` (`withFence`). With `Some((other, otherToken))` a store applies the commit only if its `token` is the thread's current claim and `otherToken` is `other`'s, both checked in the same lock or transaction as the write; otherwise it returns `GraphError.StaleClaim` - for the thread when its own claim is stale (checked first), else for `other` - and writes nothing. The runtime fences every admission and settlement a parent drives on a child (its first commit, `recoverChild`, `resumeChild`, `settleChild`, the abandon at `start`) by the parent's claim, so a stale parent task never registers or runs a child after a successor took the parent over. A wrapper that forwards the `Commit` whole needs no change. `CheckpointerContract` checks it.
+- **Child threads refuse direct calls.** `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (and the `Agent` methods over them) on a child thread are refused with the new `GraphError.ChildThread`; delete its parent to delete it. An exhaustive match on `GraphError` needs the new case.
+- **Settled children are pruned.** A thread keeps its newest 64 settled children (`RunConfig.withChildRetention`); older ones are deleted as the parent's run completes and when its next run starts, where a child an earlier run left `Running` or `Suspended` is first settled `Failed("abandoned", ...)`.
+- **`Checkpoint.apply` and `RunConfig.apply`** gain parameters with defaults (`origin`, `outcome`; `childRetention`); calls that pass every previous argument resolve to the kept overloads unchanged.
+
+### Token budgets and the run's deadline (#2047)
+
+- **`AgentStatus.TokenLimitReached`** is a new case, so an exhaustive `match` on `AgentStatus` needs it. A turn ends
+  with it when the run's token budget is used; like `StepLimitReached` it is a completed turn with no answer. In Java
+  and Kotlin, `AgentStatusKind.TOKEN_LIMIT_REACHED` is a new constant, so a `switch` or `when` without a `default`
+  needs it too. `TurnOutcome.TokenLimitReached` likewise, for code reading a `TurnOutput`.
+- **`RunBudgets.maxTokens`** is a new field (default `None`, no budget). `RunBudgets(maxSupersteps, timeout,
+  maxConcurrency)` still compiles; a pattern `case RunBudgets(s, t, c)` needs a fourth binder. Set a budget with
+  `RunBudgets.default.withMaxTokens(n)`; a run can overshoot it by the one model call in flight
+  ([design 4.43](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.43-stage-4-slice-k3-token-budgets.md)).
+
+### Child-run supervision (#2046)
+
+The runner that delegated calls use to run a child is internal ([design 4.42](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.42-stage-4-slice-k2-child-run-supervision.md)); two things change for everyone:
+
+- **A tool call's own model usage is counted.** The usage a tool call's task records (a tool that calls a model through its context, or a delegated child's roll-up) now commits to the thread's `usage` with the call's result, so `AgentResult.usage` can be higher than before for agents with such tools.
+- **The state key ids `delegation-prior-usage`, `delegation-input`, `delegation-counted` and `delegation-grant` are reserved.** Every agent graph registers them; a tool or middleware declaring a key with one of these ids is refused at `build()`.
+
+### Child suspension through the parent (#2050)
+
+A child that stops for an approval or a question now suspends its parent ([design 4.46](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.46-stage-4-slice-d3-child-suspension.md)):
+
+- **`AgentStatus.Suspended` has a fifth field, `delegated`** (default empty): a subagent's interrupts, under composite ids `<parent>~<child>`. A positional pattern `case AgentStatus.Suspended(a, q, m, b)` needs a fifth binder, `case AgentStatus.Suspended(a, q, m, b, _)`; one matching by type (`case s: AgentStatus.Suspended`) is unchanged. Answer a delegated interrupt with the usual helpers by its composite id. In Java and Kotlin, `pending` lists each one as its kind in the child, under the composite id.
+- **A suspended child is no longer a tool error.** Code that waited for the parent model to see `subagent '<id>' suspended` now gets the parent `Suspended` instead, and must answer or abandon it.
+- **`ToolLoop.questions` no longer lists a `task` call waiting on its child**; `ToolLoop.delegatedQuestions` does.
+
+### Explicit inheritance (#2049)
+
+- **`RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps: Long`** (default 0): how many of the run's
+  failed attempts were an agent's model step, which a recovered child counts against its step grant ([design 4.45](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.45-stage-4-slice-d2-inheritance.md)).
+  A positional pattern needs another binder: `case RunEvent.RunCancelled(_)` becomes `RunCancelled(_, _)`, and
+  `RunFailed(message, usage)` becomes `RunFailed(message, usage, _)`. Stored events read unchanged (a missing `steps`
+  is 0).
+
+### Nested streams and tracing (#2051)
+
+A parent's subscribers can follow its children, and a child's trace names its parent ([design 4.47](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.47-stage-4-slice-d4-nested-streams-and-tracing.md)):
+
+- **`StreamEvent.Nested(child, event)`** is a new case, so an exhaustive `match` on `StreamEvent` needs it. Only a subscription made with `nested = true` receives one; add `case _: StreamEvent.Nested => ()` where you match exhaustively.
+- **`TraceEvent.AgentRunEnded` gains `parentThreadId` and `parentRunId`** (`Option[String]`, default `None`), after `timestamp`. Construction is unchanged; a positional pattern `case AgentRunEnded(t, r, a, s, m, u, ts)` needs two more binders, or match on the type and read the fields.
+- **OpenTelemetry span names.** The ended-run span `Agent Run` is now `invoke_agent <agent>`, and the tool span `Tool Execution: <tool>` is now `execute_tool <tool>`, each with `gen_ai.operation.name`; a dashboard or alert keyed on the old names needs the new ones. A child run's span carries `llm4s.parent.thread_id` and `llm4s.parent.run_id`.
+- **`RunHandle.subscribe` takes `nested`** (`subscribe(capacity, nested = false)`), so a `RunHandle` of your own implements the two-argument form. A call site is unchanged.
+- **A subagent traces to its parent's `Tracing`.** An agent built `withTracing` now also traces its subagents' runs, each ending with its own `AgentRunEnded`.
+
+### Subagents in the harness profile (#2052)
+
+`HarnessProfile` gains `subagents: SubagentConfig` ([design 4.48](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md)). `HarnessProfile()` has `SubagentConfig.none`, so the minimal profile is unchanged; `HarnessProfile.deepAgents` and `HarnessConfigLoader.load()` now turn on the general-purpose subagent.
+
+- **A `deepAgents` agent offers a `task` tool.** An application tool named `task` now clashes at `build()`: rename it, or turn the subagent off with `profile.withSubagents(SubagentConfig.none)` (or `llm4s.agent.harness.subagents.generalPurpose.enabled = false`).
+- **Permission rules decide `task` calls.** A `deepAgents` profile with permission rules denies `task` unless a rule allows it, as for `write_todos`: add `PermissionRule.allow(Operation.Invoke, "task:general-purpose")` (or `"task:*"`).
+- **`withDelegation` beside a harness is refused.** The profile's `SubagentConfig.delegation` sets the bounds: `profile.withSubagents(profile.subagents.withDelegation(config))`.
+- **A harness agent's `delegation` middleware runs inside its permissions and outside its other middleware**, not innermost, so its prompt section comes before the harness's. Subagents added with `AgentBuilder.withSubagents` beside a harness follow the profile's own.
+
+## Production adapters (Stage 5)
+
+Not in a release yet. Stage 5 runs one agent service on several machines ([#2129](https://github.com/llm4s/llm4s/issues/2129)). Each slice adds its breaks here.
+
+### The PostgreSQL checkpointer (#2130)
+
+`llm4s-agent-checkpoint-postgres` adds `PostgresCheckpointer` ([design 4.50](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md)). Adopting it needs nothing of existing code; these change for every store:
+
+- **`RetentionPolicy.maxAge` is judged by commit time.** `prune` compares the store's clock with the time the store committed each checkpoint and event, by that same clock, no longer with the producer's `Checkpoint.createdAt` and event `timestamp`, so a writer with a skewed clock makes nothing too old or too young. With one clock for the runtime and the store, as before, nothing changes. A custom `Checkpointer` records a commit time with each checkpoint and event and judges `maxAge` by it; `CheckpointerContract` checks it, with a skewed producer.
+- **SQLite schema 7, with no way back.** It adds the commit times to `llm4s_checkpoint_history` and `llm4s_checkpoint_events`. Rows written before it have none and are judged by their producer's timestamps, as before. A schema-6 build refuses a schema-7 file, so upgrade every process sharing a file together.
+- **`GraphError.UnsupportedStoreSchema(store, found, supported)`** is a new case, returned when a store's storage was migrated by a newer build (the PostgreSQL store's refusal of a newer schema). An exhaustive match on `GraphError` needs it.
+- **Upgrading a PostgreSQL deployment.** Instances of releases that change neither the store's schema nor the checkpoint format can be replaced one at a time. A release that changes either needs every instance stopped before the first new one starts: an old instance that meets the newer schema refuses to open with `UnsupportedStoreSchema` rather than writing anything.
+
+### The thread registry (#2132)
+
+Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md)). Code that only runs agents changes nothing; these change:
+
+- **Two new abstract `Checkpointer` methods.** `threads(query: ThreadQuery): Result[ThreadPage]` and `incompleteThreads(tenantId, after, limit): Result[ThreadPage]`. A custom store implements both (a forwarding wrapper forwards both), tenant-scoped, newest and oldest first by the time the store last committed a checkpoint or metadata to the thread, and passes `CheckpointerContract`'s new cases.
+- **`Commit.metadata: Option[ThreadMetadata]`.** A commit carrying it replaces the thread's metadata, fenced like the rest of the commit; a store keeps it until another replaces it or the thread is deleted. `Commit.apply` keeps its earlier forms.
+- **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
+- **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
+## Workspace command confinement (#1983)
+
+Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:
+
+- **Commands lose the network by default.** `networkAllowed` (default `false`) now binds commands: `socket` fails for every family but `AF_UNIX`, so `sbt`, `curl` or a package manager that fetches fails. Set `networkAllowed = true` where a command needs it; in a container, pass the whole config:
+
+  ```scala
+  new ContainerisedWorkspace(dir, image, 8080,
+    sandboxConfig = Some(WorkspaceSandboxConfig.Permissive.copy(networkAllowed = true)))
+  ```
+- **`readOnlyPaths` and `allowedPaths` bind commands too**, not only the runner's own file operations: a command cannot write under a read-only path (nor create one that does not exist yet), cannot create or delete entries directly in a directory above one, and cannot read outside `allowedPaths`.
+- **A kernel without Landlock ABI v3** (Linux 6.2), or an image without the `llm4s-confine` helper, refuses every command `SANDBOX_UNAVAILABLE`; it never runs one unconfined. An amd64 image under emulation (Docker Desktop's Rosetta on Apple silicon) is such a case: build the image for the host architecture.
+- **A runner started outside the image** grants commands `/tmp` only with `-XX:+DisableAttachMechanism` and `-XX:+PerfDisableSharedMem`, and then refuses git commands (`EXECUTION_FAILED`) while its `java.io.tmpdir` lies in `/tmp` or another path commands may write: set it to an owner-only directory elsewhere, as the image does (`/var/tmp/llm4s-runner`).
+
 ## Workspace backends (#1906)
 
 Not in a release yet. Stage 3 slice F2 ([#1906](https://github.com/llm4s/llm4s/issues/1906)) puts the workspace behind the harness's `FileBackend` and `SandboxBackend` ([design 4.33](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md)). Source and behaviour breaks, with no shims:
@@ -85,6 +192,44 @@ yield (files, ExecuteTool(sandbox))
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `LLMClientPekko.streamComplete` materializes `Future[Done]` (#1848)
+
+`streamComplete` is now a `Source[StreamedChunk, Future[Done]]`, like every `AgentPekko` stream
+([#1848](https://github.com/llm4s/llm4s/issues/1848)). The future completes once the provider call has returned, after a
+cancellation too, so a caller can wait until nothing is left running. Code that only runs the stream is unchanged; code
+that names the type changes it, and code that wanted the old value drops it:
+
+```scala
+val chunks: Source[StreamedChunk, NotUsed] = client.streamComplete(conversation).mapMaterializedValue(_ => NotUsed)
+```
+
+### `MemoryManagerConfig` is growth-safe (#1847)
+
+`MemoryManagerConfig` follows the growth-prone pattern ([#1847](https://github.com/llm4s/llm4s/issues/1847)): build
+it with `MemoryManagerConfig(...)` (every option keeps its default) or a preset, and change it with
+`withAutoExtractEntities`, `withDefaultImportance`, `withContextTokenBudget` and `withConsolidationConfig`. `new` and
+`.copy` are private:
+
+```scala
+val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .copy(contextTokenBudget = 500)
+```
+
+`toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
+
+### `ToolRetryPolicy` is growth-safe (#1708)
+
+`ToolRetryPolicy` follows the growth-prone pattern, so that it could gain `jitter`
+([#1708](https://github.com/llm4s/llm4s/issues/1708)): build it with `ToolRetryPolicy(...)`, whose arguments are
+unchanged apart from the new `jitter` (default `0.0`, no jitter), and change it with `withMaxAttempts`,
+`withBaseDelay`, `withBackoffFactor` and `withJitter`. `new` and `.copy` are private:
+
+```scala
+import org.llm4s.toolapi.ToolRetryPolicy
+import scala.concurrent.duration._
+
+val policy = ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis).withMaxAttempts(5) // was .copy(maxAttempts = 5)
+```
 
 ### `AssistantMessage` and `Completion.thinking` (#1381)
 
@@ -1904,7 +2049,7 @@ llm4s {
 |---|---|
 | `LLM_MODEL=openai/gpt-4o-mini` | a section with `provider = "openai"`, `model = "gpt-4o-mini"`, selected by `llm4s.providers.provider` |
 | `OPENAI_API_KEY=...` read automatically | `apiKey = ${?OPENAI_API_KEY}` in that section, and the same variable exported |
-| `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ... | `baseUrl = "..."` (or `baseUrl = ${?OLLAMA_BASE_URL}`) in the section; Ollama sections require it |
+| `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ... | `baseUrl = "..."` (or `baseUrl = ${?OLLAMA_BASE_URL}`) in the section; an Ollama section defaults to `http://localhost:11434` |
 | switching model by changing `LLM_MODEL` | a second section, selected by changing `provider`, by `-Dllm4s.providers.provider=<name>`, by your own `provider = ${?LLM4S_PROVIDER}` binding, or loaded directly with `Llm4sConfig.provider("<name>")` |
 | `Llm4sConfig.provider()` | `Llm4sConfig.defaultProvider()` |
 
@@ -2640,6 +2785,10 @@ RAG.builder()
 
 RAG.builder().withEmbeddings(name)                 // any registered id or alias; no conversion
 ```
+
+`build` on a `RAGConfig` is an extension from `RAG.RAGConfigOps`, so the call site needs
+`import org.llm4s.rag.RAG.RAGConfigOps` and a `ModelRegistryService` given (for example from
+`Llm4sConfig.modelRegistryService()`); it takes only a `using` clause, so it is `.build`, not `.build()`.
 
 `RAGConfig.embeddingProvider` is a `ProviderId`, so `config.embeddingProvider.name` becomes
 `config.embeddingProvider.asString`. `RAG.build` and `RAGConfig#build` take an implicit

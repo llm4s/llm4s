@@ -75,7 +75,7 @@ A: Ensure you are using `StreamingAccumulator` which correctly buffers and assem
 A: Check the `endpoint` of your `provider = "azure"` section (the deployment endpoint in your Azure OpenAI resource, e.g. `endpoint = ${?AZURE_API_BASE}`) and its `model`. Nothing reads `AZURE_API_BASE` or a deployment-name variable unless your section binds it.
 
 **Q: Ollama returns connection refused**
-A: Ensure your local Ollama daemon is running (`ollama serve`) and the `baseUrl` of your `provider = "ollama"` section is correct - usually `http://localhost:11434`. Ollama sections require `baseUrl`; bind it with `baseUrl = ${?OLLAMA_BASE_URL}` if you want to set it from the environment.
+A: Ensure your local Ollama daemon is running (`ollama serve`) and the `baseUrl` of your `provider = "ollama"` section is correct - usually `http://localhost:11434`. A section without `baseUrl` uses that default; bind it with `baseUrl = ${?OLLAMA_BASE_URL}` if you want to set it from the environment.
 
 **Q: Getting "Unsupported modality" error for image requests**
 A: Not all models support image generation or vision. Ensure you are using an image-capable model configuration (e.g., `dall-e-3` or `gpt-4o`) via `ImageGenerationClient`.

@@ -38,8 +38,8 @@ public final class JEmbeddings {
   }
 
   /**
-   * The length of every vector; for an empty batch, which calls no provider, the dimensions the model is
-   * configured with.
+   * The length of every vector; for an empty batch, which calls no provider, the dimensions the model's
+   * provider module declares, or {@code 0} when it declares none.
    */
   public int dimensions() {
     return dimensions;

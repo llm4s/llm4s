@@ -5,6 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, Pro
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.provider.OllamaProvider
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -26,9 +27,10 @@ object OllamaModelLister extends ProviderModelLister:
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
     for
-      ollama  <- config.requireProvider(ProviderId("ollama"))
-      baseUrl <- ollama.requireBaseUrl
-      models  <- listOllamaModels(baseUrl, httpClient)
+      ollama <- config.requireProvider(ProviderId("ollama"))
+      // The same default as a chat section's (#1991): a section without `baseUrl` means the local server.
+      baseUrl = ollama.baseUrl.getOrElse(BaseUrl(OllamaProvider.DefaultBaseUrl))
+      models <- listOllamaModels(baseUrl, httpClient)
     yield models
 
   private def listOllamaModels(baseUrl: BaseUrl, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =

@@ -426,8 +426,8 @@ names agent events `graph.custom`; `withTracing` on an agent names them `agent.*
 
 | Backend | What `AgentRunEnded` shows |
 |---------|----------------------------|
-| Langfuse | One trace per run (trace id = run id), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; one span per message |
-| OpenTelemetry | An `INTERNAL` span "Agent Run" with thread, run, agent, status, message count and `gen_ai.usage.*` totals |
+| Langfuse | One trace per run (trace id = run id), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage, and a subagent's parent thread and run; one span per message |
+| OpenTelemetry | An `INTERNAL` span `invoke_agent <agent>` with `gen_ai.operation.name`, `gen_ai.agent.name`, `gen_ai.conversation.id`, thread, run, status, message count, `gen_ai.usage.*` totals and, for a subagent's run, `llm4s.parent.thread_id` / `llm4s.parent.run_id`; tool calls are `execute_tool <tool>` spans |
 | `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost |
 | Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
 
@@ -504,7 +504,7 @@ The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`
 libraryDependencies += "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion
 ```
 
-On `0.4.1` and earlier this code ships inside `llm4s-core`; the [migration note](../../reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core) has the details. Package names are unchanged.
+On `0.4.1` and earlier this code ships inside `llm4s-core`; the [migration note](../../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core) has the details. Package names are unchanged.
 
 ### Turn it on from configuration
 
@@ -875,7 +875,7 @@ Current monitoring limitations in LLM4S:
 - **No real-time streaming metrics** - Streaming completions are traced on completion, not in-flight
 - **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations; the resulting spans are then queryable via `InMemoryTraceStore`
 
-These are tracked in the [Production Readiness Roadmap](../../reference/roadmap.md).
+These are tracked in the [Production Readiness Roadmap](../../reference/roadmap).
 
 ---
 
@@ -884,5 +884,5 @@ These are tracked in the [Production Readiness Roadmap](../../reference/roadmap.
 - [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
 - [In-Process Tracing Use Cases](enhanced-tracing-use-cases.md) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
-- [Configuration Guide](../../getting-started/configuration.md) - Complete configuration reference
-- [Roadmap](../../reference/roadmap.md) - Planned observability improvements
+- [Configuration Guide](../../getting-started/configuration) - Complete configuration reference
+- [Roadmap](../../reference/roadmap) - Planned observability improvements

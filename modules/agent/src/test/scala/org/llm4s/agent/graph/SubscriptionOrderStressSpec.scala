@@ -39,8 +39,16 @@ class SubscriptionOrderStressSpec extends AnyFlatSpec with Matchers with EitherV
       if ThreadLocalRandom.current().nextInt(4) > 0 then Thread.sleep(0, ThreadLocalRandom.current().nextInt(800000))
       page
     }
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: FencingToken)           = underlying.deleteThread(threadId, token)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]) =
+      underlying.deleteThread(threadId, token, fence)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)

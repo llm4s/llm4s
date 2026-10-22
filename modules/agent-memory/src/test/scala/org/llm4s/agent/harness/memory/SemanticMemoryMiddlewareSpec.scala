@@ -175,8 +175,8 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
   it should "count every call the memory manager makes in the run's usage (rule 11)" in {
     val extraction =
       new FunctionClient(_ => """[{"entity_name": "Ada", "entity_type": "person", "fact": "Ada wrote programs"}]""")
-    val extracting = (store: MemoryStore, client: LLMClient) =>
-      LLMMemoryManager(MemoryManagerConfig.default.copy(autoExtractEntities = true), store, client)
+    val extracting =
+      (store: MemoryStore, client: LLMClient) => LLMMemoryManager(MemoryManagerConfig.fullFeatured, store, client)
     val m      = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), extracting, extraction)
     val result = agentWith(answering("Ada wrote programs."), m).run(ThreadId("usage"), "Who was Ada?").value
     extraction.calls.get should be > 0
@@ -444,8 +444,8 @@ class SemanticMemoryMiddlewareSpec extends AnyFlatSpec with Matchers with Either
     val calling = org.llm4s.agent.SpecTools.calling(org.llm4s.agent.SpecTools.call("c1", "echo"))
     val parked  = agent(Agent.builder("assistant", ScriptedLLMClient.of(calling))).run(thread, "go").value
     val answers = parked.status match {
-      case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(a => parked.approve(a._1)).toMap
-      case other                                     => fail(s"expected Suspended, got $other")
+      case AgentStatus.Suspended(approvals, _, _, _, _) => approvals.map(a => parked.approve(a._1)).toMap
+      case other                                        => fail(s"expected Suspended, got $other")
     }
     val memory = new SemanticMemoryMiddleware(_ => Right(InMemoryStore.empty), simple, answering())
     agent(Agent.builder("assistant", answering()).withMiddleware(memory))

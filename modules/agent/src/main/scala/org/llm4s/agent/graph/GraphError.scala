@@ -6,7 +6,7 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * Errors raised while building, running or restoring a typed graph. Every case is a
- * [[NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
+ * [[org.llm4s.error.NonRecoverableError NonRecoverableError]] except [[GraphError.DeadlineExceeded]] - `recover` with a new budget
  * continues that run - and [[GraphError.ThreadBusy]], which a retry may get past once the thread is free.
  */
 sealed trait GraphError extends LLMError
@@ -126,6 +126,18 @@ object GraphError:
   final case class UnsupportedCheckpointFormat(found: Int, supported: Int) extends GraphError with NonRecoverableError:
     override val message: String = s"Checkpoint format $found is not supported; this build reads up to $supported"
 
+  /**
+   * A store's storage was migrated by a newer build: its schema is at version `found`, and this build knows up to
+   * `supported`. The store refuses to open rather than read or write tables it does not know; `store` names the
+   * storage (for PostgreSQL, the database schema). Stop every instance of the older build before a release that
+   * changes the schema starts (design 4.50).
+   */
+  final case class UnsupportedStoreSchema(store: String, found: Int, supported: Int)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String =
+      s"$store is at checkpoint schema version $found, newer than the $supported this build supports"
+
   /** A new checkpoint's parent is not the thread's latest: another writer advanced the thread. */
   final case class CheckpointConflict(threadId: String, expected: Option[String], actual: Option[String])
       extends GraphError
@@ -150,6 +162,26 @@ object GraphError:
   /** A fork's target thread already exists; a fork only ever creates a new thread. Nothing was changed. */
   final case class ThreadExists(threadId: String) extends GraphError with NonRecoverableError:
     override val message: String = s"Thread '$threadId' already exists; fork to a new thread id"
+
+  /**
+   * The thread is a child thread - its latest checkpoint records a [[RunOrigin]] - of `parent`, and is driven only
+   * through its parent's run (design 4.41): `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` on
+   * it are refused before any claim, and nothing was changed. Reads (`history`, `checkpoint`, `subscribe`,
+   * `children`) are allowed; delete the parent to delete the child.
+   */
+  final case class ChildThread(threadId: String, parent: String) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Thread '$threadId' is a child thread of '$parent'; it is driven only through its parent's run"
+
+  /**
+   * A cascade delete of the thread began and did not finish (design 4.41, #2074): its latest checkpoint is marked
+   * [[Checkpoint.deleting]], and some of its descendants may already be gone, so a replayed task could re-run a deleted
+   * child. `start`, `recover`, `resume`, `fork` (from it) and `updateState` on it are refused before any claim, and
+   * nothing was changed; `deleteThread` finishes the delete.
+   */
+  final case class ThreadDeleting(threadId: String) extends GraphError with NonRecoverableError:
+    override val message: String =
+      s"Thread '$threadId' is being deleted; run deleteThread again to finish the delete"
 
   /** Events before `earliestSeq` were compacted away and cannot be replayed. */
   final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError with NonRecoverableError:

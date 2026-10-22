@@ -278,7 +278,15 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     orderViaZio(new ScriptedClient(wrongType), conversation).left.value shouldBe a[ValidationError]
   }
 
-  "A whole number above 2^53" should "be rounded by ujson's AST, whichever JSON library reads it afterwards" in {
+  "A whole number above 2^53" should "reach a uPickle Long field exactly, since completeStructured reads the text" in {
+    final case class Id(id: Long)
+    given upickle.default.Reader[Id] = upickle.default.macroR
+    new ScriptedClient(s"""{"id":$big}""")
+      .completeStructured[Id](conversation, idSchema[Id]("id", Schema.integer("id")))
+      .value shouldBe Id(big)
+  }
+
+  it should "be rounded by ujson's AST, whichever bridged JSON library reads it afterwards" in {
     parsed should not be big
     parsed shouldBe big - 1
 

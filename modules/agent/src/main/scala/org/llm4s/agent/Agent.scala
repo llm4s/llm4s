@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.delegation.{ ChildRef, DelegatedAnswers, DelegatedRequest, DelegationPlan }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -22,8 +23,8 @@ import org.slf4j.LoggerFactory
  * }}}
  *
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
- * `Completed` or `StepLimitReached`; one a guardrail blocks is `Right` with `Blocked`, the blocked
- * turn absent from the thread; one that parks on approvals, questions or breakpoints is `Right` with
+ * `Completed`, `StepLimitReached` or `TokenLimitReached`; one a guardrail blocks is `Right` with
+ * `Blocked`, the blocked turn absent from the thread; one that parks on approvals, questions or breakpoints is `Right` with
  * `Suspended`, and continues with [[resume]]. Anything else is `Left`: a blank query and the
  * runtime's refusals (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...)
  * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure
@@ -38,24 +39,34 @@ import org.slf4j.LoggerFactory
 final class Agent private[agent] (
   val id: AgentId,
   val loop: ToolLoop,
-  runtime: GraphRuntime,
+  private[agent] val runtime: GraphRuntime,
   tracing: Option[Tracing],
   interruptBefore: Set[NodeId] = Set.empty,
   interruptAfter: Set[NodeId] = Set.empty,
-  retention: Option[RetentionPolicy] = None
+  retention: Option[RetentionPolicy] = None,
+  childRetention: Option[Int] = None,
+  /**
+   * What this agent's subagents run with (design 4.45): for each, its tools (own or granted), middleware, ancestors'
+   * permission rules, model, budget and whether it may delegate. Empty for an agent without subagents.
+   */
+  val delegation: DelegationPlan = DelegationPlan.empty
 ):
 
   /**
    * `config` with the agent's static breakpoints ([[AgentBuilder.withInterruptBefore]],
    * [[AgentBuilder.withInterruptAfter]]) added to its own.
    */
-  private def configured(config: RunConfig): RunConfig =
+  private[agent] def configured(config: RunConfig): RunConfig =
     config
       .withInterruptBefore(config.interruptBefore ++ interruptBefore)
       .withInterruptAfter(config.interruptAfter ++ interruptAfter)
       // a harness's retention, applied as each turn is admitted (design 4.37), unless the run sets its own;
       // keepAll removes nothing, so it is not applied at all
       .withRetention(config.retention.orElse(retention).filter(_ != RetentionPolicy.keepAll))
+      // a delegating agent's DelegationConfig.childRetention and the run's own: both bound it, the tighter wins (4.44)
+      .withChildRetention(
+        childRetention.fold(config.childRetention)(math.min(_, config.childRetention))
+      )
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the
@@ -108,7 +119,7 @@ final class Agent private[agent] (
   /**
    * `first` on a new thread, then each of `followUps` on it, stopping at the first turn whose
    * status is not `Completed`; returns the last turn's result. Each turn is its own run: the first
-   * runs with `config`, each follow-up with `config` and a fresh [[RunId]]. A `Left` carries no
+   * runs with `config`, each follow-up with `config` and a fresh [[org.llm4s.agent.graph.RunId RunId]]. A `Left` carries no
    * thread id, so a conversation whose turn fails - cancelled by an interrupt included - is
    * forgotten once that turn has ended, as for the one-shot [[run]].
    */
@@ -146,7 +157,9 @@ final class Agent private[agent] (
 
   /**
    * Removes `threadId` - its history, usage and event log - from the agent's runtime, so that its id
-   * names a new thread again. Threads are kept until forgotten, one-shot [[run]]s included.
+   * names a new thread again, and every child thread below it first ([[children]], design 4.41). Threads are kept
+   * until forgotten, one-shot [[run]]s included. A child thread is refused (`GraphError.ChildThread`): forget its
+   * parent, and a child with a live run refuses the whole call (`ThreadBusy`) with nothing removed.
    * Refused, with nothing removed, for a thread that a run holds - one active in this runtime, or one
    * holding a live claim on it in any runtime or process sharing the store (`GraphError.ThreadBusy`) - or
    * that belongs to another tenant than `config`'s (`GraphError.TenantMismatch`). Forgetting an unknown
@@ -154,6 +167,36 @@ final class Agent private[agent] (
    */
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)
+
+  /**
+   * Every direct child thread of `threadId` (design 4.41) - the threads its delegated tasks ran on - oldest first,
+   * with each one's origin, status and latest checkpoint; a thread with no children, or none at all, has none. A
+   * thread of another tenant than `config`'s is `GraphError.TenantMismatch`, as for the runtime's `history`. Read a
+   * child's own history, checkpoints and events through the runtime by its id; a child thread cannot be run, resumed,
+   * forked, updated or forgotten directly (`GraphError.ChildThread`): forgetting its parent forgets it.
+   */
+  def children(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Vector[ChildThread]] =
+    @scala.annotation.tailrec
+    def pages(after: Option[ThreadId], found: Vector[ChildThread]): Result[Vector[ChildThread]] =
+      runtime.children(threadId, after, Agent.ChildPage, config) match
+        case Left(error)                                => Left(error)
+        case Right(page) if page.size < Agent.ChildPage => Right(found ++ page)
+        case Right(page)                                => pages(page.lastOption.map(_.threadId), found ++ page)
+    pages(None, Vector.empty)
+
+  /**
+   * Follows one delegated child (design 4.47): replays the child thread's own log after `afterSeq`, then delivers its
+   * new events - durable, and live from runs of this runtime - as `GraphRuntime.subscribe` does, with `nested = true`
+   * so a grandchild's arrive as `StreamEvent.Nested`. Tenant-checked as every read of a thread is: a child of another
+   * tenant than `config`'s is `GraphError.TenantMismatch`. `ref` is a `SubagentEvents.TaskStarted`'s or
+   * `TaskEnded`'s child, or a `TaskOutcome`'s; a child's durable events outlive its live ones, so this is how to read
+   * what a parent's merged stream reported as a gap (`Nested(child, LiveGap(0))`). The subscription is the thread's:
+   * cancel it when done.
+   */
+  def subscribeChild(ref: ChildRef, afterSeq: Long = 0L, config: RunConfig = RunConfig())(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    runtime.subscribe(ref.threadId, afterSeq, Agent.StreamCapacity, config, nested = true)(listener)
 
   /**
    * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
@@ -171,6 +214,10 @@ final class Agent private[agent] (
    * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]], [[AgentResult.reply]] and
    * [[AgentResult.proceed]] - and continues. Unanswered ones stay pending. Interrupting the calling
    * thread cancels the turn, as for [[run]].
+   *
+   * A subagent's interrupt (`AgentStatus.Suspended.delegated`) is answered by its composite id: the answers are
+   * grouped by the parent interrupt they go through and reach the child when its `task` call resumes (design 4.46).
+   * A composite id that is not pending is refused (`GraphError.InvalidResume`), as any other interrupt is.
    */
   def resume(
     threadId: ThreadId,
@@ -185,7 +232,43 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false))
+    routed(threadId, answers, config).flatMap(grouped =>
+      runtime.resume(threadId, loop.graph, grouped, configured(config)).map(agentRun(_, None, drain = false))
+    )
+
+  /**
+   * `answers` as the runtime takes them (design 4.46): composite answers to delegated interrupts, checked against the
+   * suspended thread's `delegated` interrupts, grouped into the `DelegatedAnswers` of the `task` call each goes
+   * through. Answers with no composite id are passed as they are, for the runtime to check.
+   */
+  private def routed(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig
+  ): Result[Map[InterruptId, ujson.Value]] =
+    if !answers.keys.exists(_.value.contains(DelegatedAnswers.Separator)) then Right(answers)
+    else
+      for
+        pending <- delegatedPending(threadId, config)
+        _ <- pending.map(DelegatedAnswers.problems(answers, _)).filter(_.nonEmpty) match
+          case Some(problems) => Left(GraphError.InvalidResume(loop.graph.id, problems.toList))
+          case None           => Right(())
+        grouped <- DelegatedAnswers.group(answers)
+      yield grouped
+
+  /** The suspended thread's delegated interrupts; `None` when it is not suspended, which the runtime then refuses. */
+  private def delegatedPending(
+    threadId: ThreadId,
+    config: RunConfig
+  ): Result[Option[Vector[(InterruptId, DelegatedRequest)]]] =
+    runtime.childAtRest(threadId, loop.graph, configured(config)).flatMap {
+      case Some((checkpoint, exec)) if checkpoint.status == CheckpointStatus.Suspended =>
+        AgentRun.status(runtime.suspendedResult(loop.graph, exec), isBlock = false, loop).map {
+          case suspended: AgentStatus.Suspended => Some(suspended.delegated)
+          case _                                => None
+        }
+      case _ => Right(None)
+    }
 
   /**
    * Starts a turn on `threadId` as [[run]] does, returning at once with the running turn - to
@@ -207,23 +290,38 @@ final class Agent private[agent] (
    * at the run's end-of-run barrier. A refused start
    * (a blank query, a busy thread, ...) is `Left`, and the listener hears nothing. The run's
    * [[AgentRun.await]] returns only once `listener` has returned from the turn's last event.
+   *
+   * With `nested`, `listener` also receives every event of each child the turn delegates to (design 4.47), as
+   * `StreamEvent.Nested(child, event)` after the turn's `SubagentEvents.TaskStarted` for it - a grandchild's nested
+   * twice - in the subscription's live slots, so an overflow is a `LiveGap`. Match them with `EventHandlers.onChild`.
    */
-  def stream(threadId: ThreadId, query: String, config: RunConfig = RunConfig(), history: Seq[Message] = Nil)(
+  def stream(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig = RunConfig(),
+    history: Seq[Message] = Nil,
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    startWith(threadId, query, config, history, Some(Listening(listener, NoEnd, drain = true)))
+    startWith(threadId, query, config, history, Some(Listening(listener, NoEnd, drain = true, nested)))
 
   /** [[startResume]] with `listener` subscribed first; see [[stream]]. */
-  def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(
+  def streamResume(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig = RunConfig(),
+    nested: Boolean = false
+  )(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    resumeWith(threadId, answers, config, Listening(listener, NoEnd, drain = true))
+    resumeWith(threadId, answers, config, Listening(listener, NoEnd, drain = true, nested))
 
   /** [[startRecover]] with `listener` subscribed first; see [[stream]]. */
-  def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig())(
+  def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig(), nested: Boolean = false)(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    recoverWith(threadId, config, Listening(listener, NoEnd, drain = true))
+    recoverWith(threadId, config, Listening(listener, NoEnd, drain = true, nested))
 
   /**
    * [[stream]], calling `onEnd` once when the subscription ends - after the terminal event or a
@@ -259,8 +357,16 @@ final class Agent private[agent] (
 
   private val NoEnd: () => Unit = () => ()
 
-  /** A run's listener, the scope end's callback, and whether the run's `await` waits for the listener. */
-  final private case class Listening(listener: StreamEvent => Unit, onEnd: () => Unit, drain: Boolean)
+  /**
+   * A run's listener, the scope end's callback, whether the run's `await` waits for the listener, and whether it takes
+   * delegated children's events.
+   */
+  final private case class Listening(
+    listener: StreamEvent => Unit,
+    onEnd: () => Unit,
+    drain: Boolean,
+    nested: Boolean = false
+  )
 
   private def resumeWith(
     threadId: ThreadId,
@@ -268,10 +374,12 @@ final class Agent private[agent] (
     config: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
-    val (observer, scope) = observed(config, listening)
-    runtime
-      .resume(threadId, loop.graph, answers, configured(config), observer = Some(observer))
-      .map(agentRun(_, Some(scope), listening.drain))
+    routed(threadId, answers, config).flatMap { grouped =>
+      val (observer, scope) = observed(config, listening)
+      runtime
+        .resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
+        .map(agentRun(_, Some(scope), listening.drain))
+    }
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
@@ -286,17 +394,7 @@ final class Agent private[agent] (
    */
   private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
-    else
-      begin.flatMap { run =>
-        run.await() match
-          case cancelled @ Left(_: CancelledError) =>
-            if run.cancelAndAwaitEnd() then
-              run.awaitEnded() match
-                case outcome @ Right(_) => outcome
-                case Left(_)            => cancelled
-            else cancelled
-          case other => other
-      }
+    else begin.flatMap(Agent.awaitBlocking)
 
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
@@ -331,10 +429,35 @@ final class Agent private[agent] (
         )
     started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
 
+  /**
+   * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
+   * `GraphError.ThreadExists`, no run started. For `BoundAgent.run` on a caller-chosen thread (#2077), which must
+   * never start a second turn on a thread another caller has created since its read, and which records the run's
+   * identity on the thread with `record`, written with its first checkpoint (#2086).
+   */
+  private[agent] def startNew(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig,
+    record: StateUpdate = StateUpdate.empty
+  ): Result[AgentRun] =
+    if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
+    else
+      runtime
+        .startNew(
+          threadId,
+          loop.graph,
+          AgentInput(query),
+          configured(config),
+          GraphError.ThreadExists(threadId.value),
+          amend = _ => Right(record)
+        )
+        .map(agentRun(_, None, drain = false))
+
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
     val scope = RunScope(config.runId, listening.listener, listening.onEnd)
-    (Observer(Agent.StreamCapacity, scope), scope)
+    (Observer(Agent.StreamCapacity, scope, listening.nested), scope)
 
   /** History must be a valid conversation without system messages; checked before any thread is claimed. */
   private def importable(history: Seq[Message]): Result[Unit] =
@@ -342,14 +465,38 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope], drain: Boolean): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain)
+  private[agent] def agentRun(
+    handle: RunHandle[TurnOutput],
+    scope: Option[RunScope],
+    drain: Boolean,
+    parent: Option[(ThreadId, RunId)] = None
+  ): AgentRun =
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])
 
+  /**
+   * Awaits `run`, which has begun, as [[Agent.blocking]] does: an interrupted wait - also one interrupted before it
+   * began - cancels the run and waits up to [[AgentRun.Drain]] for it to end, returning its real outcome if its commit
+   * beat the cancel, else the `CancelledError`, with the interrupt flag kept. The child runner awaits a child with it
+   * (design 4.42), so a child admitted just before its parent's cancel is still cancelled.
+   */
+  private[agent] def awaitBlocking(run: AgentRun): Result[AgentResult] =
+    run.await() match
+      case cancelled @ Left(_: CancelledError) =>
+        if run.cancelAndAwaitEnd() then
+          run.awaitEnded() match
+            case outcome @ Right(_) => outcome
+            case Left(_)            => cancelled
+        else cancelled
+      case other => other
+
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50
+
+  /** How many children [[Agent.children]] reads from the runtime at a time. */
+  private val ChildPage: Int = 256
 
   /** Queue size of a `stream*` or `subscribe` subscription. */
   val StreamCapacity: Int = 1024

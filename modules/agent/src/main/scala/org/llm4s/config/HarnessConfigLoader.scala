@@ -2,13 +2,16 @@
 package org.llm4s.config
 
 import com.typesafe.config.Config
+import org.llm4s.agent.delegation.DelegationConfig
 import org.llm4s.agent.graph.RetentionPolicy
 import org.llm4s.agent.harness.{
+  GeneralPurposeConfig,
   HarnessProfile,
   InstructionsConfig,
   OffloadConfig,
   PromptMode,
   SkillsConfig,
+  SubagentConfig,
   SummarizationConfig,
   SummaryTrigger,
   TodoConfig,
@@ -27,7 +30,8 @@ import scala.util.Try
 /**
  * Loads a [[org.llm4s.agent.harness.HarnessProfile]] from `llm4s.agent.harness` at the application's edge (design §4.37): the
  * [[org.llm4s.agent.harness.HarnessProfile.deepAgents]] preset with the configured settings - which tools, the tool timeout, the prompt mode,
- * each feature's limits or `enabled = false`, and the retention. `llm4s-agent`'s `reference.conf` holds the defaults,
+ * each feature's limits or `enabled = false`, the retention, and whether the general-purpose subagent is on with the
+ * bounds on delegated tasks. `llm4s-agent`'s `reference.conf` holds the defaults,
  * which are the preset's, and the application's `application.conf` or `-D` system properties override them.
  *
  * {{{
@@ -39,7 +43,8 @@ import scala.util.Try
  *
  * The loaded profile is checked as `AgentBuilder.build()` checks it, so a bad value is a `ConfigurationError` here -
  * except that `execute` may be selected before the sandbox it needs is set.
- * Backends, a sandbox, permission rules and a model compressor are code: set them on the loaded profile.
+ * Backends, a sandbox, permission rules, a model compressor, specialist subagents and subagent models are code: set
+ * them on the loaded profile.
  */
 @Experimental
 object HarnessConfigLoader:
@@ -109,6 +114,20 @@ object HarnessConfigLoader:
             .map(e => ConfigurationError(s"Invalid $Path.retention: ${e.message}", List(s"$Path.retention")))
         yield policy
       )
+      subagents <- field("subagents")(c.getConfig("subagents")).flatMap(s =>
+        for
+          generalPurpose <- field("subagents.generalPurpose.enabled")(s.getBoolean("generalPurpose.enabled"))
+          delegation <- field("subagents")(
+            DelegationConfig(
+              s.getInt("maxConcurrentChildren"),
+              s.getInt("maxTasksPerTurn"),
+              s.getInt("maxDepth"),
+              s.getInt("maxReportBytes"),
+              s.getInt("childRetention")
+            )
+          )
+        yield SubagentConfig(Option.when(generalPurpose)(GeneralPurposeConfig()), Vector.empty, delegation)
+      )
     yield HarnessProfile(
       tools = tools,
       todos = todos,
@@ -118,7 +137,8 @@ object HarnessConfigLoader:
       instructions = instructions,
       systemPrompt = systemPrompt,
       toolTimeout = toolTimeout,
-      retention = retention
+      retention = retention,
+      subagents = subagents
     )
 
   private def toolSelection(t: Config): ToolSelection =

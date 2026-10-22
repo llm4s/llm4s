@@ -31,7 +31,7 @@ Check first whether you need a module at all:
 
 - **The vendor speaks the OpenAI `/chat/completions` API.** The generic `openai-compatible`
   provider in `llm4s-openai-compatible` may already cover it with config alone - see
-  [OpenAI-compatible endpoints](providers.md#openai-compatible-endpoints). If the vendor bends the
+  [OpenAI-compatible endpoints](providers#openai-compatible-endpoints). If the vendor bends the
   format (tool-call ids, system role, reasoning fields), the fix is an
   `OpenAICompatibleDialect` plus a descriptor in that module, contributed upstream - Mistral and
   Cohere are the examples. Do not write another copy of the chat-completions client.

@@ -58,23 +58,24 @@ object VertexAIProvider extends ProviderDescriptor:
         "the GCP region that serves the model, e.g. us-central1",
         default = Some(VertexAIConfig.DEFAULT_LOCATION),
         deprecatedAliases = Seq("organization")
-      )
+      ),
+      GeminiGrounding.GoogleSearchConfigKey
     )
   )
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
   ): Result[ProviderConfig] =
-    ProviderDescriptor
-      .requireExtra(providerName, section, ProjectKey)
-      .flatMap { projectId =>
-        VertexAIConfig.fromValues(
-          modelName = section.model.asString,
-          projectId = projectId,
-          location = section.extra(LocationKey).getOrElse(VertexAIConfig.DEFAULT_LOCATION),
-          credentialFilePath = section.apiKey.map(_.asKey)
-        )
-      }
+    for
+      projectId <- ProviderDescriptor.requireExtra(providerName, section, ProjectKey)
+      search    <- GeminiGrounding.googleSearch(providerName, section)
+      config <- VertexAIConfig.fromValues(
+        modelName = section.model.asString,
+        projectId = projectId,
+        location = section.extra(LocationKey).getOrElse(VertexAIConfig.DEFAULT_LOCATION),
+        credentialFilePath = section.apiKey.map(_.asKey)
+      )
+    yield config.withGoogleSearch(search)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

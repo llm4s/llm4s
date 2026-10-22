@@ -4,9 +4,11 @@ import org.llm4s.agent.graph.{
   Checkpointer,
   Commit,
   EventRecord,
+  GraphError,
   GraphRuntime,
   InMemoryCheckpointer,
   RunEvent,
+  RunStatus,
   StoredCheckpoint,
   StreamEvent,
   ThreadId
@@ -50,10 +52,21 @@ object AgentZStreamSpec extends ZIOSpecDefault {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
-      underlying.deleteThread(threadId, token)
+    def deleteThread(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      fence: Option[(ThreadId, org.llm4s.agent.graph.FencingToken)]
+    ): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
@@ -80,10 +93,21 @@ object AgentZStreamSpec extends ZIOSpecDefault {
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
       underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken): Result[Unit] =
-      underlying.deleteThread(threadId, token)
+    def deleteThread(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      fence: Option[(ThreadId, org.llm4s.agent.graph.FencingToken)]
+    ): Result[Unit] =
+      underlying.deleteThread(threadId, token, fence)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
-    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = underlying.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = underlying.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = underlying.incompleteThreads(tenantId, after, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
 
@@ -124,6 +148,32 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         .runCollect
         .flip
         .map(e => assertTrue(e.isInstanceOf[ValidationError]))
+    },
+    test("fails at once, leaving the holder alone, when another run holds the thread") {
+      // a turn started directly on the agent holds the thread, parked in its model call until interrupted
+      val parked = new CountDownLatch(1)
+      val client = new Fixtures.Scripted(
+        _ => Right(completion("x")),
+        () => { parked.countDown(); Fixtures.parkUntilInterrupted(); Left(CancelledError("test")) }
+      )
+      val agent    = Fixtures.agentOf(client)()
+      val threadId = ThreadId("z3b")
+      val agentZ   = AgentZ(agent)
+      ZIO.acquireReleaseWith(
+        ZIO.fromEither(agent.start(threadId, "hold")).orDieWith(e => new RuntimeException(e.message))
+      )(holder => ZIO.succeedBlocking { holder.cancel(); holder.await(): Unit }) { holder =>
+        for {
+          _         <- ZIO.succeedBlocking(parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+          streamed  <- agentZ.stream(threadId, "again").runCollect.flip
+          recovered <- agentZ.streamRecover(threadId).runCollect.flip
+          // read now: the assertion is evaluated after the release has cancelled the holder
+          holding <- ZIO.succeed(holder.status)
+        } yield assertTrue(
+          streamed.isInstanceOf[GraphError.ThreadBusy],
+          recovered.isInstanceOf[GraphError.ThreadBusy],
+          holding == RunStatus.Running
+        )
+      }
     },
     test("ends, rather than hangs, when the run ends without a terminal event") {
       val agent = Fixtures.agentOf(answering("hello"))(_.withRuntime(GraphRuntime(NoTerminal())))

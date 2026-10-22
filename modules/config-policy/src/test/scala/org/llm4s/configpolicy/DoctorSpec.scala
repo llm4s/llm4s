@@ -737,6 +737,13 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       }
     }
 
+    "check the default local server for a section that sets no baseUrl (#1991)" in {
+      val report = run("""llm4s.providers { provider = "local", local { provider = "ollama", model = "llama3" } }""")
+
+      check(report, "Local server").status shouldBe CheckStatus.Skipped
+      check(report, "Local server").detail should include("localhost:11434")
+    }
+
     "report a server that is not listening" in {
       val url    = withStub("[]")(identity)
       val report = Doctor.run(source(config(url)), local, systemPorts)

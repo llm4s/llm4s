@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentResult, AgentStatus }
+import org.llm4s.agent.delegation.{ ChildInterrupt, DelegatedRequest }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, InterruptId }
 import org.llm4s.agent.graph.toolloop.{
   ApprovalRequest,
@@ -10,8 +11,8 @@ import org.llm4s.agent.graph.toolloop.{
 }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Completion,
@@ -28,7 +29,7 @@ import org.llm4s.llmconnect.model.{
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
 
-import java.util.Optional
+import java.util.{ Optional, OptionalInt }
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -44,6 +45,26 @@ private[llm4s] object FacadeInternals {
 
   /** `result` as Java callers read it. */
   def result[A](result: Result[A]): LlmResult[A] = new LlmResult(FacadeToken.INSTANCE, result)
+
+  /**
+   * What `Llm4s`'s embedding factories do: the client for the provider and config `loaded` selected - or why there is
+   * none. Its dimensions are the ones the provider module declares for the model, and empty for a model it does not
+   * list: the embed call itself needs none, and a reply's vectors say how long they are (#1781).
+   */
+  def embeddingClient(loaded: Result[(String, EmbeddingProviderConfig)]): Result[JEmbeddingClient] =
+    for {
+      selected <- loaded
+      (provider, config) = selected
+      registry <- Llm4sConfig.modelRegistryService()
+      client   <- EmbeddingClient.from(provider, config)(using registry)
+    } yield new JEmbeddingClient(FacadeToken.INSTANCE, client, config.model, declaredDimensions(provider, config.model))
+
+  /**
+   * The dimensions `provider`'s module declares for `model`. The provider is the one the config loaded, so the only
+   * refusal left is an unlisted model, which is not a failure here.
+   */
+  private def declaredDimensions(provider: String, model: String): OptionalInt =
+    ModelDimensionRegistry.getDimension(provider, model).fold(_ => OptionalInt.empty(), OptionalInt.of)
 
   /**
    * What both public `Llm4s.createClient` overloads do: the client for `config`, reporting every call to `metrics` (a
@@ -82,6 +103,8 @@ private[llm4s] object FacadeInternals {
       )
     case AgentStatus.StepLimitReached =>
       new JAgentStatus(AgentStatusKind.STEP_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
+    case AgentStatus.TokenLimitReached =>
+      new JAgentStatus(AgentStatusKind.TOKEN_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
     case suspended: AgentStatus.Suspended =>
       new JAgentStatus(AgentStatusKind.SUSPENDED, Optional.empty, Optional.empty, Optional.empty, pending(suspended))
   }
@@ -90,18 +113,33 @@ private[llm4s] object FacadeInternals {
 
   /**
    * The interrupts `status` waits for: a `Suspended` turn's approvals, then its tool questions, its middleware
-   * questions and its breakpoints, each in the order the turn lists them; none for any other status. An
+   * questions, its breakpoints and its subagents' interrupts (each as its kind in the child, under its composite id),
+   * each in the order the turn lists them; none for any other status. An
    * unmodifiable `java.util.List`.
    */
   def pending(status: AgentStatus): java.util.List[PendingInterrupt] = status match {
-    case AgentStatus.Suspended(approvals, questions, asked, breakpoints) =>
+    case AgentStatus.Suspended(approvals, questions, asked, breakpoints, delegated) =>
       val all = approvals.map((id, request) => approval(id, request)) ++
         questions.map((id, request) => question(id, request)) ++
         asked.map((id, request) => middlewareQuestion(id, request)) ++
-        breakpoints.map((id, request) => breakpoint(id, request))
+        breakpoints.map((id, request) => breakpoint(id, request)) ++
+        delegated.map((id, request) => delegatedInterrupt(id, request))
       java.util.List.copyOf(all.asJava)
     case _ => none
   }
+
+  /**
+   * A subagent's interrupt (design 4.46), as the kind of interrupt it is in the child, under its composite id: answered
+   * by that id with the same `Answer` helpers.
+   */
+  private def delegatedInterrupt(id: InterruptId, request: DelegatedRequest): PendingInterrupt =
+    request.request match {
+      case ChildInterrupt.Approval(_, r)           => approval(id, r)
+      case ChildInterrupt.Question(_, r)           => question(id, r)
+      case ChildInterrupt.MiddlewareQuestion(_, r) => middlewareQuestion(id, r)
+      case ChildInterrupt.Breakpoint(_, r)         => breakpoint(id, r)
+      case ChildInterrupt.Delegated(_, nested)     => delegatedInterrupt(id, nested)
+    }
 
   private def approval(id: InterruptId, request: ApprovalRequest): PendingInterrupt =
     interrupt(id, InterruptKind.APPROVAL, Some(request.call), Option(request.reason), None, None)

@@ -11,7 +11,7 @@ import scala.util.matching.Regex
 /**
  * Rejects text in which a regular expression finds no match.
  *
- * Works as both an [[InputGuardrail]] and an [[OutputGuardrail]]. Use it to enforce a format (an email address,
+ * Works as both an [[org.llm4s.agent.guardrails.InputGuardrail InputGuardrail]] and an [[org.llm4s.agent.guardrails.OutputGuardrail OutputGuardrail]]. Use it to enforce a format (an email address,
  * a phone number, an order id) or to require that some text is present.
  *
  * The pattern is searched for, not matched against the whole text: `[0-9]+` accepts `order 66`. Anchor the

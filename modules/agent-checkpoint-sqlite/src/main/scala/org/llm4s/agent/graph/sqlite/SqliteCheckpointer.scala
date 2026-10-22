@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.*
-import org.llm4s.error.{ CancelledError, LLMError, ProcessingError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
@@ -22,7 +22,8 @@ import scala.util.{ Try, Using }
  *
  *  - '''Atomic, fenced commits.''' Every call that writes is one `BEGIN IMMEDIATE` transaction: a `Commit`'s
  *    checkpoint, pending writes and events land together or not at all, and the claim's token and the thread's
- *    version are checked inside the same transaction, so two stores over one file cannot both pass the checks.
+ *    version are checked inside the same transaction, so two stores over one file cannot both pass the checks; so is
+ *    a `Commit.fence`'s claim on another thread.
  *  - '''Claims expire by `clock`''', the clock this store was opened with: the clock of the process that grants or
  *    renews a claim decides when it lapses. Stores in processes on different hosts sharing one file therefore
  *    judge expiry by different clocks, and skew between them changes a claim's effective `ttl` (see
@@ -133,9 +134,13 @@ final class SqliteCheckpointer private (
   def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = writing("commit") { c =>
     val current  = readRow(c, threadId)
     val latestId = current.flatMap(_.checkpointId)
-    val fenced = Option.when(!current.flatMap(_.claim).exists(_.token == commit.token.value))(
-      stale(threadId, current, commit.token)
-    )
+    // the thread's own claim first, then the fence's, both in the transaction the commit is made in
+    val fenced = Option
+      .when(!current.flatMap(_.claim).exists(_.token == commit.token.value))(stale(threadId, current, commit.token))
+      .orElse(commit.fence.flatMap { (other, otherToken) =>
+        val above = readRow(c, other)
+        Option.when(!above.flatMap(_.claim).exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
     val conflict = commit.checkpoint.filter(_.parent != latestId).map { checkpoint =>
       GraphError.CheckpointConflict(threadId.value, checkpoint.parent, latestId)
     }
@@ -155,8 +160,16 @@ final class SqliteCheckpointer private (
     fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
       // a thread with a claim always has a row
       val nextSeq = current.fold(1L)(_.nextSeq)
+      // what `prune` judges age by: the store's clock, never the producer's timestamps (schema 7)
+      val committedAt = clock.instant()
       commit.checkpoint.foreach { checkpoint =>
         val json = ujson.write(Checkpoint.toJson(checkpoint))
+        // read before this commit writes: no checkpoint yet means a new thread under the id (a tombstone's, or none);
+        // a retraction below empties the history but leaves the thread the same one
+        val fresh =
+          query(c, "SELECT checkpoint_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
+            Option(rows.getString(1))
+          ).headOption.flatten.isEmpty
         // positions only grow, also across a retraction, so the history's order is its primary key's
         val position = query(
           c,
@@ -177,26 +190,38 @@ final class SqliteCheckpointer private (
         update(
           c,
           """INSERT INTO llm4s_checkpoint_history
-            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json)
-            |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin,
+            |(thread_id, position, checkpoint_id, status, created_second, created_nano, checkpoint_json,
+            | committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin,
           threadId.value,
           position,
           checkpoint.id,
           checkpoint.status.toString,
           checkpoint.createdAt.getEpochSecond,
           checkpoint.createdAt.getNano.toLong,
-          json
+          json,
+          committedAt.getEpochSecond,
+          committedAt.getNano.toLong
         )
+        // the registry's columns (schema 8) follow the latest checkpoint
         update(
           c,
-          "UPDATE llm4s_checkpoint_threads SET checkpoint_id = ?, checkpoint_json = ? WHERE thread_id = ?",
+          """UPDATE llm4s_checkpoint_threads
+            |SET checkpoint_id = ?, checkpoint_json = ?, tenant_id = ?, graph_id = ?, thread_status = ?, updated_nanos = ?
+            |WHERE thread_id = ?""".stripMargin,
           checkpoint.id,
           json,
+          checkpoint.tenantId,
+          checkpoint.snapshot.graphId,
+          registryStatus(checkpoint),
+          epochNanos(committedAt),
           threadId.value
         )
         update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+        placeChild(c, threadId, checkpoint, fresh)
       }
       appendWrites(c, threadId, commit.pendingWrites)
+      commit.metadata.foreach(writeMetadata(c, threadId, _, committedAt))
       // released before this commit's own records are applied
       if commit.checkpoint.isDefined then
         query(
@@ -235,11 +260,12 @@ final class SqliteCheckpointer private (
       }
       Using.resource(
         c.prepareStatement(
-          "INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json) VALUES (?, ?, ?)"
+          """INSERT INTO llm4s_checkpoint_events (thread_id, seq, record_json, committed_second, committed_nano)
+            |VALUES (?, ?, ?, ?, ?)""".stripMargin
         )
       ) { insert =>
         stored.foreach { (seq, json) =>
-          bind(insert, threadId.value, seq, json)
+          bind(insert, threadId.value, seq, json, committedAt.getEpochSecond, committedAt.getNano.toLong)
           insert.executeUpdate(): Unit
         }
       }
@@ -333,11 +359,12 @@ final class SqliteCheckpointer private (
       case Some(current) =>
         val now    = clock.instant()
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
-        // oldest first: (position, id, createdAt)
+        // oldest first: (position, id, committed at) - a row from before schema 7 has its producer's time instead
         val history = query(
           c,
-          """SELECT position, checkpoint_id, created_second, created_nano FROM llm4s_checkpoint_history
-            |WHERE thread_id = ? ORDER BY position""".stripMargin,
+          """SELECT position, checkpoint_id, COALESCE(committed_second, created_second),
+            |  CASE WHEN committed_second IS NULL THEN created_nano ELSE committed_nano END
+            |FROM llm4s_checkpoint_history WHERE thread_id = ? ORDER BY position""".stripMargin,
           threadId.value
         )(rows => (rows.getLong(1), rows.getString(2), Instant.ofEpochSecond(rows.getLong(3), rows.getLong(4))))
         // the latest checkpoint is always kept, whatever its age
@@ -357,18 +384,26 @@ final class SqliteCheckpointer private (
         decoding("prune", "event") {
           query(
             c,
-            "SELECT seq, record_json FROM llm4s_checkpoint_events WHERE thread_id = ? ORDER BY seq",
+            """SELECT seq, record_json, committed_second, committed_nano FROM llm4s_checkpoint_events
+              |WHERE thread_id = ? ORDER BY seq""".stripMargin,
             threadId.value
-          )(rows => rows.getLong(1) -> rows.getString(2)).map((seq, json) =>
-            seq -> upickle.default.read[EventRecord](json)
-          )
+          ) { rows =>
+            val seq    = rows.getLong(1)
+            val json   = rows.getString(2)
+            val second = rows.getLong(3)
+            (seq, json, Option.when(!rows.wasNull())(Instant.ofEpochSecond(second, rows.getLong(4))))
+          }.map { (seq, json, committed) =>
+            val event = upickle.default.read[EventRecord](json)
+            // a row from before schema 7 has its producer's timestamp in place of its commit time
+            (seq, event, committed.getOrElse(event.timestamp))
+          }
         }.map { events =>
           // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
           val byCheckpoint =
             if kept.size == history.size then None
-            else events.collectFirst { case (seq, e) if e.checkpointId.exists(keptIds) => seq }
+            else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
           val byAge = cutoff.map { cut =>
-            events.collectFirst { case (seq, e) if !e.timestamp.isBefore(cut) => seq }.getOrElse(current.nextSeq)
+            events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
           }
           val bySize = policy.maxEvents.map(n => current.nextSeq - n)
           val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
@@ -408,37 +443,108 @@ final class SqliteCheckpointer private (
     Right(())
   }
 
+  def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
+    reading("children") { c =>
+      val from: Result[Long] = after match
+        case None => Right(0L)
+        case Some(cursor) =>
+          query(
+            c,
+            """SELECT child_order FROM llm4s_checkpoint_threads
+              |WHERE thread_id = ? AND parent_thread_id = ? AND child_order IS NOT NULL""".stripMargin,
+            cursor.value,
+            parent.value
+          )(_.getLong(1)).headOption
+            .toRight(ValidationError("after", s"'${cursor.value}' is not a known child of '${parent.value}'"))
+      from.map { order =>
+        if limit <= 0 then Vector.empty
+        else
+          // a tombstone keeps its place but is not listed
+          query(
+            c,
+            """SELECT checkpoint_json FROM llm4s_checkpoint_threads
+              |WHERE parent_thread_id = ? AND child_order > ? AND checkpoint_json IS NOT NULL
+              |ORDER BY child_order LIMIT ?""".stripMargin,
+            parent.value,
+            order,
+            limit
+          )(_.getString(1))
+      }
+    }.flatMap(rows => sequence(rows.map(decodeCheckpoint("children", _))).map(_.flatMap(ChildThread.of)))
+
+  def threads(query: ThreadQuery): Result[ThreadPage] =
+    reading("threads")(c => Right(registry(c, threadsStatement(query, clock.instant()))))
+      .flatMap(rows => summaries("threads", rows, query.limit))
+
+  def incompleteThreads(
+    tenantId: Option[TenantId],
+    after: Option[ThreadCursor],
+    limit: Int
+  ): Result[ThreadPage] =
+    ThreadQuery.checkLimit(limit).flatMap { limit =>
+      reading("incompleteThreads") { c =>
+        Right(registry(c, incompleteStatement(tenantId, after, limit, clock.instant())))
+      }.flatMap(rows => summaries("incompleteThreads", rows, limit))
+    }
+
+  private def registry(c: Connection, statement: (String, Vector[Any])): Vector[RegistryRow] =
+    query(c, statement._1, statement._2*) { rows =>
+      RegistryRow(
+        rows.getString(1),
+        Option(rows.getString(2)),
+        rows.getString(3),
+        rows.getString(4),
+        rows.getString(5),
+        Option(rows.getString(6)),
+        rows.getLong(7),
+        rows.getBoolean(8)
+      )
+    }
+
   /**
    * Deletes the thread in one write transaction, which first checks that `token` is the thread's current claim -
    * so the check and the delete see one state of the file, whatever other stores on it are doing. The thread's row
    * stays, emptied, as a tombstone (see [[SqliteSchema]]) once it has numbered an event, so that a new thread of the
-   * id numbers on past it.
+   * id numbers on past it. A `fence` thread's claim is checked in the same transaction, after the thread's own.
    */
-  def deleteThread(threadId: ThreadId, token: FencingToken): Result[Unit] = writing("deleteThread") { c =>
+  def deleteThread(
+    threadId: ThreadId,
+    token: FencingToken,
+    fence: Option[(ThreadId, FencingToken)]
+  ): Result[Unit] = writing("deleteThread") { c =>
     val current = readRow(c, threadId)
-    if !current.flatMap(_.claim).exists(_.token == token.value) then Left(stale(threadId, current, token))
-    else
-      update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
-      update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
-      update(
-        c,
-        // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
-        // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
-        // and a tombstone that numbered no event since its delete keeps its numbering
-        """UPDATE llm4s_checkpoint_threads
-          |SET checkpoint_id = NULL, checkpoint_json = NULL,
-          |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-          |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
-          |    claim_tenant = NULL, claim_tenant_token = NULL
-          |WHERE thread_id = ?""".stripMargin,
-        threadId.value
-      )
-      dropIfEmpty(c, threadId)
-      Right(())
+    val refused = Option
+      .when(!current.flatMap(_.claim).exists(_.token == token.value))(stale(threadId, current, token))
+      .orElse(fence.flatMap { (other, otherToken) =>
+        val above = readRow(c, other)
+        Option.when(!above.flatMap(_.claim).exists(_.token == otherToken.value))(stale(other, above, otherToken))
+      })
+    refused match
+      case Some(error) => Left(error)
+      case None =>
+        update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_effects WHERE thread_id = ?", threadId.value)
+        update(c, "DELETE FROM llm4s_checkpoint_thread_metadata WHERE thread_id = ?", threadId.value)
+        update(
+          c,
+          // every SET expression reads the row as it was: the next thread starts one past the deleted one's next
+          // number, which is never used (see `Checkpointer.deleted`); a thread that numbered no event leaves nothing,
+          // and a tombstone that numbered no event since its delete keeps its numbering
+          """UPDATE llm4s_checkpoint_threads
+            |SET checkpoint_id = NULL, checkpoint_json = NULL,
+            |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
+            |    claim_tenant = NULL, claim_tenant_token = NULL,
+            |    tenant_id = NULL, graph_id = NULL, thread_status = NULL, updated_nanos = NULL, metadata_json = NULL
+            |WHERE thread_id = ?""".stripMargin,
+          threadId.value
+        )
+        dropIfEmpty(c, threadId)
+        Right(())
   }
 
   /**
@@ -779,10 +885,165 @@ object SqliteCheckpointer:
     update(
       c,
       """DELETE FROM llm4s_checkpoint_threads
-        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1
+        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1 AND metadata_json IS NULL
         |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = llm4s_checkpoint_threads.thread_id)""".stripMargin,
       threadId.value
     )
+
+  // ---- the thread registry (schema 8) ----
+
+  /** The status the registry stores for a thread whose latest checkpoint is `checkpoint`: `Deleted` once deleting. */
+  private def registryStatus(checkpoint: Checkpoint): String =
+    if checkpoint.deleting then ThreadStatus.Deleted.toString else checkpoint.status.toString
+
+  /** An instant as the registry orders by it: nanoseconds since the epoch, which fit a `Long` until 2262. */
+  private[sqlite] def epochNanos(at: Instant): Long =
+    Math.addExact(Math.multiplyExact(at.getEpochSecond, 1000000000L), at.getNano.toLong)
+
+  private def fromEpochNanos(nanos: Long): Instant =
+    Instant.ofEpochSecond(Math.floorDiv(nanos, 1000000000L), Math.floorMod(nanos, 1000000000L))
+
+  /** Replaces the thread's metadata, inside the caller's write transaction: as JSON on its row, and by entry. */
+  private def writeMetadata(c: Connection, threadId: ThreadId, metadata: ThreadMetadata, at: Instant): Unit =
+    update(c, "DELETE FROM llm4s_checkpoint_thread_metadata WHERE thread_id = ?", threadId.value)
+    metadata.entries.foreach { (key, value) =>
+      update(
+        c,
+        "INSERT INTO llm4s_checkpoint_thread_metadata (thread_id, key, value) VALUES (?, ?, ?)",
+        threadId.value,
+        key,
+        value
+      )
+    }
+    // the commit's claim gives the thread a row; empty metadata is kept as none, so an emptied row can go
+    update(
+      c,
+      "UPDATE llm4s_checkpoint_threads SET metadata_json = ?, updated_nanos = ? WHERE thread_id = ?",
+      Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
+      epochNanos(at),
+      threadId.value
+    )
+
+  /** The statement and parameters of a page of `query`, its claims judged at `now`. */
+  private[sqlite] def threadsStatement(query: ThreadQuery, now: Instant): (String, Vector[Any]) =
+    registryStatement(query.tenantId, newestFirst = true, query.after, query.limit, now) { where =>
+      query.status.foreach(statusFilter(where, _, now))
+      query.agent.foreach(agent => where.add("graph_id = ?", agent))
+      query.updatedSince.foreach(since => where.add("updated_nanos >= ?", epochNanos(since)))
+      query.metadata.entries.toVector.sortBy(_._1).foreach { (key, value) =>
+        where.add(
+          "thread_id IN (SELECT thread_id FROM llm4s_checkpoint_thread_metadata WHERE key = ? AND value = ?)",
+          key,
+          value
+        )
+      }
+    }
+
+  /** The statement and parameters of a page of `tenantId`'s incomplete threads, their claims judged at `now`. */
+  private[sqlite] def incompleteStatement(
+    tenantId: Option[TenantId],
+    after: Option[ThreadCursor],
+    limit: Int,
+    now: Instant
+  ): (String, Vector[Any]) =
+    registryStatement(tenantId, newestFirst = false, after, limit, now)(statusFilter(_, ThreadStatus.Idle, now))
+
+  /**
+   * One page of the registry, and one row more to tell whether another follows: the root threads of `tenantId` with a
+   * checkpoint, past `after` in the page's order, narrowed by the conditions `filters` adds, through the registry's
+   * partial indexes (schema 8). Each row says whether a live claim holds its thread at `now`.
+   */
+  private def registryStatement(
+    tenantId: Option[TenantId],
+    newestFirst: Boolean,
+    after: Option[ThreadCursor],
+    limit: Int,
+    now: Instant
+  )(filters: Conditions => Unit): (String, Vector[Any]) =
+    val where = Conditions()
+    // the partial indexes' own predicate, so every one of them serves the statement
+    where.add("parent_thread_id IS NULL")
+    where.add("thread_status IS NOT NULL")
+    tenantId.fold(where.add("tenant_id IS NULL"))(t => where.add("tenant_id = ?", t.value))
+    filters(where)
+    val (order, direction) = if newestFirst then ("DESC", "<") else ("ASC", ">")
+    after.foreach { cursor =>
+      where.add(s"(updated_nanos, thread_id) $direction (?, ?)", epochNanos(cursor.updatedAt), cursor.threadId.value)
+    }
+    val sql =
+      s"""SELECT thread_id, tenant_id, graph_id, thread_status, checkpoint_id, metadata_json, updated_nanos, $LiveClaim
+         |FROM llm4s_checkpoint_threads WHERE ${where.sql}
+         |ORDER BY updated_nanos $order, thread_id $order LIMIT ?""".stripMargin
+    sql -> ((liveAt(now) ++ where.params) :+ (limit + 1))
+
+  /** Whether a live claim holds the thread - its expiry after the time bound by [[liveAt]] - as an SQL condition. */
+  private val LiveClaim: String =
+    "(claim_token IS NOT NULL AND (claim_expires_second > ? OR (claim_expires_second = ? AND claim_expires_nano > ?)))"
+
+  private def liveAt(now: Instant): Vector[Any] = Vector(now.getEpochSecond, now.getEpochSecond, now.getNano.toLong)
+
+  /**
+   * The condition a status filter adds: the stored status (`Deleted` while a cascade delete is under way) and whether
+   * a live claim holds the thread at `now`, as `ThreadStatus.of` decides.
+   */
+  private def statusFilter(where: Conditions, status: ThreadStatus, now: Instant): Unit =
+    status match
+      case ThreadStatus.Deleted => where.add("thread_status = ?", ThreadStatus.Deleted.toString)
+      case ThreadStatus.Running =>
+        // through the partial index of claimed threads
+        where.add("claim_token IS NOT NULL")
+        where.add(s"thread_status <> ? AND $LiveClaim", (ThreadStatus.Deleted.toString +: liveAt(now))*)
+      case ThreadStatus.Idle =>
+        where.add(s"thread_status = ? AND NOT $LiveClaim", (CheckpointStatus.Running.toString +: liveAt(now))*)
+      case other => where.add(s"thread_status = ? AND NOT $LiveClaim", (other.toString +: liveAt(now))*)
+
+  /** A `WHERE` clause built a condition at a time, with its parameters in order. */
+  final private class Conditions:
+    private val clauses = Vector.newBuilder[String]
+    private val values  = Vector.newBuilder[Any]
+    def add(clause: String, params: Any*): Unit =
+      clauses += clause
+      values ++= params
+    def sql: String         = clauses.result().mkString(" AND ")
+    def params: Vector[Any] = values.result()
+
+  /** A registry row as read: `claimed`, whether a live claim held the thread by the store's clock when it was read. */
+  final private case class RegistryRow(
+    threadId: String,
+    tenant: Option[String],
+    graphId: String,
+    status: String,
+    checkpointId: String,
+    metadata: Option[String],
+    updatedNanos: Long,
+    claimed: Boolean
+  )
+
+  /** The page `rows` hold, decoded; a row that does not decode is a `ProcessingError` naming the operation. */
+  private def summaries(operation: String, rows: Vector[RegistryRow], limit: Int)(using
+    ErrorContext
+  ): Result[ThreadPage] =
+    sequence(rows.map { row =>
+      for
+        metadata <- row.metadata.fold[Result[ThreadMetadata]](Right(ThreadMetadata.empty)) { json =>
+          decoding(operation, "thread metadata")(ujson.read(json)).flatMap(
+            ThreadMetadata.fromJson(_).left.map(e => undecodable(operation, "thread metadata", e.message, None))
+          )
+        }
+        status <- decoding(operation, "thread status") {
+          if row.status == ThreadStatus.Deleted.toString then ThreadStatus.Deleted
+          else ThreadStatus.of(CheckpointStatus.valueOf(row.status), deleting = false, row.claimed)
+        }
+      yield ThreadSummary(
+        ThreadId(row.threadId),
+        row.tenant.map(TenantId(_)),
+        row.graphId,
+        status,
+        row.checkpointId,
+        metadata,
+        fromEpochNanos(row.updatedNanos)
+      )
+    }).map(ThreadPage.of(_, limit))
 
   /** A page of the history, newest first: a backwards range of the `(thread, position)` primary key. */
   private[sqlite] val HistoryPageSql: String =
@@ -816,6 +1077,31 @@ object SqliteCheckpointer:
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
+
+  /**
+   * Records the parent `checkpoint`'s origin names, inside the caller's write transaction: the thread keeps its place
+   * among that parent's children while the parent stays the same, takes a place past every other under a new one,
+   * and has none as a top-level thread.
+   */
+  private def placeChild(c: Connection, threadId: ThreadId, checkpoint: Checkpoint, fresh: Boolean): Unit =
+    val parent = checkpoint.origin.map(_.parent.value)
+    val current =
+      query(c, "SELECT parent_thread_id FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)(rows =>
+        Option(rows.getString(1))
+      ).headOption.flatten
+    // a new thread under the id takes a new place: its tombstone's was only a paging cursor
+    if current != parent || fresh then
+      // one past the file's highest place: a tombstone keeps its place, so places only grow while children are kept
+      val order = parent.map { _ =>
+        query(c, "SELECT COALESCE(MAX(child_order), 0) + 1 FROM llm4s_checkpoint_threads")(_.getLong(1)).head
+      }
+      update(
+        c,
+        "UPDATE llm4s_checkpoint_threads SET parent_thread_id = ?, child_order = ? WHERE thread_id = ?",
+        parent,
+        order,
+        threadId.value
+      )
 
   /** The next fencing token for the whole file; inside the caller's write transaction. */
   private def nextToken(c: Connection): Long =

@@ -57,6 +57,28 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
         case Right(cfg) =>
           fail(s"Expected a missing-apiKey failure, got config: $cfg")
     }
+
+    "read webSearch from an anthropic section, off unless set (#1216)" in {
+      def load(name: String, body: String) =
+        Llm4sConfig.provider(ConfigSource.string(s"llm4s.providers.$name { $body }"), name)
+      val anthropic = """provider = "anthropic", model = "claude-sonnet-4-5", apiKey = "k""""
+
+      load("a-off", anthropic) should matchPattern { case Right(c: AnthropicConfig) if !c.webSearch => }
+      load("a-on", s"$anthropic, webSearch = true") should matchPattern {
+        case Right(c: AnthropicConfig) if c.webSearch =>
+      }
+      load("a-str", s"""$anthropic, webSearch = "TRUE" """) should matchPattern {
+        case Right(c: AnthropicConfig) if c.webSearch =>
+      }
+    }
+
+    "refuse a webSearch value that is not true or false" in {
+      val hocon =
+        """llm4s.providers.a-bad { provider = "anthropic", model = "m", apiKey = "k", webSearch = "yes" }"""
+      Llm4sConfig.provider(ConfigSource.string(hocon), "a-bad").left.map(_.message) match
+        case Left(message) => message should include("webSearch must be true or false, got 'yes'")
+        case Right(cfg)    => fail(s"expected an error, got $cfg")
+    }
   }
 
   "Llm4sConfig" should {
