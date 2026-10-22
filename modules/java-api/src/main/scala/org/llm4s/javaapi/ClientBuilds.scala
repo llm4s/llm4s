@@ -29,7 +29,7 @@ import scala.jdk.DurationConverters.*
  * `fromValues`, which reads the model catalogue for the context window, or for an OpenAI-compatible server through
  * the descriptor itself, which also infers the catalogue's provider from the base URL's host - so the same values give
  * the same config either way (`ClientBuildersSpec` compares them). Sizes and timeouts the caller set are then applied
- * with the config's `with` setters; Gemini's and Azure's configs have no setter for the sizes, so theirs use `copy`.
+ * with the config's `with` setters.
  * The client then comes from [[Llm4s.createClient]], with the collector the builder was given, as for a config a
  * caller made.
  *
@@ -92,8 +92,7 @@ private[javaapi] object ClientBuilds {
       )
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
-      // GeminiConfig has no `with` setter for the sizes: `copy` is its public way to change one
-    } yield config.copy(contextWindow = sized._1, reserveCompletion = sized._2).withTimeouts(timeouts)
+    } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
 
   def ollamaConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
@@ -142,8 +141,7 @@ private[javaapi] object ClientBuilds {
       )(using resolver)
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
-      // AzureConfig has no `with` setter for the sizes: `copy` is its public way to change one
-    } yield config.copy(contextWindow = sized._1, reserveCompletion = sized._2).withTimeouts(timeouts)
+    } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
 
   /** The client for `config`, reporting to the builder's collector, or the first thing wrong with what it was told. */
   private def client(config: Result[ProviderConfig], s: ClientSettings): LlmResult[JLlmClient] =

@@ -379,12 +379,11 @@ private[providersetup] object ProviderSetupRuntime:
           .withOrganization(input.flatMap(_.organization).orElse(cfg.organization))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: AzureConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          endpoint = input.flatMap(_.endpoint).getOrElse(cfg.endpoint),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          apiVersion = input.flatMap(_.apiVersion).getOrElse(cfg.apiVersion)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withEndpoint(input.flatMap(_.endpoint).getOrElse(cfg.endpoint))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiVersion(input.flatMap(_.apiVersion).getOrElse(cfg.apiVersion))
       case cfg: AnthropicConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
@@ -395,11 +394,10 @@ private[providersetup] object ProviderSetupRuntime:
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: GeminiConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: DeepSeekConfig =>
         cfg.copy(
           model = input.flatMap(_.model).getOrElse(cfg.model),
@@ -425,12 +423,11 @@ private[providersetup] object ProviderSetupRuntime:
           baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
         )
       case cfg: VertexAIConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          projectId = input.flatMap(_.endpoint).getOrElse(cfg.projectId),
-          location = input.flatMap(_.organization).getOrElse(cfg.location),
-          credentialFilePath = input.flatMap(_.apiKey).orElse(cfg.credentialFilePath)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withProjectId(input.flatMap(_.endpoint).getOrElse(cfg.projectId))
+          .withLocation(input.flatMap(_.organization).getOrElse(cfg.location))
+          .withCredentialFilePath(input.flatMap(_.apiKey).orElse(cfg.credentialFilePath))
 
   def demoCompletionCmd(
     providerConfig: ProviderConfig,

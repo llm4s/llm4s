@@ -14,8 +14,12 @@ import org.llm4s.util.Redaction
  * [[org.llm4s.llmconnect.provider.OpenAIClient]] internally; this config
  * carries the Azure-specific fields that [[OpenAIConfig]] does not have.
  *
- * Prefer [[AzureConfig.fromValues]] over the primary constructor; it resolves
- * `contextWindow` and `reserveCompletion` automatically.
+ * Prefer [[AzureConfig.fromValues]], which validates the values and resolves
+ * `contextWindow` and `reserveCompletion` from the bundled model catalogue.
+ * The constructor is private: build one with the companion `apply` and adjust
+ * it with the `with*` setters. Java and Kotlin, which cannot see Scala default
+ * arguments, use `AzureConfig.apply(endpoint, apiKey, model)` and the setters,
+ * so adding a field never breaks them.
  *
  * @param endpoint      Azure OpenAI deployment endpoint URL, e.g.
  *                      `"https://my-resource.openai.azure.com/openai/deployments/my-deploy"`.
@@ -28,19 +32,25 @@ import org.llm4s.util.Redaction
  *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
-case class AzureConfig(
+final case class AzureConfig private (
   endpoint: String,
   apiKey: String,
   model: String,
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                                = ProviderId("azure")
   override def endpointUrl: Option[String]                           = Some(endpoint)
   override def withModel(model: String): AzureConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig = copy(timeouts = timeouts)
+
+  def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
+  def withApiKey(apiKey: String): AzureConfig                    = copy(apiKey = apiKey)
+  def withApiVersion(apiVersion: String): AzureConfig            = copy(apiVersion = apiVersion)
+  def withContextWindow(contextWindow: Int): AzureConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): AzureConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
@@ -56,6 +66,30 @@ object AzureConfig {
   val DEFAULT_API_VERSION: String = "V2025_01_01_PREVIEW"
 
   private val standardReserve = 4096
+
+  /** Builds a config without validating it; [[fromValues]] validates. `timeouts` defaults to [[ProviderTimeouts.default]]. */
+  def apply(
+    endpoint: String,
+    apiKey: String,
+    model: String,
+    apiVersion: String,
+    contextWindow: Int,
+    reserveCompletion: Int,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): AzureConfig =
+    new AzureConfig(endpoint, apiKey, model, apiVersion, contextWindow, reserveCompletion, timeouts)
+
+  /**
+   * The endpoint, API key and deployment name, every other field at its default: the entry point
+   * for Java and Kotlin, which do not see Scala default arguments. The API version is
+   * [[DEFAULT_API_VERSION]], and `contextWindow` and `reserveCompletion` come from the model name
+   * alone (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*`
+   * setters, or use [[fromValues]] to consult the bundled model catalogue.
+   */
+  def apply(endpoint: String, apiKey: String, model: String): AzureConfig = {
+    val (cw, rc) = azureFallback(model)
+    apply(endpoint, apiKey, model, DEFAULT_API_VERSION, cw, rc)
+  }
 
   private def azureFallback(modelName: String): (Int, Int) =
     modelName match {

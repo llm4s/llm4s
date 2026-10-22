@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
+- `GeminiConfig`, `VertexAIConfig` (`llm4s-gemini`) and `AzureConfig` (`llm4s-openai`) are growth-prone types: build
+  them with `X(...)` and change them with `with*`; `new` and `.copy` are private; [migration](docs/reference/migration.md#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive

@@ -11,7 +11,8 @@ Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
-growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so is [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708).
+growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708)
+and [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263).
 
 ## Multimodal content parts (#1913)
 
@@ -251,6 +252,27 @@ val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .cop
 ```
 
 `toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
+
+### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
+
+`GeminiConfig`, `VertexAIConfig` (`llm4s-gemini`) and `AzureConfig` (`llm4s-openai`) follow the growth-prone pattern,
+as `OpenAIConfig`, `AnthropicConfig` and `OllamaConfig` already did ([#2263](https://github.com/llm4s/llm4s/issues/2263)),
+so a new field - as `googleSearch` was - no longer breaks Java and Kotlin callers or compiled code. The constructor
+and `copy` are private:
+
+- **Scala**: `GeminiConfig(...)`, `VertexAIConfig(...)` and `AzureConfig(...)` with the same arguments, positional or
+  named (`timeouts`, `googleSearch` and `wellKnownCredentialPath` keep their defaults), still compile. Replace
+  `config.copy(contextWindow = n)` with `config.withContextWindow(n)`; each field has a setter - `withApiKey`,
+  `withBaseUrl`, `withReserveCompletion` and `withGoogleSearch` on Gemini; `withProjectId`, `withLocation`,
+  `withCredentialFilePath` and `withWellKnownCredentialPath` (the value or an `Option`) on Vertex AI; `withEndpoint`,
+  `withApiKey` and `withApiVersion` on Azure - besides `withModel` and `withTimeouts`.
+- **Java and Kotlin**: call the companion's short `apply` and chain setters instead of the constructor -
+  `GeminiConfig.apply(apiKey, "gemini-2.0-flash").withGoogleSearch(true)`, `VertexAIConfig.apply(projectId, model)`,
+  `AzureConfig.apply(endpoint, apiKey, deployment).withApiVersion("2024-10-21")`. They take the default base URL,
+  location or API version and a context window from the model name; `fromValues` still consults the bundled model
+  catalogue.
+
+Pattern matching (`case GeminiConfig(...)`) is unchanged.
 
 ### `ToolRetryPolicy` is growth-safe (#1708)
 

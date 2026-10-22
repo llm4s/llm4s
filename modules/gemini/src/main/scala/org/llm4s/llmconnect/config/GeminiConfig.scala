@@ -8,8 +8,12 @@ import org.llm4s.util.Redaction
 /**
  * Configuration for the Google Gemini API.
  *
- * Prefer [[GeminiConfig.fromValues]] over the primary constructor; it resolves
- * `contextWindow` and `reserveCompletion` automatically from the model name.
+ * Prefer [[GeminiConfig.fromValues]], which validates the values, normalises `baseUrl` and
+ * resolves `contextWindow` and `reserveCompletion` from the bundled model catalogue.
+ * The constructor is private: build one with the companion `apply` and adjust
+ * it with the `with*` setters. Java and Kotlin, which cannot see Scala default
+ * arguments, use `GeminiConfig.apply(apiKey, model)` and the setters, so adding
+ * a field never breaks them.
  *
  * @param apiKey        Google API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"gemini-2.0-flash"`.
@@ -23,20 +27,25 @@ import org.llm4s.util.Redaction
  *                 and the sources it used arrive on `Completion.citations`. Off by default; billed by Google.
  */
 @Stable
-case class GeminiConfig(
+final case class GeminiConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
-  googleSearch: Boolean = false
+  override val timeouts: ProviderTimeouts,
+  googleSearch: Boolean
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("gemini")
   override def endpointUrl: Option[String]                            = Some(baseUrl)
   override def withModel(model: String): GeminiConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig = copy(timeouts = timeouts)
-  def withGoogleSearch(enabled: Boolean): GeminiConfig                = copy(googleSearch = enabled)
+
+  def withApiKey(apiKey: String): GeminiConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): GeminiConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): GeminiConfig = copy(reserveCompletion = reserveCompletion)
+  def withGoogleSearch(enabled: Boolean): GeminiConfig            = copy(googleSearch = enabled)
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, googleSearch=$googleSearch)"
@@ -53,6 +62,33 @@ object GeminiConfig {
 
   private val standardReserve = 8192
   private val DefaultApiPath  = "/v1beta"
+
+  /**
+   * Builds a config without validating it or normalising `baseUrl`; [[fromValues]] does both.
+   * `timeouts` defaults to [[ProviderTimeouts.default]] and `googleSearch` to `false`.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String,
+    contextWindow: Int,
+    reserveCompletion: Int,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default,
+    googleSearch: Boolean = false
+  ): GeminiConfig =
+    new GeminiConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts, googleSearch)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. The base URL is [[DEFAULT_BASE_URL]], Google Search
+   * grounding is off, and `contextWindow` and `reserveCompletion` come from the model name alone
+   * (1M tokens for current Gemini models); set them, and the rest, with the `with*` setters, or use
+   * [[fromValues]] to consult the bundled model catalogue.
+   */
+  def apply(apiKey: String, model: String): GeminiConfig = {
+    val (cw, rc) = geminiFallback(model)
+    apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
+  }
 
   private def geminiFallback(modelName: String): (Int, Int) =
     modelName match {

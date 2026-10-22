@@ -45,7 +45,7 @@ class VertexAIClientSpec extends AnyFunSuite {
   }
 
   test("vertex ai client computes correct base URL from location") {
-    val config = testConfig.copy(location = "europe-west4")
+    val config = testConfig.withLocation("europe-west4")
 
     assert(config.computedBaseUrl == "https://europe-west4-aiplatform.googleapis.com/v1")
   }
