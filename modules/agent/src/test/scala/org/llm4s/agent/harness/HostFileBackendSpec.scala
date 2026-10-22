@@ -77,7 +77,15 @@ class HostFileBackendSpec
     fileSystemId: Path => String = HostFileBackend.fileSystemIdOf,
     mountsBeneath: Path => Result[Vector[Path]] = HostFileBackend.mountPointsBeneath,
     openDirectory: Path => java.nio.file.DirectoryStream[Path] = Files.newDirectoryStream(_),
-    canonical: Path => Path = _.toRealPath()
+    canonical: Path => Path = _.toRealPath(),
+    move: (Path, Path) => Unit = (temp, target) =>
+      Files.move(
+        temp,
+        target,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING
+      ): Unit,
+    contendedReplace: Path => Boolean = HostFileBackend.refusesReplacingOpenFiles
   ): Result[HostFileBackend] = {
     Option(backend).foreach(_.close())
     val opened = HostFileBackend.openWith(
@@ -91,7 +99,9 @@ class HostFileBackendSpec
       fileSystemId,
       mountsBeneath,
       openDirectory,
-      canonical
+      canonical,
+      move,
+      contendedReplace
     )
     opened.foreach(b => backend = b)
     opened
@@ -985,6 +995,131 @@ class HostFileBackendSpec
     onDisk("big") shouldBe "ok"
     written(small.delete(p("/big2"), call())) shouldBe FileDeleted(wasDirectory = false)
     Files.exists(dir.resolve("big2")) shouldBe false
+  }
+
+  /**
+   * A move over the target as Windows makes it while another handle has the target open: `refusals` times
+   * an `AccessDeniedException` (after `meanwhile`, a concurrent change), then the real move. Counts calls.
+   */
+  private def contendedMove(
+    refusals: Int,
+    meanwhile: Path => Unit = _ => (),
+    refusal: Path => Exception = t => new java.nio.file.AccessDeniedException(t.toString)
+  ): (java.util.concurrent.atomic.AtomicInteger, (Path, Path) => Unit) = {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    val move = (temp: Path, target: Path) =>
+      if (calls.incrementAndGet() <= refusals) {
+        meanwhile(target)
+        throw refusal(target)
+      } else
+        Files.move(
+          temp,
+          target,
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+          java.nio.file.StandardCopyOption.REPLACE_EXISTING
+        ): Unit
+    (calls, move)
+  }
+
+  private def temporaries(): Vector[String] =
+    Files.list(dir).iterator().asScala.map(_.getFileName.toString).filter(_.startsWith(".llm4s-")).toVector
+
+  "A replace Windows refuses while the target is open" should "be retried, and apply once the target is free" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val (calls, move) = contendedMove(refusals = 2)
+    reopen(move = move, contendedReplace = _ => true).value
+    written(backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call())) shouldBe FileEdited(1)
+    onDisk("f.txt") shouldBe "two\n"
+    calls.get shouldBe 3
+    temporaries() shouldBe empty
+  }
+
+  it should "be refused as a lost race, EffectReplayRefused, when the target changed under it" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val (calls, move) = contendedMove(refusals = 1, meanwhile = t => Files.writeString(t, "theirs\n"): Unit)
+    reopen(move = move, contendedReplace = _ => true).value
+    val error = backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call()).left.value
+    error shouldBe a[org.llm4s.agent.graph.GraphError.EffectReplayRefused]
+    error.message should include("changed while it was being replaced")
+    onDisk("f.txt") shouldBe "theirs\n"
+    calls.get shouldBe 1
+    temporaries() shouldBe empty
+  }
+
+  it should "treat a sharing violation as contention too" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val sharing = (t: Path) =>
+      new java.nio.file.FileSystemException(
+        t.toString,
+        null,
+        "The process cannot access the file because it is being used by another process"
+      )
+    val (calls, move) = contendedMove(refusals = 1, refusal = sharing)
+    reopen(move = move, contendedReplace = _ => true).value
+    written(backend.write(p("/f.txt"), "two\n", call())) shouldBe FileWritten(created = false, 4)
+    onDisk("f.txt") shouldBe "two\n"
+    calls.get shouldBe 2
+  }
+
+  it should "stay a permission denial, BackendRefused, when the target is unchanged and the refusal persists" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val (calls, move) = contendedMove(refusals = Int.MaxValue)
+    reopen(move = move, contendedReplace = _ => true).value
+    val error = backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call()).left.value
+    error shouldBe a[BackendRefused]
+    error.message should include("permission denied")
+    onDisk("f.txt") shouldBe "one\n"
+    calls.get shouldBe HostFileBackend.ReplaceAttempts
+    temporaries() shouldBe empty
+  }
+
+  it should "stay a permission denial at once when the target is not writable" in {
+    val f = Files.writeString(dir.resolve("f.txt"), "one\n")
+    f.toFile.setWritable(false) shouldBe true
+    cleanups += (() => f.toFile.setWritable(true): Unit)
+    assume(!Files.isWritable(f), "this user can write a read-only file (root?)")
+    val (calls, move) = contendedMove(refusals = Int.MaxValue)
+    reopen(move = move, contendedReplace = _ => true).value
+    val error = backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call()).left.value
+    error shouldBe a[BackendRefused]
+    error.message should include("permission denied")
+    calls.get shouldBe 1
+  }
+
+  it should "not retry a failure that is not contention" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val full =
+      (t: Path) => new java.nio.file.FileSystemException(t.toString, null, "There is not enough space on the disk")
+    val (calls, move) = contendedMove(refusals = Int.MaxValue, refusal = full)
+    reopen(move = move, contendedReplace = _ => true).value
+    backend.write(p("/f.txt"), "two\n", call()).left.value.message should include("not enough space")
+    calls.get shouldBe 1
+  }
+
+  it should "end its wait as a cancellation when the thread is interrupted" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val (_, move) = contendedMove(refusals = Int.MaxValue, meanwhile = _ => Thread.currentThread().interrupt())
+    reopen(move = move, contendedReplace = _ => true).value
+    val error = backend.write(p("/f.txt"), "two\n", call()).left.value
+    Thread.interrupted() shouldBe true
+    error shouldBe a[org.llm4s.error.CancelledError]
+    onDisk("f.txt") shouldBe "one\n"
+    temporaries() shouldBe empty
+  }
+
+  it should "be refused as before where the host replaces open files (POSIX): no re-check, no retry" in {
+    Files.writeString(dir.resolve("f.txt"), "one\n")
+    val (calls, move) = contendedMove(refusals = 1, meanwhile = t => Files.writeString(t, "theirs\n"): Unit)
+    reopen(move = move, contendedReplace = _ => false).value
+    val error = backend.edit(p("/f.txt"), "one", "two", replaceAll = false, call()).left.value
+    error shouldBe a[BackendRefused]
+    error.message should include("permission denied")
+    calls.get shouldBe 1
+  }
+
+  it should "be expected only where the file system has no POSIX view" in {
+    HostFileBackend.refusesReplacingOpenFiles(dir) shouldBe
+      !dir.getFileSystem.supportedFileAttributeViews.contains("posix")
   }
 
   "Concurrent edits of one file from different threads" should "never lose one: each applies or is refused" in {
