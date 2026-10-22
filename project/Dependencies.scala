@@ -15,6 +15,7 @@ object Versions {
   val scalamock               = "7.5.5"
   val scalatestplusScalacheck = "3.2.19.0"
   val junitJupiter            = "5.12.2"
+  val reactor                 = "3.8.8"
   val fansi                   = "0.5.1"
   val ox                      = "1.0.9"
   val postgres                = "42.7.11"
@@ -102,6 +103,9 @@ object Deps {
   // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
   val junitJupiterApi = "org.junit.jupiter"      % "junit-jupiter-api" % Versions.junitJupiter
   val fansi           = "com.lihaoyi"           %% "fansi"             % Versions.fansi
+  // llm4s-reactor (#1492): the Flux adapter over the Java facade's Flow.Publisher, and StepVerifier for its specs
+  val reactorCore = "io.projectreactor" % "reactor-core" % Versions.reactor
+  val reactorTest = "io.projectreactor" % "reactor-test" % Versions.reactor
   val ox              = "com.softwaremill.ox"   %% "core"              % Versions.ox
   val postgres        = "org.postgresql"         % "postgresql"        % Versions.postgres
   val sqlite          = "org.xerial"             % "sqlite-jdbc"       % Versions.sqlite

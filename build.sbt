@@ -1918,6 +1918,7 @@ lazy val docs = (project in file("modules/docs"))
     llm4sPekko,
     javaApi,
     javaRag,
+    reactor,
     springBootStarter
   )
   .settings(
@@ -1970,6 +1971,7 @@ lazy val docs = (project in file("modules/docs"))
         (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (javaRag / Compile / sources).value ++
+        (reactor / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
@@ -2019,6 +2021,27 @@ lazy val javaRag = (project in file("modules/java-rag"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
+    )
+  )
+
+// Reactor for the Java facade (#1492): `Streams.toFlux`, a `Flux<String>` over `JLlmClient.streamAsPublisher`'s JDK
+// `Flow.Publisher`. A module of its own so that `llm4s-java-api` stays free of reactor-core. Experimental.
+lazy val reactor = (project in file("modules/reactor"))
+  // java-api's test classes: `StreamFixtures`' scripted clients, and `GuideDocs`, which reads docs/guide/java-reactor.md
+  // for `ReactorGuideSpec`.
+  .dependsOn(javaApi % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-reactor",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage reactor/test reactor/coverageReport`); floor is the measured
+    // value rounded down to the nearest 5.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.reactorCore,
+      Deps.reactorTest % Test,
+      Deps.scalatest   % Test
     )
   )
 

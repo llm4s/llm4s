@@ -413,7 +413,8 @@ thread, which is how llm4s providers stop, and the listener then hears `onError`
 are made one at a time, never on your thread; one that throws stops the call, and `onError` receives what it threw.
 
 `streamAsPublisher` returns the text as a `java.util.concurrent.Flow.Publisher<String>` instead: it is in the JDK, so
-Reactor (`JdkFlowAdapter`), RxJava and Mutiny adapt it without another llm4s dependency. Each subscription makes its own
+Reactor (`JdkFlowAdapter`), RxJava and Mutiny adapt it without another llm4s dependency, and `llm4s-reactor` returns
+it as a `Flux<String>` ([Java Reactor](java-reactor)). Each subscription makes its own
 call. A subscriber slower than the model holds the provider's thread rather than losing text, and cancelling the
 subscription cancels the call. Streaming yields text only; tool-call deltas are not streamed.
 
@@ -774,6 +775,7 @@ available from Java yet, each with the issue that tracks it:
 ## Where next
 
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.
+- [Java Reactor](java-reactor): a streamed reply as a Reactor `Flux<String>`, with `llm4s-reactor`.
 - [Spring Boot](spring-boot): auto-configuration, a template bean and a health indicator on top of this module.
 - [Basic usage](basic-usage) and [providers](providers): the same concepts in Scala, and every provider's configuration.
 - [Gradle integration](../getting-started/gradle): dependency recipes for Gradle builds.

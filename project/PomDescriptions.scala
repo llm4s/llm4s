@@ -48,6 +48,8 @@ object PomDescriptions {
       "Java-friendly facade over LLM4S: a client, an agent and a conversation builder for Java callers.",
     "llm4s-java-rag" ->
       "Java-friendly facade over LLM4S RAG: ingest documents and ask questions answered with their sources, from Java.",
+    "llm4s-reactor" ->
+      "Reactor adapter for the LLM4S Java facade: a model's streamed reply as a Flux of its text, with backpressure and cancellation.",
     "llm4s-jev" ->
       "Client for TypeSafe's Jev decision model for LLM4S: typed yes/no, choice and score answers to questions about a state.",
     "llm4s-jina" ->

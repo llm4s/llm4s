@@ -177,6 +177,10 @@ flags:
     paths:
       - modules/java-rag/src/main/scala
     carryforward: true
+  reactor:
+    paths:
+      - modules/reactor/src/main/scala
+    carryforward: true
   deploy-service:
     paths:
       - modules/deploy-service/src/main/scala
