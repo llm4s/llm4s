@@ -281,6 +281,26 @@ if command -v ruby >/dev/null 2>&1; then
     errs << "github-release must wait for publish-kotlin" unless gr && Array(gr["needs"]).include?("publish-kotlin")
     puts errs' "$RELEASE")"
   if [ -z "$wiring" ]; then ok "release.yml publishes the Kotlin artifact after sbt and before the GitHub Release"; else bad "release.yml wiring" "$wiring"; fi
+
+  # The version check, run against what sbt prints on the runner: each project's `<id> / version` then the value on its
+  # own tab-indented line, and a trailing `ESC[0J`. Reading the last line failed 0.5.0; a `^[0-9]` match failed 0.5.1.
+  ruby -ryaml -e '
+    k = (YAML.load_file(ARGV[0])["jobs"] || {})["publish-kotlin"] || {}
+    s = (k["steps"] || []).find { |st| st["name"] == "Check sbt released the tag'"'"'s version" }
+    print(s ? s["run"].to_s : "exit 99")' "$RELEASE" > "$WORK/version-check.sh"
+  mkdir -p "$WORK/fake-sbt"
+  printf '#!/usr/bin/env bash\nprintf "llm4sZio / version\\n\\t%%s\\nThisBuild / version\\n\\t%%s\\n\\033[0J" "$FAKE_SBT_VERSION" "$FAKE_SBT_VERSION"\n' > "$WORK/fake-sbt/sbt"
+  chmod +x "$WORK/fake-sbt/sbt"
+  if PATH="$WORK/fake-sbt:$PATH" GITHUB_REF_NAME=v0.5.1 FAKE_SBT_VERSION=0.5.1 bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
+    ok "the version check reads sbt's tab-indented version"
+  else
+    bad "the version check" "refused sbt's own 0.5.1 for tag v0.5.1"
+  fi
+  if PATH="$WORK/fake-sbt:$PATH" GITHUB_REF_NAME=v0.5.1 FAKE_SBT_VERSION=0.5.1+3-abc1234-SNAPSHOT bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
+    bad "the version check" "accepted a snapshot for tag v0.5.1"
+  else
+    ok "the version check refuses a version that is not the tag's"
+  fi
 else
   bad "release.yml wiring" "ruby is needed to read release.yml"
 fi

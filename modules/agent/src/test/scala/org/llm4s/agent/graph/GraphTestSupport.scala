@@ -131,6 +131,12 @@ private[agent] class ForwardingCheckpointer(to: Checkpointer) extends Checkpoint
   ) = to.incompleteThreads(tenantId, after, limit)
   def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
     to.latestOfRuns(threadId, runIds)
+  def sweep(
+    policy: org.llm4s.agent.graph.SweepPolicy,
+    after: Option[org.llm4s.agent.graph.ThreadId],
+    guard: org.llm4s.agent.graph.SweepGuard
+  ) =
+    to.sweep(policy, after, guard)
   def history(threadId: ThreadId, before: Option[String], limit: Int) = to.history(threadId, before, limit)
   def checkpoint(threadId: ThreadId, checkpointId: String)            = to.checkpoint(threadId, checkpointId)
   def prune(threadId: ThreadId, policy: RetentionPolicy)              = to.prune(threadId, policy)

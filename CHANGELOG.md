@@ -12,10 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
+  `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
+- Checkpoint format 8 and SQLite schema 9: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.sweep` is a new abstract method every store implements, and a tombstone is no longer kept for good;
+  [migration](docs/reference/migration.md#store-wide-retention-and-tombstone-reclamation-2059).
 - `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
   `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
-- `Checkpointer.latestOfRuns` is a new abstract method every store implements, with SQLite schema 9 and PostgreSQL schema 3;
+- `Checkpointer.latestOfRuns` is a new abstract method every store implements, with SQLite schema 10 and PostgreSQL schema 4;
   [migration](docs/reference/migration.md#the-run-queue-2134).
 - `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
   and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
@@ -65,13 +69,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
   claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** cross-machine change notification: `PostgresCheckpointer.awaitEventsAfter` wakes on any store's commit by `LISTEN`/`NOTIFY`,
+  one listening connection per store, polling while it is down [#2131](https://github.com/llm4s/llm4s/issues/2131); [design §4.51](docs/design/typed-agent-runtime/4.51-stage-5-slice-s2-cross-machine-change-notification.md).
 - **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
   `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
+- **Added** `Checkpointer.sweep`: store-wide retention in bounded pages, reclaiming old tombstones while their readers are still
+  told the thread was deleted [#2059](https://github.com/llm4s/llm4s/issues/2059); [design §4.53](docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md).
+- **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
 - **Added** the durable run queue: `RunQueue` and `RunSubmitter` (`org.llm4s.agent.service`) in the in-memory, SQLite and PostgreSQL
   stores, `RunQueueContract`, and `llm4s.agent.queue` settings [#2134](https://github.com/llm4s/llm4s/issues/2134); [design §4.55](docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md).
 
 ### Agent harness (Phase 3)
 
+- **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
+  and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
 - **Added** `HostFileBackend`, a `FileBackend` over a host directory with one writer per root: `open` locks the root
   against any overlapping open, in any process [#1964](https://github.com/llm4s/llm4s/issues/1964); [design §4.40](docs/design/typed-agent-runtime/4.40-host-file-backend.md).
 - **Changed** on Linux workspace commands run under Landlock and seccomp: `readOnlyPaths`/`allowedPaths` bind them, and
@@ -194,6 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
+  version, which left Kotlin out of 0.5.0 and 0.5.1.
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
   run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
 - **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,
@@ -208,13 +221,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#harness-profile-and-middleware-placement-1915).
 - `UserMessage`/`ToolMessage` carry `parts` and have no extractor; `ToolOutcome.Success` takes a `ToolContent`;
   [migration](docs/reference/migration.md#multimodal-content-parts-1913).
-- `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
-  `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
 
 ### Agent harness (Phase 3)
 
-- **Added** workspace backends: `WorkspaceFileBackend` (`Verifiable`, compare-and-set in the runner), `WorkspaceSandboxBackend`
-  and the `execute` tool; `WorkspaceTools` **removed**, `CodeWorker` on the new tools [#1906](https://github.com/llm4s/llm4s/issues/1906); [design 4.33](docs/design/typed-agent-runtime/4.33-stage-3-slice-f2-workspace-backends.md).
 - **Added** the harness profile: `HarnessProfile` (`deepAgents` preset, `HarnessConfigLoader`) installed by `AgentBuilder.withHarness`, and
   `RunConfig.withRetention`, and middleware ordering checked at `build()` (`AgentMiddleware.placement`) [#1915](https://github.com/llm4s/llm4s/issues/1915); [design §4.37](docs/design/typed-agent-runtime/4.37-stage-3-slice-p1-harness-profile.md), [guide](docs/guide/agents/index.md#harness-profile).
 - **Added** instruction memory: `InstructionMemoryMiddleware` shows `AGENTS.md` files read through a `FileBackend`
@@ -233,8 +242,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
-- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.1: the release's version check read a terminal escape as
-  sbt's version, so 0.5.0 shipped without it and `llm4s-bom` 0.5.0's Kotlin entry does not resolve.
+- **Changed** the release's version check strips terminal escapes. `llm4s-kotlin-api` still did not ship in 0.5.1 (the
+  check missed sbt's tab-indented version), so `llm4s-bom` 0.5.1's Kotlin entry does not resolve either.
 
 ## [0.5.0] - 2026-10-15
 

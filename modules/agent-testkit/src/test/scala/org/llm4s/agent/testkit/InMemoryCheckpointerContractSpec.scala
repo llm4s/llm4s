@@ -16,6 +16,9 @@ class InMemoryCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
    */
   override protected def boundedStore(clock: Clock): Option[CheckpointerContract.BoundedStore] =
     Some(CheckpointerContract.BoundedStore(InMemoryCheckpointer(clock), 1.second, () => () => ()))
+
+  // its own commits wake its waiters at once, and runtimes share the instance
+  override protected def wakeBound: Option[FiniteDuration] = Some(1.second)
 }
 
 /**

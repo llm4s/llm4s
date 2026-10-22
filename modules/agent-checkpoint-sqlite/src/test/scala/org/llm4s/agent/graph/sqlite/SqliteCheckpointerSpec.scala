@@ -44,8 +44,8 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
-  /** The file as a version-8 build left it: no run queue and no run ids on history rows (design 4.55). */
-  private def asVersionEight(path: Path): Unit =
+  /** The file as a version-9 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionNine(path: Path): Unit =
     exec(
       path,
       "DROP TABLE llm4s_checkpoint_queue_attempts",
@@ -53,6 +53,16 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "DELETE FROM llm4s_checkpoint_meta WHERE key IN ('last_entry', 'last_lease')",
       "DROP INDEX llm4s_checkpoint_history_run",
       "ALTER TABLE llm4s_checkpoint_history DROP COLUMN run_id",
+      "UPDATE llm4s_checkpoint_schema SET version = 9"
+    )
+
+  /** The file as a version-8 build left it: no tombstone reclamation (design 4.53), nor anything after it. */
+  private def asVersionEight(path: Path): Unit =
+    asVersionNine(path)
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN deleted_nanos",
+      "DELETE FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'",
       "UPDATE llm4s_checkpoint_schema SET version = 8"
     )
 
@@ -160,10 +170,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           _ == 1,
           s"round $round: not exactly one schema version row"
         ),
-        // the last token, entry and lease issued (schema 9)
+        // one row each: the last token, the reclamation mark, and the last entry and lease issued
         read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
-          _ == 3,
-          s"round $round: not exactly three meta rows"
+          _ == 4,
+          s"round $round: not exactly one row per meta key"
         ),
         read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
       )
@@ -348,6 +358,35 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.commit(thread, Commit(token, events = Vector(event("e6")))).value.map(_.seq) shouldBe Vector(6L)
     reopened.compactEvents(thread, 2L).value
     reopened.eventsAfter(thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L, 6L)
+    reopened.close()
+  }
+
+  "A version-8 file" should "date its tombstones from the upgrade, and number new threads from 1 until one is reclaimed" in {
+    val db    = SqliteFiles.fresh()
+    val clock = ManualClock(Instant.now())
+    val store = SqliteFiles.opened(db, clock)
+    val gone  = ThreadId("gone")
+    val token = store.claim(gone, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store.commit(gone, Commit(token, Some(checkpoint(gone, "c1", None, token)), events = Vector(event("a")))).value
+    store.deleteThread(gone, token, None).value
+    store.close()
+    asVersionEight(db)
+
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    scalar(db, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'")(_.getLong(1)) shouldBe 1L
+    val stamped =
+      scalar(db, "SELECT deleted_nanos FROM llm4s_checkpoint_threads WHERE thread_id = 'gone'")(_.getLong(1))
+    math.abs(stamped - SqliteCheckpointer.epochNanos(Instant.now())) should be < 60L * 1000000000L
+    // a new id numbers from 1, as before the upgrade
+    val fresh = ThreadId("fresh")
+    val held  = reopened.claim(fresh, ClaimRequest(RunId("run"), None, ttl)).value.token
+    reopened.commit(fresh, Commit(held, events = Vector(event("f")))).value.map(_.seq) shouldBe Vector(1L)
+    // the tombstone's age counts from the upgrade
+    reopened.sweep(SweepPolicy(tombstoneAge = Some(1.hour)), None, SweepGuard.none).value.reclaimed shouldBe 0
+    clock.advance(2.hours)
+    reopened.sweep(SweepPolicy(tombstoneAge = Some(1.hour)), None, SweepGuard.none).value.reclaimed shouldBe 1
+    reopened.eventsAfter(gone, 1L, 10).left.value shouldBe GraphError.ThreadDeleted("gone", 1L, 3L)
     reopened.close()
   }
 
@@ -1152,9 +1191,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     }
   }
 
-  "A version-8 file" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+  "A version-9 file" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
     val db     = SqliteFiles.fresh()
-    val thread = ThreadId("v8-thread")
+    val thread = ThreadId("v9-thread")
     val first  = SqliteCheckpointer.open(db).value
     val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token).withRunId("run-a")))).value
@@ -1162,7 +1201,7 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     first.commit(thread, Commit(token, Some(checkpoint(thread, "c3", Some("c2"), token).withRunId("run-c")))).value
     first.release(thread, token).value
     first.close()
-    asVersionEight(db)
+    asVersionNine(db)
     // one damaged row must not stop the file opening: it keeps no run id
     exec(db, "UPDATE llm4s_checkpoint_history SET checkpoint_json = 'not json' WHERE checkpoint_id = 'c3'")
 
@@ -1172,8 +1211,19 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.latestOfRuns(thread, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
     reopened.latestOfRuns(thread, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
     reopened.runQueue.openEntries(None, thread).value shouldBe empty
+    // the queue's tables are there, with every column W1 reads
+    val queued = reopened.runQueue
+      .submit(
+        org.llm4s.agent.service.Submission(
+          thread,
+          org.llm4s.agent.AgentId.unsafe("upgraded"),
+          org.llm4s.agent.service.QueuedInput.query("q")
+        )
+      )
+      .value
+    reopened.runQueue.entry(None, queued.entryId).value.admitted shouldBe false
     reopened.close()
-    val steps = plan(db, (SqliteCheckpointer.LatestOfRunSql, Vector[Any]("v8-thread", "run-a")))
+    val steps = plan(db, (SqliteCheckpointer.LatestOfRunSql, Vector[Any]("v9-thread", "run-a")))
     withClue(steps.mkString("\n")) {
       steps.exists(_.contains("USING INDEX llm4s_checkpoint_history_run")) shouldBe true
       steps.exists(_.contains("TEMP B-TREE")) shouldBe false

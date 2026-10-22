@@ -8,8 +8,9 @@ nav_order: 2
 # Migration Guide
 
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
-by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the one source break is
-[Multimodal content parts](#multimodal-content-parts-1913). After 0.5.1, [`MemoryManagerConfig` is
+by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
+[Multimodal content parts](#multimodal-content-parts-1913) and
+[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so is [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708).
 
 ## Multimodal content parts (#1913)
@@ -134,12 +135,21 @@ Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s
 - **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
 - **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### Store-wide retention and tombstone reclamation (#2059)
+
+A store can be swept, a bounded page at a time, and a deleted thread's tombstone is no longer kept for good ([design 4.53](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md)). Code that only runs agents changes nothing; these change:
+
+- **A new abstract `Checkpointer` method.** `sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage]` prunes every thread the store holds by `policy.retention`, as `prune` does, and reclaims tombstones older than `policy.tombstoneAge`, at most `policy.batchSize` threads per call. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store whose cases share one database also overrides the contract's new `isolatedCheckpointer` hook with storage of its own.
+- **A reclaimed id numbers from the store's reclamation mark.** Once a sweep has reclaimed a tombstone, a new thread of an id with no tombstone - any id, not only a reclaimed one - numbers its events from the highest first number of every tombstone reclaimed, not from `1`, so a reader of the reclaimed log still gets `GraphError.ThreadDeleted`. Code that assumed a new thread's first event is `1` reads from `afterSeq = 0` instead, as a reader of a deleted id already had to.
+- **Paging children after a reclaimed child** refuses that cursor with a `ValidationError`, as for any id the store does not know as a child.
+- **Schemas move on, with no way back.** SQLite schema 9 and PostgreSQL schema 3 record when each tombstone was deleted and hold the reclamation mark; the tombstones a store already holds are dated from the upgrade. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ### The run queue (#2134)
 
 Runs can be submitted to a durable queue that workers on any machine take ([design 4.55](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md)). Code that only runs agents changes nothing; these change:
 
 - **A new abstract `Checkpointer` method.** `latestOfRuns(threadId, runIds): Result[Option[Checkpoint]]` answers the newest checkpoint any of a set of runs committed on a thread, by an index on the run. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store that also offers a `RunQueue` keeps, through `prune`, the newest checkpoint of every run an open entry recorded, and passes `RunQueueContract`.
-- **Schemas move on, with no way back.** SQLite schema 9 and PostgreSQL schema 3 add `run_id` to every history row (backfilled from its JSON when the store opens, and indexed by thread, run and position) and the queue's two tables. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+- **Schemas move on, with no way back.** SQLite schema 10 and PostgreSQL schema 4, the step after store-wide retention's, add `run_id` to every history row (backfilled from its JSON when the store opens, and indexed by thread, run and position) and the queue's two tables. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
 ## Workspace command confinement (#1983)
 
@@ -283,7 +293,8 @@ constructors remain, so source compiles unchanged, but code compiled against 0.4
 
 ## Stage 3 migration: the Deep Agents harness
 
-In 0.5.0. Stage 3 ([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
+In 0.5.0, except the slices for #1904, #1905, #1908, #1909, #1910, #1913 and #1915, which are in 0.5.1. Stage 3
+([#1901](https://github.com/llm4s/llm4s/issues/1901)) builds the harness as middleware
 and tools on `AgentBuilder`. Each slice adds its part here as it lands:
 
 - [#1902](https://github.com/llm4s/llm4s/issues/1902), kernel hooks for the harness - state-writing hooks, prompt

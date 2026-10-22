@@ -338,12 +338,12 @@ There is no unfenced delete: to delete a thread outside a runtime, claim it and 
 
 ### Limits
 
-- A deleted thread that numbered any event leaves a small record in the store for good: its next event number, and
-  nothing of its data. It is what lets a reader of the deleted log - in any process, however late - be told that the
-  thread was deleted, and a new thread of the id be numbered past it. Nothing removes it, `prune` included, so a store
-  grows by one such record per deleted thread; `Agent.run(query)` forgets the thread of every failed or cancelled
-  one-shot turn, so a long-lived store gains one per such turn. Deleting the same id again, with no event since,
-  adds nothing.
+- A deleted thread that numbered any event leaves a small record in the store, a tombstone: its next event number and
+  when it was deleted, nothing of its data. It is what lets a reader of the deleted log, in any process, be told that
+  the thread was deleted, and a new thread of the id be numbered past it. `prune` never removes it, so a store grows by
+  one per deleted thread - `Agent.run(query)` forgets the thread of every failed or cancelled one-shot turn, and child
+  retention deletes children - until a [sweep](#sweeping-the-whole-store) with a `tombstoneAge` reclaims the old ones.
+  Deleting the same id again, with no event since, adds nothing.
 
 ## Subscriptions across runtimes
 
@@ -352,8 +352,8 @@ only through its own: durable events in `seq` order, without gap or duplicate, a
 (Where another runtime's commit falls among this runtime's live events is not fixed: it depends on whether the
 subscription's initial replay, its store watch or a hand-over's gap read delivers it first; see
 [Ordering across runtimes](streaming#ordering-across-runtimes).) Each live subscription
-watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits returns at once. A store that
-is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
+watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits, such as PostgreSQL's (by
+`LISTEN`/`NOTIFY`, [below](#the-postgresql-store)), returns at once. A store that is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
 
 ```scala
 val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
@@ -488,7 +488,9 @@ continues its event numbering), 3 and 4 for effect records, and 5 since claims r
 with `claim_tenant_token`, the token of the claim the tenant belongs to), 6 for child threads, and 7 since each
 checkpoint and event records when the store committed it, which retention judges age by (rows from before 7 are judged
 by their producer's timestamps), and 8 for the thread registry (see [Finding threads](#finding-threads)), filled from
-each thread's latest checkpoint when a version-7 file is opened. A claim a version-4 file holds when it is
+each thread's latest checkpoint when a version-7 file is opened, and 9 for tombstone reclamation (see
+[Sweeping the whole store](#sweeping-the-whole-store)), which dates the tombstones a version-8 file holds from the
+upgrade. A claim a version-4 file holds when it is
 upgraded has no tenant recorded, so it matches no tenant: its holder is named to nobody, not even its own tenant,
 and a recovery that takes it over records no `takenOverFrom`. Such a claim is no older than its `ttl`, so this lasts
 at most that long. Stop every process running an older build before opening its file with this one: an
@@ -543,13 +545,77 @@ yield store.close()
 - **Every call returns within `connectionTimeout + callTimeout`** (5 + 5 seconds by default): the call timeout is set
   on the server for each transaction and enforced on the client, which discards a connection whose call overran it.
   A caller-supplied pool's own connection timeout stands in for `connectionTimeout`; set a driver socket timeout on it.
-- **Subscriptions poll**, as with SQLite, once per `WatchPolicy.pollInterval`.
+- **Subscriptions are told of commits** by `LISTEN`/`NOTIFY`. A commit that stores events, and a delete, notifies the
+  schema's channel (`llm4s_checkpoint_<schema>`) inside its transaction, so only a commit that lands is announced;
+  the payload is a hash of the thread id, nothing of its content. Each store opens one more connection, outside its
+  pool, on its first watch (`ApplicationName` `llm4s-agent-checkpoint-postgres-listener`), and keeps it until
+  `close`: count it when sizing `max_connections`. Over a `DataSource` that is not a HikariCP pool with a JDBC URL,
+  that connection is taken from the `DataSource` instead, and held. A commit through any store over the schema wakes
+  a waiting subscription within a second on a healthy database, whatever its `pollInterval`.
+- **A lost listening connection degrades to polling.** While it is down - before it first opens, after the server or
+  network drops it, or once its heartbeat (a `SELECT 1` whenever `callTimeout` passes quietly) fails - each watch
+  reads once per `WatchPolicy.pollInterval`, as with SQLite, and the store reconnects in the background. A
+  notification is only a wake-up: the watch always reads the log, so a missed or repeated one loses nothing. Each
+  watch still reads once per `pollInterval` while it waits, so where many subscriptions watch one database, a longer
+  `pollInterval` cuts reads without slowing delivery.
 
 ### Upgrades
 
 A release that changes neither the store's schema nor the checkpoint format can replace instances one at a time. A
 release that changes either needs every instance stopped before the first new one starts: an old instance that meets
 the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing.
+
+## Choosing the store in application.conf
+
+`CheckpointerConfigLoader.open()` (`org.llm4s.config`, in `llm4s-agent`) opens the store `llm4s.agent.checkpointer.kind`
+names, and `RuntimeConfigLoader.runtime(checkpointer)` builds a `GraphRuntime` over it with the `ClaimPolicy` and
+`WatchPolicy` from `llm4s.agent.runtime`. Changing store is then a dependency and a setting, with no code:
+
+```hocon
+llm4s.agent {
+  checkpointer {
+    kind = "postgres"                 # memory (the default) | sqlite | postgres; or LLM4S_CHECKPOINTER
+    postgres {
+      url    = "jdbc:postgresql://db:5432/app"   # or LLM4S_CHECKPOINTER_POSTGRES_URL
+      user   = "agents"                          # or LLM4S_CHECKPOINTER_POSTGRES_USER
+      # password: LLM4S_CHECKPOINTER_POSTGRES_PASSWORD
+      schema = "agents"
+      callTimeout = 5 seconds
+      connectionTimeout = 5 seconds
+      maxPoolSize = 10
+    }
+    sqlite {
+      path = "/var/lib/app/threads.db"           # or LLM4S_CHECKPOINTER_SQLITE_PATH
+      busyTimeout = 5 seconds
+    }
+  }
+  runtime {
+    claims { ttl = 30 seconds, renewEvery = 10 seconds }   # label: LLM4S_RUNTIME_LABEL
+    watch  { enabled = true, pollInterval = 250 milliseconds }
+  }
+}
+```
+
+```scala
+import org.llm4s.config.{ CheckpointerConfigLoader, RuntimeConfigLoader }
+
+for
+  store   <- CheckpointerConfigLoader.open()            // a CheckpointStore: close it when the application stops
+  runtime <- RuntimeConfigLoader.runtime(store.checkpointer)
+  agent   <- Agent.builder("assistant", client).withRuntime(runtime).build()
+yield (store, agent)
+```
+
+- **`memory`** is built into `llm4s-agent` and is the default; **`sqlite`** needs `llm4s-agent-checkpoint-sqlite` and
+  **`postgres`** `llm4s-agent-checkpoint-postgres`. Each store module ships its block's defaults in its own
+  `reference.conf`. A kind whose module is not on the classpath fails only `open`, with an error naming the module.
+- **Only the selected kind's block is read**, so a half-written `postgres` block does not matter while `kind = sqlite`.
+- **Credentials stay out of logs.** No setting's value reaches a log line or an error; set the password through its
+  variable rather than in a checked-in file.
+- **A store of your own** registers a `CheckpointerBackend` (`org.llm4s.agent.graph.spi`): a `class` with a public
+  no-arg constructor, listed in `META-INF/services/org.llm4s.agent.graph.spi.CheckpointerBackend`, that opens its store
+  from its block `llm4s.agent.checkpointer.<kind>`, handed to it as a `CheckpointerSettings`.
+  `CheckpointerBackends.of(...)` registers backends explicitly, for a shaded jar whose services files were lost.
 
 ## Checkpoint history, fork and updateState
 
@@ -664,6 +730,40 @@ can run while a run executes; call it on a schedule that suits you.
 that same clock - never with the `createdAt` and event timestamps the committing runtime stamped by its own, which stay
 as the producer's record. So a host whose clock is skewed makes nothing too old or too young. The SQLite and in-memory
 stores judge by the clock they were opened with; the PostgreSQL store by the database server's.
+
+### Sweeping the whole store
+
+`prune` works on one thread. `Checkpointer.sweep` applies a policy to every thread the store holds, a bounded page at a
+time, and reclaims the tombstones of threads deleted long enough ago (design 4.53):
+
+```scala
+val policy = SweepPolicy(
+  retention = RetentionPolicy(maxAge = Some(30.days), maxCheckpoints = Some(50)),
+  tombstoneAge = Some(7.days),
+  batchSize = 100
+)
+@annotation.tailrec
+def sweepAll(after: Option[ThreadId]): Result[Unit] =
+  checkpointer.sweep(policy, after, SweepGuard.none) match
+    case Right(page) if page.next.isDefined => sweepAll(page.next)
+    case other                              => other.map(_ => ())
+```
+
+- Each call visits at most `batchSize` threads (1 to 1000), tombstones included, and returns the cursor of the next
+  page, so every call stays within the store's bound however many threads it holds. The PostgreSQL store makes a call
+  in up to three short transactions, so one returns within three times its bound.
+- Each thread is pruned exactly as `prune(threadId, policy.retention)` would prune it, by the store's commit times.
+- A tombstone is reclaimed once the store deleted the thread more than `tombstoneAge` ago, by its clock, and nothing was
+  stored under the id since (a claim counts until it has lapsed for `tombstoneAge` too).
+- A reader of a reclaimed log is still refused with `ThreadDeleted`: reclaiming raises the store's reclamation mark,
+  and a new thread of any id without a tombstone numbers its events from it, past every reclaimed thread's. So once a
+  store has reclaimed a tombstone, new threads no longer number from `1`. Paging `children` after a reclaimed child
+  refuses that cursor.
+- A `SweepGuard` names the threads something outside the store still depends on: each keeps its tombstone, and the
+  newest checkpoint each of its named `RunId`s committed, whatever the policy. A run queue's open entries are what a
+  guard will name (Stage 5, rule 4); `SweepGuard.none` protects nothing.
+
+A sweep needs no claim. Run one at a time per store, on a schedule: two at once are safe, only wasteful.
 
 ## Finding threads
 

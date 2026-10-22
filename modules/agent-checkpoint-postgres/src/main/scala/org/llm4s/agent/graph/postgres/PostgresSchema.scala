@@ -34,7 +34,9 @@ import scala.util.Using
  *    names and `committed_at` beside it, so `prune` decides by the database's clock without decoding the log.
  *  - `checkpoint_effects`: the thread's effect records (design §4.24), one JSON `EffectRecord` per
  *    `(thread, effect key)`, with its task's id and lineage and the token of the commit that wrote it.
- *  - the run queue (version 3, design 4.55, [[addRunQueue]]): `checkpoint_queue_entries` and
+ *  - `checkpoint_reclaimed` (version 3): one row, the first event number of a thread whose id has no row - the
+ *    reclamation mark a retention sweep raises as it reclaims tombstones ([[addReclamation]]).
+ *  - the run queue (version 4, design 4.55, [[addRunQueue]]): `checkpoint_queue_entries` and
  *    `checkpoint_queue_attempts`, with the sequences their ids and lease tokens come from, and `run_id` on every
  *    history row for the run-id lookup.
  *
@@ -47,13 +49,30 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 3
+  val Current: Int = 4
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addRunQueue)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addReclamation, 3 -> addRunQueue)
+
+  /**
+   * Version 3: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_at`, when the
+   * store last deleted a thread of the id by the database's clock, which a sweep judges a tombstone's age by and which
+   * keeps a tombstone from being dropped as an empty row; `checkpoint_reclaimed` holds one row, `first_seq`, the first
+   * event number of a thread whose id has no row - `1` until a sweep reclaims a tombstone, then the highest first
+   * number of every tombstone reclaimed.
+   *
+   * A version-2 schema's rows whose `first_seq` is past 1 are its tombstones and the threads created again over one:
+   * they are stamped with the migration's time by the database's clock, so a tombstone's age counts from the upgrade.
+   */
+  private def addReclamation(t: Tables): Vector[String] = Vector(
+    s"ALTER TABLE ${t.threads} ADD COLUMN deleted_at timestamptz",
+    s"UPDATE ${t.threads} SET deleted_at = clock_timestamp() WHERE first_seq > 1",
+    s"CREATE TABLE ${t.reclaimed} (first_seq bigint NOT NULL)",
+    s"INSERT INTO ${t.reclaimed} (first_seq) VALUES (1)"
+  )
 
   /**
    * Version 2: the thread registry (Stage 5 slice S3, design 4.52). Each thread's row gains what `threads` and
@@ -104,7 +123,7 @@ private[postgres] object PostgresSchema:
     )
 
   /**
-   * Version 3: the run queue (Stage 5 slice W1, design 4.55). Every history row gets the run that committed it
+   * Version 4: the run queue (Stage 5 slice W1, design 4.55). Every history row gets the run that committed it
    * (`run_id`), backfilled from its JSON (NULL for a row whose JSON cannot be read), indexed by `(thread_id, run_id, position)` for the run-id lookup.
    *
    * `checkpoint_queue_entries` holds one row per entry: its id (from `checkpoint_queue_entry_ids`, so ids follow
@@ -190,6 +209,7 @@ private[postgres] object PostgresSchema:
     val queueLeaseTokens: String        = q("checkpoint_queue_lease_tokens")
     val queueEntries: String            = q("checkpoint_queue_entries")
     val queueAttempts: String           = q("checkpoint_queue_attempts")
+    val reclaimed: String               = q("checkpoint_reclaimed")
 
   /** Version 1: every table, as the store's Scaladoc describes them. */
   private def createTables(t: Tables): Vector[String] = Vector(

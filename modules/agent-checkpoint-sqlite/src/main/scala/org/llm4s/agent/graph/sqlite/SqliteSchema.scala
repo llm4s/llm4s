@@ -13,7 +13,8 @@ import scala.util.{ Try, Using }
  *
  *  - `llm4s_checkpoint_schema`: one row, the schema version the file is at.
  *  - `llm4s_checkpoint_meta`: the last fencing token issued, for the whole file. It survives a restart and
- *    `deleteThread`, so a token is never issued twice.
+ *    `deleteThread`, so a token is never issued twice. From version 9 also `reclaimed_first`, the first event number
+ *    of a thread whose id has no row ([[addReclamation]]).
  *  - `llm4s_checkpoint_threads`: one row per thread that has a checkpoint, a claim, or an event number spent - the
  *    latest checkpoint as JSON with its id (the thread's version), the next event number and the replay floor,
  *    the first event number of the thread now under the id (`first_seq`, version 2), and the claim (holder, token,
@@ -38,7 +39,7 @@ import scala.util.{ Try, Using }
  *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
  *  - `llm4s_checkpoint_thread_metadata` (version 8): each thread's metadata (design 4.52), entry by entry, indexed by
  *    `(key, value)` for the registry's equality search; `deleteThread` removes a thread's.
- *  - the run queue (version 9, design 4.55, [[addRunQueue]]): `llm4s_checkpoint_queue_entries`, one row per entry,
+ *  - the run queue (version 10, design 4.55, [[addRunQueue]]): `llm4s_checkpoint_queue_entries`, one row per entry,
  *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
  *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`).
  *
@@ -50,7 +51,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 9
+  val Current: Int = 10
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -65,8 +66,30 @@ private[sqlite] object SqliteSchema:
     5 -> addChildThreads,
     6 -> addCommitTimes,
     7 -> addThreadRegistry,
-    8 -> addRunQueue
+    8 -> addReclamation,
+    9 -> addRunQueue
   )
+
+  /**
+   * Version 9: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_nanos`, when
+   * the store last deleted a thread of the id (epoch nanoseconds by the store's clock), which a sweep judges a
+   * tombstone's age by and which keeps a tombstone from being dropped as an empty row; `llm4s_checkpoint_meta` gains
+   * `reclaimed_first`, the first event number of a thread whose id has no row - `1` until a sweep reclaims a tombstone,
+   * then the highest first number of every tombstone reclaimed.
+   *
+   * A version-8 file's rows whose `first_seq` is past 1 are its tombstones and the threads created again over one: they
+   * are stamped with the time of the migration by the system clock, so a tombstone's age counts from the upgrade.
+   */
+  private def addReclamation(connection: Connection): Unit =
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN deleted_nanos INTEGER",
+      s"UPDATE llm4s_checkpoint_threads SET deleted_nanos = ${SqliteSchema.nowNanos} WHERE first_seq > 1",
+      "INSERT INTO llm4s_checkpoint_meta (key, value) VALUES ('reclaimed_first', 1)"
+    )
+
+  /** The system clock's time, as an SQL expression in epoch nanoseconds. */
+  private[sqlite] val nowNanos: String = "CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER) * 1000000"
 
   /** The partial index predicate every registry index shares: root threads with a registered latest checkpoint. */
   private val Registered = "parent_thread_id IS NULL AND thread_status IS NOT NULL"
@@ -84,7 +107,7 @@ private[sqlite] object SqliteSchema:
    * this build cannot read is logged and left out of the registry, as [[ensureHistory]] leaves it out of the history.
    */
   /**
-   * Version 9: the run queue (design 4.55). Every history row gets the run that committed it (`run_id`), backfilled
+   * Version 10: the run queue (design 4.55). Every history row gets the run that committed it (`run_id`), backfilled
    * from its JSON (NULL for a row whose JSON cannot be read, so one damaged row does not stop the file opening), indexed by `(thread_id, run_id, position)` so the run-id lookup reads one index entry per run.
    *
    * `llm4s_checkpoint_queue_entries` holds one row per entry: its id (`AUTOINCREMENT`, so an id is never reused, and

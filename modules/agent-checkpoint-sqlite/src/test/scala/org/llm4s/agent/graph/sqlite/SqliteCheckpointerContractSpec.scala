@@ -151,6 +151,12 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     ) = next.incompleteThreads(tenantId, after, limit)
     def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
       next.latestOfRuns(threadId, runIds)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      next.sweep(policy, after, guard)
     def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
       next.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =

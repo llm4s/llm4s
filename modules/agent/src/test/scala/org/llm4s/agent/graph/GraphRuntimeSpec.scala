@@ -133,6 +133,12 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     ) = underlying.incompleteThreads(tenantId, after, limit)
     def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
       underlying.latestOfRuns(threadId, runIds)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
@@ -409,6 +415,12 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       ) = store.incompleteThreads(tenantId, after, limit)
       def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
         store.latestOfRuns(threadId, runIds)
+      def sweep(
+        policy: org.llm4s.agent.graph.SweepPolicy,
+        after: Option[org.llm4s.agent.graph.ThreadId],
+        guard: org.llm4s.agent.graph.SweepGuard
+      ) =
+        store.sweep(policy, after, guard)
       def history(threadId: ThreadId, before: Option[String], limit: Int) = store.history(threadId, before, limit)
       def checkpoint(threadId: ThreadId, checkpointId: String)            = store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)              = store.prune(threadId, policy)

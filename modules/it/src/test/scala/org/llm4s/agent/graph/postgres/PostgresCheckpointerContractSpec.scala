@@ -39,21 +39,36 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
     }
   }
 
-  private def open(clock: Clock): PostgresCheckpointer = {
+  private def open(clock: Clock, in: PostgresCheckpointerConfig = config): PostgresCheckpointer = {
     PgCheckpointerDb.require()
-    val store = PgCheckpointerDb.store(config, clocks.sql(clockId(clock)))
+    val store = PgCheckpointerDb.store(in, clocks.sql(clockId(clock)))
     opened.add(store)
     store
   }
 
-  protected def newCheckpointer(clock: Clock): Checkpointer = open(clock)
-
-  override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {
-    closeExtra(store)
-    open(clock)
+  /** The configuration - the schema - `store` was opened with, so a reopen or a sibling opens the same storage. */
+  private def configOf(store: Checkpointer): PostgresCheckpointerConfig = store match {
+    case postgres: PostgresCheckpointer => postgres.config
+    case _                              => config
   }
 
-  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer = open(clock)
+  protected def newCheckpointer(clock: Clock): Checkpointer = open(clock)
+
+  // the retention sweep's cases each get a schema of their own: they page through, and renumber, the whole store
+  override protected def isolatedCheckpointer(clock: Clock): Checkpointer = {
+    PgCheckpointerDb.require()
+    val isolated = PgCheckpointerDb.freshSchema()
+    schemas.add(isolated)
+    open(clock, PostgresCheckpointerConfig(schema = isolated))
+  }
+
+  override protected def reopen(store: Checkpointer, clock: ManualClock): Checkpointer = {
+    val in = configOf(store)
+    closeExtra(store)
+    open(clock, in)
+  }
+
+  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer = open(clock, configOf(store))
 
   override protected def advanceStoreClock(store: Checkpointer, clock: ManualClock, by: FiniteDuration): Unit = {
     clock.advance(by)
@@ -62,6 +77,9 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
 
   // the database's clock is the case's clock, to the microsecond, so expiries are exact
   override protected def exactExpiry: Boolean = true
+
+  // LISTEN/NOTIFY (design 4.51): a commit through any store wakes a waiter within a second on a healthy database
+  override protected def wakeBound: Option[FiniteDuration] = Some(1.second)
 
   /**
    * A store with a 300 ms call timeout over a pool of two with a 250 ms connection timeout: its documented bound is

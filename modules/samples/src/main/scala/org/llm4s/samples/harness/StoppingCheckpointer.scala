@@ -63,6 +63,12 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
     alive(underlying.incompleteThreads(tenantId, after, limit))
   def latestOfRuns(threadId: ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
     alive(underlying.latestOfRuns(threadId, runIds))
+  def sweep(
+    policy: org.llm4s.agent.graph.SweepPolicy,
+    after: Option[org.llm4s.agent.graph.ThreadId],
+    guard: org.llm4s.agent.graph.SweepGuard
+  ) =
+    alive(underlying.sweep(policy, after, guard))
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     alive(underlying.checkpoint(threadId, checkpointId))
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = alive(underlying.prune(threadId, policy))

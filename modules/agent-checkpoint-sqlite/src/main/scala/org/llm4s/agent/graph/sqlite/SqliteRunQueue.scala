@@ -12,7 +12,7 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * The [[org.llm4s.agent.service.RunQueue RunQueue]] of a [[SqliteCheckpointer]] (`SqliteCheckpointer.runQueue`,
- * design 4.55): entries and attempts in the store's file (schema version 9), over its connection and in its write
+ * design 4.55): entries and attempts in the store's file (schema version 10), over its connection and in its write
  * transactions, so each call is atomic and bounded as the store's calls are. Leases expire, and closes are stamped,
  * by the store's clock. A write transaction holds the file's lock, so two queues over one file never take one entry.
  * `awaitClosed` polls, as the store's change notification does.

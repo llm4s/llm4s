@@ -797,6 +797,47 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.entry(second).admitted shouldBe false
   }
 
+  // ---- the store's sweep (design 4.53) ----
+
+  /** Sweeps the whole store, a page at a time, with no guard. */
+  private def sweepAll(c: Case, policy: SweepPolicy): Unit =
+    @scala.annotation.tailrec
+    def from(after: Option[ThreadId]): Unit =
+      c.checkpointer.sweep(policy, after, SweepGuard.none).value.next match
+        case None       => ()
+        case Some(next) => from(Some(next))
+    from(None)
+
+  it should "keep the newest checkpoint of an open entry's runs through a sweep whose guard protects nothing" in {
+    val c = Case()
+    c.submit().value
+    val leased = c.take().value
+    val run    = s"run-${unique()}"
+    c.queue.recordAttempt(leased.lease, RunId(run)).value
+    c.commitAs(run, "admitted")
+    (1 to 3).foreach(n => c.commitAs("direct", s"direct-$n"))
+    sweepAll(c, SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), batchSize = SweepPolicy.MaxBatchSize))
+    c.checkpointer.latestOfRuns(c.thread, Set(RunId(run))).value.map(_.id) shouldBe Some("admitted")
+    c.checkpointer.history(c.thread, None, 100).value.map(_.id) shouldBe Vector("direct-3", "admitted")
+  }
+
+  it should "keep refusing a deleted entry's attempt once a sweep has reclaimed the thread's tombstone" in {
+    val c = Case()
+    c.commitAs("direct", "c1")
+    c.submit().value
+    val leased = c.take().value
+    val run    = s"run-${unique()}"
+    c.queue.recordAttempt(leased.lease, RunId(run)).value shouldBe a[AttemptStart.Recorded]
+    c.deleteThread()
+    c.advance(2.hours)
+    sweepAll(c, SweepPolicy(tombstoneAge = Some(1.hour), batchSize = SweepPolicy.MaxBatchSize))
+    // the tombstone is gone, but the fence lives in the queue
+    c.tryCommit(run, "late").refused shouldBe a[GraphError.InvalidCommit]
+    c.checkpointer.latest(c.thread).value shouldBe None
+    val again = c.take("worker-2").value
+    c.queue.recordAttempt(again.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
+  }
+
 object RunQueueContract:
 
   /** A store's checkpointer and the run queue in the same database. */

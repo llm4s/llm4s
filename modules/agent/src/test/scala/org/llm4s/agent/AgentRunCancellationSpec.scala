@@ -285,6 +285,12 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     ) = underlying.incompleteThreads(tenantId, after, limit)
     def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
       underlying.latestOfRuns(threadId, runIds)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }

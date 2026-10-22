@@ -135,6 +135,12 @@ class ReplayContractSelfCheckSpec extends AnyFlatSpec with Matchers {
     ) = underlying.incompleteThreads(tenantId, after, limit)
     def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
       underlying.latestOfRuns(threadId, runIds)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
   }
 
   "ReplayContract" should "fail a target that performs its effect without a guard" in {

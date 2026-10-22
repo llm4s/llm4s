@@ -7,7 +7,7 @@ import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationEr
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
-import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException }
+import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet, SQLException }
 import java.time.{ Instant, OffsetDateTime, ZoneOffset }
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -40,10 +40,21 @@ import scala.util.{ Try, Using }
  *  - '''History, retention, deletes and children''' behave exactly as in the SQLite store: every superseded
  *    checkpoint is kept until `prune`, `retractTurn` or [[deleteThread]] removes it; a deleted thread leaves a
  *    tombstone of its event numbering; a parent's children are listed in the order their first commits landed.
+ *  - '''The retention sweep''' (design 4.53) pages through the threads by primary key, prunes each and reclaims old
+ *    tombstones, raising the schema's reclamation mark in the same transaction, under an advisory lock that every
+ *    claim creating a row shares; see [[sweep]].
  *  - '''Data only.''' Checkpoints, pending writes, events and effect records are stored as JSON text and decoded on
  *    read, so nothing executable is stored.
- *  - '''Change notification by polling''' for now: a subscription reads the log once per `WatchPolicy.pollInterval`
- *    (the `Checkpointer.awaitEventsAfter` default). `LISTEN`/`NOTIFY` replaces it in a later slice.
+ *  - '''Change notification by `LISTEN`/`NOTIFY`''' (design 4.51). A commit that stores events, and a delete, `NOTIFY`s the
+ *    schema's channel inside its transaction, so the notification is delivered only if it commits; its payload is a
+ *    hash of the thread id, nothing of the thread's content. One dedicated connection per store, opened by the first
+ *    [[awaitEventsAfter]] and kept until [[close]], `LISTEN`s and wakes the store's waiting calls, so a commit through
+ *    any store over the same database and schema wakes them as soon as it is delivered: within a second, tested, on a
+ *    healthy database. A notification is only a hint: a woken call reads the log again, so a missed or duplicated one
+ *    loses nothing. While the listening connection is down - not yet open, lost, or found dead by its heartbeat - a
+ *    call waits out its `timeout` and its caller reads again, polling under its `WatchPolicy`; the connection is
+ *    reopened in the background and, once it listens, every waiting call reads again. A wait never depends on that
+ *    connection, so every call keeps its bound.
  *
  * Reads run in a `REPEATABLE READ`, read-only transaction, so what one call reads is one snapshot; they never wait for
  * a writer.
@@ -80,6 +91,12 @@ final class PostgresCheckpointer private (
   private[postgres] given errorContext: ErrorContext = ErrorContext(config.schema)
   private val callTimeout                            = config.callTimeout
   private val transactionSetting                     = settings(callTimeout)
+  private val notifier = new ChangeNotifier(
+    ChangeNotifier.channelFor(config.schema),
+    listenerConnection(dataSource, config),
+    callTimeout,
+    config.schema
+  )
 
   /** The schema this store's tables are in. */
   def schema: String = config.schema
@@ -219,6 +236,7 @@ final class PostgresCheckpointer private (
             insert.executeBatch(): Unit
           }
           update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
+          notifyCommit(c, threadId)
         // handed back decoded from what was stored, as a later read would see them
         stored.map((_, _, json) => upickle.default.read[EventRecord](json))
     }
@@ -347,48 +365,115 @@ final class PostgresCheckpointer private (
    * which a writer with a skewed clock would make too old or too young (rule 1).
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = writing("prune") { c =>
-    lockRow(c, threadId) match
-      case None => Right(())
-      case Some(current) =>
-        val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
-        // oldest first: (position, id, committed at)
-        val history =
-          query(c, Sql.historyAges(t), threadId.value)(rows => (rows.getLong(1), rows.getString(2), instant(rows, 3)))
-        // the latest checkpoint is always kept, whatever its age
-        val (older, latest) = history.splitAt(history.size - 1)
-        val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
-        val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        // an open queue entry's admission evidence (rule 4): the newest checkpoint each of its runs committed
-        val evidence      = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
-        val keptPositions = kept.map(_._1).toSet ++ evidence
-        history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
-          update(c, Sql.deleteHistoryAt(t), threadId.value, position)
-        }
-        // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
-        val byCheckpoint =
-          if kept.size == history.size then None
-          else
-            query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
-              Option(rows.getObject(1)).map(_ => rows.getLong(1))
-            ).head
-        val byAge = cutoff.map { cut =>
-          query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
-            Option(rows.getObject(1)).map(_ => rows.getLong(1))
-          ).head
-            .getOrElse(current.nextSeq)
-        }
-        val bySize = policy.maxEvents.map(n => current.nextSeq - n)
-        val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
-        update(c, Sql.deleteEventsBefore(t), threadId.value, floor)
-        update(c, Sql.setFloor(t), floor, threadId.value)
-        Right(())
+    lockRow(c, threadId).foreach(pruneRow(c, threadId, _, policy, Set.empty))
+    Right(())
   }
+
+  /**
+   * [[prune]] of a thread whose row the caller's transaction holds locked, also keeping the newest checkpoint each of
+   * `protectedRuns` committed (a sweep's protected thread, design 4.53).
+   */
+  private def pruneRow(
+    c: Connection,
+    threadId: ThreadId,
+    current: Row,
+    policy: RetentionPolicy,
+    protectedRuns: Set[RunId]
+  ): Unit =
+    val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
+    // oldest first: (position, id, committed at, run)
+    val history =
+      query(c, Sql.historyAges(t), threadId.value)(rows =>
+        (rows.getLong(1), rows.getString(2), instant(rows, 3), Option(rows.getString(4)).getOrElse(""))
+      )
+    val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
+    // and an open queue entry's admission evidence (rule 4, design 4.55): the newest checkpoint each of its runs
+    // committed, read in this transaction
+    val queued        = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
+    val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
+    history.filterNot(h => keptPositions(h._1)).foreach(h => update(c, Sql.deleteHistoryAt(t), threadId.value, h._1))
+    // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
+    val byCheckpoint =
+      if kept.size == history.size then None
+      else
+        query(c, Sql.firstEventOf(t), threadId.value, kept.map(_._2).toArray)(rows =>
+          Option(rows.getObject(1)).map(_ => rows.getLong(1))
+        ).head
+    val byAge = cutoff.map { cut =>
+      query(c, Sql.firstEventSince(t), threadId.value, cut)(rows =>
+        Option(rows.getObject(1)).map(_ => rows.getLong(1))
+      ).head
+        .getOrElse(current.nextSeq)
+    }
+    val bySize = policy.maxEvents.map(n => current.nextSeq - n)
+    val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
+    update(c, Sql.deleteEventsBefore(t), threadId.value, floor)
+    update(c, Sql.setFloor(t), floor, threadId.value)
+
+  /**
+   * One page of the sweep (design 4.53), in up to three transactions, each bounded as every call is - so a sweep call
+   * returns within three times the store's bound: the page's ids read by the primary key; the guard asked outside any
+   * transaction; then, if the policy reclaims, the page's old tombstones reclaimed under the reclamation lock (taken
+   * exclusively, so no claim creates a row from the mark meanwhile), each row locked in id order as every call locks
+   * rows - skipping a row another call holds, which is in use and so no tombstone to reclaim, for a sweep holding the
+   * reclamation lock never waits on a live thread's commit while every claim of a new id waits on it - and removed
+   * only if it is still only an old tombstone; then the rest of the page pruned, the rows locked in that same order.
+   * Time is the database's.
+   */
+  def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
+    reading("sweep") { c =>
+      Right(after match
+        case None => query(c, Sql.sweepPage(t), policy.batchSize + 1)(rows => ThreadId(rows.getString(1)))
+        case Some(id) =>
+          query(c, Sql.sweepPageAfter(t), id.value, policy.batchSize + 1)(rows => ThreadId(rows.getString(1)))
+      )
+    }.flatMap { page =>
+      val visited = page.take(policy.batchSize)
+      // asked outside the store's transactions: the guard may read another store, such as a run queue
+      guard.retained(visited).flatMap { protectedRuns =>
+        val candidates = visited.filterNot(protectedRuns.contains).sortBy(_.value)
+        val reclaimed: Result[Set[ThreadId]] = policy.tombstoneAge match
+          case Some(age) if candidates.nonEmpty =>
+            writing("sweep") { c =>
+              query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
+              val cutoff = clockNow(c).minusNanos(age.toNanos)
+              val gone = candidates.flatMap { threadId =>
+                readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
+                  query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
+                }
+              }
+              // readers of a reclaimed log are still refused: a new thread of the id starts past it
+              gone.map(_._2).maxOption.foreach(first => update(c, Sql.raiseReclaimed(t), first))
+              Right(gone.map(_._1).toSet)
+            }
+          case _ => Right(Set.empty)
+        reclaimed.flatMap { gone =>
+          val pruning = visited.filterNot(gone).sortBy(_.value)
+          val pruned =
+            if policy.retention == RetentionPolicy.keepAll || pruning.isEmpty then Right(())
+            else
+              writing("sweep") { c =>
+                pruning.foreach { threadId =>
+                  lockRow(c, threadId).foreach { row =>
+                    pruneRow(c, threadId, row, policy.retention, protectedRuns.getOrElse(threadId, Set.empty))
+                  }
+                }
+                Right(())
+              }
+          pruned.map(_ => SweepPage(visited.size, gone.size, RetentionSweep.next(page, policy.batchSize)))
+        }
+      }
+    }
+
+  /** The key of the reclamation lock (see `Sql.lockReclamation`): one per schema. */
+  private val reclamationLock = PostgresSchema.lockName(config.schema) + ":reclamation"
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
-      val row      = readRow(c, threadId, Sql.row(t))
-      val first    = row.fold(1L)(_.firstSeq)
-      val earliest = row.fold(1L)(_.earliestSeq)
+      val row = readRow(c, threadId, Sql.row(t))
+      // an id with no row numbers from the reclamation mark (design 4.53)
+      val first    = row.fold(query(c, Sql.reclaimedFirst(t))(_.getLong(1)).headOption.getOrElse(1L))(_.firstSeq)
+      val earliest = row.fold(first)(_.earliestSeq)
       // a reader from the start reads the thread now under the id, from its first event
       if Checkpointer.deleted(afterSeq, first) then Left(GraphError.ThreadDeleted(threadId.value, afterSeq, first))
       else if math.max(afterSeq, first - 1) + 1 < earliest then
@@ -415,6 +500,40 @@ final class PostgresCheckpointer private (
    * the store closes it.
    */
   lazy val runQueue: org.llm4s.agent.service.RunQueue = new PostgresRunQueue(this)
+
+  /**
+   * [[eventsAfter]], waiting for a commit when there is nothing to return yet (see `Checkpointer.awaitEventsAfter`). The
+   * call registers its wait before it reads, so a commit that lands after the read wakes it; a wake reads the log
+   * again and returns what it finds, or waits on for what is left of `timeout` if a notification brought nothing (a
+   * hash collision, or a commit that stored nothing past `afterSeq`). It waits only on its own `timeout`, never on the
+   * listening connection: while that is down, the call returns empty once `timeout` passes, and its caller's next call
+   * reads again, so it polls. It returns within `timeout` plus the bound of each read it makes.
+   */
+  override def awaitEventsAfter(
+    threadId: ThreadId,
+    afterSeq: Long,
+    limit: Int,
+    timeout: FiniteDuration
+  ): Result[Vector[EventRecord]] =
+    Using.resource(notifier.register(threadId)) { waiter =>
+      ChangeNotifier.readUntilWoken(threadId, waiter, timeout)(eventsAfter(threadId, afterSeq, limit))
+    }
+
+  /** Whether this store's listening connection is up: for tests. */
+  private[postgres] def listening: Boolean = notifier.listening
+
+  /** The listening connection's backend process id while it is up: for tests that kill it. */
+  private[postgres] def listenerPid: Option[Int] = notifier.listenerPid
+
+  /** How many listening connections this store has opened: one, unless one was lost. For tests. */
+  private[postgres] def listenerConnections: Int = notifier.connectionsOpened
+
+  /** The channel this store's commits notify and its listener listens on. */
+  private[postgres] def channel: String = notifier.channel
+
+  /** Tells every store listening on the schema's channel that `threadId` changed, when this transaction commits. */
+  private def notifyCommit(c: Connection, threadId: ThreadId): Unit =
+    query(c, ChangeNotifier.NotifySql, notifier.channel, ChangeNotifier.payload(threadId))(_ => ()): Unit
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = writing("compactEvents") { c =>
     lockRow(c, threadId).foreach { current =>
@@ -494,8 +613,10 @@ final class PostgresCheckpointer private (
         // the thread's open queue entries learn of the delete in its own transaction (design 4.55), so none of them
         // runs on a new thread of the id, whatever the deleted thread numbered
         update(c, Sql.queueThreadDeleted(t), threadId.value)
-        update(c, Sql.tombstone(t), threadId.value)
+        update(c, Sql.tombstone(t), clockNow(c), threadId.value)
         dropIfEmpty(c, threadId)
+        // a reader waiting inside the deleted log is told at once
+        notifyCommit(c, threadId)
         Right(())
   }
 
@@ -506,6 +627,7 @@ final class PostgresCheckpointer private (
   def close(): Unit =
     if !shut then
       shut = true
+      notifier.close()
       if ownsDataSource then
         dataSource match
           case closeable: AutoCloseable => Try(closeable.close()): Unit
@@ -609,18 +731,23 @@ final class PostgresCheckpointer private (
     threadIds.distinct.sortBy(_.value).flatMap(id => lockRow(c, id).map(id -> _)).toMap
 
   /**
-   * The thread's row, created if it has none, and locked. A row a concurrent call deletes (an emptied thread's) while
-   * this one waits for its lock is gone once the lock is granted: the insert is tried again.
+   * The thread's row, created if it has none, and locked. A row a concurrent call deletes (an emptied thread's, or a
+   * tombstone a sweep reclaims) while this one waits for its lock is gone once the lock is granted: the insert is
+   * tried again. A row is created only under the reclamation lock, shared, so it numbers from a reclamation mark no
+   * sweep in flight is raising (design 4.53); a row that exists is locked without it.
    */
   private def lockOrCreate(c: Connection, threadId: ThreadId): Row =
-    Iterator
-      .continually {
-        update(c, Sql.ensureRow(t), threadId.value)
-        lockRow(c, threadId)
-      }
-      .take(8)
-      .collectFirst { case Some(row) => row }
-      .getOrElse(throw new IllegalStateException(s"thread ${threadId.value}'s row kept vanishing while being locked"))
+    lockRow(c, threadId).getOrElse {
+      query(c, Sql.shareReclamation, reclamationLock)(_ => ()): Unit
+      Iterator
+        .continually {
+          update(c, Sql.ensureRow(t), threadId.value)
+          lockRow(c, threadId)
+        }
+        .take(8)
+        .collectFirst { case Some(row) => row }
+        .getOrElse(throw new IllegalStateException(s"thread ${threadId.value}'s row kept vanishing while being locked"))
+    }
 
   private def setClaim(c: Connection, threadId: ThreadId, claim: Option[Claim]): Unit =
     update(
@@ -707,6 +834,44 @@ object PostgresCheckpointer:
     ownsDataSource: Boolean,
     config: PostgresCheckpointerConfig = PostgresCheckpointerConfig.default
   ): Result[PostgresCheckpointer] = createWith(dataSource, ownsDataSource, config, ServerClock)
+
+  /** The `ApplicationName` of a store's listening connection, as `pg_stat_activity` shows it. */
+  private[postgres] val ListenerApplicationName: String = "llm4s-agent-checkpoint-postgres-listener"
+
+  /**
+   * How a store opens its listening connection: outside the pool where the pool says how to connect (a HikariCP pool
+   * with a JDBC URL, as [[open]] builds), bounded by the store's connection and call timeouts; otherwise from
+   * `dataSource`, holding one of its connections for as long as the store listens.
+   */
+  private[postgres] def listenerConnection(
+    dataSource: DataSource,
+    config: PostgresCheckpointerConfig
+  ): () => Connection =
+    dataSource match
+      case hikari: HikariDataSource if hikari.getJdbcUrl != null =>
+        () => DriverManager.getConnection(hikari.getJdbcUrl, listenerProperties(hikari, config))
+      case other => () => other.getConnection()
+
+  /**
+   * The driver properties of a listening connection opened outside `hikari`: the pool's own driver properties and
+   * credentials, with the store's connection and call timeouts and the listener's `ApplicationName`.
+   */
+  private[postgres] def listenerProperties(
+    hikari: HikariDataSource,
+    config: PostgresCheckpointerConfig
+  ): java.util.Properties =
+    val properties = new java.util.Properties()
+    properties.putAll(hikari.getDataSourceProperties)
+    Option(hikari.getUsername).foreach(properties.setProperty("user", _))
+    Option(hikari.getPassword).foreach(properties.setProperty("password", _))
+    // whole seconds, rounded up: the driver reads 0 as no timeout
+    val connectSeconds = math.max(1L, (config.connectionTimeout.toMillis + 999) / 1000)
+    properties.setProperty("connectTimeout", connectSeconds.toString)
+    properties.setProperty("loginTimeout", connectSeconds.toString)
+    properties.setProperty("socketTimeout", socketTimeoutSeconds(config.callTimeout).toString)
+    properties.setProperty("tcpKeepAlive", "true")
+    properties.setProperty("ApplicationName", ListenerApplicationName)
+    properties
 
   /** The database server's clock, read once a call holds its locks. */
   private[postgres] val ServerClock: String = "clock_timestamp()"

@@ -237,28 +237,28 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
-  /** The schema as a version-2 build left it: no run queue and no run ids on history rows (design 4.55). */
-  private def asVersionTwo(config: PostgresCheckpointerConfig): Unit = {
+  /** The schema as a version-3 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionThree(config: PostgresCheckpointerConfig): Unit = {
     val q = s""""${config.schema}""""
     PgCheckpointerDb.execute(
       s"""DROP TABLE $q.checkpoint_queue_attempts, $q.checkpoint_queue_entries;
          |DROP SEQUENCE $q.checkpoint_queue_entry_ids, $q.checkpoint_queue_lease_tokens;
          |DROP INDEX $q.checkpoint_history_run;
          |ALTER TABLE $q.checkpoint_history DROP COLUMN run_id;
-         |UPDATE $q.checkpoint_schema SET version = 2""".stripMargin
+         |UPDATE $q.checkpoint_schema SET version = 3""".stripMargin
     )
   }
 
-  "A version-2 schema" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+  "A version-3 schema" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
     val config = fresh()
     val store  = PgCheckpointerDb.store(config)
-    val t      = ThreadId("v2-thread")
+    val t      = ThreadId("v3-thread")
     val token  = store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
     store.commit(t, Commit(token, Some(checkpoint("c1", None, t).withRunId("run-a")))).value
     store.commit(t, Commit(token, Some(checkpoint("c2", Some("c1"), t).withRunId("run-b")))).value
     store.commit(t, Commit(token, Some(checkpoint("c3", Some("c2"), t).withRunId("run-c")))).value
     store.close()
-    asVersionTwo(config)
+    asVersionThree(config)
     val q = s""""${config.schema}""""
     // one damaged row must not stop the schema opening: it keeps no run id
     PgCheckpointerDb.execute(
@@ -271,10 +271,59 @@ class PostgresCheckpointerSpec
     reopened.latestOfRuns(t, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
     reopened.latestOfRuns(t, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
     reopened.runQueue.openEntries(None, t).value shouldBe empty
+    // the queue's tables are there, with every column W1 reads
+    val queued = reopened.runQueue
+      .submit(
+        org.llm4s.agent.service.Submission(
+          t,
+          org.llm4s.agent.AgentId.unsafe("upgraded"),
+          org.llm4s.agent.service.QueuedInput.query("q")
+        )
+      )
+      .value
+    reopened.runQueue.entry(None, queued.entryId).value.admitted shouldBe false
     reopened.close()
   }
 
   // ---- the thread registry (design 4.52) ----
+
+  /** The schema `q` (quoted) as a version-2 build left it, once [[asVersionThree]] has: no tombstone reclamation (design 4.53). */
+  private def asVersionTwo(q: String): Unit = {
+    PgCheckpointerDb.execute(s"ALTER TABLE $q.checkpoint_threads DROP COLUMN deleted_at")
+    PgCheckpointerDb.execute(s"DROP TABLE $q.checkpoint_reclaimed")
+    PgCheckpointerDb.execute(s"UPDATE $q.checkpoint_schema SET version = 2")
+  }
+
+  "A version-2 schema" should "date its tombstones from the upgrade, and number new threads from 1 until one is reclaimed" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val gone   = ThreadId("gone")
+    val token  = store.claim(gone, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    store.commit(gone, Commit(token, Some(checkpoint("c1", None, gone)), events = Vector(event("a", None)))).value
+    store.deleteThread(gone, token, None).value
+    store.close()
+    val q = s""""${config.schema}""""
+    asVersionThree(config)
+    asVersionTwo(q)
+
+    val reopened = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    PgCheckpointerDb.scalar(s"SELECT first_seq FROM $q.checkpoint_reclaimed")(_.getLong(1)) shouldBe 1L
+    PgCheckpointerDb.scalar(
+      s"SELECT deleted_at > clock_timestamp() - INTERVAL '1 minute' FROM $q.checkpoint_threads WHERE thread_id = 'gone'"
+    )(_.getBoolean(1)) shouldBe true
+    // a new id numbers from 1, as before the upgrade
+    val fresh1 = ThreadId("fresh")
+    val held   = reopened.claim(fresh1, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    reopened.commit(fresh1, Commit(held, events = Vector(event("f", None)))).value.map(_.seq) shouldBe Vector(1L)
+    // the tombstone's age counts from the upgrade
+    val policy = SweepPolicy(tombstoneAge = Some(1.hour))
+    reopened.sweep(policy, None, SweepGuard.none).value.reclaimed shouldBe 0
+    PgCheckpointerDb.execute(s"UPDATE $q.checkpoint_threads SET deleted_at = deleted_at - INTERVAL '2 hours'")
+    reopened.sweep(policy, None, SweepGuard.none).value.reclaimed shouldBe 1
+    reopened.eventsAfter(gone, 1L, 10).left.value shouldBe GraphError.ThreadDeleted("gone", 1L, 3L)
+    reopened.close()
+  }
 
   "A version-1 schema" should "fill the thread registry from each thread's latest checkpoint and its commit time" in {
     val config = fresh()
@@ -293,8 +342,9 @@ class PostgresCheckpointerSpec
     committed(deleting, CheckpointStatus.Running, deleting = true)
     val before = store.threads(ThreadQuery(tenant)).value
     store.close()
-    asVersionTwo(config)
+    asVersionThree(config)
     val q = s""""${config.schema}""""
+    asVersionTwo(q)
     Vector("", "_status", "_agent", "_claimed", "_metadata").foreach { suffix =>
       PgCheckpointerDb.execute(s"DROP INDEX $q.checkpoint_threads_registry$suffix")
     }
