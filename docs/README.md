@@ -52,6 +52,7 @@ Links to design documents for production features. See [design/](design/) for de
 
 - **[Migration Guide](reference/migration.md)** - Upgrade between versions
 - **[Scalafix Rules](reference/scalafix.md)** - Code quality
+- **[Glossary](reference/glossary.md)** - Definitions of the terms LLM4S uses
 - **[Test Coverage](reference/test-coverage.md)** - Testing guidelines
 - **[Release Process](reference/release.md)** - How releases work
 - **[Roadmap](reference/roadmap.md)** - Single source of truth for project status

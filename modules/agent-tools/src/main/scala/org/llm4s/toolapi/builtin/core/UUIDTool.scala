@@ -39,7 +39,7 @@ object UUIDTool {
     .withProperty(
       Schema.property(
         "count",
-        Schema.integer("Number of UUIDs to generate (default: 1, max: 10)")
+        Schema.integer("Number of UUIDs to generate (default: 1; values below 1 give 1, above 10 give 10)")
       )
     )
     .withProperty(
@@ -61,6 +61,27 @@ object UUIDTool {
   }
 
   /**
+   * The number of UUIDs asked for: 1 when `count` is absent, otherwise `count` clamped to 1..10. A `count` that is not a
+   * whole number in the `Int` range (`3.5`, `"5"`, `null`) is an error, not the default, so a caller asking for several
+   * UUIDs is never silently given one.
+   */
+  private def requestedCount(extractor: SafeParameterExtractor): Either[String, Int] =
+    extractor.getIntEnhanced("count") match {
+      case Right(count)                                 => Right(count.min(10).max(1))
+      case Left(_: ToolParameterError.MissingParameter) => Right(1)
+      case Left(error)                                  => Left(error.getMessage)
+    }
+
+  /** The name of a `java.util.UUID#variant` value. */
+  private[builtin] def variantName(variant: Int): String = variant match {
+    case 0 => "NCS"
+    case 2 => "Leach-Salz (standard)"
+    case 6 => "Microsoft"
+    case 7 => "Future"
+    case _ => "Unknown"
+  }
+
+  /**
    * The UUID generator tool instance, returning a Result for safe error handling.
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], UUIDsResult]] =
@@ -70,30 +91,25 @@ object UUIDTool {
         "Useful for creating unique IDs for transactions, records, or entities.",
       schema = schema
     ).withHandler { extractor =>
-      val count  = extractor.getInt("count").fold(_ => 1, identity).min(10).max(1)
       val format = extractor.getString("format").fold(_ => "standard", identity)
 
-      val uuids = (1 to count).map { _ =>
-        val uuid = UUID.randomUUID()
-        val uuidStr = format.toLowerCase match {
-          case "compact" => uuid.toString.replace("-", "")
-          case _         => uuid.toString
+      requestedCount(extractor).map { count =>
+        val uuids = (1 to count).map { _ =>
+          val uuid = UUID.randomUUID()
+          val uuidStr = format.toLowerCase match {
+            case "compact" => uuid.toString.replace("-", "")
+            case _         => uuid.toString
+          }
+
+          UUIDResult(
+            uuid = uuidStr,
+            version = uuid.version(),
+            variant = variantName(uuid.variant())
+          )
         }
 
-        UUIDResult(
-          uuid = uuidStr,
-          version = uuid.version(),
-          variant = uuid.variant() match {
-            case 0 => "NCS"
-            case 2 => "Leach-Salz (standard)"
-            case 6 => "Microsoft"
-            case 7 => "Future"
-            case _ => "Unknown"
-          }
-        )
+        UUIDsResult(uuids)
       }
-
-      Right(UUIDsResult(uuids))
     }.buildSafe()
 
 }

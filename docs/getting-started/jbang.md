@@ -21,7 +21,7 @@ A first LLM call from one Java file, with no build tool and no project.
 
 [JBang](https://www.jbang.dev/) runs a Java file with its dependencies declared in the file itself, so you can try
 LLM4S from Java without creating a project. `llm4s-java-api` is on Maven Central from `0.5.0`. When you want a real
-project, use Maven (see the Java API module's README) or [Gradle](gradle).
+project, use [Maven](maven) or [Gradle](gradle).
 
 ## Before you start
 

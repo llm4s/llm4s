@@ -83,6 +83,8 @@ snippets below show `llm4s-core` only; add the provider module the same way, wit
 
 ```
 
+For Java, the [Maven quick start](maven) has a complete `pom.xml` for `llm4s-java-api_3`.
+
 ### Gradle (Kotlin DSL)
 
 Gradle does **not** resolve Scala cross-version suffixes automatically — you must append the `_3` suffix explicitly (LLM4S is Scala 3 only):
