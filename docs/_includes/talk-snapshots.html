@@ -1,0 +1,9 @@
+{%- comment -%}
+  Snapshots from LLM4S talks, newest first, from _data/event_photos.yml. Shown on the home page and the Events page.
+{%- endcomment -%}
+<ul class="event-gallery">
+{%- assign photos = site.data.event_photos | sort: "date" | reverse -%}
+{%- for photo in photos -%}
+<li><a href="{{ photo.src | relative_url }}"><img src="{{ photo.src | relative_url }}" alt="{{ photo.caption | escape }}" loading="lazy"></a><span>{{ photo.caption }}</span></li>
+{%- endfor -%}
+</ul>

@@ -399,12 +399,12 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
           jsonrpc = "2.0",
           id = generateId(),
           method = "tools/call", // method value for executing a specific tool
-          params = Some(
-            ujson.Obj(
-              "name"      -> ujson.Str(toolName),
-              "arguments" -> params.params
-            )
-          )
+          params = Some {
+            val body = ujson.Obj("name" -> ujson.Str(toolName), "arguments" -> params.params)
+            // an agent's call: its idempotency key goes in `_meta`, never in the tool's arguments (#1740)
+            params.call.foreach(call => body("_meta") = MCPToolCallMeta.toMeta(call))
+            body
+          }
         )
 
         transportImpl.sendRequest(callRequest) match {

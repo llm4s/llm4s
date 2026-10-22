@@ -28,15 +28,17 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sClient` | the `JLlmClient`, built from the `llm4s.*` properties; closed when the context closes | defining a bean of type `JLlmClient` |
 | `llm4sTaskExecutor` | the `ExecutorService` behind `completeAsync` and the health probe | defining a bean named `llm4sTaskExecutor` |
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
-| `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` |
+| `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` (`LlmBoot4HealthIndicator` on Spring Boot 4) |
 | `llm4sMetricsCollector` | a `MicrometerMetrics` over your `MeterRegistry`, only when `llm4s-observability-micrometer` is on the classpath and there is a `MeterRegistry` bean; the client reports every call to it (see [Metrics](#metrics)) | defining a bean of type `MetricsCollector` |
 
 Set `llm4s.enabled=false` to switch all of them off; the beans are also registered when `llm4s.enabled` is absent.
 
-**Spring Boot versions.** The starter supports Spring Boot 3.x from 3.3 on. It is built against 3.3.6, and CI runs its
-whole test suite again against the latest 3.x release (3.5.16), so both ends of the range are tested on every change.
-Spring Boot 4 is not supported yet; whether it needs its own artifact, as LangChain4j ships one, is tracked in
-[#1467](https://github.com/llm4s/llm4s/issues/1467).
+**Spring Boot versions.** One artifact supports Spring Boot 3.x from 3.3 on and Spring Boot 4.x from 4.0 on. It is
+built against 3.3.6, and CI runs its whole test suite again against the latest 3.x release (3.5.16), against the 4.0
+line (4.0.8) and against the latest 4.x release (4.1.1), so both ends of each range are tested on every change; the
+Spring Boot 4 runs test the published classes, not a Boot 4 build of them. The one difference is the health indicator:
+Spring Boot 4 moved `HealthIndicator` to `org.springframework.boot.health.contributor`, so there the bean
+`llmHealthIndicator` is an `LlmBoot4HealthIndicator`, reporting exactly what `LlmHealthIndicator` reports on 3.x.
 
 {: .note }
 > `llm4s-spring-boot-starter` is on Maven Central from `0.5.0` on, together with the Java API it is built on; the
@@ -113,6 +115,11 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | `llm4s.health.probe` | `false` | opt in to a real provider call per health check |
 | `llm4s.health.probe-ttl` | `60s` | how long a probe result is reused |
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports `DOWN` |
+
+The starter ships Spring Boot configuration metadata (`META-INF/spring-configuration-metadata.json`), so IntelliJ
+IDEA and the Spring tools for VS Code and Eclipse complete these keys, show their defaults and flag a misspelt one in
+`application.properties` and `application.yml`. Inside a `llm4s.providers.<name>` section they complete nothing: its keys
+depend on the provider, and are listed under [Any provider](#any-provider).
 
 ### Which providers
 

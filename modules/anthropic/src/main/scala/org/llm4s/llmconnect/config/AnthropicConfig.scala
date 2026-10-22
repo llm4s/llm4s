@@ -30,6 +30,9 @@ import org.llm4s.util.Redaction
  *                          breaks it.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param webSearch whether the model may search the web: the section's `webSearch` key. When set, every request
+ *                 carries Anthropic's server-side `web_search` tool, and the sources the answer cites arrive on
+ *                 `Completion.citations`. Off by default; each search is billed by Anthropic.
  */
 @Stable
 final case class AnthropicConfig private (
@@ -39,7 +42,8 @@ final case class AnthropicConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   workloadIdentity: Option[AnthropicWorkloadIdentity],
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  webSearch: Boolean
 ) extends ProviderConfig:
   override val providerId: ProviderId                                    = ProviderId("anthropic")
   override def endpointUrl: Option[String]                               = Some(baseUrl)
@@ -54,9 +58,10 @@ final case class AnthropicConfig private (
     copy(workloadIdentity = Some(workloadIdentity))
   def withWorkloadIdentity(workloadIdentity: Option[AnthropicWorkloadIdentity]): AnthropicConfig =
     copy(workloadIdentity = workloadIdentity)
+  def withWebSearch(enabled: Boolean): AnthropicConfig = copy(webSearch = enabled)
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity)"
+      s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity, webSearch=$webSearch)"
 
 object AnthropicConfig {
 
@@ -90,7 +95,8 @@ object AnthropicConfig {
       contextWindow,
       reserveCompletion,
       workloadIdentity,
-      ProviderTimeouts.default
+      ProviderTimeouts.default,
+      webSearch = false
     )
 
   /**

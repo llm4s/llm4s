@@ -43,8 +43,9 @@ import java.util.{ Objects, OptionalInt }
 object Llm4s {
 
   /**
-   * Creates a [[JLlmClient]] from the default provider configured via
-   * environment variables (e.g. `LLM_MODEL`, `OPENAI_API_KEY`).
+   * Creates a [[JLlmClient]] from the default provider: the section of `application.conf` that
+   * `llm4s.providers.provider` names. A provider's API key comes from its section's `apiKey`, else from
+   * `llm4s.credentials` (bound to the vendor's usual environment variable, e.g. `OPENAI_API_KEY`).
    */
   def createDefaultClient(): LlmResult[JLlmClient] = {
     val result = for {

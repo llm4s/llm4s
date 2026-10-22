@@ -64,7 +64,8 @@ private[agent] enum ChildEnd:
  * stopping.
  *
  * Interrupting the calling thread (the parent's cancel, its lost claim, a timeout on the call) cancels the child, waits
- * up to [[AgentRun.Drain]] for it to end, and returns `Left(CancelledError)` with the interrupt flag kept. Every other
+ * up to [[AgentRun.Drain]] for it to end, and returns `Left(CancelledError)` with the interrupt flag kept; a timeout on
+ * the call leaves the child to the loop, which settles it `Failed("timed-out")` only if the call commits (#2098). Every other
  * `Left` is a refusal the call should fail on (`ToolOutcome.Fatal`).
  *
  * The child's usage (its committed `usage` key, its prior usage, and the lost usage on terminal events not yet
@@ -347,7 +348,15 @@ private[agent] object ChildRunner:
               pause(until, waits, error) match
                 case Left(stop) => Left(stop)
                 case Right(_)   => loop(Some(until), waits + 1)
-      loop(None, 0)
+      // the loop settles a child the call's own timeout left `Running` once the call commits (#2098); a run that reaches
+      // the child again withdraws it. A parent cancel or lost claim never marks the timeout, so its child stays Running
+      ctx.timeout.left(None)
+      val result = loop(None, 0)
+      result match
+        case Left(_: CancelledError) if ctx.timeout.timedOut =>
+          ctx.timeout.left(Some(TimedOutChild(childId.value, origin.agent.value, origin.depth)))
+        case _ => ()
+      result
 
     /** One read of the child and what it calls for. */
     private def step(): Step =

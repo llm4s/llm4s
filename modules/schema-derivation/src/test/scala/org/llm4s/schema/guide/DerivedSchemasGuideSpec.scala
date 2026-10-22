@@ -89,6 +89,30 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         .buildSafe()
   }
 
+  // ---- Typed tools
+
+  object TypedTools {
+    import org.llm4s.schema.*
+    import org.llm4s.toolapi.ToolFunction
+    import org.llm4s.types.Result
+    import upickle.default.ReadWriter
+
+    @description("A forecast request")
+    case class ForecastQuery(
+      @description("City name, for example Paris") city: String,
+      @description("How many days ahead, from 1 to 7") days: Int
+    ) derives SchemaOf,
+          ReadWriter
+
+    case class Forecast(city: String, days: Int, summary: String) derives ReadWriter
+
+    val forecastTool: Result[ToolFunction[ForecastQuery, Forecast]] =
+      Tool.of[ForecastQuery, Forecast]("get_forecast", "Weather forecast for a city") { query =>
+        if (query.days < 1 || query.days > 7) Left("days must be between 1 and 7")
+        else Right(Forecast(query.city, query.days, "Sunny"))
+      }
+  }
+
   // ---- An agent's answer
 
   object Agents {
@@ -166,7 +190,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 8
+    scalaBlocks should have size 9
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -209,6 +233,33 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     tool.execute(ujson.Obj("city" -> "Paris", "unit" -> ujson.Null)) shouldBe Right(ujson.Str("Sunny in Paris"))
     tool.execute(ujson.Obj("city" -> "Oslo", "unit" -> "Fahrenheit")) shouldBe Right(ujson.Str("Sunny in Oslo"))
     tool.execute(ujson.Obj("unit" -> "Kelvin")).isLeft shouldBe true
+  }
+
+  "The typed tool of the guide" should "decode a call, run the function and report the errors the table lists" in {
+    import org.llm4s.toolapi.{ ToolCallError, ToolParameterError }
+    import ToolParameterError.*
+    val tool = TypedTools.forecastTool.fold(e => fail(e.toString), identity)
+    tool.toOpenAITool()("function")("parameters") shouldBe
+      org.llm4s.schema.SchemaOf[TypedTools.ForecastQuery].toJsonSchema()
+
+    def error(e: ToolParameterError) = Left(ToolCallError.HandlerError("get_forecast", e.getMessage))
+    tool.execute(ujson.Obj("city" -> "Paris", "days" -> 3, "extra" -> true)) shouldBe
+      Right(ujson.Obj("city" -> "Paris", "days" -> 3, "summary" -> "Sunny"))
+    tool.execute(ujson.Obj("city" -> "Paris", "days" -> 9)) shouldBe
+      Left(ToolCallError.HandlerError("get_forecast", "days must be between 1 and 7"))
+    tool.execute(ujson.Obj("city" -> "Paris")) shouldBe error(MissingParameter("days", "integer", List("city")))
+    tool.execute(ujson.Obj("city" -> "Paris", "days" -> ujson.Null)) shouldBe error(NullParameter("days", "integer"))
+    for (days <- List(ujson.Str("three"), ujson.Num(2.5), ujson.Num(3e9)))
+      tool.execute(ujson.Obj("city" -> "Paris", "days" -> days)) shouldBe
+        error(TypeMismatch("days", "integer", if (days.strOpt.isDefined) "string" else "number"))
+    tool.execute(ujson.Str("Paris")) shouldBe Left(
+      ToolCallError.HandlerError(
+        "get_forecast",
+        MultipleErrors(
+          List(InvalidNesting("city", "root", "string"), InvalidNesting("days", "root", "string"))
+        ).getMessage
+      )
+    )
   }
 
   "The agent of the guide" should "answer with the derived type" in {

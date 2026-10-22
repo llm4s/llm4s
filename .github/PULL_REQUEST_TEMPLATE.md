@@ -18,4 +18,5 @@
 - [ ] No unrelated changes included (branched from `main`, not from another PR)
 - [ ] Commit messages explain the "why"
 - [ ] Every commit is signed off (`git commit -s`, see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#developer-certificate-of-origin-dco))
+- [ ] If this changes a Frozen module's public API, a module's tier, an SPI or a wire format: links the accepted [RFC](https://github.com/llm4s/llm4s/blob/main/docs/rfcs/README.md)
 - [ ] Updated `CHANGELOG.md` under `[Unreleased]` if this adds a feature, fixes a bug, or introduces a breaking change

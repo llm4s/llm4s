@@ -53,6 +53,14 @@ final class StoppingCheckpointer(underlying: Checkpointer, at: Commit => Option[
     alive(underlying.history(threadId, before, limit))
   def children(parent: ThreadId, after: Option[ThreadId], limit: Int): Result[Vector[ChildThread]] =
     alive(underlying.children(parent, after, limit))
+  def threads(query: org.llm4s.agent.graph.ThreadQuery) =
+    alive(underlying.threads(query))
+  def incompleteThreads(
+    tenantId: Option[org.llm4s.agent.graph.TenantId],
+    after: Option[org.llm4s.agent.graph.ThreadCursor],
+    limit: Int
+  ) =
+    alive(underlying.incompleteThreads(tenantId, after, limit))
   def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =
     alive(underlying.checkpoint(threadId, checkpointId))
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = alive(underlying.prune(threadId, policy))

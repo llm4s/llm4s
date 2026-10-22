@@ -1,0 +1,137 @@
+{
+  "groups": [
+    {
+      "name": "llm4s",
+      "type": "org.llm4s.spring.Llm4sProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "LLM4S client: the flat openai/anthropic/ollama keys, or any provider under llm4s.providers."
+    },
+    {
+      "name": "llm4s.async",
+      "type": "org.llm4s.spring.AsyncProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "sourceMethod": "getAsync()",
+      "description": "Sizing of the executor behind LLM4STemplate.completeAsync."
+    },
+    {
+      "name": "llm4s.health",
+      "type": "org.llm4s.spring.HealthProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "sourceMethod": "getHealth()",
+      "description": "The LLM4S health indicator."
+    }
+  ],
+  "properties": [
+    {
+      "name": "llm4s.enabled",
+      "type": "java.lang.Boolean",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "Whether to register the LLM4S beans; false registers none of them.",
+      "defaultValue": true
+    },
+    {
+      "name": "llm4s.provider",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "The provider of the flat form: openai, anthropic or ollama. Required unless llm4s.providers.* is set, which configures any provider on the classpath."
+    },
+    {
+      "name": "llm4s.model",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "The model name as the provider spells it. Required with the flat form."
+    },
+    {
+      "name": "llm4s.api-key",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "The API key of the flat form: required for openai and anthropic, not used by ollama."
+    },
+    {
+      "name": "llm4s.base-url",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "Overrides the flat-form provider's default URL."
+    },
+    {
+      "name": "llm4s.organization",
+      "type": "java.lang.String",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "OpenAI only: the organisation id."
+    },
+    {
+      "name": "llm4s.context-window",
+      "type": "java.lang.Integer",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "The model's context window in tokens; must be positive.",
+      "defaultValue": 128000
+    },
+    {
+      "name": "llm4s.reserve-completion",
+      "type": "java.lang.Integer",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "Tokens kept for the reply; at least 0 and less than the context window.",
+      "defaultValue": 4096
+    },
+    {
+      "name": "llm4s.async.max-threads",
+      "type": "java.lang.Integer",
+      "sourceType": "org.llm4s.spring.AsyncProperties",
+      "description": "Maximum worker threads of the default llm4sTaskExecutor (idle threads time out).",
+      "defaultValue": 16
+    },
+    {
+      "name": "llm4s.async.queue-capacity",
+      "type": "java.lang.Integer",
+      "sourceType": "org.llm4s.spring.AsyncProperties",
+      "description": "Pending completeAsync calls the default executor queues before rejecting new ones.",
+      "defaultValue": 1000
+    },
+    {
+      "name": "llm4s.health.probe",
+      "type": "java.lang.Boolean",
+      "sourceType": "org.llm4s.spring.HealthProperties",
+      "description": "Opt in to a real provider call (one token) per health probe; off by default because it bills.",
+      "defaultValue": false
+    },
+    {
+      "name": "llm4s.health.probe-ttl",
+      "type": "java.time.Duration",
+      "sourceType": "org.llm4s.spring.HealthProperties",
+      "description": "How long a probe result is reused, so health polling does not hit the provider each time.",
+      "defaultValue": "60s"
+    },
+    {
+      "name": "llm4s.health.probe-timeout",
+      "type": "java.time.Duration",
+      "sourceType": "org.llm4s.spring.HealthProperties",
+      "description": "A probe slower than this is cancelled (interrupting the provider call) and reports DOWN.",
+      "defaultValue": "10s"
+    },
+    {
+      "name": "llm4s.providers.provider",
+      "type": "java.lang.String",
+      "description": "The name of the llm4s.providers.<name> section the starter uses. Each section sets provider (a provider id such as gemini, azure, bedrock or openai-compatible), model and, as the provider needs, api-key, base-url and the provider's own keys."
+    },
+    {
+      "name": "llm4s.providers",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "description": "Named provider sections, llm4s.providers.<name>.<key>, mirroring the llm4s.providers block of llm4s's HOCON configuration. Setting any of them replaces the flat llm4s.provider form."
+    },
+    {
+      "name": "llm4s.credentials",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "description": "Shared vendor keys, llm4s.credentials.<provider>.api-key, used by a section that sets no api-key of its own."
+    }
+  ],
+  "hints": [
+    {
+      "name": "llm4s.provider",
+      "values": [
+        { "value": "openai", "description": "OpenAI (llm4s-openai)." },
+        { "value": "anthropic", "description": "Anthropic Claude (llm4s-anthropic)." },
+        { "value": "ollama", "description": "A local Ollama server (llm4s-ollama)." }
+      ]
+    }
+  ]
+}

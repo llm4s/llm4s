@@ -29,6 +29,7 @@ import com.anthropic.models.messages.{
   ToolResultBlockParam,
   ToolUseBlockParam,
   UrlImageSource,
+  WebSearchTool20250305,
   UrlPdfSource
 }
 import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
@@ -221,6 +222,7 @@ class AnthropicClient(
         if (transformed.options.tools.nonEmpty) {
           transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
         }
+        addWebSearch(paramsBuilder)
 
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
@@ -310,6 +312,7 @@ curl https://api.anthropic.com/v1/messages \
         // Add tools if specified
         if (transformed.options.tools.nonEmpty)
           transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
         // Build the parameters
@@ -317,7 +320,9 @@ curl https://api.anthropic.com/v1/messages \
         val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
-        val accumulator                      = StreamingAccumulator.create()
+        val accumulator = StreamingAccumulator.create()
+        // the sources the streamed text blocks cite, each once, in order
+        val citations                        = mutable.LinkedHashSet.empty[Citation]
         var currentMessageId: Option[String] = None
         val blockIndexToToolId               = mutable.Map.empty[Long, String]
         // thinking blocks by content-block index, so each keeps its own text and signature
@@ -399,6 +404,16 @@ curl https://api.anthropic.com/v1/messages \
                       thinkingBlocks
                         .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
                         .signature = Some(signature)
+                  }
+                }
+
+                // A citation of the text block being streamed, from a web search the model ran
+                Try(delta.citations()).foreach { citationsOpt =>
+                  if (citationsOpt != null && citationsOpt.isPresent) {
+                    val c = citationsOpt.get().citation()
+                    AnthropicWebSearch
+                      .citation(c.webSearchResultLocation(), c.searchResultLocation())
+                      .foreach(citations += _)
                   }
                 }
 
@@ -490,6 +505,7 @@ curl https://api.anthropic.com/v1/messages \
             c.withModel(config.model)
               .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
               .withEstimatedCost(cost)
+              .withCitations(citations.toList)
           }
         )
 
@@ -750,9 +766,14 @@ curl https://api.anthropic.com/v1/messages \
         created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
         message = message,
         usage = Some(tokenUsage),
-        estimatedCost = cost
+        estimatedCost = cost,
+        citations = AnthropicWebSearch.citations(contentBlocks)
       )
   }
+
+  /** Anthropic's server-side web search tool, on every request when the config's `webSearch` is set. */
+  private def addWebSearch(paramsBuilder: MessageCreateParams.Builder): Unit =
+    if (config.webSearch) paramsBuilder.addTool(WebSearchTool20250305.builder().build()): Unit
 
   private def malformedToolCall(detail: String): ProcessingError =
     ProcessingError("anthropic-tool-calls", s"malformed tool call: $detail")
