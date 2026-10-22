@@ -143,6 +143,12 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     def deleteThread(threadId: ThreadId, token: FencingToken, fence: Option[(ThreadId, FencingToken)]): Result[Unit] =
       next.deleteThread(threadId, token, fence)
     def children(parent: ThreadId, after: Option[ThreadId], limit: Int) = next.children(parent, after, limit)
+    def threads(query: org.llm4s.agent.graph.ThreadQuery)               = next.threads(query)
+    def incompleteThreads(
+      tenantId: Option[org.llm4s.agent.graph.TenantId],
+      after: Option[org.llm4s.agent.graph.ThreadCursor],
+      limit: Int
+    ) = next.incompleteThreads(tenantId, after, limit)
     def history(threadId: ThreadId, before: Option[String], limit: Int): Result[Vector[Checkpoint]] =
       next.history(threadId, before, limit)
     def checkpoint(threadId: ThreadId, checkpointId: String): Result[Option[Checkpoint]] =

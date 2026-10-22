@@ -2,6 +2,7 @@
 layout: page
 title: Contribute
 nav_order: 9
+has_children: true
 ---
 
 # Contribute to LLM4S
@@ -53,6 +54,9 @@ Find issues that match your interests:
 3. **Fork and branch** — Create a feature branch from `main`
 4. **Follow the guidelines** — See the [Contributing Guide](../reference/contributing) for coding standards
 5. **Submit a PR** — Reference the issue number in your PR description
+
+Looking for a first task? Convert one documentation page to [checked code blocks](doc-snippets-plan): each is a
+small pull request that fixes real documentation bugs.
 
 ---
 

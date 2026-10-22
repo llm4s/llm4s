@@ -1,9 +1,10 @@
 package org.llm4s.agent.graph.tool
 
+import org.llm4s.agent.delegation.TimedOutChild
 import org.llm4s.agent.graph.{ EffectKey, IdempotencyKey, RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.ContentPart
-import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction, ToolHints }
+import org.llm4s.toolapi.{ SchemaDefinition, ToolCallInfo, ToolFunction, ToolHints }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -152,6 +153,39 @@ object AgentToolSpec:
       None
     )
 
+/**
+ * A tool call's own timeout, between the loop and the tool (#2098). The loop's per-call timeout marks the run of the
+ * tool it stops [[timedOut]] before it interrupts it, so the tool can tell that timeout from a cancel of its task (the
+ * run's cancel, its lost claim), which never marks it; each run of the tool (a wrapper's retry) starts unmarked.
+ *
+ * A delegating tool tells the loop which child its latest run of the call left ([[left]]): `None` once it reached its
+ * child, the child itself when the call's timeout stopped it with the child left `Running`, so that a wrapper's retry
+ * still reattaches it. The loop settles that child once the call commits, and records it with a suspension
+ * (`DelegationKeys.timedOut`) for the call's resumed run. Equal to every other, so it never changes a context's
+ * equality.
+ */
+final private[agent] class CallTimeout:
+  private val marked = new java.util.concurrent.atomic.AtomicBoolean(false)
+  private val child  = new java.util.concurrent.atomic.AtomicReference[Option[Option[TimedOutChild]]](None)
+
+  /** Starts a run of the tool unmarked: done by the loop's per-call timeout. */
+  def reset(): Unit = marked.set(false)
+
+  /** Marks the run of the tool timed out: done by the loop before it interrupts it. */
+  def markTimedOut(): Unit = marked.set(true)
+
+  /** Whether the call's own timeout stopped the latest run of the tool. */
+  def timedOut: Boolean = marked.get
+
+  /** Records what the latest run of the call left: `None` when it reached its child, else the child timed out. */
+  def left(timedOut: Option[TimedOutChild]): Unit = child.set(Some(timedOut))
+
+  /** What a run of the call in this context left ([[left]]); `None` when none reached a child. */
+  def reached: Option[Option[TimedOutChild]] = child.get
+
+  override def equals(other: Any): Boolean = other.isInstanceOf[CallTimeout]
+  override def hashCode: Int               = 0
+
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
 
@@ -179,7 +213,9 @@ final case class ToolContext private (
    * The phase of the call this context runs: `None` for `execute` (also when an approval or a
    * wrapper runs it again), or the key of one answered resume (design §4.24). Set by the loop only.
    */
-  private[graph] val phase: Option[IdempotencyKey]
+  private[graph] val phase: Option[IdempotencyKey],
+  /** The call's own timeout, as the loop's per-call timeout signals it (#2098). Shared by every copy of the context. */
+  private[agent] val timeout: CallTimeout
 ):
   def withRun(r: RunContext): ToolContext                  = copy(run = r)
   def withToolCallId(id: ToolCallId): ToolContext          = copy(toolCallId = id)
@@ -207,7 +243,7 @@ object ToolContext:
     state: ThreadState,
     approved: Boolean = false
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None)
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, None, new CallTimeout)
 
   /** The context of an answered resume of the call, whose effect keys are its phase's (see `effectKey`). */
   private[graph] def resuming(
@@ -218,7 +254,7 @@ object ToolContext:
     approved: Boolean,
     phase: IdempotencyKey
   ): ToolContext =
-    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase))
+    new ToolContext(run, toolCallId, idempotencyKey, state, approved, Some(phase), new CallTimeout)
 
 /**
  * A successful call's result for the model: JSON, or content parts - text, images and documents.
@@ -344,8 +380,9 @@ object AgentTool:
       )
       .withHints(hints)
 
+    // the call's id and idempotency key reach the handler as `SafeParameterExtractor.call` (#1740)
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
-      function.execute(args) match
+      function.execute(args, ToolCallInfo(context.toolCallId.value, context.idempotencyKey.value)) match
         case Right(json) => ToolOutcome.Success(ToolContent.Json(json))
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
 

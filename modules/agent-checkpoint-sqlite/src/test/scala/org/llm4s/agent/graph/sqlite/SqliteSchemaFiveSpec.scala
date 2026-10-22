@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Using
 
 /**
- * A SQLite file written by a schema-5, format-7 build (#2045), opened by this one: it migrates to schema 6, its
+ * A SQLite file written by a schema-5, format-7 build (#2045), opened by this one: it migrates to the current schema, its
  * thread restores as a top-level thread with no outcome, lists no children, and continues.
  *
  * `fixtures/schema-5-before-children.db` was written by 7623bd442 (the Phase 4 spec on `main`, the last schema-5
@@ -63,7 +63,7 @@ class SqliteSchemaFiveSpec extends AnyFlatSpec with Matchers with EitherValues w
     )
     val store = SqliteFiles.opened(db, Clock.systemUTC())
     schemaVersion(store) shouldBe SqliteSchema.Current
-    SqliteSchema.Current shouldBe 6
+    SqliteSchema.Current shouldBe 8
 
     val stored = store.latest(thread).value.value.checkpoint
     stored.formatVersion shouldBe Checkpoint.CurrentFormat
@@ -78,7 +78,7 @@ class SqliteSchemaFiveSpec extends AnyFlatSpec with Matchers with EitherValues w
     store.latest(thread).value.value.checkpoint.outcome shouldBe Some(RunOutcome.Answered)
     store.close()
 
-    // a new process reads the continued thread back at schema 6
+    // a new process reads the continued thread back at the current schema
     val reopened = SqliteFiles.opened(db, Clock.systemUTC())
     reopened.latest(thread).value.value.checkpoint.outcome shouldBe Some(RunOutcome.Answered)
     reopened.children(thread, None, 10).value shouldBe empty

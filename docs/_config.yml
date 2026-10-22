@@ -97,7 +97,7 @@ discord_invite: https://discord.gg/4uvTPn6qww
 
 # SEO settings
 twitter:
-  username: llm4s
+  username: llm4sfoundation
   card: summary_large_image
 
 social:
@@ -105,6 +105,12 @@ social:
   links:
     - https://github.com/llm4s/llm4s
     - https://discord.gg/4uvTPn6qww
+    - https://www.linkedin.com/company/llm4s-foundation/
+    - https://www.reddit.com/user/llm4s_foundation/
+    - https://x.com/llm4sfoundation/
+    - https://bsky.app/profile/llm4s-foundation.bsky.social
+    - https://mastodon.social/@llm4s_foundation/
+    - https://www.instagram.com/llm4s/
 
 # ----- just-the-docs theme settings -----
 

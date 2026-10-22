@@ -521,9 +521,13 @@ private[llm4s] object Redaction {
 
   private def pairStarts(escaped: Boolean): PairStarts = if (escaped) EscapedPairStarts else PlainPairStarts
 
-  /** A header-style line, `x-api-key: value`, at the start of a line. */
+  /**
+   * A header-style or YAML line, `x-api-key: value`: the key at the start of a line, after any spaces or tabs and an
+   * optional YAML list marker (`  - password: value`), so that a nested key of a YAML config dump is read too (#1844).
+   * The value is the rest of the line, in any scalar style (plain, single- or double-quoted).
+   */
   private val HeaderLine: Regex =
-    s"""(?m)(^($Key):[ \\t]*)(\\S[^\\r\\n]*)""".r
+    s"""(?m)(^[ \\t]*+(?:-[ \\t]++)?($Key):[ \\t]*)(\\S[^\\r\\n]*)""".r
 
   /**
    * Redact sensitive information from a string.

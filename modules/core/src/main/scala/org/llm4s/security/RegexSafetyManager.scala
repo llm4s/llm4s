@@ -56,21 +56,77 @@ object RegexSafetyManager {
   /** Raised when a match exceeds its step budget (likely catastrophic backtracking). */
   final class RegexComplexityException(message: String) extends RuntimeException(message)
 
+  /**
+   * Compiles a user-supplied pattern after the pre-screen, without throwing.
+   *
+   * Returns `Left` with a message when the pattern is null, empty or blank, is longer than 1000 characters,
+   * matches one of the known catastrophic-backtracking shapes (nested quantifiers, or a quantified alternation
+   * whose alternatives overlap), or is not valid regex syntax. The pre-screen is only an early reject: bound
+   * matching with [[safeFind]] or [[safeMatches]].
+   *
+   * @param pattern the regular expression to compile
+   * @param flags `java.util.regex.Pattern` flags, such as `Pattern.CASE_INSENSITIVE`; 0 by default
+   * @return the compiled `Pattern`, or `Left` with the reason it was rejected
+   */
   def safeCompile(pattern: String, flags: Int = 0): Either[String, Pattern] =
     for {
       _ <- validatePattern(pattern)
       p <- compileSafely(pattern, flags)
     } yield p
 
+  /**
+   * Tells whether the pattern is found anywhere in the input (`Matcher.find`), within a step budget.
+   *
+   * Returns `Left` with a message when the input is null or longer than 100000 characters, when matching reads
+   * more than `maxSteps` characters (likely catastrophic backtracking), when the pattern recurses too deeply for
+   * the input, or when matching fails for another non-fatal reason. See [[safeMatches]] for whole-input matching.
+   *
+   * @param pattern the compiled pattern, e.g. from [[safeCompile]]
+   * @param input the text to search
+   * @param maxSteps the most character accesses one match may make; 10000000 by default
+   * @return `Right(true)` if a match is found, `Right(false)` if not, or `Left` with the reason matching stopped
+   */
   def safeFind(pattern: Pattern, input: String, maxSteps: Long = DefaultMaxMatchSteps): Either[String, Boolean] =
     withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).find()))
 
+  /**
+   * Tells whether the pattern matches the whole input (`Matcher.matches`), within a step budget.
+   *
+   * It is [[safeFind]] for the whole input: `find` succeeds on a match anywhere in the input, `matches` only
+   * when the pattern matches all of it. The same `Left` cases apply: a null or over-long input (more than 100000
+   * characters), an exceeded step budget, too deep a recursion, or another non-fatal failure.
+   *
+   * @param pattern the compiled pattern, e.g. from [[safeCompile]]
+   * @param input the text to match
+   * @param maxSteps the most character accesses one match may make; 10000000 by default
+   * @return `Right(true)` if the whole input matches, `Right(false)` if not, or `Left` with the reason matching
+   *         stopped
+   */
   def safeMatches(pattern: Pattern, input: String, maxSteps: Long = DefaultMaxMatchSteps): Either[String, Boolean] =
     withInputValidation(input).flatMap(_ => guardMatch(boundedMatcher(pattern, input, maxSteps).matches()))
 
+  /**
+   * Compiles text as a literal pattern: it is quoted with `Pattern.quote`, so regex metacharacters in it match
+   * themselves.
+   *
+   * It returns the `Pattern` directly and does not apply the checks of [[safeCompile]]. A quoted pattern has no
+   * quantifiers or alternation, so the shapes those checks look for cannot occur in it.
+   *
+   * @param pattern the text to match literally
+   * @param flags `java.util.regex.Pattern` flags; 0 by default
+   * @return a `Pattern` that matches `pattern` as plain text
+   */
   def compileLiteral(pattern: String, flags: Int = 0): Pattern =
     Pattern.compile(Pattern.quote(pattern), flags)
 
+  /**
+   * Compiles text as a literal pattern that ignores case (`Pattern.CASE_INSENSITIVE`).
+   *
+   * Like [[compileLiteral]], it quotes the text and does not apply the checks of [[safeCompile]].
+   *
+   * @param pattern the text to match literally
+   * @return a case-insensitive `Pattern` that matches `pattern` as plain text
+   */
   def compileLiteralCaseInsensitive(pattern: String): Pattern =
     compileLiteral(pattern, DefaultCaseInsensitiveFlags)
 
@@ -126,6 +182,18 @@ object RegexSafetyManager {
     }
   }
 
+  /**
+   * Replaces every occurrence of a literal text in the input.
+   *
+   * Both `literalPattern` and `replacement` are taken literally: the pattern is compiled with [[compileLiteral]]
+   * and the replacement goes through `Matcher.quoteReplacement`, so `$` and `\` in it have no special meaning.
+   *
+   * @param input the text to search
+   * @param literalPattern the text to find, matched literally
+   * @param replacement the text to put in its place, inserted literally
+   * @param caseInsensitive whether `literalPattern` matches regardless of case (`Pattern.CASE_INSENSITIVE`)
+   * @return the input with every occurrence replaced
+   */
   def replaceAllLiteral(
     input: String,
     literalPattern: String,
@@ -137,6 +205,18 @@ object RegexSafetyManager {
     pattern.matcher(input).replaceAll(Matcher.quoteReplacement(replacement))
   }
 
+  /**
+   * Replaces the first occurrence of a literal text in the input.
+   *
+   * It is [[replaceAllLiteral]] for the first occurrence only: `literalPattern` and `replacement` are both taken
+   * literally, the replacement through `Matcher.quoteReplacement`.
+   *
+   * @param input the text to search
+   * @param literalPattern the text to find, matched literally
+   * @param replacement the text to put in its place, inserted literally
+   * @param caseInsensitive whether `literalPattern` matches regardless of case (`Pattern.CASE_INSENSITIVE`)
+   * @return the input with its first occurrence replaced, or the input unchanged if there is none
+   */
   def replaceFirstLiteral(
     input: String,
     literalPattern: String,
