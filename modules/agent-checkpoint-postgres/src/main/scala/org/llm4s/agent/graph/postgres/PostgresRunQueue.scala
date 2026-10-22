@@ -8,6 +8,7 @@ import org.llm4s.types.Result
 
 import java.sql.{ Connection, ResultSet }
 import java.time.Instant
+import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -124,16 +125,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       store.writing("queue.take") { c =>
         val now    = store.clockNow(c)
         val agents = request.agents.toVector.map(_.value).toArray
-        // candidate heads, skipping rows another worker has locked: workers do not wait for one another
-        val candidates = query(
-          c,
-          Sql.queueCandidates(t),
-          agents,
-          now,
-          now
-        )(rows => rows.getLong(1) -> rows.getString(2))
-        // the thread's lock, tried: a submission or another take on the thread is deciding its order now
-        val chosen = candidates.find { (id, thread) =>
+        // the thread's lock, tried: a submission, an attempt or another take on the thread is deciding its order now
+        def takeable(id: Long, thread: String): Boolean =
           lockIfFree(c, s"thread:$thread") && query(
             c,
             Sql.queueTakeable(t),
@@ -141,8 +134,22 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             now,
             now
           )(_ => ()).nonEmpty && siblingsFree(c, thread, id, now)
-        }
-        chosen match
+        // candidate heads a batch at a time, skipping rows another worker has locked - workers do not wait for one
+        // another - and going on past a full batch none of which could be taken, so busy heads never hide a takeable
+        // one behind them
+        @tailrec def scan(after: Long): Option[(Long, String)] =
+          val batch = query(
+            c,
+            Sql.queueCandidates(t),
+            agents,
+            now,
+            after,
+            now
+          )(rows => rows.getLong(1) -> rows.getString(2))
+          batch.find(takeable) match
+            case None if batch.size == Candidates => scan(batch.last._1)
+            case chosen                           => chosen
+        scan(0L) match
           case None               => Right(None)
           case Some((id, thread)) =>
             // a sibling whose lease expired loses it now, so its holder can no longer act beside the new head's
@@ -321,6 +328,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         row.maxAttempts,
         row.submitted,
         recorded,
+        row.admitted,
         row.leaseHolder,
         row.leaseExpires,
         row.outcome.map(json =>
@@ -361,18 +369,19 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       at(15),
       Option(r.getString(16)),
       at(17),
-      long(18)
+      long(18),
+      r.getBoolean(19)
     )
 
 private[postgres] object PostgresRunQueue:
 
-  /** How many candidate heads one `take` locks and tries. */
+  /** How many candidate heads one `take` locks and tries at a time. */
   val Candidates: Int = 16
 
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at, closed_seq""".stripMargin
+      |closed_at, closed_seq, admitted""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -392,7 +401,8 @@ private[postgres] object PostgresRunQueue:
     leaseExpires: Option[Instant],
     outcome: Option[String],
     closed: Option[Instant],
-    closedSeq: Option[Long]
+    closedSeq: Option[Long],
+    admitted: Boolean
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */

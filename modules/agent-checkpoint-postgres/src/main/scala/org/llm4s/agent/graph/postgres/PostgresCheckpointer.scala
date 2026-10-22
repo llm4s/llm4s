@@ -171,7 +171,11 @@ final class PostgresCheckpointer private (
         val committedAt =
           if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
           else Instant.EPOCH
-        commit.checkpoint.foreach(writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, _))
+        commit.checkpoint.foreach { checkpoint =>
+          writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, checkpoint)
+          // an open queue entry whose attempt this is was admitted, whatever a later retraction removes (design 4.55)
+          update(c, Sql.admitAttempt(t), threadId.value, checkpoint.runId)
+        }
         appendWrites(c, threadId, commit.pendingWrites)
         // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
         commit.metadata.foreach { metadata =>

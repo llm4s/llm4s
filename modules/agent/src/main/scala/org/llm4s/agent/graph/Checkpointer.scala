@@ -592,6 +592,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
               if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
           )
         )
+        // an open queue entry whose attempt this is was admitted, whatever a later retraction removes (design 4.55)
+        commit.checkpoint.foreach(c => runQueue.committed(threadId, RunId(c.runId)))
         if stored.nonEmpty then appended.signalAll()
         records
     }

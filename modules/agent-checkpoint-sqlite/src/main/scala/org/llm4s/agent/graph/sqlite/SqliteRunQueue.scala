@@ -57,8 +57,8 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             c,
             """INSERT INTO llm4s_checkpoint_queue_entries
               |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-              | max_attempts, attempt_count, submitted_nanos, thread_deleted, state)
-              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'open')""".stripMargin,
+              | max_attempts, attempt_count, submitted_nanos, thread_deleted, admitted, state)
+              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'open')""".stripMargin,
             id,
             submission.threadId.value,
             submission.agentId.value,
@@ -302,6 +302,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         row.maxAttempts,
         fromEpochNanos(row.submitted),
         attempts,
+        row.admitted,
         row.leaseHolder,
         row.leaseExpires.map(fromEpochNanos),
         row.outcome.map(json =>
@@ -334,7 +335,7 @@ private[sqlite] object SqliteRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_nanos, thread_deleted, lease_holder, lease_token, lease_expires_nanos, outcome_json,
-      |closed_nanos, closed_seq""".stripMargin
+      |closed_nanos, closed_seq, admitted""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -354,7 +355,8 @@ private[sqlite] object SqliteRunQueue:
     leaseExpires: Option[Long],
     outcome: Option[String],
     closed: Option[Long],
-    closedSeq: Option[Long]
+    closedSeq: Option[Long],
+    admitted: Boolean
   )
 
   def raw(r: ResultSet): Raw =
@@ -377,7 +379,8 @@ private[sqlite] object SqliteRunQueue:
       long(15),
       Option(r.getString(16)),
       long(17),
-      long(18)
+      long(18),
+      r.getInt(19) == 1
     )
 
   def runIdUsed(threadId: String, runId: RunId): ValidationError =

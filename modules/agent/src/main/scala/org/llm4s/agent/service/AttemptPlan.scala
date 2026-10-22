@@ -14,7 +14,8 @@ import org.llm4s.annotation.Experimental
  *    one of them commits (the owner's explicit transfer of the thread's recovery to the queue).
  *  - `Close`: the entry's input was admitted and the thread has moved on - its run reached rest, or the thread moved
  *    on through a direct `recover`, which applied the input once - so the attempt closes the entry with `outcome`,
- *    running nothing.
+ *    running nothing. That includes an admitted entry ([[QueueEntry.admitted]]) whose checkpoints the lookup no longer
+ *    finds: a direct run's blocked turn retracted them (`Commit.retractTurn`), so the input must not run again.
  */
 @Experimental
 enum AttemptPlan:
@@ -28,11 +29,16 @@ object AttemptPlan:
   /**
    * The plan for an attempt at `entry`, from the run-id lookup - `admitted`, the newest checkpoint any of the entry's
    * recorded runs committed (`Checkpointer.latestOfRuns(entry.threadId, entry.runIds)`) - and the thread's `latest`
-   * checkpoint, both read after the attempt was recorded. Never from an attempt count, and never from `latest` alone:
-   * a direct run after an attempt died would have replaced it.
+   * checkpoint, both read after the attempt was recorded - and `entry` as [[RunQueue.recordAttempt]] answered it, whose
+   * [[QueueEntry.admitted]] says one of its runs committed even once a retraction removed that run's checkpoints.
+   * Never from an attempt count, and never from `latest` alone: a direct run after an attempt died would have replaced
+   * it.
    */
   def of(entry: QueueEntry, admitted: Option[Checkpoint], latest: Option[Checkpoint]): AttemptPlan =
     admitted match
+      // admitted, and the evidence retracted since by a direct run: the thread moved on without the entry's run
+      case None if entry.admitted =>
+        Close(latest.fold[EntryOutcome](EntryOutcome.Cancelled(CancelReason.ThreadDeleted))(closedFrom))
       case None =>
         entry.input match
           case QueuedInput.Recover => Recover

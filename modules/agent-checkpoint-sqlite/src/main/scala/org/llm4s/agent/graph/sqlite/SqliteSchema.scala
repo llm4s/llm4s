@@ -91,7 +91,8 @@ private[sqlite] object SqliteSchema:
    * the meta table's `last_entry` the highest issued, which tells a reclaimed id from one never issued), thread, agent,
    * tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique while held -
    * its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
-   * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
+   * (`thread_deleted`, set in the delete's own transaction), whether one of its attempts' runs has committed a
+   * checkpoint (`admitted`, set in that commit's transaction), whether it is an `Interrupt` entry, its lease (holder, token, expiry in epoch nanoseconds), its state
    * (`open` or the outcome's), outcome JSON, close time, the thread's last event number at the close (`closed_seq`)
    * and the trace context it carries (`trace_parent`). It is indexed by thread for the run order, by agent for `take`,
    * and by close time for `reclaim`.
@@ -124,6 +125,7 @@ private[sqlite] object SqliteSchema:
         |  attempt_count       INTEGER NOT NULL,
         |  submitted_nanos     INTEGER NOT NULL,
         |  thread_deleted      INTEGER NOT NULL,
+        |  admitted            INTEGER NOT NULL DEFAULT 0,
         |  trace_parent        TEXT,
         |  lease_holder        TEXT,
         |  lease_token         INTEGER,

@@ -42,7 +42,12 @@ import scala.concurrent.duration.*
  *    ([[AttemptStart.ThreadDeleted]]);
  *  - '''learn of deletes''': the store's `Checkpointer.deleteThread` marks every open entry of the thread in the
  *    delete's own transaction (or under its lock), whatever the deleted thread numbered, so no such entry runs on a new
- *    thread of the id; an entry submitted after the delete is not marked;
+ *    thread of the id; an entry submitted after the delete is not marked. The store's `Checkpointer.commit` refuses a
+ *    checkpoint whose run is an attempt a marked entry recorded - while the entry is open and after it closes, until
+ *    it is reclaimed - so a worker whose claim outlived its lease never writes the deleted thread's input;
+ *  - '''learn of admissions''': the store's `Checkpointer.commit` of a checkpoint whose run is an attempt of an open
+ *    entry marks the entry [[QueueEntry.admitted]] in the commit's own transaction (or under its lock), and the mark
+ *    stays when a later retraction removes the checkpoint, so [[AttemptPlan]] never starts an admitted input again;
  *  - '''keep the evidence''': while an entry is open, its store's `Checkpointer.prune` keeps the newest checkpoint each
  *    of the entry's recorded runs committed on its thread, so `latestOfRuns` never loses an admitted run;
  *  - '''close''' an entry once, with its [[EntryOutcome]], the store's time and the thread's last event number then

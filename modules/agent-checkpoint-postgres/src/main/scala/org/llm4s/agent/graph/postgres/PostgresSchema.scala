@@ -111,7 +111,8 @@ private[postgres] object PostgresSchema:
    * submission order and are never reused, and the sequence's last value tells a reclaimed id from one never issued),
    * thread, agent, tenant, input and policy, its submission key under `key_scope` (the tenant, or `-` for none) - unique
    * while held - its `max_attempts` and `attempt_count`, whether `deleteThread` deleted its thread while it was open
-   * (`thread_deleted`, set in the delete's own transaction), whether it is an `Interrupt` entry, its lease (holder, token from
+   * (`thread_deleted`, set in the delete's own transaction), whether one of its attempts' runs has committed a
+   * checkpoint (`admitted`, set in that commit's transaction), whether it is an `Interrupt` entry, its lease (holder, token from
    * `checkpoint_queue_lease_tokens`, expiry by the database's clock), its state (`open` or the outcome's), outcome JSON,
    * close time (the database's clock), the thread's last event number at the close (`closed_seq`) and the trace context it carries (`trace_parent`). Partial indexes serve the run
    * order (by thread), `take` (by agent) and `reclaim` (by close time). `checkpoint_queue_attempts` holds
@@ -146,6 +147,7 @@ private[postgres] object PostgresSchema:
        |  attempt_count     integer NOT NULL,
        |  submitted_at      timestamptz NOT NULL,
        |  thread_deleted    boolean NOT NULL,
+       |  admitted          boolean NOT NULL DEFAULT false,
        |  trace_parent      text,
        |  lease_holder      text,
        |  lease_token       bigint,

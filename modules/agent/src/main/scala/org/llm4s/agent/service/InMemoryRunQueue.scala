@@ -43,7 +43,8 @@ final class InMemoryRunQueue private[agent] (
     lease: Option[Held],
     outcome: Option[EntryOutcome],
     closedAt: Option[Instant],
-    closedAtSeq: Option[Long] = None
+    closedAtSeq: Option[Long] = None,
+    admitted: Boolean = false
   ):
     def open: Boolean = outcome.isEmpty
 
@@ -55,6 +56,12 @@ final class InMemoryRunQueue private[agent] (
   /** Each thread's open entries, and the run ids every held entry of it recorded: so no call scans every entry. */
   private val openByThread = mutable.Map.empty[ThreadId, mutable.Set[Long]]
   private val attemptRuns  = mutable.Map.empty[ThreadId, mutable.Set[RunId]]
+
+  /**
+   * The run ids of attempts recorded before their thread's delete, by thread: fenced from committing to the id until
+   * their entry is reclaimed, whether or not it is still open ([[orphaned]]).
+   */
+  private val deletedRuns = mutable.Map.empty[ThreadId, mutable.Set[RunId]]
 
   /** Closed entries by when they closed, then id: what `reclaim` takes from the front of. */
   private val closedOrder = mutable.TreeSet.empty[(Instant, Long)]
@@ -83,6 +90,7 @@ final class InMemoryRunQueue private[agent] (
       row.maxAttempts,
       row.submittedAt,
       row.attempts,
+      row.admitted,
       row.lease.map(_.holder),
       row.lease.map(_.expiresAt),
       row.outcome,
@@ -276,22 +284,41 @@ final class InMemoryRunQueue private[agent] (
         runs --= r.attempts.map(_.runId)
         if runs.isEmpty then attemptRuns.remove(r.threadId)
       }
+      if r.threadDeleted then
+        deletedRuns.get(r.threadId).foreach { runs =>
+          runs --= r.attempts.map(_.runId)
+          if runs.isEmpty then deletedRuns.remove(r.threadId)
+        }
       r.key.foreach(k => keys.remove(r.tenantId.map(_.value) -> k.value))
     }
     Right(expired.size)
   }
 
   /**
-   * Whether `runId` is an attempt of an open entry of `threadId` that its thread's delete marked: such an attempt must
-   * not found a new thread of the id. Call under the lock.
+   * Whether `runId` is an attempt recorded before a delete of `threadId` while its entry was open: such an attempt
+   * must never write to the id again - also once its entry has closed, since its worker may still hold a claim taken
+   * before the close - until the entry is reclaimed. Call under the lock.
    */
   private[agent] def orphaned(threadId: ThreadId, runId: RunId): Boolean =
-    attemptRuns.get(threadId).exists(_.contains(runId)) &&
-      queueOf(threadId).exists(r => r.threadDeleted && r.attempts.exists(_.runId == runId))
+    deletedRuns.get(threadId).exists(_.contains(runId))
 
   /** Marks the thread's open entries as having outlived their thread: the checkpointer's `deleteThread`, under the lock. */
   private[agent] def threadDeleted(threadId: ThreadId): Unit =
-    queueOf(threadId).foreach(r => rows.update(r.id, r.copy(threadDeleted = true)))
+    queueOf(threadId).foreach { r =>
+      rows.update(r.id, r.copy(threadDeleted = true))
+      if r.attempts.nonEmpty then deletedRuns.getOrElseUpdate(threadId, mutable.Set.empty) ++= r.attempts.map(_.runId)
+    }
+
+  /**
+   * Records that run `runId` committed a checkpoint on `threadId`: an open entry that recorded it as an attempt is
+   * admitted from now on, whatever later leaves the history ([[QueueEntry.admitted]]). The checkpointer's commit,
+   * under the lock.
+   */
+  private[agent] def committed(threadId: ThreadId, runId: RunId): Unit =
+    if attemptRuns.get(threadId).exists(_.contains(runId)) then
+      queueOf(threadId).filter(r => !r.admitted && r.attempts.exists(_.runId == runId)).foreach { r =>
+        rows.update(r.id, r.copy(admitted = true))
+      }
 
   /**
    * The runs whose newest checkpoint on `threadId` the checkpointer's `prune` keeps: every attempt of every open entry

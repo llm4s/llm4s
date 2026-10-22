@@ -135,6 +135,10 @@ object EntryOutcome:
  *
  * @param maxAttempts the most attempts the entry may make, fixed at submission
  * @param attempts the attempts recorded, oldest first, each before it touched the thread
+ * @param admitted whether a run of one of `attempts` has committed a checkpoint on the thread - set by the store in
+ *   that commit's own transaction, and kept when the checkpoint later leaves the history (a direct run's
+ *   `Commit.retractTurn` removes it), so the input is known to be admitted even when the run-id lookup no longer
+ *   finds it ([[AttemptPlan]])
  * @param closedAtSeq the number of the thread's last event when the entry closed (`0` for none): every event of the
  *   entry's runs is at or below it, so following the entry stops there ([[RunSubmitter.follow]])
  */
@@ -150,6 +154,7 @@ final case class QueueEntry private (
   maxAttempts: Int,
   submittedAt: Instant,
   attempts: Vector[Attempt],
+  admitted: Boolean,
   leaseHolder: Option[String],
   leaseExpiresAt: Option[Instant],
   outcome: Option[EntryOutcome],
@@ -178,6 +183,7 @@ object QueueEntry:
     maxAttempts: Int,
     submittedAt: Instant,
     attempts: Vector[Attempt],
+    admitted: Boolean,
     leaseHolder: Option[String],
     leaseExpiresAt: Option[Instant],
     outcome: Option[EntryOutcome],
@@ -196,6 +202,7 @@ object QueueEntry:
       maxAttempts,
       submittedAt,
       attempts,
+      admitted,
       leaseHolder,
       leaseExpiresAt,
       outcome,

@@ -112,6 +112,16 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
 
     /** Commits checkpoint `id` on `on` as run `run`, under a fresh claim it then releases, with one event. */
     def commitAs(run: String, id: String, on: ThreadId = thread, status: CheckpointStatus = CheckpointStatus.Running) =
+      tryCommit(run, id, on, status).value
+
+    /** [[commitAs]], answering the commit's result; `retract` retracts the turn, as a blocked run's close does. */
+    def tryCommit(
+      run: String,
+      id: String,
+      on: ThreadId = thread,
+      status: CheckpointStatus = CheckpointStatus.Running,
+      retract: Boolean = false
+    ): Result[Vector[EventRecord]] =
       val claim  = checkpointer.claim(on, ClaimRequest(RunId(run), None, ttl)).value
       val parent = checkpointer.latest(on).value.map(_.checkpoint.id)
       val checkpoint = Checkpoint(
@@ -127,8 +137,10 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
         Some(claim.token)
       )
       val event = EventDraft(run, Some(id), None, None, start, RunEvent.Custom("contract", 1, ujson.Obj()))
-      checkpointer.commit(on, Commit(claim.token, Some(checkpoint), events = Vector(event))).value
+      val result =
+        checkpointer.commit(on, Commit(claim.token, Some(checkpoint), events = Vector(event), retractTurn = retract))
       checkpointer.release(on, claim.token).value
+      result
 
     /** Deletes `on` under a fresh claim. */
     def deleteThread(on: ThreadId = thread): Unit =
@@ -540,6 +552,23 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
   }
 
+  it should "keep refusing an attempt recorded before its thread's delete once another worker closed its entry" in {
+    val c = Case()
+    c.submit().value
+    val leased = c.take().value
+    val run    = s"run-${unique()}"
+    c.queue.recordAttempt(leased.lease, RunId(run)).value shouldBe a[AttemptStart.Recorded]
+    c.deleteThread()
+    // the first worker's lease lapses; another takes the entry over, and its attempt closes it
+    c.advance(ttl + 1.second)
+    val again = c.take("worker-2").value
+    c.queue.recordAttempt(again.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.ThreadDeleted]
+    c.entry(again.entry.id).outcome shouldBe Some(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
+    // the first worker, still holding a claim on the id, never writes the deleted entry's input
+    c.tryCommit(run, "late").refused shouldBe a[GraphError.InvalidCommit]
+    c.checkpointer.latest(c.thread).value shouldBe None
+  }
+
   it should "refuse an attempt's run id that already names a run or another entry's attempt on the thread" in {
     val c = Case()
     c.commitAs("direct", "c1")
@@ -710,6 +739,7 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val entry = c.queue.recordAttempt(leased.lease, RunId(run)).value match
       case AttemptStart.Recorded(e) => e
       case other                    => fail(s"expected the attempt recorded, got $other")
+    entry.admitted shouldBe false
     def plan() =
       AttemptPlan.of(
         entry,
@@ -719,8 +749,52 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     plan() shouldBe AttemptPlan.Start
     c.commitAs(run, "admitted")
     plan() shouldBe AttemptPlan.Recover
+    c.entry(entry.id).admitted shouldBe true
     c.commitAs("direct", "moved-on", status = CheckpointStatus.Completed)
     plan() shouldBe AttemptPlan.Close(EntryOutcome.Done(Some("moved-on"), Some(CheckpointStatus.Completed)))
+  }
+
+  it should "keep an entry admitted when a direct run's blocked turn retracts its run's checkpoints" in {
+    val c = Case()
+    c.commitAs("direct", "settled", status = CheckpointStatus.Completed)
+    c.submit().value
+    val leased = c.take().value
+    val run    = s"run-${unique()}"
+    c.queue.recordAttempt(leased.lease, RunId(run)).value shouldBe a[AttemptStart.Recorded]
+    // the attempt admits the input and dies mid-run
+    c.commitAs(run, "admitted")
+    // a direct recovery's turn is blocked: its closing checkpoint retracts the turn, the attempt's checkpoint with it
+    c.tryCommit("recovery", "blocked", status = CheckpointStatus.Failed, retract = true).value
+    c.checkpointer.latestOfRuns(c.thread, Set(RunId(run))).value shouldBe None
+    // the next attempt still knows the input was admitted, and closes the entry rather than run it again
+    c.advance(ttl + 1.second)
+    val again = c.take("worker-2").value
+    val entry = c.queue.recordAttempt(again.lease, RunId(s"run-${unique()}")).value match
+      case AttemptStart.Recorded(e) => e
+      case other                    => fail(s"expected the attempt recorded, got $other")
+    entry.admitted shouldBe true
+    val plan = AttemptPlan.of(
+      entry,
+      c.checkpointer.latestOfRuns(c.thread, entry.runIds).value,
+      c.checkpointer.latest(c.thread).value.map(_.checkpoint)
+    )
+    plan match
+      case AttemptPlan.Close(EntryOutcome.Failed(FailureReason.RunFailed(message))) => message should include("blocked")
+      case other => fail(s"expected the entry closed as the thread's run failed, got $other")
+  }
+
+  it should "not mark an entry admitted for a run it did not record, nor a closed one" in {
+    val c     = Case()
+    val first = c.submit().value.entryId
+    val held  = c.take().value
+    val run   = s"run-${unique()}"
+    c.queue.recordAttempt(held.lease, RunId(run)).value
+    c.queue.close(held.lease, EntryOutcome.Done(None, None)).value
+    val second = c.submit().value.entryId
+    c.commitAs("direct", "c1")
+    c.commitAs(run, "late")
+    c.entry(first).admitted shouldBe false
+    c.entry(second).admitted shouldBe false
   }
 
 object RunQueueContract:

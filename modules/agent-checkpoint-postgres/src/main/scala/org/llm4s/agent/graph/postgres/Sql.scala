@@ -127,10 +127,19 @@ private[postgres] object Sql:
   def queueThreadDeleted(t: Tables): String =
     s"UPDATE ${t.queueEntries} SET thread_deleted = true WHERE thread_id = ? AND state = 'open'"
 
-  /** An open queue entry's attempt, as run `?` on thread `?`, whose thread a delete marked. */
+  /**
+   * A queue entry's attempt, as run `?` on thread `?`, recorded before a delete of the thread marked the entry: fenced
+   * until the entry is reclaimed, open or closed, since its worker may still hold a claim taken before the close.
+   */
   def orphanedAttempt(t: Tables): String =
     s"""SELECT 1 FROM ${t.queueAttempts} a JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id
-       |WHERE a.thread_id = ? AND a.run_id = ? AND e.state = 'open' AND e.thread_deleted LIMIT 1""".stripMargin
+       |WHERE a.thread_id = ? AND a.run_id = ? AND e.thread_deleted LIMIT 1""".stripMargin
+
+  /** Marks every open entry that recorded run `?` (bound second) on thread `?` as admitted: in a commit's transaction. */
+  def admitAttempt(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET admitted = true
+       |WHERE state = 'open' AND NOT admitted AND entry_id IN (
+       |  SELECT entry_id FROM ${t.queueAttempts} WHERE thread_id = ? AND run_id = ?)""".stripMargin
 
   /** Whether a run id already names a checkpoint or a queue attempt on the thread (bound twice). */
   def runIdUsed(t: Tables): String =
@@ -253,13 +262,17 @@ private[postgres] object Sql:
   def insertQueueEntry(t: Tables): String =
     s"""INSERT INTO ${t.queueEntries}
        |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-       | max_attempts, attempt_count, submitted_at, thread_deleted, state)
-       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, 'open')""".stripMargin
+       | max_attempts, attempt_count, submitted_at, thread_deleted, admitted, state)
+       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open')""".stripMargin
 
-  /** Candidate heads for `take` (the agents, then the time twice), skipping rows another worker holds. */
+  /**
+   * Candidate heads for `take` past entry id `?` (the agents, the time, that id, then the time again), skipping rows
+   * another worker holds.
+   */
   def queueCandidates(t: Tables): String =
     s"""SELECT e.entry_id, e.thread_id FROM ${t.queueEntries} e
        |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND e.entry_id > ?
        |  AND e.entry_id = (${queueHeadOf(t)})
        |  AND NOT EXISTS (${queueLiveSibling(t)})
        |ORDER BY e.entry_id

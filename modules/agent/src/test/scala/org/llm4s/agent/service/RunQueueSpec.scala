@@ -31,7 +31,7 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false)
     )
 
-  private def entry(input: QueuedInput): QueueEntry =
+  private def entry(input: QueuedInput, admitted: Boolean = false): QueueEntry =
     QueueEntry.stored(
       EntryId.unsafe(1),
       thread,
@@ -43,6 +43,7 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       3,
       start,
       Vector(Attempt(RunId("r1"), start, "w")),
+      admitted,
       None,
       None,
       None,
@@ -80,6 +81,18 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                                                                    => fail(s"unexpected $other")
     }
     AttemptPlan.of(entry(QueuedInput.query("q")), Some(own), None) shouldBe
+      AttemptPlan.Close(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
+  }
+
+  it should "close an admitted entry whose checkpoints a retraction removed, never starting its input again" in {
+    // the lookup finds none of the entry's runs, but the store recorded that one of them committed
+    val failed = checkpoint("c3", "direct", CheckpointStatus.Failed)
+    AttemptPlan.of(entry(QueuedInput.query("q"), admitted = true), None, Some(failed)) match {
+      case AttemptPlan.Close(EntryOutcome.Failed(FailureReason.RunFailed(message))) => message should include("c3")
+      case other                                                                    => fail(s"unexpected $other")
+    }
+    AttemptPlan.of(entry(QueuedInput.Recover, admitted = true), None, Some(failed)) shouldBe a[AttemptPlan.Close]
+    AttemptPlan.of(entry(QueuedInput.query("q"), admitted = true), None, None) shouldBe
       AttemptPlan.Close(EntryOutcome.Cancelled(CancelReason.ThreadDeleted))
   }
 

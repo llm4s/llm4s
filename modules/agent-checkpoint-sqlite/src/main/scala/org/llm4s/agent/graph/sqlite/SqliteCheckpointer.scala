@@ -228,6 +228,8 @@ final class SqliteCheckpointer private (
           )
           update(c, "DELETE FROM llm4s_checkpoint_pending_writes WHERE thread_id = ?", threadId.value)
           placeChild(c, threadId, checkpoint, fresh)
+          // an open queue entry whose attempt this is was admitted, whatever a later retraction removes
+          admitAttempt(c, threadId, checkpoint.runId)
         }
         appendWrites(c, threadId, commit.pendingWrites)
         commit.metadata.foreach(writeMetadata(c, threadId, _, committedAt))
@@ -1108,16 +1110,34 @@ object SqliteCheckpointer:
   private[sqlite] val PositionByIdSql: String =
     "SELECT position FROM llm4s_checkpoint_history WHERE thread_id = ? AND checkpoint_id = ?"
 
-  /** Whether checkpoint `id` is in the thread's history; by the `(thread, checkpoint id)` index. */
+  /**
+   * Whether run `runId` is an attempt recorded before a delete of the thread while its entry was open: fenced from
+   * the id until the entry is reclaimed, open or closed, since its worker may still hold a claim taken before the
+   * close (design 4.55). By the attempts' `(thread_id, run_id)` index.
+   */
   private def orphanedAttempt(c: Connection, threadId: ThreadId, runId: String): Boolean =
     query(
       c,
       """SELECT 1 FROM llm4s_checkpoint_queue_attempts a
         |JOIN llm4s_checkpoint_queue_entries e ON e.entry_id = a.entry_id
-        |WHERE a.thread_id = ? AND a.run_id = ? AND e.state = 'open' AND e.thread_deleted = 1 LIMIT 1""".stripMargin,
+        |WHERE a.thread_id = ? AND a.run_id = ? AND e.thread_deleted = 1 LIMIT 1""".stripMargin,
       threadId.value,
       runId
     )(_ => ()).nonEmpty
+
+  /**
+   * Marks every open entry that recorded run `runId` as an attempt on the thread admitted: the run committed a
+   * checkpoint, and the mark outlives any retraction of it (design 4.55). In the commit's own transaction.
+   */
+  private def admitAttempt(c: Connection, threadId: ThreadId, runId: String): Unit =
+    update(
+      c,
+      """UPDATE llm4s_checkpoint_queue_entries SET admitted = 1
+        |WHERE state = 'open' AND admitted = 0 AND entry_id IN (
+        |  SELECT entry_id FROM llm4s_checkpoint_queue_attempts WHERE thread_id = ? AND run_id = ?)""".stripMargin,
+      threadId.value,
+      runId
+    )
 
   private def inHistory(c: Connection, threadId: ThreadId, id: String): Boolean =
     positionOf(c, threadId, id).isDefined

@@ -1,13 +1,18 @@
 package org.llm4s.agent.graph.postgres
 
+import org.llm4s.agent.AgentId
+import org.llm4s.agent.graph.ThreadId
+import org.llm4s.agent.service.{ QueuedInput, Submission, TakeRequest }
 import org.llm4s.agent.testkit.{ ManualClock, RunQueueContract }
 import org.llm4s.it.tags.Docker
 import org.scalatest.{ BeforeAndAfterAll, Outcome }
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.time.Clock
+import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.concurrent.duration.*
+import scala.util.Using
 
 /**
  * `PostgresCheckpointer.runQueue` passes the contract every run queue must pass (design 4.55), against a real server.
@@ -66,6 +71,27 @@ class PostgresRunQueueContractSpec extends AnyFlatSpec with RunQueueContract wit
     val outcome = super.withFixture(test)
     Iterator.continually(opened.poll()).takeWhile(_ != null).foreach(_.close())
     outcome
+  }
+
+  "PostgresCheckpointer.runQueue" should "take a free head behind a full batch of heads whose threads are locked" in {
+    val stores  = open(Clock.systemUTC())
+    val agent   = AgentId.of(s"scan-${UUID.randomUUID().toString.take(8)}").toOption.get
+    val threads = (0 to PostgresRunQueue.Candidates).map(i => ThreadId(s"scan-$i-${UUID.randomUUID()}"))
+    val ids     = threads.map(t => stores.queue.submit(Submission(t, agent, QueuedInput.query("q"))).toOption.get.entryId)
+    // another transaction holds the advisory lock of every thread of the first batch, as submissions deciding their
+    // thread's order would
+    PgCheckpointerDb.withConnection { c =>
+      c.setAutoCommit(false)
+      threads.take(PostgresRunQueue.Candidates).foreach { t =>
+        Using.resource(c.prepareStatement("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) { st =>
+          st.setString(1, s"""llm4s.agent.queue:"$schema":thread:${t.value}""")
+          st.executeQuery().close()
+        }
+      }
+      val taken = stores.queue.take(TakeRequest("worker", Set(agent), 30.seconds)).toOption.get
+      c.rollback()
+      taken.map(_.entry.id) shouldBe Some(ids.last)
+    }
   }
 
   override def afterAll(): Unit = {
