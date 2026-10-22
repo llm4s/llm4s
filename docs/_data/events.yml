@@ -165,11 +165,35 @@
 - start: 2026-10-23
   starts_at: "2026-10-23T10:00:00+05:30"
   time: "10:00-15:00 IST"
-  event: "E-Cell Orientation & Pitch Roulette, VIPS-TC"
+  event: "E-Cell Orientation & Pitch Roulette | Vivekananda Institute of Professional Studies-Technical Campus (VIPS-TC)"
   title: "LLM4S Foundation: A Retrospective"
-  location: VIPS Technical Campus, Pitampura, Delhi, India 🇮🇳
+  location: Vivekananda Institute of Professional Studies-Technical Campus (VIPS-TC), Pitampura, Delhi, India 🇮🇳
   speakers: [Kannupriya Kalra]
   image: /image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
+  url: https://e-cellvips.netlify.app/events/ecell-orientation-2026
+  links:
+    - label: "Contact E-Cell VIPS-TC"
+      url: "mailto:ecell@vips.edu"
+    - label: "Instagram post 1"
+      url: "https://www.instagram.com/p/DewrJQZToeq/"
+    - label: "Instagram post 2"
+      url: "https://www.instagram.com/p/DexAULBE9OR/"
+    - label: "LinkedIn post 1"
+      url: "https://lnkd.in/p/ggdeiydS"
+    - label: "LinkedIn post 2"
+      url: "https://lnkd.in/p/g7SJV_Gy"
+    - label: "LinkedIn post 3"
+      url: "https://lnkd.in/p/gGPUwZM9"
+    - label: "LinkedIn post 4"
+      url: "https://lnkd.in/p/gC8qGGaS"
+    - label: "Bluesky"
+      url: "https://bsky.app/profile/llm4s-foundation.bsky.social/post/3myfjtq5klc2e"
+    - label: "Reddit"
+      url: "https://www.reddit.com/r/scala/s/8gN6AKtv7J"
+    - label: "X/Twitter"
+      url: "https://x.com/llm4sfoundation/status/2112952346674430300?s=20"
+    - label: "Mastodon"
+      url: "https://mastodon.social/@llm4s_foundation/117479898546636829"
 
 - start: 2026-10-25
   starts_at: "2026-10-25T12:00:00+05:30"
