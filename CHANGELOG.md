@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
+  `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
@@ -112,6 +114,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
+  `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
+  "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
+- **Added** agent tools defined from Java: `@Tool`/`@Param` methods (`JTool.fromAnnotated`) and lambdas
+  (`JTool.builder(...).param(...).handler(...)`), given to `Llm4s.createAgentWithTools`; arguments are read into Java
+  values without a JSON library, and a handler's exception is a tool error the model sees [#1484](https://github.com/llm4s/llm4s/issues/1484).
+- **Added** token streaming to the Java facade: `JLlmClient.stream(..., CompletionStreamListener)` returns a
+  cancellable `CompletionStream` (`onPartial`, then `onComplete` or `onError` once), and `streamAsPublisher` a cold
+  `Flow.Publisher<String>` that holds the provider for a slow subscriber [#1485](https://github.com/llm4s/llm4s/issues/1485).
+- **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
+  overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
 - **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
   files or text, `ask` for an answer with its sources [#1491](https://github.com/llm4s/llm4s/issues/1491); see [Java RAG](docs/guide/java-rag.md).
 - **Added** Spring Boot configuration metadata to `llm4s-spring-boot-starter`, so IDEs complete and document the
@@ -135,6 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
   `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
   sample `TypedCalculatorExample`.
+- **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
+  of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
+  [#1514](https://github.com/llm4s/llm4s/issues/1514).
+- **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
+  default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
+  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
 
 ### MCP
 
@@ -144,6 +163,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
+  `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
+  the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
 - **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with

@@ -57,10 +57,15 @@ psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ### Minimal Example
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
+
+// build needs the extension import above and a model registry; ProviderRegistry.default is a given.
+given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
 
 // 1. Create and initialize the SearchIndex
 val searchIndex = PgSearchIndex.fromJdbcUrl(
@@ -80,7 +85,7 @@ searchIndex.collections.create(CollectionConfig.publicLeaf(collectionPath))
 val rag = RAG.builder()
   .withEmbeddings("openai")
   .withSearchIndex(searchIndex)
-  .build()
+  .build
   .getOrElse(throw new RuntimeException("Failed to build RAG"))
 
 // 4. Ingest a document
@@ -488,7 +493,7 @@ val rag = RAG.builder()
   .withEmbeddings("openai")
   .withSearchIndex(searchIndex)
   .withLLM(llmClient)  // Add LLM for answer generation
-  .build()
+  .build
   .getOrElse(???)
 
 val answer = rag.queryWithPermissionsAndAnswer(
@@ -629,12 +634,16 @@ This:
 Here's a complete example showing a multi-tenant document system:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
 
 object MultiTenantRAGExample extends App {
+
+  given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
 
   // 1. Setup
   val searchIndex = PgSearchIndex.fromJdbcUrl(
@@ -679,7 +688,7 @@ object MultiTenantRAGExample extends App {
   val rag = RAG.builder()
     .withEmbeddings("openai")
     .withSearchIndex(searchIndex)
-    .build()
+    .build
     .getOrElse(throw new RuntimeException("Failed to build RAG"))
 
   // 5. Ingest documents
