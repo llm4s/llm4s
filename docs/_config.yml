@@ -114,8 +114,11 @@ social:
 
 # ----- just-the-docs theme settings -----
 
-# Aux links (appear in header)
+# Aux links (appear in header). _includes/components/aux_nav.html opens only the external ones in a new tab and
+# shows "Sponsor" as a button.
 aux_links:
+  "Sponsor":
+    - "/foundation/"
   "GitHub":
     - "https://github.com/llm4s/llm4s"
   "Discord":

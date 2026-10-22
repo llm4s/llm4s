@@ -1,0 +1,10 @@
+{%- comment -%}
+  Added to the <head> of every page by just-the-docs. The landing layout (home, Why LLM4S, Learn, Showcase,
+  Foundation) also loads its two web fonts from Google Fonts; the documentation pages keep the theme's system fonts.
+{%- endcomment -%}
+<meta name="theme-color" content="#16181d">
+{%- if page.layout == "landing" %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+{%- endif %}

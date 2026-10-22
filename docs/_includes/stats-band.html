@@ -1,0 +1,15 @@
+{%- comment -%}
+  The project's public numbers, from _data/stats.yml, plus the number of talks and events in _data/events.yml.
+{%- endcomment -%}
+<section class="lp-stats" aria-labelledby="stats-heading">
+  <div class="lp-wrap">
+    <h2 id="stats-heading" class="lp-visually-hidden">LLM4S in numbers</h2>
+    <ul class="lp-stats__list">
+      {%- for s in site.data.stats.github %}
+      <li><a href="{{ s.url }}"><strong>{{ s.value }}</strong><span>{{ s.label }}</span></a></li>
+      {%- endfor %}
+      <li><a href="{{ '/events/' | relative_url }}"><strong>{{ site.data.events | size }}</strong><span>Talks and events</span></a></li>
+    </ul>
+    <p class="lp-stats__note">{{ site.data.stats.source_note }} <a href="{{ site.data.stats.lfx_insights }}">See LLM4S on LFX Insights</a>.</p>
+  </div>
+</section>

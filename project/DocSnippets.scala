@@ -37,7 +37,8 @@ object DocSnippets {
     "guide/custom-tools.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
-    "guide/providers.md"
+    "guide/providers.md",
+    "index.md"
   )
 
   val packageName = "org.llm4s.docsnippets"

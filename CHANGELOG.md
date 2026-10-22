@@ -211,6 +211,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Changed** the front of llm4s.org: a redesigned home page and new **Why LLM4S** (`/why-llm4s/`), **Learn**
+  (`/learn/`) and **Showcase** (`/showcase/`) pages, and a rewritten **Foundation** page (`/foundation/`) on what
+  support funds, ways to give and partner on internships, and how funds are handled through Open Collective. They use
+  a new full-width `landing` layout (`docs/_layouts/landing.html`, styles scoped to `body.landing` in
+  `_sass/custom/custom.scss`); the documentation pages keep their layout and gain a **Sponsor** header link. The
+  numbers in the home page's stats band are in `docs/_data/stats.yml` (as of Oct 2026) and the showcased open-source
+  projects in `docs/_data/showcase.yml`; ADOPTERS.md is unchanged. The home page's Scala sample is compiled with the
+  other documentation snippets (`index.md` joins `DocSnippets.pages`). Existing permalinks are unchanged.
 - **Added** a Quarkus guide ([docs/guide/quarkus.md](docs/guide/quarkus.md)) and a runnable Maven sample,
   `modules/samples/quarkus-java`: a `@Produces @ApplicationScoped JLlmClient` built with the Java API's builders from
   a `@ConfigMapping` of `llm4s.provider`, `model`, `base-url` and `api-key`, closed by a `@Disposes` method, and a

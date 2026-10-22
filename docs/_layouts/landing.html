@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+{%- comment -%}
+  Full-width layout for the site's front pages: home, Why LLM4S, Learn, Showcase and Foundation.
+  It keeps just-the-docs' <head> (stylesheet, SEO tags, favicon, head_custom.html), so the shared styles and the
+  page metadata are the same as on the documentation pages, and swaps the sidebar for a top navigation bar
+  (_includes/landing-header.html) and a site footer (_includes/landing-footer.html). Page sections are plain HTML in
+  the page source, styled by the `.landing` rules in _sass/custom/custom.scss. The documentation pages keep the
+  `default` and `page` layouts.
+{%- endcomment -%}
+<html lang="{{ site.lang | default: 'en-US' }}">
+{% include head.html %}
+<body class="landing">
+  <a class="skip-to-main" href="#main-content">Skip to main content</a>
+  {% include icons/icons.html %}
+  {% include landing-header.html %}
+  <main id="main-content" class="landing-main">
+    {{ content }}
+  </main>
+  {% include landing-footer.html %}
+</body>
+</html>

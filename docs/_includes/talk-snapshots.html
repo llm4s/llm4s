@@ -1,7 +1,8 @@
 {%- comment -%}
   Snapshots from LLM4S talks, newest first, from _data/event_photos.yml. Shown on the home page and the Events page.
+  include.strip: a horizontally scrolling strip (the home page) instead of the grid (the Events page).
 {%- endcomment -%}
-<ul class="event-gallery">
+<ul class="event-gallery{% if include.strip %} event-gallery--strip{% endif %}"{% if include.strip %} tabindex="0" aria-label="Talk snapshots, scroll sideways for more"{% endif %}>
 {%- assign photos = site.data.event_photos | sort: "date" | reverse -%}
 {%- for photo in photos -%}
 <li><a href="{{ photo.src | relative_url }}"><img src="{{ photo.src | relative_url }}" alt="{{ photo.caption | escape }}" loading="lazy"></a><span>{{ photo.caption }}</span></li>

@@ -36,7 +36,6 @@ docs/guide/providers.md -> /MODEL_METADATA.md
 docs/guide/rag-evaluation.md -> ../rag-benchmark-results.md
 docs/guide/speech.md -> /api/llm-client
 docs/guide/vector-store.md -> /examples/#embeddings-examples
-docs/index.md -> /examples/#embeddings-examples
 docs/migrations/0x-to-1x.md -> ../../CHANGELOG.md
 docs/migrations/index.md -> v0.3.x-stt-domain-expansion
 docs/reference/migration.md -> ../guide/writing-a-provider#testing

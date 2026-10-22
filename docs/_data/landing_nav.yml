@@ -1,0 +1,60 @@
+# Navigation of the landing layout (_layouts/landing.html): the top bar and the footer columns.
+# The documentation pages keep just-the-docs' sidebar, built from each page's nav_order.
+
+main:
+  - title: Docs
+    url: /getting-started/
+  - title: Why LLM4S
+    url: /why-llm4s/
+  - title: Learn
+    url: /learn/
+  - title: Showcase
+    url: /showcase/
+  - title: Events
+    url: /events/
+  - title: Foundation
+    url: /foundation/
+
+footer:
+  - heading: Build
+    links:
+      - title: Getting started
+        url: /getting-started/
+      - title: User guide
+        url: /guide/
+      - title: Examples
+        url: /examples/
+      - title: Scaladoc
+        url: /scaladoc/
+      - title: 1.0 scope
+        url: /reference/v1-scope
+      - title: Roadmap
+        url: /reference/roadmap
+  - heading: Learn and contribute
+    links:
+      - title: Learning path
+        url: /learn/
+      - title: Contributing guide
+        url: /reference/contributing
+      - title: Good first issues
+        url: https://github.com/llm4s/llm4s/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22
+      - title: Google Summer of Code
+        url: /gsoc/
+      - title: Events and Dev Hour
+        url: /events/
+      - title: People
+        url: /people/
+  - heading: Foundation
+    links:
+      - title: Support LLM4S
+        url: /foundation/
+      - title: Open Collective
+        url: https://opencollective.com/llm4s
+      - title: Showcase
+        url: /showcase/
+      - title: Adopters
+        url: https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md
+      - title: Governance
+        url: https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md
+      - title: Security
+        url: /reference/security

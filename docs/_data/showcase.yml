@@ -1,0 +1,96 @@
+# Open-source projects built with LLM4S, shown on /showcase/ and (the entries with `home: true`) on the home page.
+# Only public repositories that depend on org.llm4s, and are not forks. A listing is not an endorsement either way,
+# and never carries a company logo. Organisations and products that use LLM4S list themselves in ADOPTERS.md instead.
+# Fields: name, repo (owner/name), url, description (from the repository's own description or README), tags,
+# group (org = from the llm4s organisation, community = everyone else), home (optional, show on the home page).
+# Last checked: 2026-10-23.
+
+- name: Szork
+  repo: llm4s/szork
+  url: https://github.com/llm4s/szork
+  description: A voice-controlled, Zork-style text adventure that uses LLM4S for speech, image generation, tools and agentic gameplay.
+  tags: [agents, speech, images, tools]
+  group: org
+  home: true
+
+- name: RAG in a Box
+  repo: llm4s/rag_in_a_box
+  url: https://github.com/llm4s/rag_in_a_box
+  description: "A turnkey RAG deployment powered by LLM4S, with a REST API for ingestion and querying, PostgreSQL with pgvector, and hybrid search."
+  tags: [rag, service]
+  group: org
+  home: true
+
+- name: llm4s.g8
+  repo: llm4s/llm4s.g8
+  url: https://github.com/llm4s/llm4s.g8
+  description: The giter8 project template. Running sbt new llm4s/llm4s.g8 gives you a working LLM4S project in one command.
+  tags: [template, starter]
+  group: org
+
+- name: TermFlow
+  repo: llm4s/termflow
+  url: https://github.com/llm4s/termflow
+  description: A small, functional terminal UI framework for Scala 3, used by LLM4S's streaming chat TUI sample.
+  tags: [tui, library]
+  group: org
+
+- name: toon4s
+  repo: com-vitthalmirji/toon4s
+  url: https://github.com/com-vitthalmirji/toon4s
+  description: Token-Oriented Object Notation (TOON) for the JVM, a compact encoding for sending structured data to LLMs.
+  tags: [library, tokens]
+  group: community
+  home: true
+
+- name: Adk4s
+  repo: gruggiero/Adk4s
+  url: https://github.com/gruggiero/Adk4s
+  description: An Agentic Development Kit in Scala, built on top of LLM4S.
+  tags: [agents, framework]
+  group: community
+  home: true
+
+- name: graphStore
+  repo: gruggiero/graphStore
+  url: https://github.com/gruggiero/graphStore
+  description: A temporally-aware knowledge graph for AI agent memory.
+  tags: [memory, knowledge graph]
+  group: community
+
+- name: llm4s-tripper
+  repo: gruggiero/llm4s-tripper
+  url: https://github.com/gruggiero/llm4s-tripper
+  description: A travel-planning agent built with LLM4S and workflows4s, with cats-effect and MCP tools.
+  tags: [agents, mcp, cats-effect]
+  group: community
+  home: true
+
+- name: triage4s
+  repo: pavanvamsi3/triage4s
+  url: https://github.com/pavanvamsi3/triage4s
+  description: Evidence-backed AI issue triage for Scala projects, powered by LLM4S, with a read-only GitHub dashboard.
+  tags: [agents, developer tools]
+  group: community
+  home: true
+
+- name: Forge
+  repo: rorygraves/forge
+  url: https://github.com/rorygraves/forge
+  description: A coding meta agent that drives an agent-development workflow.
+  tags: [agents, developer tools]
+  group: community
+
+- name: translator
+  repo: im-vedant/translator
+  url: https://github.com/im-vedant/translator
+  description: A Scala 3 translation project that calls LLMs through LLM4S.
+  tags: [example]
+  group: community
+
+- name: hello-llm4s
+  repo: cheleb/hello-llm4s
+  url: https://github.com/cheleb/hello-llm4s
+  description: An LLM4S hello world, a minimal project to start from.
+  tags: [example, starter]
+  group: community

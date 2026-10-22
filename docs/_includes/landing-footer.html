@@ -1,0 +1,33 @@
+{%- comment -%}
+  Footer of the landing layout: link columns from site.data.landing_nav.footer, the follow links, the licence and
+  the release version.
+{%- endcomment -%}
+<footer class="lp-footer">
+  <div class="lp-wrap lp-footer__grid">
+    <div class="lp-footer__about">
+      <a class="lp-brand lp-brand--footer" href="{{ '/' | relative_url }}">
+        <img src="{{ '/image_assets/llm4s_logo.png' | relative_url }}" alt="" width="40" height="40">
+        <span>LLM4S</span>
+      </a>
+      <p>Large Language Models for Scala: an open-source, community-led framework for building LLM applications on the JVM, stewarded by the LLM4S Foundation.</p>
+      <p class="lp-footer__chat">
+        <a class="lp-btn lp-btn--ghost-dark lp-btn--sm" href="{{ site.discord_invite }}">Join the Discord</a>
+        <a class="lp-btn lp-btn--ghost-dark lp-btn--sm" href="https://github.com/llm4s/llm4s">Star on GitHub</a>
+      </p>
+    </div>
+    {%- for col in site.data.landing_nav.footer %}
+    <nav class="lp-footer__col" aria-label="{{ col.heading }}">
+      <h2>{{ col.heading }}</h2>
+      <ul>
+        {%- for link in col.links %}
+        <li><a href="{% if link.url contains '://' %}{{ link.url }}{% else %}{{ link.url | relative_url }}{% endif %}">{{ link.title }}</a></li>
+        {%- endfor %}
+      </ul>
+    </nav>
+    {%- endfor %}
+  </div>
+  <div class="lp-wrap lp-footer__bottom">
+    <p>Follow LLM4S: {% include follow-links.html %}</p>
+    <p>LLM4S is released under the <a href="https://github.com/llm4s/llm4s/blob/main/LICENSE">MIT License</a>. Latest release: <code>{{ site.data.project.latest_release }}</code>. Names of other projects, companies and conferences on this site identify them and do not imply affiliation or endorsement.</p>
+  </div>
+</footer>

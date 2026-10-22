@@ -2,7 +2,7 @@
   Overrides just-the-docs' footer_custom.html, which renders only site.footer_content: adds the follow links to the
   footer of every page.
 {%- endcomment -%}
-<p class="text-small text-grey-dk-100 mb-0">Follow LLM4S: {% include follow-links.html %}</p>
+<p class="text-small text-grey-dk-100 mb-0">Follow LLM4S: {% include follow-links.html %} &middot; <a href="{{ '/foundation/' | relative_url }}">Support the LLM4S Foundation</a></p>
 {%- if site.footer_content %}
 <p class="text-small text-grey-dk-100 mb-0">{{ site.footer_content }}</p>
 {%- endif -%}

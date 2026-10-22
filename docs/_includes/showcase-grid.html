@@ -1,0 +1,17 @@
+{%- comment -%}
+  Cards for the projects in _data/showcase.yml.
+  include.home: only the entries marked `home: true`. include.group: only that group (org or community).
+{%- endcomment -%}
+{%- assign projects = site.data.showcase -%}
+{%- if include.home -%}{%- assign projects = projects | where: "home", true -%}{%- endif -%}
+{%- if include.group -%}{%- assign projects = projects | where: "group", include.group -%}{%- endif -%}
+<ul class="lp-showcase">
+  {%- for p in projects %}
+  <li class="lp-card lp-card--project">
+    <p class="lp-card__repo">{{ p.repo }}</p>
+    <h3><a href="{{ p.url }}">{{ p.name }}</a></h3>
+    <p>{{ p.description }}</p>
+    <p class="lp-tags">{% for t in p.tags %}<span>{{ t }}</span>{% endfor %}</p>
+  </li>
+  {%- endfor %}
+</ul>
