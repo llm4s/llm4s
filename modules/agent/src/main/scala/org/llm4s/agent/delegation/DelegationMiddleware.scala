@@ -1,6 +1,6 @@
 package org.llm4s.agent.delegation
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentTraceSpans }
 import org.llm4s.agent.events.SubagentEvents
 import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, RunOrigin }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelContext, PromptSection }
@@ -162,8 +162,25 @@ final private[agent] class DelegationMiddleware(
     limits: TaskLimits
   ): ToolOutcome =
     val name = bound.id.value
+    // the span of this tool call, which the parent run's tracing places its execute_tool at (design 4.58)
+    val callSpan = AgentTraceSpans.toolCall(
+      AgentTraceSpans.run(
+        ctx.run.position.threadId,
+        ctx.run.position.runId,
+        ctx.run.position.fencingToken,
+        ctx.run.config.traceContext
+      ),
+      ctx.idempotencyKey
+    )
     val origin =
-      RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, bound.id, bound.agent.runtime.now(), depth + 1)
+      RunOrigin(
+        ctx.run.position.threadId,
+        ctx.idempotencyKey,
+        bound.id,
+        bound.agent.runtime.now(),
+        depth + 1,
+        Some(callSpan)
+      )
     bound.delegated(
       input,
       origin,

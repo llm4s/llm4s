@@ -3,6 +3,7 @@ package org.llm4s.agent.graph
 import org.llm4s.agent.delegation.ChildRef
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -106,7 +107,8 @@ final case class RunConfig private (
   interruptBefore: Set[NodeId],
   interruptAfter: Set[NodeId],
   retention: Option[RetentionPolicy],
-  childRetention: Int
+  childRetention: Int,
+  traceContext: Option[TraceContext]
 ):
   def withRunId(id: RunId): RunConfig                 = copy(runId = id)
   def withTenantId(t: TenantId): RunConfig            = copy(tenantId = Some(t))
@@ -155,6 +157,16 @@ final case class RunConfig private (
     require(n >= 0, s"childRetention must not be negative, was $n")
     copy(childRetention = n)
 
+  /**
+   * The trace context this run continues (design 4.58): the run's span takes it as its remote parent, so the run is
+   * in that context's trace - a submitter's request, a queue entry's recorded context, the original run's context for
+   * a recovery on another machine. `None`, the default, starts a trace of the run's own, derived from its [[RunId]]. A
+   * delegated child's run is given the context its origin recorded ([[RunOrigin.trace]]), whatever is set here.
+   * Tracing reads it; nothing else in the run does.
+   */
+  def withTraceContext(c: TraceContext): RunConfig         = copy(traceContext = Some(c))
+  def withTraceContext(c: Option[TraceContext]): RunConfig = copy(traceContext = c)
+
 object RunConfig:
   def apply(
     runId: RunId = RunId.random(),
@@ -165,7 +177,8 @@ object RunConfig:
     interruptBefore: Set[NodeId] = Set.empty,
     interruptAfter: Set[NodeId] = Set.empty,
     retention: Option[RetentionPolicy] = None,
-    childRetention: Int = DefaultChildRetention
+    childRetention: Int = DefaultChildRetention,
+    traceContext: Option[TraceContext] = None
   ): RunConfig =
     require(childRetention >= 0, s"childRetention must not be negative, was $childRetention")
     new RunConfig(
@@ -177,7 +190,33 @@ object RunConfig:
       interruptBefore,
       interruptAfter,
       retention,
-      childRetention
+      childRetention,
+      traceContext
+    )
+
+  /** A config continuing no trace context, as before `traceContext` existed. */
+  def apply(
+    runId: RunId,
+    tenantId: Option[TenantId],
+    principal: Option[Principal],
+    budgets: RunBudgets,
+    metadata: Map[String, String],
+    interruptBefore: Set[NodeId],
+    interruptAfter: Set[NodeId],
+    retention: Option[RetentionPolicy],
+    childRetention: Int
+  ): RunConfig =
+    apply(
+      runId,
+      tenantId,
+      principal,
+      budgets,
+      metadata,
+      interruptBefore,
+      interruptAfter,
+      retention,
+      childRetention,
+      None
     )
 
   /** Settled child threads a thread keeps unless its run says otherwise ([[RunConfig.withChildRetention]]). */
@@ -203,7 +242,8 @@ object RunConfig:
       interruptBefore,
       interruptAfter,
       retention,
-      DefaultChildRetention
+      DefaultChildRetention,
+      None
     )
 
   /** A config without retention, as before `retention` existed. */
@@ -225,7 +265,8 @@ object RunConfig:
       interruptBefore,
       interruptAfter,
       None,
-      DefaultChildRetention
+      DefaultChildRetention,
+      None
     )
 
 /**

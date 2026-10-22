@@ -135,6 +135,25 @@ Threads can be listed and searched ([design 4.52](https://github.com/llm4s/llm4s
 - **`RunConfig.metadata` is now used.** A top-level `start` with non-empty metadata sets it on the thread, and refuses metadata past `ThreadMetadata`'s limits (32 entries, keys of `A-Z a-z 0-9 _ . : / -` up to 64 characters, values up to 256) with a `ValidationError` before it claims anything. Change it later with `GraphRuntime.updateMetadata`.
 - **Schemas move on, with no way back.** SQLite schema 8 and PostgreSQL schema 2 add the registry's columns and indexes, backfilled from each thread's latest checkpoint when the store opens. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### One trace per run (#2137)
+
+- **Positional patterns** on `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` need
+  one more binder, for the new last field `span: Option[TraceSpan]` (`case TraceEvent.CustomEvent(name, data, at, _)`).
+  Constructor calls are unchanged: `span` defaults to `None`.
+- **OpenTelemetry dashboards and queries.** An agent run is now one trace: `invoke_agent <agent>` is the parent of the
+  run's `chat <model>` (new: one per model call, `SpanKind.CLIENT`), `execute_tool <tool>` (now `SpanKind.INTERNAL`)
+  and its other events, and a delegated child's `invoke_agent` is under the `execute_tool task` that started it. A
+  query that counted one trace per event, or keyed on the old parentless spans, needs rewriting; filter by
+  `gen_ai.operation.name` instead.
+- **Langfuse trace ids.** A traced agent run's Langfuse trace id is now its 32-hex trace id (the OpenTelemetry one),
+  not the run id, which moves to the trace's `run_id` metadata. A child run has no trace of its own: find it inside
+  its parent's trace, under the `execute_tool task` observation. A run traced without a placement (a hand-built
+  `AgentRunEnded`) is unchanged.
+- **Continuing a trace.** To put a run in an upstream request's trace, pass its `traceparent`:
+  `RunConfig().withTraceContext(TraceContext.parse(header).toOption)`. A `resume` or `recover` with no context
+  continues the trace its work started in.
+- **Stored data needs nothing.** `RunOrigin.trace` and `Checkpoint.trace` are optional; a thread stored without them reads as `None`. A `resume` or `recover` given no `traceContext` now continues the trace its work started in (`Checkpoint.trace`) rather than starting one.
+
 ### Store-wide retention and tombstone reclamation (#2059)
 
 A store can be swept, a bounded page at a time, and a deleted thread's tombstone is no longer kept for good ([design 4.53](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md)). Code that only runs agents changes nothing; these change:

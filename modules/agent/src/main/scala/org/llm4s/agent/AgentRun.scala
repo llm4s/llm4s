@@ -6,7 +6,7 @@ import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
-import org.llm4s.trace.Tracing
+import org.llm4s.trace.{ TraceContext, Tracing }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -212,7 +212,8 @@ private[agent] object AgentRun:
    * of the observer the run was admitted with, and ends the handle's observation after the run;
    * `await` drains it when `drain` is set. The bridges (fs2, ZIO) pass `drain = false`: they end on
    * the scope's `onEnd`, and their release awaits the run without waiting on their own listener.
-   * `parent` is a delegated child run's parent thread and run, which its tracing names (design 4.47).
+   * `parent` is a delegated child run's parent thread and run, which its tracing names (design 4.47); `continues` the
+   * trace context the run's span takes as its parent (design 4.58).
    */
   def apply(
     handle: RunHandle[TurnOutput],
@@ -222,7 +223,8 @@ private[agent] object AgentRun:
     tracing: Option[Tracing],
     scope: Option[RunScope],
     drain: Boolean,
-    parent: Option[(ThreadId, RunId)] = None
+    parent: Option[(ThreadId, RunId)] = None,
+    continues: Option[TraceContext] = None
   ): AgentRun =
     scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
@@ -230,7 +232,7 @@ private[agent] object AgentRun:
       loop,
       root,
       runtime,
-      tracing.map(AgentTracing(handle, root, loop, _, parent)),
+      tracing.map(AgentTracing(handle, root, loop, _, parent, continues)),
       scope.filter(_ => drain)
     )
 

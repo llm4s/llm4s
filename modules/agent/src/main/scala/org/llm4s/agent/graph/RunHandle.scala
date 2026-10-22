@@ -64,6 +64,13 @@ trait RunHandle[O]:
    */
   def observation: Option[Subscription]
 
+  /**
+   * The trace context the run continues, as its admission settled it (design 4.58): the run's own
+   * `RunConfig.traceContext`, else - for a recover or resume - the trace its thread's admitted checkpoint records
+   * ([[Checkpoint.trace]]). Its tracing takes it as the run span's parent. `None` for a handle the runtime did not make.
+   */
+  private[agent] def traceContext: Option[org.llm4s.trace.TraceContext] = None
+
 /**
  * Why a run stops, recorded once: the first cause recorded wins. `Cancelled`, `Expired` and
  * `ClaimLost` are recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause
@@ -115,7 +122,8 @@ final private[graph] class DefaultRunHandle[O](
   claimSeq: Long,
   signal: StopSignal,
   subscribeFrom: (Long, Int, Boolean, StreamEvent => Unit) => Result[Dispatched],
-  val observation: Option[Dispatched]
+  val observation: Option[Dispatched],
+  override private[agent] val traceContext: Option[org.llm4s.trace.TraceContext] = None
 ) extends RunHandle[O]:
 
   private val result                      = new CompletableFuture[RunResult[O]]()

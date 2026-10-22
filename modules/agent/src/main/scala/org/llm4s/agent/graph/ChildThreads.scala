@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.LLMError
+import org.llm4s.trace.TraceContext
 import upickle.default.ReadWriter
 
 import java.time.Instant
@@ -16,7 +17,12 @@ import java.time.Instant
  *
  * A thread is a child thread exactly when its latest checkpoint records an origin ([[Checkpoint.origin]]), never
  * because of its id's shape. The origin is written with the child's first checkpoint and copied onto every later one,
- * as the tenant is. A child thread is driven only through its parent's run: `start`, `recover`, `resume`, `fork`,
+ * as the tenant is.
+ *
+ * `trace` is the trace context of the parent's tool call that started the child (design 4.58): every run of the child
+ * - its first, and each recovery or resume, on whichever machine - takes it as its span's parent, so the child stays
+ * in the trace of the run that started it. `None` on a child first admitted before it existed, whose runs continue the
+ * context of the call that drives them. A child thread is driven only through its parent's run: `start`, `recover`, `resume`, `fork`,
  * `updateState` and `deleteThread` on it are refused with [[GraphError.ChildThread]].
  */
 @Experimental
@@ -25,20 +31,34 @@ final case class RunOrigin private (
   call: IdempotencyKey,
   agent: AgentId,
   startedAt: Instant,
-  depth: Int
+  depth: Int,
+  trace: Option[TraceContext] = None
 ):
-  def withParent(p: ThreadId): RunOrigin     = copy(parent = p)
-  def withCall(c: IdempotencyKey): RunOrigin = copy(call = c)
-  def withAgent(a: AgentId): RunOrigin       = copy(agent = a)
-  def withStartedAt(at: Instant): RunOrigin  = copy(startedAt = at)
-  def withDepth(d: Int): RunOrigin           = RunOrigin(parent, call, agent, startedAt, d)
+  def withParent(p: ThreadId): RunOrigin            = copy(parent = p)
+  def withCall(c: IdempotencyKey): RunOrigin        = copy(call = c)
+  def withAgent(a: AgentId): RunOrigin              = copy(agent = a)
+  def withStartedAt(at: Instant): RunOrigin         = copy(startedAt = at)
+  def withDepth(d: Int): RunOrigin                  = RunOrigin(parent, call, agent, startedAt, d, trace)
+  def withTrace(t: TraceContext): RunOrigin         = copy(trace = Some(t))
+  def withTrace(t: Option[TraceContext]): RunOrigin = copy(trace = t)
 
 object RunOrigin:
 
   /** Throws `IllegalArgumentException` for a `depth` below 1: a child is at least one level below its parent. */
-  def apply(parent: ThreadId, call: IdempotencyKey, agent: AgentId, startedAt: Instant, depth: Int = 1): RunOrigin =
+  def apply(
+    parent: ThreadId,
+    call: IdempotencyKey,
+    agent: AgentId,
+    startedAt: Instant,
+    depth: Int = 1,
+    trace: Option[TraceContext] = None
+  ): RunOrigin =
     require(depth >= 1, s"depth must be at least 1, was $depth")
-    new RunOrigin(parent, call, agent, startedAt, depth)
+    new RunOrigin(parent, call, agent, startedAt, depth, trace)
+
+  /** An origin recording no trace context, as before `trace` existed. */
+  def apply(parent: ThreadId, call: IdempotencyKey, agent: AgentId, startedAt: Instant, depth: Int): RunOrigin =
+    apply(parent, call, agent, startedAt, depth, None)
 
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 

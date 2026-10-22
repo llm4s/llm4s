@@ -465,13 +465,19 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
+  /**
+   * The turn `handle` runs. Its tracing continues the trace context the run's admission settled
+   * ([[RunHandle.traceContext]], design 4.58): a run's own `RunConfig.traceContext`, else - for a resume or recover -
+   * the trace the work started in, read from the checkpoint the run was admitted over, so every run of one piece of
+   * work, and the child a suspended `task` call started, is in one trace.
+   */
   private[agent] def agentRun(
     handle: RunHandle[TurnOutput],
     scope: Option[RunScope],
     drain: Boolean,
     parent: Option[(ThreadId, RunId)] = None
   ): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent)
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, handle.traceContext)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])

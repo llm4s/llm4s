@@ -19,7 +19,104 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     collector = TraceCollectorTracing(store).getOrElse(fail("could not create TraceCollectorTracing"))
   }
 
-  "TraceCollectorTracing" should "convert ToolExecuted event to ToolCall span" in {
+  "TraceCollectorTracing" should "keep a placed event's trace, span, parent and start (design 4.58)" in {
+    val trace  = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val run    = trace.spanFor("run")
+    val start  = java.time.Instant.parse("2026-10-21T10:00:00Z")
+    val end    = start.plusSeconds(2)
+    val placed = TraceSpan(run.spanFor("tool"), Some(run), start)
+    collector.traceEvent(TraceEvent.CustomEvent("agent.tool_executed", ujson.Obj(), end, Some(placed))) shouldBe Right(
+      ()
+    )
+    collector.traceEvent(
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        "completed",
+        Nil,
+        org.llm4s.llmconnect.model.UsageSummary(),
+        end,
+        span = Some(TraceSpan(run, None, start))
+      )
+    ) shouldBe Right(())
+
+    store.getSpans(collector.traceId) shouldBe empty
+    val spans = store.getSpans(org.llm4s.types.TraceId(trace.traceId)).map(s => s.spanId.value -> s).toMap
+    spans.keySet shouldBe Set(run.spanId, placed.context.spanId)
+    val tool = spans(placed.context.spanId)
+    tool.parentSpanId.map(_.value) shouldBe Some(run.spanId)
+    tool.startTime shouldBe start
+    tool.endTime shouldBe Some(end)
+    spans(run.spanId).parentSpanId shouldBe None
+
+    // the placed trace is registered, with the root run as its root span, so it can be found and deleted
+    val registered = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+    registered.rootSpanId.map(_.value) shouldBe Some(run.spanId)
+    registered.startTime shouldBe start
+    store.getTrace(collector.traceId) should not be empty
+  }
+
+  it should "start a placed trace at its earliest start, and at its root's, whatever order the events arrive in" in {
+    val trace = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val run   = trace.spanFor("run")
+    val t0    = java.time.Instant.parse("2026-10-21T10:00:00Z")
+    def event(key: String, start: java.time.Instant) =
+      TraceEvent.CustomEvent(key, ujson.Obj(), start, Some(TraceSpan(run.spanFor(key), Some(run), start)))
+    def stored = store.getTrace(org.llm4s.types.TraceId(trace.traceId)).getOrElse(fail("trace not registered"))
+
+    collector.traceEvent(event("late", t0.plusSeconds(5))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(5)
+    collector.traceEvent(event("earlier", t0.plusSeconds(2))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(2)
+    collector.traceEvent(event("later", t0.plusSeconds(9))) shouldBe Right(())
+    stored.startTime shouldBe t0.plusSeconds(2)
+    // the run's own span, traced last, is the root and sets the start
+    collector.traceEvent(
+      TraceEvent.AgentRunEnded(
+        "t",
+        "r",
+        "a",
+        "completed",
+        Nil,
+        org.llm4s.llmconnect.model.UsageSummary(),
+        t0.plusSeconds(10),
+        span = Some(TraceSpan(run, None, t0))
+      )
+    ) shouldBe Right(())
+    stored.startTime shouldBe t0
+    stored.rootSpanId.map(_.value) shouldBe Some(run.spanId)
+  }
+
+  it should "register a placed trace again after a failed registration" in {
+    import scala.util.{ Failure, Success, Try }
+    val inner = InMemoryTraceStore()
+    var down  = false
+    val flaky = new org.llm4s.trace.store.TraceStore[Try] {
+      private def guarded[A](a: => A): Try[A] = if (down) Failure(new RuntimeException("down")) else Success(a)
+      def saveTrace(trace: org.llm4s.trace.model.Trace)        = guarded(inner.saveTrace(trace))
+      def getTrace(id: org.llm4s.types.TraceId)                = guarded(inner.getTrace(id))
+      def saveSpan(span: org.llm4s.trace.model.Span)           = Success(inner.saveSpan(span))
+      def getSpans(id: org.llm4s.types.TraceId)                = Success(inner.getSpans(id))
+      def queryTraces(query: org.llm4s.trace.store.TraceQuery) = Success(inner.queryTraces(query))
+      def searchByMetadata(key: String, value: String)         = Success(inner.searchByMetadata(key, value))
+      def deleteTrace(id: org.llm4s.types.TraceId)             = Success(inner.deleteTrace(id))
+      def clear()                                              = Success(inner.clear())
+    }
+    val tracing = TraceCollectorTracing(flaky).getOrElse(fail("could not create the collector"))
+    val trace   = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val at      = java.time.Instant.parse("2026-10-21T10:00:00Z")
+    def placed(key: String) =
+      TraceEvent.CustomEvent(key, ujson.Obj(), at, Some(TraceSpan(trace.spanFor(key), Some(trace), at)))
+
+    down = true
+    tracing.traceEvent(placed("a")).isLeft shouldBe true
+    down = false
+    tracing.traceEvent(placed("b")) shouldBe Right(())
+    inner.getTrace(org.llm4s.types.TraceId(trace.traceId)) should not be empty
+  }
+
+  it should "convert ToolExecuted event to ToolCall span" in {
     val event = TraceEvent.ToolExecuted("test-tool", "input", "output", 100.millis, true)
     collector.traceEvent(event) shouldBe Right(())
 

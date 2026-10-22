@@ -640,41 +640,44 @@ final class GraphRuntime(
                 for
                   execution <- graph.restoreStored(stored.checkpoint)
                   reused    <- reusableWrites(graph, execution, stored)
+                  continued = continuedOn(config, stored)
                   run <- newRun(
                     graph,
                     threadId,
-                    config,
+                    continued,
                     durability,
                     execution.superstep,
                     admitting,
                     stored.checkpoint.origin,
-                    notAfter
-                  ).admit(
-                    execution,
-                    Some(stored.checkpoint.id),
-                    // a claim that replaced an expired one is a takeover: its run may still be executing, even
-                    // when it had this run's id - a reused RunId names two runs, so the id is never filtered.
-                    // The store names it only if it was a claim of this run's tenant (#1926)
-                    granted =>
-                      RunEvent.RunRecovered(
-                        stored.checkpoint.id,
-                        config.tenantId.map(_.value),
-                        config.principal.map(_.value),
-                        granted.takenOverFrom.map(_.value)
-                      ),
-                    // read again under the claim: a holder whose claim expired but was not yet replaced
-                    // could still add pending writes after the read above, and only the claim stops it
-                    () =>
-                      checkpointer.latest(threadId).flatMap {
-                        case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
-                          reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
-                        // the thread moved on: the claim commit's parent no longer matches, so it conflicts
-                        case _ => Right(stored.pendingWrites -> reused)
-                      },
-                    amend = amended(_, amend),
-                    // a child's reattachment is fenced by its parent's claim, as its first commit is (#2071)
-                    fence = parentFenceOf(stored, parentClaim)
+                    notAfter,
+                    continued.traceContext
                   )
+                    .admit(
+                      execution,
+                      Some(stored.checkpoint.id),
+                      // a claim that replaced an expired one is a takeover: its run may still be executing, even
+                      // when it had this run's id - a reused RunId names two runs, so the id is never filtered.
+                      // The store names it only if it was a claim of this run's tenant (#1926)
+                      granted =>
+                        RunEvent.RunRecovered(
+                          stored.checkpoint.id,
+                          config.tenantId.map(_.value),
+                          config.principal.map(_.value),
+                          granted.takenOverFrom.map(_.value)
+                        ),
+                      // read again under the claim: a holder whose claim expired but was not yet replaced
+                      // could still add pending writes after the read above, and only the claim stops it
+                      () =>
+                        checkpointer.latest(threadId).flatMap {
+                          case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
+                            reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
+                          // the thread moved on: the claim commit's parent no longer matches, so it conflicts
+                          case _ => Right(stored.pendingWrites -> reused)
+                        },
+                      amend = amended(_, amend),
+                      // a child's reattachment is fenced by its parent's claim, as its first commit is (#2071)
+                      fence = parentFenceOf(stored, parentClaim)
+                    )
                 yield run
               case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
               case CheckpointStatus.Completed | CheckpointStatus.Failed =>
@@ -748,31 +751,44 @@ final class GraphRuntime(
               for
                 suspended <- graph.restoreStored(stored.checkpoint)
                 resumed   <- graph.resume(suspended, answers)
+                continued = continuedOn(config, stored)
                 run <- newRun(
                   graph,
                   threadId,
-                  config,
+                  continued,
                   durability,
                   resumed.superstep,
                   admitting,
                   stored.checkpoint.origin,
-                  notAfter
-                ).admit(
-                  resumed,
-                  Some(stored.checkpoint.id),
-                  _ =>
-                    RunEvent.RunResumed(
-                      suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
-                      config.tenantId.map(_.value),
-                      config.principal.map(_.value)
-                    ),
-                  fence = parentFenceOf(stored, parentClaim),
-                  amend = amended(_, amend)
+                  notAfter,
+                  continued.traceContext
                 )
+                  .admit(
+                    resumed,
+                    Some(stored.checkpoint.id),
+                    _ =>
+                      RunEvent.RunResumed(
+                        suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+                        config.tenantId.map(_.value),
+                        config.principal.map(_.value)
+                      ),
+                    fence = parentFenceOf(stored, parentClaim),
+                    amend = amended(_, amend)
+                  )
               yield run
           }
     }
   }
+
+  /**
+   * `config` for a continuation - a recover or resume - of the work `stored` records (design 4.58): an explicit
+   * `traceContext` wins, else the one the work started in ([[Checkpoint.trace]]). Chosen from the checkpoint the run
+   * is admitted over - its claim commit is fenced on it, so a thread that moved on refuses the claim - never from an
+   * earlier, unlocked read; the run's tool calls (a `task` call naming its child's origin) and its handle's
+   * [[RunHandle.traceContext]] see the result, and its checkpoints record it for later continuations.
+   */
+  private def continuedOn(config: RunConfig, stored: StoredCheckpoint): RunConfig =
+    config.withTraceContext(config.traceContext.orElse(stored.checkpoint.trace))
 
   /**
    * A top-level thread, or a child thread - its latest checkpoint records a [[RunOrigin]] - refused with
@@ -940,7 +956,7 @@ final class GraphRuntime(
               Some(held.claim.token),
               open.origin,
               Some(outcome)
-            )
+            ).withTrace(open.trace)
             event  = EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             fence  = parentFenceOf(stored, parentClaim)
             commit = Commit(held.claim.token, Some(saved), Vector.empty, Vector(event)).withFence(fence)
@@ -1336,7 +1352,7 @@ final class GraphRuntime(
               Some(held.claim.token),
               open.origin,
               Some(outcome)
-            )
+            ).withTrace(open.trace)
             val event =
               EventDraft(config.runId.value, Some(saved.id), None, None, now, RunEvent.RunFailed(message))
             val fence  = Some(parent -> token)
@@ -1595,7 +1611,7 @@ final class GraphRuntime(
             stored.checkpoint.origin,
             // the status is kept, and with it how the run it records settled
             stored.checkpoint.outcome
-          )
+          ).withTrace(stored.checkpoint.trace)
           val event = EventDraft(
             config.runId.value,
             Some(saved.id),
@@ -2166,7 +2182,8 @@ final class GraphRuntime(
                   signal,
                   (afterSeq, capacity, nested, listener) =>
                     dispatched(threadId, afterSeq, capacity, listener, abandoned.apply, runScope, nested),
-                  subscription
+                  subscription,
+                  run.traceContext
                 )
                 // the store claim first - its heartbeat stopped and joined before it - then this
                 // runtime's hold: once a caller sees the result, any runtime may claim the thread
@@ -2302,9 +2319,20 @@ final class GraphRuntime(
     firstSuperstep: Int,
     admitting: Admitting,
     origin: Option[RunOrigin],
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    continuing: Option[org.llm4s.trace.TraceContext] = None
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, admitting, origin, notAfter)
+    new Run(
+      graph,
+      threadId,
+      config,
+      committer(threadId, durability),
+      firstSuperstep,
+      admitting,
+      origin,
+      notAfter,
+      continuing
+    )
 
   /**
    * What admission gives the run it admits: the run's stop signal, and `claimed`, told the token the
@@ -2842,12 +2870,17 @@ final class GraphRuntime(
      * deadline fixed at the claim is the sooner of it and `budgets.timeout` from then, so admission's own latency never
      * moves a child's deadline past its parent's.
      */
-    notAfter: Option[Instant] = None
+    notAfter: Option[Instant] = None,
+    /** The trace of the work this run continues (a recover or resume), copied onto its checkpoints (design 4.58). */
+    continuing: Option[org.llm4s.trace.TraceContext] = None
   ):
-    private val signal      = admitting.signal
-    val runId               = config.runId
-    private val cause       = signal.cause
-    private var checkpoints = 0L
+    private val signal = admitting.signal
+    val runId          = config.runId
+
+    /** The trace context the run continues: its config's, which a continuation's admission settled. */
+    def traceContext: Option[org.llm4s.trace.TraceContext] = config.traceContext
+    private val cause                                      = signal.cause
+    private var checkpoints                                = 0L
 
     /** The `n` of the checkpoint this run claims over; its own checkpoints count on from it. */
     private var parentOrdinal = 0L
@@ -3577,8 +3610,17 @@ final class GraphRuntime(
           claim.map(_.token),
           origin,
           outcome
-        )
+        ).withTrace(trace)
       }
+
+    /**
+     * The trace this run's checkpoints record (design 4.58): the one it continues, else - for a run that starts work -
+     * its own span, named by its incarnation as its tracing names it.
+     */
+    private def trace: Option[org.llm4s.trace.TraceContext] =
+      continuing.orElse(
+        claim.map(c => org.llm4s.agent.AgentTraceSpans.run(threadId, runId, Some(c.token), config.traceContext))
+      )
 
     private def checkpoint(
       execution: Execution,

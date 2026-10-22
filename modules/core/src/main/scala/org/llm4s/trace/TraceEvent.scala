@@ -30,6 +30,14 @@ sealed trait TraceEvent {
   def timestamp: Instant
   def eventType: String
   def toJson: ujson.Value
+
+  /**
+   * Where this event sits in a trace, when its emitter places it in one (design 4.58): the span it is, that span's
+   * parent and when it started; the event's `timestamp` is its end. `None` for an event traced on its own. Only
+   * [[TraceEvent.CustomEvent]], [[TraceEvent.TokenUsageRecorded]], [[TraceEvent.ErrorOccurred]] and
+   * [[TraceEvent.AgentRunEnded]] carry one.
+   */
+  def span: Option[TraceSpan] = None
 }
 
 object TraceEvent {
@@ -89,16 +97,20 @@ object TraceEvent {
   case class ErrorOccurred(
     error: Throwable,
     context: String,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant = Instant.now(),
+    override val span: Option[TraceSpan] = None
   ) extends TraceEvent {
     def eventType: String = "error_occurred"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type"    -> eventType,
-      "timestamp"     -> timestamp.toString,
-      "error_type"    -> error.getClass.getSimpleName,
-      "error_message" -> error.getMessage,
-      "context"       -> context,
-      "stack_trace"   -> error.getStackTrace.take(5).mkString("\n")
+    def toJson: ujson.Value = TraceSpan.annotate(
+      ujson.Obj(
+        "event_type"    -> eventType,
+        "timestamp"     -> timestamp.toString,
+        "error_type"    -> error.getClass.getSimpleName,
+        "error_message" -> error.getMessage,
+        "context"       -> context,
+        "stack_trace"   -> error.getStackTrace.take(5).mkString("\n")
+      ),
+      span
     )
   }
 
@@ -106,17 +118,21 @@ object TraceEvent {
     usage: TokenUsage,
     model: String,
     operation: String,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant = Instant.now(),
+    override val span: Option[TraceSpan] = None
   ) extends TraceEvent {
     def eventType: String = "token_usage_recorded"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type"        -> eventType,
-      "timestamp"         -> timestamp.toString,
-      "model"             -> model,
-      "operation"         -> operation,
-      "prompt_tokens"     -> usage.promptTokens,
-      "completion_tokens" -> usage.completionTokens,
-      "total_tokens"      -> usage.totalTokens
+    def toJson: ujson.Value = TraceSpan.annotate(
+      ujson.Obj(
+        "event_type"        -> eventType,
+        "timestamp"         -> timestamp.toString,
+        "model"             -> model,
+        "operation"         -> operation,
+        "prompt_tokens"     -> usage.promptTokens,
+        "completion_tokens" -> usage.completionTokens,
+        "total_tokens"      -> usage.totalTokens
+      ),
+      span
     )
   }
 
@@ -139,6 +155,8 @@ object TraceEvent {
    * @param parentThreadId for a delegated child run, the thread of the parent whose tool call started it;
    *                 `None` for a top-level run
    * @param parentRunId for a delegated child run, the parent run that started it; `None` for a top-level run
+   * @param span     the run's own span (design 4.58): its context, its parent - a child run's is the `task` tool call
+   *                 that started it, a continued run's the context it continued - and when the run started
    */
   case class AgentRunEnded(
     threadId: String,
@@ -149,7 +167,8 @@ object TraceEvent {
     usage: UsageSummary,
     timestamp: Instant = Instant.now(),
     parentThreadId: Option[String] = None,
-    parentRunId: Option[String] = None
+    parentRunId: Option[String] = None,
+    override val span: Option[TraceSpan] = None
   ) extends TraceEvent {
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
@@ -167,21 +186,25 @@ object TraceEvent {
       )
       parentThreadId.foreach(id => json("parent_thread_id") = id)
       parentRunId.foreach(id => json("parent_run_id") = id)
-      json
+      TraceSpan.annotate(json, span)
     }
   }
 
   case class CustomEvent(
     name: String,
     data: ujson.Value,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant = Instant.now(),
+    override val span: Option[TraceSpan] = None
   ) extends TraceEvent {
     def eventType: String = "custom_event"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type" -> eventType,
-      "timestamp"  -> timestamp.toString,
-      "name"       -> name,
-      "data"       -> data
+    def toJson: ujson.Value = TraceSpan.annotate(
+      ujson.Obj(
+        "event_type" -> eventType,
+        "timestamp"  -> timestamp.toString,
+        "name"       -> name,
+        "data"       -> data
+      ),
+      span
     )
   }
 

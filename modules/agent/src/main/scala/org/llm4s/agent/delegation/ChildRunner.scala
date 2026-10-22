@@ -225,6 +225,13 @@ private[agent] object ChildRunner:
     /** Whether the latest admission's timeout was the parent's deadline rather than the grant. */
     @volatile private var parentsDeadline = false
 
+    /**
+     * The trace context the child's runs continue (design 4.58): the one its stored origin recorded at its first
+     * admission - the tool call that started it - so a recovered or resumed child stays in that trace whichever run of
+     * the parent drives it; this call's own (`origin.trace`) for a child not started yet, or one stored without one.
+     */
+    @volatile private var trace = origin.trace
+
     /** The run this attempt last sent `TaskStarted` for. */
     @volatile private var announced = Option.empty[RunId]
 
@@ -315,6 +322,7 @@ private[agent] object ChildRunner:
       base
         .withBudgets(config.budgets.withTimeout(timeout).withMaxTokens(tokens).withMaxConcurrency(concurrency))
         .withRunId(RunId.random())
+        .withTraceContext(trace)
 
     /** `grant` recorded on the child, with its admission. */
     private def recorded(grant: ChildGrant): StateUpdate = StateUpdate.update(DelegationKeys.grant, Some(grant))
@@ -360,7 +368,13 @@ private[agent] object ChildRunner:
 
     /** One read of the child and what it calls for. */
     private def step(): Step =
-      runtime.childAtRest(childId, graph, base) match
+      val read = runtime.childAtRest(childId, graph, base)
+      read.foreach(
+        _.foreach((checkpoint, _) =>
+          if ours(checkpoint) then trace = checkpoint.origin.flatMap(_.trace).orElse(origin.trace)
+        )
+      )
+      read match
         case Left(error) => Step.Done(Left(error))
         case Right(None) if answers.isDefined =>
           Step.Done(
