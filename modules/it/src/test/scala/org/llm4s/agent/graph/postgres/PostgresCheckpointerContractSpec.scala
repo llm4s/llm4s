@@ -78,6 +78,9 @@ class PostgresCheckpointerContractSpec extends AnyFlatSpec with CheckpointerCont
   // the database's clock is the case's clock, to the microsecond, so expiries are exact
   override protected def exactExpiry: Boolean = true
 
+  // LISTEN/NOTIFY (design 4.51): a commit through any store wakes a waiter within a second on a healthy database
+  override protected def wakeBound: Option[FiniteDuration] = Some(1.second)
+
   /**
    * A store with a 300 ms call timeout over a pool of two with a 250 ms connection timeout: its documented bound is
    * their sum. The storage is made busy as another instance's long write would: a connection of its own holding an

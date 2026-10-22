@@ -67,10 +67,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
   claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** cross-machine change notification: `PostgresCheckpointer.awaitEventsAfter` wakes on any store's commit by `LISTEN`/`NOTIFY`,
+  one listening connection per store, polling while it is down [#2131](https://github.com/llm4s/llm4s/issues/2131); [design §4.51](docs/design/typed-agent-runtime/4.51-stage-5-slice-s2-cross-machine-change-notification.md).
 - **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
   `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
 - **Added** `Checkpointer.sweep`: store-wide retention in bounded pages, reclaiming old tombstones while their readers are still
   told the thread was deleted [#2059](https://github.com/llm4s/llm4s/issues/2059); [design §4.53](docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md).
+- **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
 
 ### Agent harness (Phase 3)
 

@@ -445,8 +445,10 @@ Each Stage 0 prototype and Stage 1/2 slice records its settled decisions in its 
 | 4.48 | [Stage 4 slice P1: subagents in the harness profile](typed-agent-runtime/4.48-stage-4-slice-p1-harness-subagents.md) ([#2052](https://github.com/llm4s/llm4s/issues/2052)) |
 | 4.49 | [Stage 4 slice P2: the exit example, parallel-specialist deep research](typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md) ([#2053](https://github.com/llm4s/llm4s/issues/2053)) |
 | 4.50 | [Stage 5 slice S1: the PostgreSQL checkpointer](typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md) ([#2130](https://github.com/llm4s/llm4s/issues/2130)) |
+| 4.51 | [Stage 5 slice S2: cross-machine change notification](typed-agent-runtime/4.51-stage-5-slice-s2-cross-machine-change-notification.md) ([#2131](https://github.com/llm4s/llm4s/issues/2131)) |
 | 4.52 | [Stage 5 slice S3: the thread registry](typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md) ([#2132](https://github.com/llm4s/llm4s/issues/2132)) |
 | 4.53 | [Stage 5 slice S4: store-wide retention and tombstone reclamation](typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md) ([#2059](https://github.com/llm4s/llm4s/issues/2059)) |
+| 4.54 | [Stage 5 slice S5: store configuration](typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md) ([#2133](https://github.com/llm4s/llm4s/issues/2133)) |
 
 ### 4.9 Stage 0 carry-forward
 

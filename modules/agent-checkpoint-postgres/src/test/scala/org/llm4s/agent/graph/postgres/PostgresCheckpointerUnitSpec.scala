@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph.postgres
 
-import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadQuery, ThreadStatus }
+import com.zaxxer.hikari.HikariDataSource
+import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadId, ThreadQuery, ThreadStatus }
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -218,6 +219,60 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
       PostgresCheckpointerConfig(connectionTimeout = 300.millis, maxPoolSize = 1)
     )
     unreachable.left.value shouldBe a[ProcessingError]
+  }
+
+  // ---- change notification ----
+
+  "The listening connection" should "be opened outside a HikariCP pool with the store's bounds and its own name" in {
+    val hikari = new HikariDataSource()
+    hikari.setJdbcUrl("jdbc:postgresql://127.0.0.1:1/none")
+    hikari.setUsername("agent")
+    hikari.setPassword("secret")
+    hikari.addDataSourceProperty("sslmode", "require")
+    hikari.addDataSourceProperty("ApplicationName", "the-pool")
+    val config     = PostgresCheckpointerConfig(callTimeout = 5.seconds, connectionTimeout = 1500.millis)
+    val properties = PostgresCheckpointer.listenerProperties(hikari, config)
+    properties.getProperty("sslmode") shouldBe "require"
+    (properties.getProperty("user"), properties.getProperty("password")) shouldBe ("agent", "secret")
+    // whole seconds, rounded up, never 0
+    properties.getProperty("connectTimeout") shouldBe "2"
+    properties.getProperty("loginTimeout") shouldBe "2"
+    PostgresCheckpointer
+      .listenerProperties(hikari, config.withConnectionTimeout(300.millis))
+      .getProperty("connectTimeout") shouldBe "1"
+    properties.getProperty("socketTimeout") shouldBe "11"
+    properties.getProperty("tcpKeepAlive") shouldBe "true"
+    properties.getProperty("ApplicationName") shouldBe PostgresCheckpointer.ListenerApplicationName
+    // the pool is never asked: the connection goes straight to the URL, here refused
+    an[SQLException] should be thrownBy PostgresCheckpointer.listenerConnection(hikari, config)()
+    hikari.isClosed shouldBe false
+    hikari.close()
+  }
+
+  it should "come from the pool when the pool does not say how to connect" in {
+    val calls = new CopyOnWriteArrayList[String]()
+    val conn  = FakeConnection(calls, failOn = "<nothing>")
+    PostgresCheckpointer.listenerConnection(FakePool(_ => conn), PostgresCheckpointerConfig.default)() shouldBe conn
+  }
+
+  "awaitEventsAfter" should "return a failed read at once rather than wait out its timeout" in {
+    val calls = new CopyOnWriteArrayList[String]()
+    val store = PostgresCheckpointer.create(FakePool(_ => FakeConnection(calls, failOn = "<nothing>")), false).value
+    val start = System.nanoTime()
+    // the fake answers no row read, so the read fails
+    store.awaitEventsAfter(ThreadId("t"), 0L, 10, 1.hour).left.value shouldBe a[ProcessingError]
+    (System.nanoTime() - start).nanos should be < 10.seconds
+    store.close()
+  }
+
+  it should "on a closed store, be refused without opening a listening connection" in {
+    val calls = new CopyOnWriteArrayList[String]()
+    val store = PostgresCheckpointer.create(FakePool(_ => FakeConnection(calls, failOn = "<nothing>")), false).value
+    store.close()
+    store.awaitEventsAfter(ThreadId("t"), 0L, 10, 1.hour).left.value.message should include("closed")
+    Thread.sleep(100)
+    store.listenerConnections shouldBe 0
+    store.listening shouldBe false
   }
 
   // ---- fakes ----

@@ -68,8 +68,9 @@ import scala.jdk.CollectionConverters.*
  *    as many stores over the storage ([[contenders]]); stored values kept apart from those callers
  *    pass in and are given back - and change notification:
  *    `awaitEventsAfter` returns what is there at once, returns a commit made meanwhile through
- *    this store or another over the same storage within about its `timeout`, returns empty when
- *    nothing lands, and ends its wait when interrupted.
+ *    this store or another over the same storage within about its `timeout` - and, for a store told
+ *    of commits ([[wakeBound]]), within that bound of the commit however long its `timeout` - returns
+ *    empty when nothing lands, and ends its wait when interrupted.
  *  - '''Two runtimes over one store''': a second [[org.llm4s.agent.graph.GraphRuntime GraphRuntime]] is refused a thread whose run is
  *    live in the first ([[org.llm4s.agent.graph.GraphError.ThreadBusy GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
@@ -191,6 +192,14 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
    * driver that polls its lock - SQLite's busy handler sleeps up to 100 ms between tries - add a little to any bound.
    */
   protected def boundGrace: FiniteDuration = 500.millis
+
+  /**
+   * For a store that is told of commits rather than polling: how soon after a commit through a [[sibling]] returns a
+   * waiting `awaitEventsAfter` on this store must return its events, however long the wait's own `timeout`. `None`,
+   * the default, skips the case: right for a store that polls, such as the SQLite store, whose waiter sees a commit
+   * only when its `timeout` has passed and its caller reads again.
+   */
+  protected def wakeBound: Option[FiniteDuration] = None
 
   private val start     = Instant.parse("2026-10-09T12:00:00Z")
   private val ttl       = 30.seconds
@@ -1258,6 +1267,33 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     Thread.sleep(50)
     s.commit(token, events = Vector(s.event("d"))).value
     await(second) shouldBe Vector(4L)
+  }
+
+  it should "wake a waiting awaitEventsAfter within the store's wake bound of a commit through another store over the same storage" in {
+    assume(wakeBound.isDefined, "the store polls rather than being told of commits (wakeBound)")
+    val bound = wakeBound.get
+    val s     = Store()
+    val other = s.other()
+    val token = s.claim("run").value.token
+    s.commit(token, events = Vector(s.event("a"))).value
+
+    // one call, waiting far longer than the case: only being told of the commit returns it in time
+    val returned = new LinkedBlockingQueue[(Result[Vector[EventRecord]], Long)]()
+    val waiting = Thread.ofVirtual().start { () =>
+      val result = s.store.awaitEventsAfter(s.thread, 1L, 10, 1.hour)
+      returned.offer(result -> System.nanoTime()): Unit
+    }
+    // the waiter is ended whatever the case finds, so a failure leaves no hour-long wait behind
+    scala.util.Using.resource((() => waiting.interrupt()): AutoCloseable) { _ =>
+      Thread.sleep(200)
+      returned.peek() shouldBe null
+      other.commit(s.thread, Commit(token, None, Vector.empty, Vector(s.event("b")))).value
+      val committed = System.nanoTime()
+      val (result, at) = Option(returned.poll(bound.toMillis + contractWait.toMillis, TimeUnit.MILLISECONDS))
+        .getOrElse(fail("awaitEventsAfter was not woken by the commit"))
+      result.value.map(_.seq) shouldBe Vector(2L)
+      (at - committed).nanos should be <= bound
+    }
   }
 
   it should "end an awaitEventsAfter wait when its thread is interrupted, with CancelledError and the flag set" in {

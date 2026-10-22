@@ -927,6 +927,10 @@ also set in `application.conf` or with `-D`.
 | `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL` | `llm4s.embeddings.cohere.*` | `llm4s-cohere` |
 | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
 | `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
+| `LLM4S_CHECKPOINTER` | `llm4s.agent.checkpointer.kind` (`memory` - the default, built in - `sqlite`, `postgres`, or the kind of any other `CheckpointerBackend` on the classpath) | `llm4s-agent` |
+| `LLM4S_RUNTIME_LABEL` | `llm4s.agent.runtime.claims.label` (names the runtime holding a thread's claim in the logs) | `llm4s-agent` |
+| `LLM4S_CHECKPOINTER_SQLITE_PATH` | `llm4s.agent.checkpointer.sqlite.path` | `llm4s-agent-checkpoint-sqlite` |
+| `LLM4S_CHECKPOINTER_POSTGRES_URL`, `LLM4S_CHECKPOINTER_POSTGRES_USER`, `LLM4S_CHECKPOINTER_POSTGRES_PASSWORD` | `llm4s.agent.checkpointer.postgres.url`, `.user`, `.password` | `llm4s-agent-checkpoint-postgres` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
 
 **Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
