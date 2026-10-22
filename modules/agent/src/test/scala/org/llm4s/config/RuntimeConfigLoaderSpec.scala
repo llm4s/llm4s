@@ -47,6 +47,18 @@ class RuntimeConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValue
     watch.message should include("llm4s.agent.runtime.watch")
   }
 
+  "The no-argument entry points" should "read the classpath configuration" in {
+    RuntimeConfigLoader.claimPolicy().value shouldBe ClaimPolicy.default
+    RuntimeConfigLoader.watchPolicy().value shouldBe WatchPolicy.default
+    RuntimeConfigLoader.runtime(new InMemoryCheckpointer()).isRight shouldBe true
+  }
+
+  "A section that is not an object" should "be a ConfigurationError naming it" in {
+    val error = RuntimeConfigLoader.claimPolicy(source("""llm4s.agent.runtime.claims = "short"""")).left.value
+    error shouldBe a[ConfigurationError]
+    error.message should include("Failed to read llm4s.agent.runtime.claims")
+  }
+
   "A mistyped value" should "be a ConfigurationError naming the key" in {
     RuntimeConfigLoader
       .claimPolicy(source("llm4s.agent.runtime.claims.ttl = soon"))

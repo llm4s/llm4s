@@ -61,8 +61,8 @@ final class CheckpointerSettings private (val kind: String, val extras: Map[Stri
         Try(parse(value)).toEither.left.map(_ => ConfigurationError(s"${key(name)} must be $what", List(key(name))))
 
   /**
-   * The values in this block that may hold a secret, longest first: those of keys whose name mentions a password,
-   * secret, token, credential or key, or a URL, URI or DSN (which can carry credentials in its parameters), and the
+   * The values in this block that may hold a secret, longest first: those of keys whose name mentions a password
+   * (`pass`, `pwd`), secret, token, credential, auth or key, or a URL, URI or DSN (which can carry credentials in its parameters), and the
    * value of each `password=` or `secret=`-like parameter inside any value.
    */
   def sensitiveValues: Vector[String] =
@@ -86,11 +86,11 @@ object CheckpointerSettings:
 
   /** A key whose last segment names a secret or a locator that can carry one. */
   private val SensitiveKey =
-    "(?i)(?:.*\\.)?[^.]*(?:password|passwd|secret|token|credential|key|url|uri|dsn)[^.]*".r
+    "(?i)(?:.*\\.)?[^.]*(?:pass|pwd|secret|token|credential|auth|key|url|uri|dsn)[^.]*".r
 
   /** A `name=value` parameter (in a URL query, a DSN) whose name says it is a secret. */
   private val SensitiveParameter =
-    "(?i)(?:password|passwd|pwd|secret|token|apikey|api_key|key)=([^&;\\s]+)".r
+    "(?i)(?:pass|password|passwd|passphrase|pwd|secret|token|apikey|api_key|key)=([^&;\\s]+)".r
 
   /** The settings for `kind` (lower-cased) from its block `extras`. */
   def apply(kind: String, extras: Map[String, String] = Map.empty): CheckpointerSettings =

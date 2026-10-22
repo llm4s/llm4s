@@ -23,6 +23,11 @@ final class BrokenKindCheckpointerBackend extends CheckpointerBackend:
   def kind: String                                                  = throw new IllegalStateException("no kind")
   def open(settings: CheckpointerSettings): Result[CheckpointStore] = Left(ConfigurationError("never"))
 
+/** A backend from a half-present jar: its `kind` throws a `LinkageError`, which discovery records too. */
+final class LinkageKindCheckpointerBackend extends CheckpointerBackend:
+  def kind: String = throw new NoClassDefFoundError("com/example/MissingDriver")
+  def open(settings: CheckpointerSettings): Result[CheckpointStore] = Left(ConfigurationError("never"))
+
 /** Stage 5 slice S5 (#2133, design 4.54): the checkpoint store backend registry and its settings. */
 class CheckpointerBackendsSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
@@ -57,6 +62,16 @@ class CheckpointerBackendsSpec extends AnyFlatSpec with Matchers with EitherValu
     backends.failures.mkString should (include("NoSuchBackend").and(include("BrokenKindCheckpointerBackend")))
   }
 
+  it should "record a backend that throws a LinkageError rather than failing" in {
+    val backends = CheckpointerBackends.discover(
+      loaderWith(classOf[LinkageKindCheckpointerBackend].getName, classOf[FixtureCheckpointerBackend].getName)
+    )
+    backends.find("fixture").value shouldBe a[FixtureCheckpointerBackend]
+    backends.failures should have size 1
+    backends.failures.head should (include("NoClassDefFoundError").and(include("MissingDriver")))
+    backends.toString shouldBe "CheckpointerBackends(memory, fixture)"
+  }
+
   "withBackend" should "replace a backend for the same kind, the built-in memory one included" in {
     val replacement = new CheckpointerBackend:
       val kind                                                          = "memory"
@@ -74,6 +89,24 @@ class CheckpointerBackendsSpec extends AnyFlatSpec with Matchers with EitherValu
     store.close()
     closes shouldBe 1
     store.isClosed shouldBe true
+    store.toString shouldBe "CheckpointStore(x)"
+  }
+
+  "CheckpointerSettings.redact" should "hide the values of every credential-like key and parameter" in {
+    val s = CheckpointerSettings(
+      "x",
+      Map(
+        "sslPassphrase" -> "phrase-1",
+        "authHeader"    -> "Bearer tok-2",
+        "pwd"           -> "pw-3",
+        "dsn"           -> "host=db pass=pw-4",
+        "schema"        -> "plain"
+      )
+    )
+    val text = "phrase-1 Bearer tok-2 pw-3 host=db pass=pw-4 pw-4 plain"
+    val out  = s.redact(text)
+    Vector("phrase-1", "tok-2", "pw-3", "pw-4").foreach(secret => (out should not).include(secret))
+    out should include("plain")
   }
 
   "CheckpointerSettings" should "read typed values and name the full key, never the value, when one is wrong" in {

@@ -66,6 +66,13 @@ class SqliteCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eithe
     error.message should include("llm4s.agent.checkpointer.sqlite.busyTimeout")
   }
 
+  "A path the file system refuses" should "fail the load naming the key" in {
+    val error =
+      open("", Map("LLM4S_CHECKPOINTER" -> "sqlite", "LLM4S_CHECKPOINTER_SQLITE_PATH" -> "threads\u0000.db")).left.value
+    error shouldBe a[ConfigurationError]
+    error.message should include("llm4s.agent.checkpointer.sqlite.path is not a valid path")
+  }
+
   "A path whose directory does not exist" should "fail the load" in {
     val missing = Files.createTempDirectory("sqlite-backend").resolve("no/such/dir/threads.db")
     open(

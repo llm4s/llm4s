@@ -14,6 +14,9 @@ import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.net.URLClassLoader
+import java.nio.file.Files
+
 /** Stage 5 slice S5 (#2133, design 4.54): choosing the checkpoint store in `application.conf`. */
 class CheckpointerConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
@@ -76,6 +79,34 @@ class CheckpointerConfigLoaderSpec extends AnyFlatSpec with Matchers with Either
     val error =
       open("llm4s.agent.checkpointer.kind = redis", CheckpointerBackends.of(new FixtureCheckpointerBackend)).left.value
     error.message should (include("'redis'").and(include("memory, fixture")))
+  }
+
+  it should "say which service entries could not be loaded" in {
+    val dir      = Files.createTempDirectory("checkpointer-loader")
+    val services = dir.resolve("META-INF/services")
+    Files.createDirectories(services)
+    Files.writeString(services.resolve(classOf[CheckpointerBackend].getName), "org.llm4s.NoSuchBackend")
+    val backends = CheckpointerBackends.discover(new URLClassLoader(Array(dir.toUri.toURL), getClass.getClassLoader))
+    val error    = open("llm4s.agent.checkpointer.kind = redis", backends).left.value
+    error.message should (include("could not be loaded").and(include("NoSuchBackend")))
+  }
+
+  "The no-argument entry points" should "read the classpath configuration, whose default is the in-memory store" in {
+    CheckpointerConfigLoader.settings().value.kind shouldBe "memory"
+    CheckpointerConfigLoader.open().value.kind shouldBe "memory"
+    CheckpointerConfigLoader.open(CheckpointerBackends.empty).value.checkpointer shouldBe a[InMemoryCheckpointer]
+  }
+
+  "A kind that is not a string" should "be refused naming the key" in {
+    val error = open("llm4s.agent.checkpointer.kind { nested = true }").left.value
+    error shouldBe a[ConfigurationError]
+    error.message should include("Failed to read llm4s.agent.checkpointer.kind")
+  }
+
+  "A null block" should "be read as an empty one" in {
+    val recording = new Recording("custom")
+    open("llm4s.agent.checkpointer { kind = custom, custom = null }", CheckpointerBackends.of(recording)).value
+    recording.seen.value.extras shouldBe empty
   }
 
   "A blank kind" should "be refused" in {
