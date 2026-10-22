@@ -8,14 +8,7 @@ import org.llm4s.metrics.{ MetricsCollector, MicrometerMetrics, Outcome }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.autoconfigure.endpoint.EndpointAutoConfiguration
-import org.springframework.boot.actuate.autoconfigure.metrics.{
-  CompositeMeterRegistryAutoConfiguration,
-  MetricsAutoConfiguration,
-  MetricsEndpointAutoConfiguration
-}
-import org.springframework.boot.actuate.autoconfigure.metrics.`export`.simple.SimpleMetricsExportAutoConfiguration
-import org.springframework.boot.actuate.metrics.MetricsEndpoint
+import BootLine.MetricsEndpoint
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.FilteredClassLoader
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
@@ -92,13 +85,7 @@ class LlmMetricsAutoConfigurationSpec extends AnyFlatSpec with Matchers with Bef
   // What an application with spring-boot-starter-actuator gets: a MeterRegistry and the metrics endpoint.
   private val withActuator = new ApplicationContextRunner()
     .withConfiguration(
-      AutoConfigurations.of(
-        classOf[MetricsAutoConfiguration],
-        classOf[CompositeMeterRegistryAutoConfiguration],
-        classOf[SimpleMetricsExportAutoConfiguration],
-        classOf[EndpointAutoConfiguration],
-        classOf[MetricsEndpointAutoConfiguration]
-      )
+      AutoConfigurations.of(BootLine.meterRegistryAutoConfigurations ++ BootLine.metricsEndpointAutoConfigurations*)
     )
     .withConfiguration(llm4sOnly)
     .withPropertyValues(

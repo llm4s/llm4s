@@ -64,6 +64,20 @@ private[agent] object DelegationKeys:
    * thread: a call that suspended after its child ran committed the roll-up with the suspension, and when it runs again
    * the reattached child is not counted twice. Written only with a tool call's result, and cleared as each turn starts.
    */
+  /**
+   * The children timed-out runs of suspended calls left `Running` (#2098), on the parent's thread, by tool call id: a
+   * call whose wrapper suspends it after its tool timed out (an approval, a question) is run again on resume, and if it
+   * then commits without reaching its child, the loop settles the child from this record. Written only with a tool
+   * call's result: recorded by its suspension, cleared once the call commits or reaches its child again.
+   */
+  val timedOut: StateKey[Map[String, TimedOutChild], TimedOutUpdate] =
+    StateKey[Map[String, TimedOutChild], TimedOutUpdate]("delegation-timed-out", Map.empty)((pending, update) =>
+      Right(update match
+        case TimedOutUpdate.Pending(call, child) => pending.updated(call, child)
+        case TimedOutUpdate.Cleared(call)        => pending - call
+      ): Result[Map[String, TimedOutChild]]
+    )
+
   val counted: StateKey[Set[String], CountedUpdate] =
     StateKey[Set[String], CountedUpdate]("delegation-counted", Set.empty)((ids, update) =>
       Right(update match
@@ -105,6 +119,17 @@ private[agent] object ChildGrant:
   private given ReadWriter[java.time.Instant] =
     upickle.default.readwriter[String].bimap(_.toString, java.time.Instant.parse)
   given ReadWriter[ChildGrant] = upickle.default.macroRW
+
+/**
+ * A child that a timed-out run of a delegating call left `Running` (#2098): its thread, its agent and its depth, for
+ * the loop to settle it - and announce the run that settled it - once the call commits.
+ */
+final private[agent] case class TimedOutChild(thread: String, agent: String, depth: Int) derives ReadWriter
+
+/** An update to [[DelegationKeys.timedOut]]: the child a call's suspension leaves pending, or its record cleared. */
+private[agent] enum TimedOutUpdate derives ReadWriter:
+  case Pending(call: String, child: TimedOutChild)
+  case Cleared(call: String)
 
 /** An update to [[DelegationKeys.counted]]. */
 private[agent] enum CountedUpdate derives ReadWriter:

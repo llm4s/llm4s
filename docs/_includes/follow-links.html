@@ -1,0 +1,17 @@
+{%- comment -%}
+  One-click links to follow LLM4S (and, with include.cofounder, its co-founder), from _data/social.yml.
+  include.style: "buttons" for a row of buttons, otherwise an inline list separated by middots.
+{%- endcomment -%}
+{%- assign links = site.data.social.foundation -%}
+{%- if include.cofounder -%}{%- assign links = site.data.social.cofounder.links -%}{%- endif -%}
+{%- if include.style == "buttons" -%}
+<p class="follow-links">
+  {%- for link in links %}
+  <a class="btn btn-outline mr-2 mb-2" href="{{ link.url }}" target="_blank" rel="noopener me">{{ link.name }}</a>
+  {%- endfor %}
+</p>
+{%- else -%}
+{%- for link in links -%}
+<a href="{{ link.url }}" target="_blank" rel="noopener me">{{ link.name }}</a>{% unless forloop.last %} &middot; {% endunless %}
+{%- endfor -%}
+{%- endif -%}

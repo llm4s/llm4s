@@ -109,6 +109,8 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
    - Search [existing issues](https://github.com/llm4s/llm4s/issues) to avoid duplicates
    - Use [issue templates](https://github.com/llm4s/llm4s/issues/new/choose) for bugs, features, or enhancements
    - Wait for maintainer feedback before coding
+   - Changing a Frozen module's public API, a module's tier, an SPI or a wire format? Propose it as an
+     [RFC](docs/rfcs/README.md) first
 
 3. **Make your changes:**
    - Follow code conventions in [CLAUDE.md](CLAUDE.md)
@@ -425,6 +427,34 @@ sbt scalafmtAll       # Format code
   breakage is listed in `scripts/docs-link-baseline.txt`; when you fix a listed link the check asks you to delete
   its line, and a new broken link is never added to that file (a `.md` link fails even if it is listed there).
   `scripts/check-docs-site-links.sh --print` shows what is broken now.
+
+### Checked code blocks
+
+The fenced ```` ```scala ```` blocks of the pages listed in `DocSnippets.pages` (`project/DocSnippets.scala`)
+compile as test sources of `samples`, so `sbt samples/Test/compile` (and `sbt test`) fails when a snippet no longer
+matches the code. Which pages are checked, and the order to convert the rest in, is on the
+[conversion plan](https://llm4s.org/contribute/doc-snippets-plan) (`docs/contribute/doc-snippets-plan.md`).
+
+- **Add a page:** add its path, relative to `docs/`, to `DocSnippets.pages`, then run `sbt samples/Test/compile`
+  and fix what fails. A block that uses an API that no longer exists is a documentation bug: rewrite it to the
+  current API (check the source in `modules/`), never change the library to suit the page. A block that is not
+  Scala (a shell or env line, HOCON) gets the right fence language instead (` ```bash `, ` ```hocon `). A block
+  meant to be copied on its own gets its missing imports written into it.
+- **`modules/samples/src/test/docs-snippets/skip.txt`** lists the blocks that cannot compile as written, one per
+  line as `page | hash | action | detail`. `skip | reason` leaves the block out: an sbt build definition, Liquid
+  template lines, declared pseudocode. `with | import a.B; import c._` compiles it after those imports, for a
+  fragment that relies on imports shown earlier on the page. An entry whose block was edited or removed fails the
+  build, so every listed block is looked at again when it changes.
+- **Values a page assumes** ("here `client` is any `LLMClient`") come from
+  `modules/samples/src/test/scala/org/llm4s/samples/docs/SnippetEnv.scala`. Add a member only when the page text
+  says the value is assumed; a name the page forgot to define or import is a bug to fix on the page.
+- **Find a block's hash** with `sbt samples/docSnippetsReport`: one line per block with its page, first line, hash,
+  status (`compiled`, `skip: ...`, `with: ...`) and first line of code. The hash covers the block's text with
+  whitespace collapsed, so reformatting it does not change it, but any other edit does.
+- **Read an error position:** each block becomes a file named after its page and first line, padded so its line
+  numbers are the page's. `Snippet_guide_basic_usage_L107.scala:112:20` is `docs/guide/basic-usage.md` line 112,
+  column 20, in the block that starts at line 107. The `with` imports are put on line 1, so they never shift a
+  position.
 
 ## Commit Messages
 

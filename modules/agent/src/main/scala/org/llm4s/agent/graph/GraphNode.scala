@@ -125,6 +125,18 @@ private[graph] trait NodeEventSink:
   /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
   def discardCustom(): Unit
 
+  /**
+   * Settles `child`, a child thread of the task's thread that no call will reattach, as `outcome`, fenced by the run's
+   * claim (`GraphRuntime.settleUnreachable`, #2098): the run that settled it. Outside a runtime there is no child to
+   * settle: `None`.
+   */
+  def settleChild(
+    @unused child: ThreadId,
+    @unused outcome: RunOutcome,
+    @unused message: String
+  ): Result[Option[RunId]] =
+    Right(None)
+
 private[graph] object NodeEventSink:
   val none: NodeEventSink = new NodeEventSink:
     def custom(name: String, version: Int, payload: ujson.Value): Unit   = ()

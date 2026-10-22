@@ -12,9 +12,14 @@ import scala.annotation.tailrec
  * 2. Enhanced mode: Returns Either[ToolParameterError, T] for structured error reporting
  *
  * @param params The JSON parameters to extract from
+ * @param call   The tool call being run, when the caller knows it: an agent sets it for every call, with the call's
+ *               id and idempotency key ([[ToolCallInfo]]); plain [[ToolRegistry]] tool calling leaves it `None`.
  */
 @Stable
-case class SafeParameterExtractor(params: ujson.Value) {
+case class SafeParameterExtractor(params: ujson.Value, call: Option[ToolCallInfo] = None) {
+
+  /** An extractor with no call, for Java, which does not see Scala's default arguments. */
+  def this(params: ujson.Value) = this(params, None)
   // Helper case class to return both the value and available keys from parent
   private case class NavigationResult(value: Option[ujson.Value], availableKeys: List[String])
   // Simple mode - returns string errors for backward compatibility
@@ -44,6 +49,9 @@ case class SafeParameterExtractor(params: ujson.Value) {
 
   /**
    * Extract a required double (number) parameter from the JSON params.
+   *
+   * A whole number above 2^53 (9007199254740992) has already been rounded to the nearest double when the tool call's
+   * arguments were parsed, so it cannot be recovered here. Declare large identifiers as strings in the tool's schema.
    *
    * @param path Dot-separated path to the parameter
    * @return `Right(value)` on success, `Left(errorMessage)` on failure

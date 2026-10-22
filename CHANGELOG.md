@@ -12,12 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
-- Checkpoint format 8 and SQLite schema 6: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
+  `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
+- `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
+  and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
 - `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
   `fence` on the claim above, checked atomically with the delete, and a store checks `Commit.fence` atomically with
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
+  `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
   `new` and `.copy` are private; [migration](docs/reference/migration.md#memorymanagerconfig-is-growth-safe-1847).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
@@ -29,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `execute_tool <tool>`: exhaustive matches, positional patterns and dashboards break; [migration](docs/reference/migration.md#nested-streams-and-tracing-2051).
 - `HarnessProfile.deepAgents` offers a `task` tool (a tool named `task` clashes; permission rules need an `Invoke` rule for it),
   and `withDelegation` beside a harness is refused; [migration](docs/reference/migration.md#subagents-in-the-harness-profile-2052).
+- `LLMClientPekko.streamComplete` materializes `Future[Done]` instead of `NotUsed`: code that names the type, or keeps
+  the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
 
 ### Agent subagents (Phase 4)
 
@@ -51,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the exit example, `ParallelDeepResearchExample`: typed specialists in parallel under bounds, a crash, a child's failure,
   approval and cancel, nested streams, with an acceptance suite on a scripted model [#2053](https://github.com/llm4s/llm4s/issues/2053); [design §4.49](docs/design/typed-agent-runtime/4.49-stage-4-slice-p2-exit-example.md).
 
+### Production adapters (Stage 5)
+
+- **Added** `llm4s-agent-checkpoint-postgres`: `PostgresCheckpointer`, a `Checkpointer` shared by runtimes on several machines,
+  claims and retention by the database's clock [#2130](https://github.com/llm4s/llm4s/issues/2130); [design §4.50](docs/design/typed-agent-runtime/4.50-stage-5-slice-s1-postgresql-checkpointer.md).
+- **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
+  `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
+
 ### Agent harness (Phase 3)
 
 - **Added** `HostFileBackend`, a `FileBackend` over a host directory with one writer per root: `open` locks the root
@@ -66,31 +81,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** a `llm4s-pekko` stream leaking its producer thread when provider code swallows the interrupt: once the
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
+- **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
+  returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
 
 ### Agent runtime
 
+- **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
+  `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
+  recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
+- **Added** the call's id and idempotency key for `ToolFunction` tools run by an agent: `SafeParameterExtractor.call`
+  (a `ToolCallInfo`, `None` outside an agent) and `ToolFunction.execute(args, call)`; `HTTPTool` sends it as
+  `Idempotency-Key` on writes, and MCP tools forward it in `tools/call` `_meta` (`llm4s.org/idempotencyKey`), which an
+  llm4s `MCPServer` reads back [#1740](https://github.com/llm4s/llm4s/issues/1740).
 - **Fixed** `SqliteCheckpointer.open` failing on a pre-release version-1 file whose latest checkpoint is not valid JSON: that
   thread is left out of the seeded history, with a warning, and seeding streams the rows [#1849](https://github.com/llm4s/llm4s/issues/1849).
+- **Fixed** `RunContext.progress` from a node that keeps its context past its run reaching a later run's subscribers:
+  once the run has released the thread it is a no-op, as it already was once the claim was lost [#1737](https://github.com/llm4s/llm4s/issues/1737).
 
 ### Providers
 
 - **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
   `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
+- **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
+  on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Changed** an `ollama` section's `baseUrl` to default to `http://localhost:11434`, so a local section needs only
   `provider` and `model`; `OLLAMA_BASE_URL` is the one documented variable (`baseUrl = ${?OLLAMA_BASE_URL}`) [#1991](https://github.com/llm4s/llm4s/issues/1991).
 - **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
+- **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
+  (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
 
 ### Java & Kotlin APIs
 
 - **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
   overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
+- **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
+  files or text, `ask` for an answer with its sources [#1491](https://github.com/llm4s/llm4s/issues/1491); see [Java RAG](docs/guide/java-rag.md).
+- **Added** Spring Boot configuration metadata to `llm4s-spring-boot-starter`, so IDEs complete and document the
+  `llm4s.*` properties; a spec keeps it in step with the bound properties [#1467](https://github.com/llm4s/llm4s/issues/1467).
 - **Added** `Llm4s.createEmbeddingClient("provider/model")`, a Java embedding client for a model you name; `llm4s.embeddings.model`
   need not be set [#1781](https://github.com/llm4s/llm4s/issues/1781); see the [Java guide](docs/guide/java.md#embeddings).
 - **Changed** a Java embedding client to accept a model its provider module does not list (Ollama's `bge-m3`): BREAKING,
   `JEmbeddingClient.dimensions()` is an `OptionalInt`, empty for such a model [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Added** `Llm4s.wrapClient(JLlmClient)` to `llm4s-kotlin-api`: a client built in code with the Java builders
   (`ollama()`, `openAi()`, ...) becomes an `LLMClientKt` [#1850](https://github.com/llm4s/llm4s/issues/1850); see the [Java guide](docs/guide/java.md#configure-in-code).
+- **Added** Spring Boot 4 support to `llm4s-spring-boot-starter`, in the same artifact: on Boot 4, where `HealthIndicator`
+  moved to `org.springframework.boot.health.contributor`, the `llmHealthIndicator` bean is an `LlmBoot4HealthIndicator`
+  reporting what `LlmHealthIndicator` does on 3.x. CI runs the starter's specs on Spring Boot 4.0.8 and 4.1.1 as well as
+  3.3.6 and 3.5.16 [#1467](https://github.com/llm4s/llm4s/issues/1467); see the [Spring Boot guide](docs/guide/spring-boot.md#what-the-starter-gives-you).
+
+### Tools
+
+- **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
+  Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
+  derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
+  core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
+  `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
+  sample `TypedCalculatorExample`.
+- **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
+  of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
+  [#1514](https://github.com/llm4s/llm4s/issues/1514).
+- **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
+  default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
+  not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
 
 ### MCP
 
@@ -102,12 +155,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `ProviderDiscoveryExample` demonstrating dynamic provider discovery via `ProviderRegistry.discover()`,
   `ProviderRegistryReport` diagnostics and explicit module registration [#1548](https://github.com/llm4s/llm4s/issues/1548).
+- **Documented** that a tool argument above 2^53 reaches the handler already rounded (send large ids as strings), with
+  tests pinning it, in `SafeParameterExtractor`, `ToolCall` and the structured-output limits [#1597](https://github.com/llm4s/llm4s/issues/1597).
+- **Added** a lightweight RFC process for public API changes ([docs/rfcs](docs/rfcs/README.md)): when one is required, a
+  template, a 7-day final comment period, an index with the earlier frozen-API decisions, and RFC 0001 on when
+  `llm4s-agent` gets its MiMa baseline [#1480](https://github.com/llm4s/llm4s/issues/1480).
+- **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
+  [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
+  and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
 
 ### Memory
 
 - **Changed** `MemoryManagerConfig` to a private constructor with `with*` setters (`.copy` is private) [#1847](https://github.com/llm4s/llm4s/issues/1847).
 - **Fixed** `autoExtractEntities` swallowing a cancellation: `recordMessage` returns the `CancelledError` (also a failure ending
   while the thread is interrupted, or a thrown `InterruptedException`) and the interrupt flag stays set [#1847](https://github.com/llm4s/llm4s/issues/1847).
+
+### Security
+
+- **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
+  (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
+  start of a line was read [#1844](https://github.com/llm4s/llm4s/issues/1844).
 
 ### Build & tooling
 

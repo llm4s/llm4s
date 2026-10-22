@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService
 
 @AutoConfiguration(after = Array(classOf[Llm4sAutoConfiguration]))
 @Configuration
+// Spring Boot 3's HealthIndicator; on Spring Boot 4, LlmBoot4ActuatorAutoConfiguration registers the indicator.
 @ConditionalOnClass(name = Array("org.springframework.boot.actuate.health.HealthIndicator"))
 @ConditionalOnBean(Array(classOf[JLlmClient]))
 // The same switch as Llm4sAutoConfiguration: llm4s.enabled=false turns the whole starter off. Without
@@ -31,9 +32,6 @@ class LlmActuatorAutoConfiguration {
     properties: Llm4sProperties,
     @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService,
     environment: ConfigurableEnvironment
-  ): LlmHealthIndicator = {
-    require(properties.health.probeTimeout.toNanos > 0, "llm4s.health.probe-timeout must be positive")
-    require(!properties.health.probeTtl.isNegative, "llm4s.health.probe-ttl must not be negative")
-    new LlmHealthIndicator(client, HealthSettings.from(properties, environment), executor)
-  }
+  ): LlmHealthIndicator =
+    new LlmHealthIndicator(client, HealthSettings.checked(properties, environment), executor)
 }

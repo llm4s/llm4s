@@ -30,6 +30,35 @@ These were checked against the `0.4.1` build definition and the dependency trees
 
 ---
 
+## Dependency footprint
+
+What each artifact puts on the runtime classpath, measured with `cs fetch` against Maven Central. Each row is resolved
+together, as a project that declares those dependencies gets them:
+
+| Dependencies (llm4s 0.5.1) | Jars | Size (MB) | Brings |
+|---|---:|---:|---|
+| llm4s-java-api | 55 | 130.2 | OkHttp, kotlin-stdlib, Jackson, Anthropic SDK, OpenAI SDK |
+| llm4s-core | 16 | 23.7 | - |
+| llm4s-core + llm4s-ollama | 17 | 23.8 | - |
+| llm4s-core + llm4s-openai-compatible | 17 | 24.2 | - |
+| llm4s-core + llm4s-gemini | 17 | 24.0 | - |
+| llm4s-core + llm4s-anthropic | 42 | 60.8 | OkHttp, kotlin-stdlib, Jackson, Anthropic SDK |
+| llm4s-core + llm4s-openai | 42 | 95.2 | OkHttp, kotlin-stdlib, Jackson, OpenAI SDK |
+| llm4s-core + llm4s-agent + llm4s-ollama | 22 | 30.1 | - |
+
+- **`llm4s-java-api` brings every provider.** It depends on `llm4s-openai`, `llm4s-anthropic`, `llm4s-ollama`,
+  `llm4s-gemini` and `llm4s-openai-compatible`, so a Java user who calls only Ollama still gets both vendor SDKs:
+  two and a half times the jars, and over four times the size, of core, the agent and one SDK-free provider. Whether to make the providers opt-in is
+  [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Only two providers bring an SDK.** Ollama, Gemini and the OpenAI-compatible providers add one small jar to core;
+  OpenAI and Anthropic add their SDK and, with it, OkHttp, Jackson and the Kotlin standard library (see
+  [OkHttp and Kotlin standard library](#okhttp-and-kotlin-standard-library)).
+
+To measure a release, run `scripts/dependency-footprint.sh [VERSION]` (coursier's `cs` on the `PATH`; the version
+defaults to the latest release). It prints this table.
+
+---
+
 ## Conflict Matrix
 
 | Conflict | Affected scenario | Symptom | Resolution |

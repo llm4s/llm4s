@@ -596,4 +596,15 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
   it should "return empty map for clean text" in {
     PIIPatterns.summarize("no pii here") shouldBe empty
   }
+
+  // #1569: a finding is one match of one type, so text two types match is reported, and counted, once per type,
+  // while maskAll writes one placeholder for it
+  it should "count text that two types match once for each type, while maskAll masks it once" in {
+    val types   = Seq(PIIType.SSN, PIIType.Passport)
+    val matches = PIIPatterns.detect("123456789", types)
+    matches.map(_.piiType) shouldBe Seq(PIIType.SSN, PIIType.Passport)
+    matches.map(m => (m.startIndex, m.endIndex)).distinct should have size 1
+    PIIPatterns.summarize("123456789", types) shouldBe Map(PIIType.SSN.name -> 1, PIIType.Passport.name -> 1)
+    PIIPatterns.maskAll("123456789", types) shouldBe "[REDACTED_SSN]"
+  }
 }

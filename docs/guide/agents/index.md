@@ -346,6 +346,30 @@ val charge = AgentTool(chargeSpec) { (args, context) =>
 }
 ```
 
+A plain `ToolFunction` - one built with `ToolBuilder`, a built-in tool, an MCP tool - reads the same call as
+`params.call`, a `ToolCallInfo` with the call's `toolCallId` and `idempotencyKey`. It is `None` when the function runs
+outside an agent, through `ToolRegistry.execute`, which has no call to describe:
+
+```scala
+import org.llm4s.toolapi.{ Schema, ToolBuilder }
+
+val charge = ToolBuilder[Map[String, Any], String]("charge", "Charges a card", chargeSchema)
+  .withHandler { params =>
+    for
+      amount  <- params.getDouble("amount")
+      receipt <- payments.charge(amount, idempotencyKey = params.call.map(_.idempotencyKey))
+    yield receipt.id
+  }
+  .buildSafe()
+```
+
+Two tools pass it on by themselves. `HTTPTool` adds `Idempotency-Key: <key>` to a POST, PUT, PATCH or DELETE it
+sends as an agent's call, unless the call's own headers set one. An MCP tool sends it to its server in the
+`tools/call` request's `_meta`, as `llm4s.org/idempotencyKey` (with `llm4s.org/toolCallId`), never among the
+arguments; an llm4s `MCPServer` hands it to its tool as `params.call`, and another server can read it there or
+ignore it. Tools defined from Java (`llm4s-java-api`) and Kotlin (`llm4s-kotlin-api`) do not see it yet
+([#1740](https://github.com/llm4s/llm4s/issues/1740)).
+
 The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
 issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
 with the call. A call of a later model request gets a new key even when the provider reuses its

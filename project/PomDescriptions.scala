@@ -22,6 +22,8 @@ object PomDescriptions {
       "Agent runtime for LLM4S: agents, guardrails, handoffs, a typed graph runtime, streaming and an assistant.",
     "llm4s-agent-checkpoint-sqlite" ->
       "SQLite checkpoint store for the LLM4S graph runtime: durable threads, restart and recovery, fenced run claims.",
+    "llm4s-agent-checkpoint-postgres" ->
+      "PostgreSQL checkpoint store for the LLM4S graph runtime: threads shared across machines, fenced run claims by the database clock.",
     "llm4s-agent-memory" ->
       "Semantic memory for LLM4S agents: recall before a turn, recording and consolidation after it, replay-safe across recovery.",
     "llm4s-agent-testkit" ->
@@ -44,6 +46,8 @@ object PomDescriptions {
       "Image generation and image vision and processing clients for LLM4S.",
     "llm4s-java-api" ->
       "Java-friendly facade over LLM4S: a client, an agent and a conversation builder for Java callers.",
+    "llm4s-java-rag" ->
+      "Java-friendly facade over LLM4S RAG: ingest documents and ask questions answered with their sources, from Java.",
     "llm4s-jev" ->
       "Client for TypeSafe's Jev decision model for LLM4S: typed yes/no, choice and score answers to questions about a state.",
     "llm4s-jina" ->

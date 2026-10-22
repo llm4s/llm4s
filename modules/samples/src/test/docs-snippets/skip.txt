@@ -23,3 +23,56 @@ getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconne
 getting-started/ollama-quickstart.md | 36e396831d | with | import org.llm4s.llmconnect.model.CompletionOptions
 getting-started/testing-guide.md | cf30f353e7 | skip | conceptual pseudocode by its own comment: InMemoryVectorStore, embedder and RAGPipeline are stand-ins, not llm4s classes
 getting-started/first-example.md | dc23df3294 | with | import org.llm4s.llmconnect.model._
+getting-started/installation.md | f4504f50ef | skip | sbt build definition, not Scala source
+getting-started/installation.md | 9a7b01aa6f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 8288e4a556 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 4fedebd19f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 30efc2e8cd | skip | sbt build definition, not Scala source
+getting-started/installation.md | ef30bdb2b3 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6c4ea7f583 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 3273fe661f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 4353c88c48 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 2fd6d0e112 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 1e77150533 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 84f607dbd4 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 54a8a6537b | skip | sbt build definition, not Scala source
+getting-started/installation.md | b6a4a474c4 | skip | sbt build definition, not Scala source
+getting-started/installation.md | ae34e42f15 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 9aef71a790 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 975f60b158 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 99cfae3041 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 03446641a8 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 425f37584b | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6b26cf14c7 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 4f8485e651 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6ea01941b0 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6e672cfc37 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 362b0b0114 | skip | sbt build definition, not Scala source
+getting-started/installation.md | b85df8a9fb | skip | sbt build definition, not Scala source
+getting-started/installation.md | 0b97b6dcc7 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 373158eeb7 | skip | sbt build definition, not Scala source
+getting-started/installation.md | f9b67cd50f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 26688d4223 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 975cc0444f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 5c8e7dda9b | skip | sbt build definition, not Scala source
+getting-started/installation.md | 18f032097a | skip | sbt build definition, not Scala source
+getting-started/installation.md | 6daa317308 | skip | Scala CLI directives with Liquid template lines, not Scala source
+guide/providers.md | e116ab7e84 | skip | sbt build definition, not Scala source
+guide/providers.md | 42d96ef6be | skip | sbt build definition, not Scala source
+guide/providers.md | eefc81026e | skip | sbt build definition, not Scala source
+guide/providers.md | afa57b6d42 | skip | sbt build definition, not Scala source
+guide/providers.md | 5b738f4a9e | skip | sbt build definition, not Scala source
+guide/providers.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
+guide/providers.md | 3aaf5d6233 | skip | uses ConfigPolicy from llm4s-config-policy, the unpublished config-check CLI module, which samples does not depend on
+guide/basic-usage.md | 26fea8f0c8 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
+guide/basic-usage.md | 54302bfb43 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
+guide/basic-usage.md | ef5e8e7dfe | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
+guide/basic-usage.md | 5db7871ebb | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
+guide/basic-usage.md | 29d02e8f18 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | 9eb86e6783 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | deca383ea9 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | ed6fda0f98 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | dd07d6089e | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | 90dff515d7 | with | import org.llm4s.llmconnect.model._; import org.llm4s.types.Result
+guide/basic-usage.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
+guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError

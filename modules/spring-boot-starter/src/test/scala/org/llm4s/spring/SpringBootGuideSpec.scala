@@ -9,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.springframework.beans.BeanWrapperImpl
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean
-import org.springframework.boot.actuate.health.Status
+import BootLine.Status
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.convert.DurationStyle
 import org.springframework.boot.test.context.assertj.AssertableApplicationContext
@@ -93,7 +93,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     .withConfiguration(
       AutoConfigurations.of(
         classOf[Llm4sAutoConfiguration],
-        classOf[LlmActuatorAutoConfiguration],
+        classOf[ActuatorAutoConfiguration],
         classOf[LlmMetricsAutoConfiguration]
       )
     )
@@ -319,7 +319,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
             ctx.getStartupFailure shouldBe null
             ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
             ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
-            val health = ctx.getBean(classOf[LlmHealthIndicator]).health()
+            val health = ctx.getBean(classOf[LlmIndicator]).health()
             health.getDetails.get("provider") shouldBe value("provider")
             health.getDetails.get("model") shouldBe value("model")
             (health.toString should not).include("from-env")
@@ -356,6 +356,16 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       """-Dllm4s\.springBootVersion=([0-9.]+)""",
       "the latest 3.x CI tests in .github/workflows/ci.yml"
     )
+    lazy val boot4Baseline = one(
+      StarterGuideDocs.read(GuideFile, "project/Dependencies.scala"),
+      """springBoot4Baseline\s*=\s*"([0-9.]+)"""",
+      "the Spring Boot 4 baseline in project/Dependencies.scala"
+    )
+    lazy val boot4Latest = one(
+      StarterGuideDocs.read(GuideFile, ".github/workflows/ci.yml"),
+      """-Dllm4s\.springBoot4Version=([0-9.]+)""",
+      "the latest 4.x CI tests in .github/workflows/ci.yml"
+    )
 
     "be the baseline the starter is built against and the latest 3.x CI tests it against" in {
       one(guide, """built against ([0-9.]+)""", "the guide's baseline") shouldBe baseline
@@ -364,8 +374,17 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       latest should startWith("3.")
     }
 
-    "include the Spring Boot these specs run on, so the CI job really runs the latest 3.x" in {
-      Seq(baseline, latest) should contain(org.springframework.boot.SpringBootVersion.getVersion)
+    "be the Spring Boot 4 releases CI tests the starter against" in {
+      one(guide, """the 4\.0\s+line \(([0-9.]+)\)""", "the guide's 4.0 line") shouldBe boot4Baseline
+      one(guide, """latest 4\.x release \(([0-9.]+)\)""", "the guide's latest 4.x") shouldBe boot4Latest
+      boot4Baseline should startWith("4.0.")
+      boot4Latest should startWith("4.")
+    }
+
+    "include the Spring Boot these specs run on, so the CI jobs really run the versions the guide names" in {
+      Seq(baseline, latest, boot4Baseline, boot4Latest) should contain(
+        org.springframework.boot.SpringBootVersion.getVersion
+      )
     }
   }
 
@@ -431,7 +450,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         ctx.getStartupFailure shouldBe null
         ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
         ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 1
+        ctx.getBeansOfType(classOf[LlmIndicator]).size() shouldBe 1
       }
     }
   }
@@ -441,7 +460,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     "report UP with the provider, the model and probe=disabled, and no key, by default" in {
       val pairs = propertyPairs(blocksIn("properties").head) :+ "OPENAI_API_KEY=sk-from-env"
       runner.withPropertyValues(pairs: _*).run { ctx =>
-        val health = ctx.getBean(classOf[LlmHealthIndicator]).health()
+        val health = ctx.getBean(classOf[LlmIndicator]).health()
 
         health.getStatus shouldBe Status.UP
         health.getDetails.asScala.toMap shouldBe Map("provider" -> "openai", "model" -> "gpt-4o", "probe" -> "disabled")
@@ -454,7 +473,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         ctx =>
           recording.sent.clear()
 
-          val health = ctx.getBean(classOf[LlmHealthIndicator]).health()
+          val health = ctx.getBean(classOf[LlmIndicator]).health()
 
           health.getStatus shouldBe Status.UP
           health.getDetails.asScala.get("probe") shouldBe Some("ok")
@@ -465,7 +484,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     "report DOWN with probe=failed and an error when the probe call fails" in {
       runner.withUserConfiguration(classOf[FailingClientConfig]).withPropertyValues("llm4s.health.probe=true").run {
         ctx =>
-          val health = ctx.getBean(classOf[LlmHealthIndicator]).health()
+          val health = ctx.getBean(classOf[LlmIndicator]).health()
 
           health.getStatus shouldBe Status.DOWN
           health.getDetails.asScala.get("probe") shouldBe Some("failed")
