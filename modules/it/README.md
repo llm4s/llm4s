@@ -139,12 +139,16 @@ docker run --rm -p 6333:6333 qdrant/qdrant
 # Start Elasticsearch (one node, security off):
 docker run --rm -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabled=false docker.elastic.co/elasticsearch/elasticsearch:8.15.3
 
+# Start OpenSearch (one node, security plugin off, on host port 9201):
+docker run --rm -p 9201:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true -e DISABLE_INSTALL_DEMO_CONFIG=true opensearchproject/opensearch:2.19.1
+
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
 export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
 export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
 export QDRANT_TEST_URL=http://localhost:6333
 export ELASTICSEARCH_TEST_URL=http://localhost:9200
+export OPENSEARCH_TEST_URL=http://localhost:9201
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
 
 sbt testIntegration
@@ -216,6 +220,7 @@ sbt testMcpReference
 - PostgreSQL/pgvector via `PGVECTOR_TEST_URL`, `PGVECTOR_TEST_USER`, `PGVECTOR_TEST_PASSWORD`, or the `POSTGRES_*` variables used by memory tests
 - Qdrant via `QDRANT_TEST_URL` and `QDRANT_TEST_API_KEY`
 - Elasticsearch via `ELASTICSEARCH_TEST_URL` and, for a secured cluster, `ELASTICSEARCH_TEST_API_KEY`
+- OpenSearch via `OPENSEARCH_TEST_URL` and, for a secured cluster, `OPENSEARCH_TEST_USERNAME` and `OPENSEARCH_TEST_PASSWORD`
 - The MCP reference server (`@modelcontextprotocol/server-everything`, Streamable HTTP, pinned with its dependency tree in `mcp-reference-server/`) via `MCP_SERVER_URL`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled

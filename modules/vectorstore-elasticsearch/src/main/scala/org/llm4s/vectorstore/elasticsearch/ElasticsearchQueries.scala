@@ -14,8 +14,11 @@ import org.llm4s.vectorstore.MetadataFilter
  * `id` repeats `_id` as a `keyword`, because a prefix query on `_id` is not allowed; `seq` is a per-write sequence
  * that `list` sorts on, so records come back in insertion order. Every metadata value is mapped as a `keyword`
  * (a dynamic template under `metadata`), which is what makes exact, set, existence and substring matches possible.
+ *
+ * OpenSearch shares all of this but the vector field and the kNN query; those are in
+ * [[org.llm4s.vectorstore.opensearch.OpenSearchQueries]].
  */
-private[elasticsearch] object ElasticsearchQueries {
+private[vectorstore] object ElasticsearchQueries {
 
   val IdField        = "id"
   val EmbeddingField = "embedding"
@@ -26,30 +29,39 @@ private[elasticsearch] object ElasticsearchQueries {
   /** The body of `PUT /<index>`: the mapping, with the vector sized and the similarity set. */
   def indexDefinition(dimensions: Int, similarity: ElasticsearchSimilarity): ujson.Obj =
     ujson.Obj(
-      "mappings" -> ujson.Obj(
-        "dynamic_templates" -> ujson.Arr(
-          ujson.Obj(
-            "llm4s_metadata_keywords" -> ujson.Obj(
-              "path_match"         -> s"$MetadataField.*",
-              "match_mapping_type" -> "string",
-              "mapping"            -> ujson.Obj("type" -> "keyword")
-            )
-          )
-        ),
-        "properties" -> ujson.Obj(
-          IdField -> ujson.Obj("type" -> "keyword"),
-          EmbeddingField -> ujson.Obj(
-            "type"       -> "dense_vector",
-            "dims"       -> dimensions,
-            "index"      -> true,
-            "similarity" -> similarity.wireName
-          ),
-          ContentField  -> ujson.Obj("type" -> "text"),
-          MetadataField -> ujson.Obj("type" -> "object", "dynamic" -> true),
-          SeqField      -> ujson.Obj("type" -> "long")
+      "mappings" -> mappings(
+        ujson.Obj(
+          "type"       -> "dense_vector",
+          "dims"       -> dimensions,
+          "index"      -> true,
+          "similarity" -> similarity.wireName
         )
       )
     )
+
+  /** The index mapping around `vectorField`, the mapping of the `embedding` field. */
+  def mappings(vectorField: ujson.Obj): ujson.Obj =
+    ujson.Obj(
+      "dynamic_templates" -> ujson.Arr(
+        ujson.Obj(
+          "llm4s_metadata_keywords" -> ujson.Obj(
+            "path_match"         -> s"$MetadataField.*",
+            "match_mapping_type" -> "string",
+            "mapping"            -> ujson.Obj("type" -> "keyword")
+          )
+        )
+      ),
+      "properties" -> ujson.Obj(
+        IdField        -> ujson.Obj("type" -> "keyword"),
+        EmbeddingField -> vectorField,
+        ContentField   -> ujson.Obj("type" -> "text"),
+        MetadataField  -> ujson.Obj("type" -> "object", "dynamic" -> true),
+        SeqField       -> ujson.Obj("type" -> "long")
+      )
+    )
+
+  /** A vector as a JSON array. */
+  def vector(values: Array[Float]): ujson.Arr = ujson.Arr.from(values.iterator.map(f => ujson.Num(f.toDouble)))
 
   /** The source document of a record. */
   def document(
@@ -61,7 +73,7 @@ private[elasticsearch] object ElasticsearchQueries {
   ): ujson.Obj = {
     val doc = ujson.Obj(
       IdField        -> id,
-      EmbeddingField -> ujson.Arr.from(embedding.iterator.map(f => ujson.Num(f.toDouble))),
+      EmbeddingField -> vector(embedding),
       MetadataField  -> ujson.Obj.from(metadata.map { case (k, v) => k -> ujson.Str(v) }),
       SeqField       -> ujson.Num(seq.toDouble)
     )
@@ -123,7 +135,7 @@ private[elasticsearch] object ElasticsearchQueries {
   def knnSearch(queryVector: Array[Float], topK: Int, numCandidates: Int, filter: Option[MetadataFilter]): ujson.Obj = {
     val knn = ujson.Obj(
       "field"          -> EmbeddingField,
-      "query_vector"   -> ujson.Arr.from(queryVector.iterator.map(f => ujson.Num(f.toDouble))),
+      "query_vector"   -> vector(queryVector),
       "k"              -> topK,
       "num_candidates" -> numCandidates
     )

@@ -3,10 +3,7 @@ package org.llm4s.vectorstore.elasticsearch
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 
-import java.net.URI
-import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.*
-import scala.util.Try
 
 /**
  * What [[ElasticsearchVectorStore]] needs to reach one index of an Elasticsearch cluster.
@@ -62,8 +59,8 @@ final case class ElasticsearchConfig private (
   /** Checks the config; the first problem is reported, naming the setting. */
   def validate: Result[ElasticsearchConfig] =
     for {
-      _ <- ElasticsearchConfig.checkBaseUrl(baseUrl, auth)
-      _ <- ElasticsearchConfig.checkIndex(index)
+      _ <- SearchConfigChecks.checkBaseUrl("Elasticsearch", baseUrl, auth != ElasticsearchAuth.NoAuth)
+      _ <- SearchConfigChecks.checkIndex("Elasticsearch", index)
       _ <- auth match {
         case ElasticsearchAuth.ApiKey(key) if key.trim.isEmpty || key.exists(c => c.isWhitespace || c.isControl) =>
           Left(ConfigurationError("The Elasticsearch apiKey is blank or contains whitespace"))
@@ -71,16 +68,8 @@ final case class ElasticsearchConfig private (
           Left(ConfigurationError("The Elasticsearch username is blank or contains ':'"))
         case _ => Right(())
       }
-      _ <- dimensions match {
-        case Some(d) if d < 1 || d > ElasticsearchConfig.MaxDimensions =>
-          Left(ConfigurationError(s"dimensions must be between 1 and ${ElasticsearchConfig.MaxDimensions}, got $d"))
-        case _ => Right(())
-      }
-      _ <- numCandidates match {
-        case Some(n) if n < 1 || n > ElasticsearchConfig.MaxCandidates =>
-          Left(ConfigurationError(s"numCandidates must be between 1 and ${ElasticsearchConfig.MaxCandidates}, got $n"))
-        case _ => Right(())
-      }
+      _ <- SearchConfigChecks.checkRange("dimensions", dimensions, ElasticsearchConfig.MaxDimensions)
+      _ <- SearchConfigChecks.checkRange("numCandidates", numCandidates, ElasticsearchConfig.MaxCandidates)
       _ <-
         if (timeout > Duration.Zero) Right(())
         else Left(ConfigurationError("timeout must be positive"))
@@ -119,43 +108,4 @@ object ElasticsearchConfig {
     timeout: FiniteDuration = DefaultTimeout
   ): ElasticsearchConfig =
     new ElasticsearchConfig(baseUrl, index, auth, similarity, dimensions, numCandidates, refreshOnWrite, timeout)
-
-  private def isLoopback(host: String): Boolean =
-    host.equalsIgnoreCase("localhost") || host == "[::1]" || {
-      val octets = host.split('.')
-      octets.length == 4 && octets(0) == "127" &&
-      octets.forall(o => o.nonEmpty && o.forall(_.isDigit) && o.length <= 3 && o.toInt <= 255)
-    }
-
-  private def checkBaseUrl(url: String, auth: ElasticsearchAuth): Result[Unit] = {
-    def bad(why: String): Result[Unit] = Left(ConfigurationError(s"The Elasticsearch baseUrl $why"))
-    if (url.exists(c => c.isWhitespace || c.isControl)) bad("must not contain whitespace or control characters")
-    else
-      Try(new URI(url)).toOption match {
-        case None => bad("is not a valid URL")
-        case Some(uri) =>
-          val scheme = Option(uri.getScheme).map(_.toLowerCase)
-          val host   = Option(uri.getHost)
-          if (host.isEmpty || scheme.isEmpty) bad("must be an absolute URL with a host")
-          else if (!scheme.exists(s => s == "http" || s == "https")) bad("must be http or https")
-          else if (uri.getRawUserInfo != null) bad("must not carry credentials; set apiKey or username and password")
-          else if (uri.getRawQuery != null || uri.getRawFragment != null) bad("must not have a query or a fragment")
-          else if (scheme.contains("https") || auth == ElasticsearchAuth.NoAuth || host.exists(isLoopback)) Right(())
-          else bad("must be https when credentials are configured, unless the host is loopback")
-      }
-  }
-
-  private val ForbiddenIndexChars = "\\/*?\"<>|, #:"
-
-  private def checkIndex(index: String): Result[Unit] = {
-    def bad(why: String): Result[Unit] = Left(ConfigurationError(s"The Elasticsearch index name '$index' $why"))
-    if (index.isEmpty) bad("is empty")
-    else if (index == "." || index == "..") bad("is reserved")
-    else if (index.exists(c => c.isUpper)) bad("must be lower case")
-    else if (index.exists(c => ForbiddenIndexChars.contains(c) || c.isControl))
-      bad("contains a character Elasticsearch forbids (\\ / * ? \" < > | , # : or space)")
-    else if ("-_+".contains(index.head)) bad("must not start with -, _ or +")
-    else if (index.getBytes(StandardCharsets.UTF_8).length > 255) bad("is longer than 255 bytes")
-    else Right(())
-  }
 }

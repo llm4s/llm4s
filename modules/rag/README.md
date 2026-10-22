@@ -28,7 +28,7 @@ the provider module you use (for example `llm4s-openai` or `llm4s-ollama`).
 | Pipeline | `RAG`, `RAGConfig` | `RAG.build(config, ...)` returns a `Result[RAG]`; `ingest*`, `query`, `queryWithAnswer`, `queryWithGraphRAG`, `queryWithPermissions` |
 | Loading and extraction | `FileLoader`, `DirectoryLoader`, `TextLoader`, `UrlLoader`, `WebCrawlerLoader`, `S3Loader`; `TikaDocumentExtractor`, `MediaExtractor` | PDF, Office and plain-text formats go through Tika |
 | Chunking | `ChunkerFactory.Strategy`: `Simple`, `Sentence` (default), `Semantic`, `Markdown`; `ChunkingConfig` | default 800-character target and 150 overlap |
-| Vector stores | `VectorStoreFactory.Backend`: `SQLite`, `PgVector`, `Qdrant`; in-memory. Elasticsearch: `ElasticsearchVectorStore` in `llm4s-vectorstore-elasticsearch` | `RAGConfig` builds in-memory unless you set a path or a Postgres connection |
+| Vector stores | `VectorStoreFactory.Backend`: `SQLite`, `PgVector`, `Qdrant`; in-memory. Elasticsearch and OpenSearch: `ElasticsearchVectorStore` and `OpenSearchVectorStore` in `llm4s-vectorstore-elasticsearch` | `RAGConfig` builds in-memory unless you set a path or a Postgres connection |
 | Keyword search | `SQLiteKeywordIndex` (FTS5, BM25), `PgKeywordIndex`, in-memory | |
 | Hybrid search | `HybridSearcher`, `FusionStrategy`: `RRF(k = 60)` (default), `WeightedScore`, `VectorOnly`, `KeywordOnly` | |
 | Reranking | `RerankingStrategy`: `None` (default), `Cohere`, `LLM` | Cohere needs a key, see below |

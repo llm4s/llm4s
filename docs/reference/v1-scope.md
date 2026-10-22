@@ -93,6 +93,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
 | `vectorstore.elasticsearch` — `ElasticsearchVectorStore`, a `VectorStore` over the Elasticsearch REST API (`dense_vector` kNN, metadata filters, `_bulk`), with `ElasticsearchConfig` and `ElasticsearchVectorStoreConfigLoader`; no Elasticsearch client library — **new** | `llm4s-vectorstore-elasticsearch` (`modules/vectorstore-elasticsearch`) | Experimental |
+| `vectorstore.opensearch` — `OpenSearchVectorStore`, the OpenSearch dialect of the same store (`knn_vector` with the k-NN plugin, the `knn` query, efficient or post-filtering per engine), with `OpenSearchConfig` and `OpenSearchVectorStoreConfigLoader` — **new** | `llm4s-vectorstore-elasticsearch` (`modules/vectorstore-elasticsearch`) | Experimental |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |

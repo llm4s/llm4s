@@ -35,13 +35,13 @@ The `VectorStore` trait provides a backend-agnostic interface for storing and se
 - **pgvector** - PostgreSQL with pgvector extension (production-ready)
 - **Qdrant** - Cloud-native vector database via REST API
 - **Elasticsearch** - `dense_vector` kNN search in a cluster you already run, in the separate module `llm4s-vectorstore-elasticsearch` (Experimental); see [Elasticsearch](#elasticsearch)
+- **OpenSearch** - `knn_vector` search with the k-NN plugin, in the same module (Experimental); see [OpenSearch](#opensearch)
 
 **Keyword Backends (for hybrid search):**
 - **SQLite FTS5** - File-based or in-memory BM25 search (default)
 - **PostgreSQL** - Native full-text search with tsvector/tsquery (production-ready)
 
 **Planned Backends:**
-- OpenSearch (a dialect of the Elasticsearch module: `knn_vector` and the k-NN plugin's query, [#1469](https://github.com/llm4s/llm4s/issues/1469))
 - Milvus
 - Pinecone
 
@@ -226,6 +226,86 @@ so keys `a` and `a.b` cannot both be used. The base URL must be `https` when cre
 host is loopback. `ElasticsearchVectorStoreSpec` in `modules/it` (`@Docker` tier, `ELASTICSEARCH_TEST_URL`) runs every
 operation against a real cluster.
 
+### OpenSearch
+
+`OpenSearchVectorStore` keeps the vectors in one index of an OpenSearch cluster with the k-NN plugin (bundled with
+the standard distribution), through the REST API: no OpenSearch client library is added. It is in the same module as
+the Elasticsearch store, `llm4s-vectorstore-elasticsearch` (Experimental), and shares its code: OpenSearch kept
+Elasticsearch 7.10's document, `_bulk` and query DSL APIs, so records, writes, reads, deletes, `stats` and every
+metadata filter behave as described for [Elasticsearch](#elasticsearch). Only the vector field, the kNN query, the
+scores and the authentication differ, and those are what `OpenSearchVectorStore` changes.
+
+```scala
+import org.llm4s.vectorstore.opensearch._
+
+// Local single node with the security plugin off:
+// docker run -p 9200:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true \
+//   -e DISABLE_INSTALL_DEMO_CONFIG=true opensearchproject/opensearch:2.19.1
+val local = OpenSearchVectorStore.local(index = "my-vectors")
+
+// A secured cluster: a username and password, or a bearer token (JWT)
+val config = OpenSearchConfig("https://search.example.com:9200")
+  .withIndex("my-vectors")
+  .withAuth(OpenSearchAuth.Basic("llm4s", password))
+  .withSpaceType(OpenSearchSpaceType.CosineSimil) // or InnerProduct, L2
+  .withEngine(OpenSearchEngine.Lucene)            // or Faiss, Nmslib (deprecated)
+  .withDimensions(1536)                           // unset: the first record's size
+val store = OpenSearchVectorStore(config)
+```
+
+Or from configuration, at the app edge:
+
+```hocon
+llm4s.vectorstore.opensearch {
+  baseUrl   = "https://search.example.com:9200"  # OPENSEARCH_URL; default http://localhost:9200
+  index     = "my-vectors"                       # OPENSEARCH_INDEX; default llm4s-vectors
+  username  = llm4s                              # OPENSEARCH_USERNAME
+  password  = ${?OPENSEARCH_PASSWORD}            # or token = ${?OPENSEARCH_TOKEN}, not both
+  spaceType = cosinesimil                        # cosinesimil | innerproduct | l2
+  engine    = lucene                             # lucene | faiss | nmslib
+  dimensions = 1536
+  # m              = 16                          # HNSW links per node; default: the engine's
+  # efConstruction = 100                         # default: the engine's
+  # numCandidates  = 100                         # the query's k; see below
+  # refreshOnWrite = true
+  # timeout        = 30 seconds
+}
+```
+
+```scala
+import org.llm4s.config.OpenSearchVectorStoreConfigLoader
+
+val store = for {
+  config <- OpenSearchVectorStoreConfigLoader.default()
+  store  <- OpenSearchVectorStore(config)
+} yield store
+```
+
+How it maps onto OpenSearch:
+
+- **Index**: created on the first upsert with `index.knn: true` and a `knn_vector` field (`embedding`) of the
+  configured `dimension`, indexed with `method` `hnsw`, the configured `space_type` and `engine`, and `m` and
+  `ef_construction` when set. The other fields are mapped as for Elasticsearch.
+- **Search**: a `knn` query, `{"knn": {"embedding": {"vector": [...], "k": k}}}`. On Lucene (OpenSearch 2.4+) and
+  Faiss (2.9+) the metadata filter goes inside it as `filter` - efficient filtering, so `topK` results come back when
+  that many records match, and `k` defaults to `topK`. NMSLIB has no efficient filtering, so there the `knn` query is
+  the `must` clause of a `bool` query whose `filter` clause drops non-matching neighbours afterwards; `k` then
+  defaults to `max(100, 10 * topK)`, and a selective filter can still return fewer than `topK` - raise
+  `numCandidates` (the `k` sent) if it does. `k` is never below `topK` and at most 10,000.
+- **Scores**: OpenSearch scores each space differently; the store maps them onto `[0, 1]` like Elasticsearch's.
+  `cosinesimil` is already `(1 + cosine) / 2` on every engine and is kept; `innerproduct`'s `dot + 1` (or
+  `1 / (1 - dot)` for a negative dot) becomes `(1 + dot) / 2`, which lies in `[0, 1]` for unit vectors and is clamped
+  otherwise; `l2`'s `1 / (1 + distance²)` is kept.
+- **Authentication**: HTTP basic (the security plugin's internal users, also on Amazon OpenSearch Service with
+  fine-grained access control) or `Authorization: Bearer` (its JWT backend). AWS Signature Version 4 (IAM) request
+  signing is not supported; use an internal user, or a signing proxy in front of the domain.
+- **Errors**: as for Elasticsearch, with `opensearch` as the provider of the error.
+
+Engine notes: Faiss supports `cosinesimil` from OpenSearch 2.19 and normalises the vectors it indexes; NMSLIB is
+deprecated by OpenSearch, and a newer cluster may refuse to create an NMSLIB index, so use it only for an index that
+already has it. The `knn_vector` dimension limit is 16,000. `OpenSearchVectorStoreSpec` in `modules/it` (`@Docker`
+tier, `OPENSEARCH_TEST_URL`) runs every operation against a real cluster, on each engine.
+
 ---
 
 ## Core Concepts
@@ -407,7 +487,7 @@ store.deleteByFilter(Equals("archived", "true"))
 ### Using VectorStoreFactory
 
 `VectorStoreFactory` covers the backends inside `llm4s-rag` (SQLite, pgvector, Qdrant). A backend in a module of its
-own, such as [Elasticsearch](#elasticsearch), is built with its own constructor, and any `VectorStore` can be passed
+own, such as [Elasticsearch](#elasticsearch) or [OpenSearch](#opensearch), is built with its own constructor, and any `VectorStore` can be passed
 wherever one is taken.
 
 ```scala
@@ -1185,6 +1265,7 @@ docker run -p 6333:6333 qdrant/qdrant
 | Development/testing | SQLite (in-memory) |
 | Single-machine production | SQLite (file-based) |
 | Existing PostgreSQL | pgvector |
+| Existing Elasticsearch or OpenSearch cluster | `ElasticsearchVectorStore` / `OpenSearchVectorStore` |
 | Full PostgreSQL hybrid RAG | pgvector + PgKeywordIndex |
 | High-scale production | Qdrant |
 | Managed service | Qdrant Cloud |

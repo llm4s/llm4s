@@ -95,7 +95,7 @@ object PomDescriptions {
     "llm4s-testkit" ->
       "Scriptable fake LLM client and recorded calls for testing applications built with LLM4S.",
     "llm4s-vectorstore-elasticsearch" ->
-      "Elasticsearch vector store for LLM4S RAG: dense_vector kNN search, metadata filters and bulk upserts over the REST API.",
+      "Elasticsearch and OpenSearch vector stores for LLM4S RAG: kNN search (dense_vector, knn_vector), metadata filters and bulk upserts over the REST API.",
     "llm4s-voyage" ->
       "Voyage AI embedding provider for LLM4S.",
     "llm4s-watsonx" ->

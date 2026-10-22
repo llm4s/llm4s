@@ -289,9 +289,11 @@ client — the document-extraction and loader dependencies that `llm4s-core` no 
 Package names are unchanged, so existing `org.llm4s.rag.*` imports keep working; see the
 [migration note](../reference/migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 
-To keep the vectors in an Elasticsearch cluster you already run, add the Elasticsearch store
-(Experimental). It talks to the REST API through `llm4s-core`'s HTTP client, so it brings no
-Elasticsearch client library; see [Elasticsearch](../guide/vector-store#elasticsearch).
+To keep the vectors in an Elasticsearch or OpenSearch cluster you already run, add the
+Elasticsearch store module (Experimental), which holds both `ElasticsearchVectorStore` and
+`OpenSearchVectorStore`. It talks to the REST API through `llm4s-core`'s HTTP client, so it brings no
+client library; see [Elasticsearch](../guide/vector-store#elasticsearch) and
+[OpenSearch](../guide/vector-store#opensearch).
 
 ```scala
 // same version as llm4s-rag

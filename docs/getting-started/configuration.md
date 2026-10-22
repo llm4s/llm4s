@@ -934,6 +934,7 @@ also set in `application.conf` or with `-D`.
 | `LLM4S_CHECKPOINTER_POSTGRES_URL`, `LLM4S_CHECKPOINTER_POSTGRES_USER`, `LLM4S_CHECKPOINTER_POSTGRES_PASSWORD` | `llm4s.agent.checkpointer.postgres.url`, `.user`, `.password` | `llm4s-agent-checkpoint-postgres` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
 | `ELASTICSEARCH_URL`, `ELASTICSEARCH_INDEX`, `ELASTICSEARCH_API_KEY`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD` | `llm4s.vectorstore.elasticsearch.*`, read by `ElasticsearchVectorStoreConfigLoader` | `llm4s-vectorstore-elasticsearch` |
+| `OPENSEARCH_URL`, `OPENSEARCH_INDEX`, `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD`, `OPENSEARCH_TOKEN` | `llm4s.vectorstore.opensearch.*`, read by `OpenSearchVectorStoreConfigLoader` | `llm4s-vectorstore-elasticsearch` |
 
 **Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
 every chat provider's endpoint and model variable (`AZURE_API_BASE`, `AZURE_API_VERSION`,

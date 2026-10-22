@@ -255,6 +255,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   similarity, kNN search with every `MetadataFilter` applied inside it, `_bulk` writes, API-key or basic authentication,
   configured from `llm4s.vectorstore.elasticsearch` (`ELASTICSEARCH_URL`, ...) by `ElasticsearchVectorStoreConfigLoader`
   [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#elasticsearch).
+- **Added** `OpenSearchVectorStore` to `llm4s-vectorstore-elasticsearch` (Experimental), sharing the Elasticsearch
+  store's code: an index created with `index.knn: true` and an HNSW `knn_vector` field (`spaceType` `cosinesimil`,
+  `innerproduct` or `l2`; `engine` `lucene`, `faiss` or `nmslib`; optional `m` and `efConstruction`), the `knn` query
+  with the `MetadataFilter` inside it on Lucene and Faiss (efficient filtering) and as a `bool` post-filter on NMSLIB,
+  scores mapped onto `[0, 1]` per space type, basic or bearer-token authentication (AWS SigV4 is not supported),
+  configured from `llm4s.vectorstore.opensearch` (`OPENSEARCH_URL`, `OPENSEARCH_INDEX`, `OPENSEARCH_USERNAME`,
+  `OPENSEARCH_PASSWORD`, `OPENSEARCH_TOKEN`) by `OpenSearchVectorStoreConfigLoader`
+  [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#opensearch).
 
 ### Memory
 
