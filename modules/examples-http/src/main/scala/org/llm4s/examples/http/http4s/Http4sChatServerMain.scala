@@ -12,6 +12,7 @@ import org.llm4s.examples.http.ServerSettings
  */
 object Http4sChatServerMain extends IOApp {
 
+  /** Serves until stopped; exits with `2` for arguments it cannot use. */
   def run(args: List[String]): IO[ExitCode] =
     ServerSettings.parse(args).flatMap(addressOf) match {
       case Left(message) => IO.println(message).as(ExitCode(2))
