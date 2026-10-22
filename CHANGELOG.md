@@ -203,6 +203,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
   (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
   start of a line was read [#1844](https://github.com/llm4s/llm4s/issues/1844).
+- **Fixed** (security) `Redaction` left the value of a sensitive key in the clear where TOML, YAML or dotenv text sits
+  in a JSON string and the key starts a line after an escaped line break or tab (`\n`, `\r`, `\t`, `\u000a`, `\u000d`,
+  also doubly escaped in JSON inside a JSON string): `token = "..."`, `password: ...`, `token='...'`. The rest of such
+  a line is now replaced, and the JSON still parses [#1765](https://github.com/llm4s/llm4s/issues/1765),
+  [#1799](https://github.com/llm4s/llm4s/issues/1799).
 
 ### Build & tooling
 
