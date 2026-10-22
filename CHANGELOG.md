@@ -264,6 +264,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
+  (`sort -- -tNAME`): uutils coreutils, which the runner's Ubuntu-based image may ship, rewrites it on its unreleased
+  main branch into
+  `--field-separator=NAME` and opens a file of that name, which was never path-checked. Write `./-tNAME` instead
+  [#1774](https://github.com/llm4s/llm4s/issues/1774); [sandbox](docs/reference/workspace-sandbox.md).
 - **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
   (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
   start of a line was read [#1844](https://github.com/llm4s/llm4s/issues/1844).

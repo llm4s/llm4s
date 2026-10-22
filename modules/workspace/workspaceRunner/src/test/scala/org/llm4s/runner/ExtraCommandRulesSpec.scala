@@ -195,6 +195,84 @@ class ExtraCommandRulesSpec extends AnyFlatSpec with Matchers {
   }
 
   // -----------------------------------------------------------------------------------------------------------------
+  // sort operands after `--` that uutils sort reads as an option (#1774)
+
+  it should "refuse a sort operand after '--' starting with -t, which uutils sort reads as --field-separator (#1774)" in
+    inRoot { root =>
+      Seq(
+        "-- -tNAME",
+        "-- -t",
+        "-- -t,",
+        "-- -t/etc/passwd",
+        "-- -tt",
+        "-- -t--output=x",
+        "-- a.txt -tNAME",            // after another operand
+        "-r -- -tNAME",               // after options
+        "-rn -k2 -- b.txt -tx a.txt", // among operands
+        "-t, -- -tNAME",              // a real -t before the `--` changes nothing
+        "-k -- -tNAME",               // a `--` another option takes as its value still counts (over-blocking accepted)
+        "-- -- -tNAME"                // a second `--` is an operand
+      ).foreach(args => withClue(s"sort $args: ")(refusal("sort", args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED")))
+    }
+
+  it should "still refuse sort's writing options after '--', in every spelling (#1774)" in inRoot { root =>
+    Seq(
+      "-- -o out.txt a.txt",
+      "-- -oout.txt a.txt",
+      "-- -ro out.txt a.txt", // in a cluster
+      "-- --output=out.txt a.txt",
+      "-- --outp=out.txt a.txt", // an abbreviation
+      "-- --output out.txt a.txt",
+      "-- --compress-program=id a.txt",
+      "-- --compress=id a.txt",
+      "-- --files0-from=a.txt",
+      "-- --files0=a.txt"
+    ).foreach(args => withClue(s"sort $args: ")(refusal("sort", args, root) shouldBe Some("ARGUMENT_NOT_ALLOWED")))
+  }
+
+  it should "still path-check every sort operand after '--' as the file it names (#1774)" in inRoot { root =>
+    Seq("-- /etc/passwd", "-- ../a.txt", "-- a.txt ../b.txt", "-- -T/../..", "-- -r/../../x").foreach(args =>
+      withClue(s"sort $args: ")(refusal("sort", args, root) shouldBe Some("PATH_ESCAPE_ATTEMPT"))
+    )
+  }
+
+  it should "say why a -t operand after '--' is refused for sort, and how to name the file (#1774)" in inRoot { root =>
+    val message = CommandPolicy
+      .refusal("sort", Seq("--", "-tNAME"), false, root, root, Map.empty)
+      .map(_.message)
+    message.get should (include("'-tNAME'")
+      .and(include("uutils"))
+      .and(include("--field-separator"))
+      .and(include("./-t")))
+  }
+
+  it should "still let sort run with a separator, a '--' before ordinary names, and a '-' name written as ./-x" in
+    inRoot { root =>
+      Seq(
+        "a.txt",
+        "-r a.txt b.txt",
+        "-t , -k2 a.txt",
+        "-t, -k2 a.txt",
+        "--field-separator=, a.txt",
+        "-t, -- a.txt",
+        "-- a.txt b.txt",
+        "-r -- a.txt",
+        "-- t.txt",    // starts with `t`, not `-t`
+        "-- ./-tNAME", // a name starting with `-t`, written so no sort reads it as an option
+        "-- ./-x",
+        "-- -r a.txt",    // an operand starting with another letter is a file to every sort, and path-checked
+        "./-tNAME a.txt", // without `--`
+        "-a.txt"          // an unknown option, but no `--`: not this rule's concern
+      ).foreach(args => withClue(s"sort $args: ")(refusal("sort", args, root) shouldBe None))
+    }
+
+  it should "leave Windows sort to its own rules, which refuse any -t cluster wherever it is (#1774)" in inRoot {
+    root =>
+      refusal("sort", "-- -tNAME", root, windows = true) shouldBe Some("ARGUMENT_NOT_ALLOWED")
+      refusal("sort", "-- a.txt", root, windows = true) shouldBe None
+  }
+
+  // -----------------------------------------------------------------------------------------------------------------
   // Unicode spellings: a name Windows or a case- and normalisation-insensitive file system could read as a refused one
 
   /** Every non-ASCII BMP character that some Windows code page best-fits to, or that folds to, each ASCII character. */

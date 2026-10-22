@@ -256,7 +256,7 @@ following links out of the workspace through its own options:
 |---------|---------|
 | `find` | `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`, `-files0-from`, `-follow`, `-L` (also in `-HL`) |
 | `git` | any subcommand but `status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`, `branch`; any global option but `--version`, `--no-pager`, `--no-optional-locks`, `--literal-pathspecs`, `--no-replace-objects` (so `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree`, `-p`); `--output`, `--ext-diff`, `--textconv`, `--show-signature` on `log`/`show`/`diff`; `-O`, `--open-files-in-pager`, `--textconv` on `grep`; `--textconv` on `blame`; an argument starting with `:` (pathspec magic, index paths); `branch` with anything but listing options, or with a name unless `--list`/`-l` makes it a pattern (the values of `--merged`, `--no-merged`, `--contains`, `--no-contains`, `--points-at`, `--sort` and `--format` are values, not names) |
-| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory`, and any argument starting with `/` that is not a native `sort.exe` switch (see [On Windows](#on-windows)). The value of `-t` / `--field-separator` is not path-checked only when it really is that value: see [Option values](#option-values) |
+| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on POSIX an operand after `--` starting with `-t` (see below); on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory`, and any argument starting with `/` that is not a native `sort.exe` switch (see [On Windows](#on-windows)). The value of `-t` / `--field-separator` is not path-checked only when it really is that value: see [Option values](#option-values) |
 | `findstr` (Windows) | a switch with `F` among its letters (`/F:list`), a `/D:` value holding `,` or `;`, any argument starting with `/` that is not a native `findstr.exe` switch (see [On Windows](#on-windows)) |
 | `uniq` | a second operand (the output file); every argument after the first operand counts as one, as BSD `uniq` does not reorder its arguments, so write options before the file (`uniq -c a.txt`, not `uniq a.txt -c`) |
 | `wc` | `--files0-from` |
@@ -276,6 +276,17 @@ only (with the exception for a link itself under [Removing a link](#removing-a-l
 Every argument is scanned for these options, including those after `--`, because an option that takes a value can
 consume the `--` itself. A short option is refused anywhere in a cluster (`sort -ro out`), and a long one under any
 abbreviation of at least one letter (`sort --outp=out`), as GNU programs and git accept an unambiguous prefix.
+
+On POSIX, `sort` also refuses an operand after `--` that starts with `-t` (`sort -- -tNAME`,
+[#1774](https://github.com/llm4s/llm4s/issues/1774)). GNU and BSD sort open a file named `-tNAME`, but uutils
+coreutils (the Rust implementation that Ubuntu 26.04, the base of the runner image's `eclipse-temurin:21-jdk`, may
+ship as its `coreutils`) rewrites, in its development line though not yet in a release (0.8.0, 0.10.0), every argument starting with `-t` into `--field-separator=<rest>` before it parses
+its options, including after `--`, and would then open a file literally named `--field-separator=NAME`, which the path
+rule never sees. The `--` counts wherever it is, even as another option's value (`sort -k -- -t,` is refused too).
+Name such a file `./-tNAME`, or give `-t` before the `--`. Other option-looking operands after `--` need no rule of
+their own: `-o`, `--output`, `--compress-program` and `--files0-from` are refused there as anywhere, and every other
+operand is path-checked as the file it names (`sort -- -T/../..` is refused as a path out of the workspace). Which coreutils the built image ships is not yet confirmed or pinned
+(the rest of #1774).
 
 Every argument of every program except `echo`, `pwd`, `whoami` and `hostname` is then held to the workspace. Each
 candidate path is resolved from the real working directory the way the kernel resolves it, one component at a time,

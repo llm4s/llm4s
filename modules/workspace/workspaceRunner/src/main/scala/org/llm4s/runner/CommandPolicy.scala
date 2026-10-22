@@ -26,7 +26,8 @@ import scala.util.{ Try, Using }
  *     options that write a file or run a program; `uniq` takes at most one operand; `hostname` takes none. Options
  *     are matched the way the program parses them, erring towards refusal:
  *     - every argument is scanned, including those after `--`, because an option that takes a value may consume
- *       the `--` itself (`sort -k -- -o out`);
+ *       the `--` itself (`sort -k -- -o out`), and on POSIX a `sort` operand after `--` starting with `-t` is refused,
+ *       since uutils sort reads it as `--field-separator=` (see [[sortSeparatorOperandRefusal]], #1774);
  *     - a short option is refused anywhere in a cluster (`-ro out`), attached value or not;
  *     - a long option is refused under any abbreviation of at least one letter (`--outp`), since GNU programs and
  *       `git` accept an unambiguous prefix, and with or without `=value`.
@@ -607,6 +608,7 @@ private[runner] object CommandPolicy {
       case "git"                  => gitRefusal(args)
       case "uniq"                 => uniqRefusal(args)
       case "sort" if isWindows    => windowsSortRefusal(args).orElse(refusedOption(program, args))
+      case "sort"                 => sortSeparatorOperandRefusal(args).orElse(refusedOption(program, args))
       case "findstr" if isWindows => findstrRefusal(args)
       case "hostname"             => hostnameRefusal(args).orElse(refusedOption(program, args))
       case "find"                 => findFollowRefusal(args).orElse(refusedOption(program, args))
@@ -681,6 +683,29 @@ private[runner] object CommandPolicy {
 
   private def findFollowRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => FindFollowCluster.matches(arg)).map(notAllowed("find", _, "it follows every link it meets."))
+
+  private val SeparatorOperand =
+    "after '--' it names a file to GNU sort, but uutils sort (the Rust coreutils of Ubuntu-based runner images), in " +
+      "its development line, reads every argument starting with '-t' as '--field-separator=<rest>', even after '--', and opens a file of that " +
+      "name, which is not path-checked. Name the file './-t...' instead."
+
+  /**
+   * An operand after `--` that starts with `-t` (#1774). uutils `sort` (on its main branch, not yet in 0.8.0 or 0.10.0)
+   * rewrites every argument starting with `-t` into
+   * `--field-separator=<rest>` before it parses its options - after `--` too - so `sort -- -tNAME` would open a file
+   * literally named `--field-separator=NAME`, a name the path rule never sees (GNU and BSD sort open `-tNAME`). Every
+   * such argument after the first `--` is refused, even when that `--` is another option's value
+   * (`sort -k -- -t,`, over-blocking accepted): write the file as `./-tNAME`, or put `-t` before the `--`. The other
+   * option-looking operands after `--` need no rule of their own: the refused options (`-o`, `--output`,
+   * `--compress-program`, `--files0-from`) are refused after `--` as before it, and every other operand is path-checked
+   * as the file every sort opens for it ([[sortCandidates]]).
+   */
+  private def sortSeparatorOperandRefusal(args: Seq[String]): Option[Refusal] =
+    args
+      .dropWhile(_ != "--")
+      .drop(1)
+      .find(_.startsWith("-t"))
+      .map(notAllowed("sort", _, SeparatorOperand))
 
   /**
    * Windows `sort.exe` writes its output with `/O[UTPUT] file` and its temporary files with `/T[EMPORARY] dir`;
