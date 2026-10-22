@@ -94,7 +94,7 @@ throws.
 | true or false | `Schema.boolean("...")` |
 | a list | `Schema.array("...", itemSchema)` |
 | a value that may be `null` | `Schema.nullable(schema)` |
-| a nested object | ``Schema.`object`[T]("...")``, with its own properties |
+| a nested object | ``Schema.`object` `` with a type parameter and a description, plus its own properties |
 
 An object schema adds fields with `withProperty`, or with `withRequiredField(name, schema)` and
 `withOptionalField(name, schema)`, which are shorthand for it. A nested object is read with a dotted path:
