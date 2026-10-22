@@ -1,7 +1,8 @@
 package org.llm4s.agent.graph.postgres
 
-import org.llm4s.agent.graph.ThreadId
+import org.llm4s.agent.graph.{ Checkpointer, ThreadId }
 import org.llm4s.error.CancelledError
+import org.llm4s.types.Result
 import org.postgresql.PGConnection
 import org.slf4j.LoggerFactory
 
@@ -186,6 +187,32 @@ private[postgres] object ChangeNotifier:
    * (rule 10); two threads whose hashes collide only wake each other's waiters, which read again and find nothing.
    */
   def payload(threadId: ThreadId): String = digest(threadId.value)
+
+  /**
+   * `read` (a read of `threadId`'s log), waiting on `waiter` when it finds nothing yet - the body of
+   * [[PostgresCheckpointer.awaitEventsAfter]]. `waiter` is registered before the first read, so a commit that lands
+   * after a read wakes it; a wake reads again and returns what it finds, or waits on for what is left of `timeout` if
+   * the notification brought nothing (a hash collision, or a commit that stored nothing the read wants). It waits
+   * only on its own `timeout`, never on the listener, so it returns within `timeout` plus the bound of each read. A
+   * failed read is returned at once; an interrupt ends the wait with `CancelledError`, the flag set again.
+   */
+  def readUntilWoken[A](threadId: ThreadId, waiter: Waiter, timeout: FiniteDuration)(
+    read: => Result[Vector[A]]
+  ): Result[Vector[A]] =
+    val deadline = System.nanoTime() + timeout.toNanos
+    @scala.annotation.tailrec
+    def await(): Result[Vector[A]] =
+      read match
+        case Right(found) if found.isEmpty =>
+          val remaining = deadline - System.nanoTime()
+          if remaining <= 0 then Right(found)
+          else
+            CancelledError.catchInterrupt(waiter.await(remaining)) match
+              case Right(true)       => await()
+              case Right(false)      => Right(found)
+              case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
+        case other => other
+    await()
 
   /** The statement a commit sends its notification with, inside its transaction, so it is delivered only on commit. */
   val NotifySql: String = "SELECT pg_notify(?, ?)"

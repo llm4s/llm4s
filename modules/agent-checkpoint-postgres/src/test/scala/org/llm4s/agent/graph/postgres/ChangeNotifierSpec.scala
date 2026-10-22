@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph.postgres
 
 import org.llm4s.agent.graph.ThreadId
+import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.types.Result
 import org.postgresql.{ PGConnection, PGNotification }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -82,6 +84,75 @@ class ChangeNotifierSpec extends AnyFlatSpec with Matchers {
     Thread.currentThread().interrupt()
     an[InterruptedException] should be thrownBy w.await(TimeUnit.SECONDS.toNanos(10))
     Thread.interrupted() shouldBe false
+    w.close()
+    n.close()
+  }
+
+  "readUntilWoken" should "return what the first read finds, and a failed read, at once, whatever the timeout" in {
+    val n     = notifier(() => throw new SQLException("no server"))
+    val t     = ThreadId("t")
+    val w     = n.register(t)
+    val reads = new AtomicInteger()
+    val start = System.nanoTime()
+    ChangeNotifier.readUntilWoken(t, w, 1.hour) { reads.incrementAndGet(); Right(Vector(1)) } shouldBe Right(Vector(1))
+    val failed: Result[Vector[Int]] = Left(ProcessingError("read", "the store is closed"))
+    ChangeNotifier.readUntilWoken(t, w, 1.hour) { reads.incrementAndGet(); failed } shouldBe failed
+    reads.get shouldBe 2
+    (System.nanoTime() - start).nanos should be < 5.seconds
+    w.close()
+    n.close()
+  }
+
+  it should "return empty once its timeout passes with no wake, reading once" in {
+    val n     = notifier(() => throw new SQLException("no server"))
+    val t     = ThreadId("t")
+    val w     = n.register(t)
+    val reads = new AtomicInteger()
+    val start = System.nanoTime()
+    ChangeNotifier.readUntilWoken(t, w, 100.millis) { reads.incrementAndGet(); Right(Vector.empty[Int]) } shouldBe
+      Right(Vector.empty)
+    (System.nanoTime() - start).nanos should be >= 100.millis
+    reads.get shouldBe 1
+    // nothing left of the timeout: one read, no wait
+    ChangeNotifier.readUntilWoken(t, w, Duration.Zero) { reads.incrementAndGet(); Right(Vector.empty[Int]) } shouldBe
+      Right(Vector.empty)
+    reads.get shouldBe 2
+    w.close()
+    n.close()
+  }
+
+  it should "read again on each wake, waiting on through one that brought nothing, and return what a later one brings" in {
+    val n     = notifier(() => throw new SQLException("no server"))
+    val t     = ThreadId("t")
+    val w     = n.register(t)
+    val reads = new AtomicInteger()
+    // the second read finds nothing (a colliding hash), the third finds the commit
+    val waiting = new LinkedBlockingQueue[Result[Vector[Int]]]()
+    val caller = Thread.ofVirtual().start { () =>
+      waiting.put(ChangeNotifier.readUntilWoken(t, w, 1.hour) {
+        if reads.incrementAndGet() < 3 then Right(Vector.empty) else Right(Vector(7))
+      })
+    }
+    eventually(5.seconds)(reads.get == 1) shouldBe true
+    n.wake(ChangeNotifier.payload(t))
+    eventually(5.seconds)(reads.get == 2) shouldBe true
+    waiting.poll(100, TimeUnit.MILLISECONDS) shouldBe null
+    n.wake(ChangeNotifier.payload(t))
+    Option(waiting.poll(5, TimeUnit.SECONDS)) shouldBe Some(Right(Vector(7)))
+    reads.get shouldBe 3
+    caller.join()
+    w.close()
+    n.close()
+  }
+
+  it should "end its wait with CancelledError when interrupted, the flag set again" in {
+    val n = notifier(() => throw new SQLException("no server"))
+    val t = ThreadId("t")
+    val w = n.register(t)
+    Thread.currentThread().interrupt()
+    val outcome = ChangeNotifier.readUntilWoken(t, w, 1.hour)(Right(Vector.empty[Int]))
+    Thread.interrupted() shouldBe true
+    outcome.left.toOption.get shouldBe a[CancelledError]
     w.close()
     n.close()
   }

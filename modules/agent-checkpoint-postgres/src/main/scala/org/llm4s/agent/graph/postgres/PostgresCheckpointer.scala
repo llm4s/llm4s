@@ -410,20 +410,7 @@ final class PostgresCheckpointer private (
     timeout: FiniteDuration
   ): Result[Vector[EventRecord]] =
     Using.resource(notifier.register(threadId)) { waiter =>
-      val deadline = System.nanoTime() + timeout.toNanos
-      @scala.annotation.tailrec
-      def await(): Result[Vector[EventRecord]] =
-        eventsAfter(threadId, afterSeq, limit) match
-          case Right(found) if found.isEmpty =>
-            val remaining = deadline - System.nanoTime()
-            if remaining <= 0 then Right(found)
-            else
-              CancelledError.catchInterrupt(waiter.await(remaining)) match
-                case Right(true)       => await()
-                case Right(false)      => Right(found)
-                case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
-          case other => other
-      await()
+      ChangeNotifier.readUntilWoken(threadId, waiter, timeout)(eventsAfter(threadId, afterSeq, limit))
     }
 
   /** Whether this store's listening connection is up: for tests. */
@@ -742,23 +729,35 @@ object PostgresCheckpointer:
    * with a JDBC URL, as [[open]] builds), bounded by the store's connection and call timeouts; otherwise from
    * `dataSource`, holding one of its connections for as long as the store listens.
    */
-  private def listenerConnection(dataSource: DataSource, config: PostgresCheckpointerConfig): () => Connection =
+  private[postgres] def listenerConnection(
+    dataSource: DataSource,
+    config: PostgresCheckpointerConfig
+  ): () => Connection =
     dataSource match
       case hikari: HikariDataSource if hikari.getJdbcUrl != null =>
-        () =>
-          val properties = new java.util.Properties()
-          properties.putAll(hikari.getDataSourceProperties)
-          Option(hikari.getUsername).foreach(properties.setProperty("user", _))
-          Option(hikari.getPassword).foreach(properties.setProperty("password", _))
-          // whole seconds, rounded up: the driver reads 0 as no timeout
-          val connectSeconds = math.max(1L, (config.connectionTimeout.toMillis + 999) / 1000)
-          properties.setProperty("connectTimeout", connectSeconds.toString)
-          properties.setProperty("loginTimeout", connectSeconds.toString)
-          properties.setProperty("socketTimeout", socketTimeoutSeconds(config.callTimeout).toString)
-          properties.setProperty("tcpKeepAlive", "true")
-          properties.setProperty("ApplicationName", ListenerApplicationName)
-          DriverManager.getConnection(hikari.getJdbcUrl, properties)
+        () => DriverManager.getConnection(hikari.getJdbcUrl, listenerProperties(hikari, config))
       case other => () => other.getConnection()
+
+  /**
+   * The driver properties of a listening connection opened outside `hikari`: the pool's own driver properties and
+   * credentials, with the store's connection and call timeouts and the listener's `ApplicationName`.
+   */
+  private[postgres] def listenerProperties(
+    hikari: HikariDataSource,
+    config: PostgresCheckpointerConfig
+  ): java.util.Properties =
+    val properties = new java.util.Properties()
+    properties.putAll(hikari.getDataSourceProperties)
+    Option(hikari.getUsername).foreach(properties.setProperty("user", _))
+    Option(hikari.getPassword).foreach(properties.setProperty("password", _))
+    // whole seconds, rounded up: the driver reads 0 as no timeout
+    val connectSeconds = math.max(1L, (config.connectionTimeout.toMillis + 999) / 1000)
+    properties.setProperty("connectTimeout", connectSeconds.toString)
+    properties.setProperty("loginTimeout", connectSeconds.toString)
+    properties.setProperty("socketTimeout", socketTimeoutSeconds(config.callTimeout).toString)
+    properties.setProperty("tcpKeepAlive", "true")
+    properties.setProperty("ApplicationName", ListenerApplicationName)
+    properties
 
   /** The database server's clock, read once a call holds its locks. */
   private[postgres] val ServerClock: String = "clock_timestamp()"
