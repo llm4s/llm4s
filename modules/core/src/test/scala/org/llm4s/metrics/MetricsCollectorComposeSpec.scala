@@ -42,6 +42,12 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
     ): Unit = calls += "observeImageGeneration"
     override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
       calls += "recordImageGenerationCost"
+    override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+      calls += "increment"
+    override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+      calls += "observe"
+    override def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit =
+      calls += "set"
   }
 
   /** A collector that throws from every method; `compose` must not let it stop the others. */
@@ -106,6 +112,9 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
     composed.recordError(ErrorKind.RateLimit, "openai")
     composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 2.seconds, 1)
     composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
+    composed.increment(Metric.counter("test.things", "things"), Seq.empty)
+    composed.observe(Metric.timer("test.waits", "waits", Seq(1.second)), Seq.empty, 1.second)
+    composed.set(Metric.gauge("test.level", "level"), Seq.empty, 1.0)
 
     val expected = List(
       "observeRequest",
@@ -115,7 +124,10 @@ class MetricsCollectorComposeSpec extends AnyFlatSpec with Matchers {
       "recordCircuitBreakerTransition",
       "recordError",
       "observeImageGeneration",
-      "recordImageGenerationCost"
+      "recordImageGenerationCost",
+      "increment",
+      "observe",
+      "set"
     )
     a.calls.toList shouldBe expected
     b.calls.toList shouldBe expected

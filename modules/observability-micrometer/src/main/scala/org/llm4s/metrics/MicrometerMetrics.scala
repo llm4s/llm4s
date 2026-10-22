@@ -1,12 +1,13 @@
 package org.llm4s.metrics
 
-import io.micrometer.core.instrument.{ Counter, MeterRegistry, Tag, Tags, Timer }
+import io.micrometer.core.instrument.{ Counter, Gauge, MeterRegistry, Tag, Tags, Timer }
 import org.slf4j.LoggerFactory
 
 import java.time.Duration
 import java.util.concurrent.{ ConcurrentHashMap, TimeUnit }
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong }
 import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters.*
 import scala.util.{ Failure, Success, Try }
 
 /**
@@ -179,6 +180,61 @@ final class MicrometerMetrics(registry: MeterRegistry) extends MetricsCollector 
           Tags.of(ProviderTag, providerLabel(provider), ModelTag, modelLabel(model))
         ).increment(costUsd)
     }
+
+  // ---- generic metrics ----
+
+  private val genericLabels = new MetricLabels()
+
+  /** Each gauge series' latest value, as `Double` bits: held here, since a Micrometer gauge keeps only a weak reference. */
+  private val gaugeValues = new ConcurrentHashMap[(String, Vector[String]), AtomicLong]()
+
+  private def generic(metric: Metric, values: Seq[String])(record: (Vector[String], Tags) => Unit): Unit =
+    safely(s"metric ${metric.name}") {
+      genericLabels(metric, values) match {
+        case Some(admitted) =>
+          record(admitted, Tags.of(metric.labelNames.zip(admitted).map((k, v) => Tag.of(k, v)).asJava))
+        case None =>
+          logger.warn(
+            s"Metric ${metric.name} takes ${metric.labelNames.size} label values " +
+              s"(${metric.labelNames.mkString(", ")}), was given ${Option(values).fold(0)(_.size)}; dropping the recording"
+          )
+      }
+    }
+
+  /**
+   * Adds `amount` to counter `metric` - a Micrometer counter of the metric's name, which Prometheus naming exposes as
+   * `<name>_total` - dropping a negative or non-finite amount.
+   */
+  override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+    if (isAmount(amount))
+      generic(metric, labelValues)((_, tags) => counter(metric.name, metric.help, tags).increment(amount))
+
+  /** Records `duration` in timer `metric`: a Micrometer timer publishing the metric's buckets as its SLOs. */
+  override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+    generic(metric, labelValues) { (_, tags) =>
+      timer(metric.name, metric.help, metric.buckets.map(b => Duration.ofNanos(b.toNanos)), tags)
+        .record(duration.toNanos, TimeUnit.NANOSECONDS)
+    }
+
+  /** Sets gauge `metric` to `value`, dropping a non-finite one. */
+  override def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit =
+    if (!value.isNaN && !value.isInfinite)
+      generic(metric, labelValues) { (admitted, tags) =>
+        val key = metric.name -> admitted
+        val holder = gaugeValues.computeIfAbsent(
+          key,
+          _ => {
+            val bits = new AtomicLong(java.lang.Double.doubleToLongBits(value))
+            Gauge
+              .builder(metric.name, bits, (b: AtomicLong) => java.lang.Double.longBitsToDouble(b.get))
+              .description(metric.help)
+              .tags(tags)
+              .register(registry)
+            bits
+          }
+        )
+        holder.set(java.lang.Double.doubleToLongBits(value))
+      }
 
   private def tokens(base: Tags, tokenType: String, amount: Double): Unit =
     counter(Names.Tokens, "Total tokens consumed", base.and(Tag.of(TypeTag, tokenType))).increment(amount)

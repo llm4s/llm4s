@@ -9,8 +9,10 @@ import scala.concurrent.duration.FiniteDuration
  *
  * The core metrics model tracks request latency, request outcome, token usage,
  * estimated cost, retry attempts, circuit-breaker transitions, generic errors,
- * and image generation usage. Concrete implementations decide where these
- * observations are stored or exported.
+ * and image generation usage. Modules above core declare metrics of their own as
+ * [[Metric]]s and record them through the generic [[increment]], [[observe]] and
+ * [[set]], so core names none of their concepts. Concrete implementations decide
+ * where these observations are stored or exported.
  *
  * Implementations should be safe: failures must not propagate to callers.
  * All methods should catch and log errors internally without throwing.
@@ -169,9 +171,35 @@ trait MetricsCollector {
     costUsd: Double,
     imageCount: Int
   ): Unit = () // Default no-op
+
+  /**
+   * Add `amount` to counter `metric`, with `labelValues` for its label names, in order.
+   *
+   * The generic entry point for metrics a module above core declares (see [[Metric]]): the agent runtime's run, claim,
+   * queue and child-task metrics come through here, so a backend exports them with no dependency on that module. A
+   * backend drops a recording whose number of values is not the metric's number of labels, or whose `amount` is
+   * negative or not finite, logging it, and records a null or blank value as `unknown` and values past
+   * [[MetricsCollector.MaxLabelValues]] distinct ones per label as `other`.
+   */
+  def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double = 1.0): Unit = () // Default no-op
+
+  /** Record one `duration` in timer `metric`, with `labelValues` for its label names; see [[increment]]. */
+  def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit = () // Default no-op
+
+  /**
+   * Set gauge `metric`, with `labelValues` for its label names, to `value`, its latest reading; see [[increment]]. A
+   * non-finite value is dropped.
+   */
+  def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit = () // Default no-op
 }
 
 object MetricsCollector {
+
+  /**
+   * The most distinct values a backend records for one label of one [[Metric]]; further values are recorded as
+   * `other`, so a label fed an unbounded value by mistake cannot grow the registry without limit.
+   */
+  val MaxLabelValues: Int = 256
 
   /**
    * Combine multiple collectors into one that fans out every call to all of them.
@@ -240,6 +268,15 @@ object MetricsCollector {
       costUsd: Double,
       imageCount: Int
     ): Unit = safeForEach(_.recordImageGenerationCost(provider, model, costUsd, imageCount))
+
+    override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+      safeForEach(_.increment(metric, labelValues, amount))
+
+    override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+      safeForEach(_.observe(metric, labelValues, duration))
+
+    override def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit =
+      safeForEach(_.set(metric, labelValues, value))
   }
 
   /**

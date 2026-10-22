@@ -57,6 +57,17 @@ class MicrometerPrometheusSeriesSpec extends AnyFlatSpec with Matchers {
     metrics.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 4.seconds, 2)
     metrics.observeImageGeneration("openai", "dall-e-3", "edit", Outcome.Error(ErrorKind.Network), 500.millis, 1)
     metrics.recordImageGenerationCost("openai", "dall-e-3", 0.5, 2)
+    // generic metrics, as a module above core declares them (design 4.59)
+    val things = Metric.counter("llm4s.test.things", "Things counted", "kind")
+    metrics.increment(things, Seq("a"))
+    metrics.increment(things, Seq("b"), 2.0)
+    val waits = Metric.timer("llm4s.test.wait", "Waits", Seq(1.second, 10.seconds), "kind")
+    metrics.observe(waits, Seq("a"), 500.millis)
+    metrics.observe(waits, Seq("a"), 4.seconds)
+    val depth = Metric.gauge("llm4s.test.depth", "Depth", "kind")
+    metrics.set(depth, Seq("a"), 3.0)
+    metrics.set(depth, Seq("a"), 5.0)
+    metrics.set(depth, Seq("b"), 1.0)
   }
 
   private def micrometerSamples(): Seq[Sample] = {

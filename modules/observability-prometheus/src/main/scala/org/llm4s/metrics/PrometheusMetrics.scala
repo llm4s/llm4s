@@ -1,11 +1,12 @@
 package org.llm4s.metrics
 
-import io.prometheus.metrics.core.metrics.{ Counter, Histogram }
+import io.prometheus.metrics.core.metrics.{ Counter, Gauge, Histogram }
 import io.prometheus.metrics.model.registry.PrometheusRegistry
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration.FiniteDuration
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 /**
  * Prometheus implementation of [[MetricsCollector]].
@@ -24,6 +25,12 @@ import scala.util.Try
  * - `llm4s_image_generation_duration_seconds`
  * - `llm4s_image_generation_cost_usd_total`
  * - `llm4s_image_generation_errors_total`
+ *
+ * Generic [[Metric]]s that other modules declare (the agent runtime's run, claim, queue and child-task metrics) are
+ * registered on their first recording, their name's dots turned into underscores: a counter
+ * `llm4s.agent.runs.started` is exposed as `llm4s_agent_runs_started_total`, a timer as a histogram
+ * `<name>_seconds` with the metric's buckets, a gauge under its name. Label values are bounded as
+ * [[MetricsCollector.increment]] describes.
  *
  * All operations are wrapped in try-catch to ensure metric failures
  * never propagate to callers. This implementation is thread-safe.
@@ -268,6 +275,84 @@ final class PrometheusMetrics(
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record image generation cost metrics: ${e.getMessage}")
     }
+
+  // ---- generic metrics ----
+
+  private val labels     = new MetricLabels()
+  private val counters   = new ConcurrentHashMap[String, Registered[Counter]]()
+  private val histograms = new ConcurrentHashMap[String, Registered[Histogram]]()
+  private val gauges     = new ConcurrentHashMap[String, Registered[Gauge]]()
+
+  /** A generic metric's family, as registered for the definition first recorded under its name. */
+  final private case class Registered[F](metric: Metric, family: Try[F])
+
+  /**
+   * The family registered in `families` for `metric`, registering it with `build` - given the Prometheus name - on its
+   * first recording; `None` (logged) when another definition holds its name or the registry refused it.
+   */
+  private def family[F](families: ConcurrentHashMap[String, Registered[F]], metric: Metric)(
+    build: String => F
+  ): Option[F] =
+    families.computeIfAbsent(metric.name, _ => Registered(metric, Try(build(metric.name.replace('.', '_'))))) match {
+      case Registered(m, Success(f)) if m == metric => Some(f)
+      case Registered(m, Success(_)) =>
+        logger.warn(s"Metric ${metric.name} is already registered with another definition ($m); dropping the recording")
+        None
+      case Registered(_, Failure(e)) =>
+        logger.warn(s"Metric ${metric.name} could not be registered: ${e.getMessage}")
+        None
+    }
+
+  private def generic(metric: Metric, values: Seq[String])(record: Array[String] => Unit): Unit =
+    Try {
+      labels(metric, values) match {
+        case Some(admitted) => record(admitted.toArray)
+        case None =>
+          logger.warn(
+            s"Metric ${metric.name} takes ${metric.labelNames.size} label values " +
+              s"(${metric.labelNames.mkString(", ")}), was given ${Option(values).fold(0)(_.size)}; dropping the recording"
+          )
+      }
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record metric ${metric.name}: ${e.getMessage}")
+    }: Unit
+
+  /**
+   * Adds `amount` to counter `metric`, registered on its first recording and exposed as `<name>_total`. A negative or
+   * non-finite amount is dropped.
+   */
+  override def increment(metric: Metric.Counter, labelValues: Seq[String], amount: Double): Unit =
+    if (amount.isNaN || amount.isInfinite || amount < 0) ()
+    else
+      generic(metric, labelValues) { values =>
+        family(counters, metric)(name =>
+          Counter.builder().name(name).help(metric.help).labelNames(metric.labelNames*).register(registry)
+        ).foreach(_.labelValues(values*).inc(amount))
+      }
+
+  /** Records `duration` in timer `metric`, registered on its first recording as a histogram `<name>_seconds`. */
+  override def observe(metric: Metric.Timer, labelValues: Seq[String], duration: FiniteDuration): Unit =
+    generic(metric, labelValues) { values =>
+      family(histograms, metric)(name =>
+        Histogram
+          .builder()
+          .name(s"${name}_seconds")
+          .help(metric.help)
+          .labelNames(metric.labelNames*)
+          .classicUpperBounds(metric.buckets.map(_.toNanos / 1e9)*)
+          .register(registry)
+      ).foreach(_.labelValues(values*).observe(duration.toNanos / 1e9))
+    }
+
+  /** Sets gauge `metric`, registered on its first recording under its name. A non-finite value is dropped. */
+  override def set(metric: Metric.Gauge, labelValues: Seq[String], value: Double): Unit =
+    if (value.isNaN || value.isInfinite) ()
+    else
+      generic(metric, labelValues) { values =>
+        family(gauges, metric)(name =>
+          Gauge.builder().name(name).help(metric.help).labelNames(metric.labelNames*).register(registry)
+        ).foreach(_.labelValues(values*).set(value))
+      }
 }
 
 object PrometheusMetrics {
