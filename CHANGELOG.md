@@ -281,6 +281,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured from `llm4s.vectorstore.opensearch` (`OPENSEARCH_URL`, `OPENSEARCH_INDEX`, `OPENSEARCH_USERNAME`,
   `OPENSEARCH_PASSWORD`, `OPENSEARCH_TOKEN`) by `OpenSearchVectorStoreConfigLoader`
   [#1469](https://github.com/llm4s/llm4s/issues/1469); see [Vector Store](docs/guide/vector-store.md#opensearch).
+- **Added** `llm4s-vectorstore-redis` (Experimental): `RedisVectorStore`, a `VectorStore` over Redis with the Redis Query
+  Engine (Redis Stack, Redis 8+) or Valkey with `valkey-search` (vector search and operations by ID; Valkey 9.0's
+  `valkey-search` answers no query without a vector, so not `count`, `list` or `deleteByFilter`) - an `FT.CREATE`
+  index over hashes created on the first upsert (HNSW or FLAT; COSINE, IP or L2), KNN `FT.SEARCH` with every `MetadataFilter` as a pre-filter of encoded `TAG`
+  clauses (`Contains` needs the Redis Query Engine), pipelined writes, TLS and ACL credentials, configured from
+  `llm4s.vectorstore.redis` (`REDIS_HOST`, `REDIS_PORT`, ...) by `RedisVectorStoreConfigLoader`. It talks to the server
+  through Jedis, which stays out of its API [#1470](https://github.com/llm4s/llm4s/issues/1470); see
+  [Vector Store](docs/guide/vector-store.md#redis-and-valkey).
 
 ### Memory
 

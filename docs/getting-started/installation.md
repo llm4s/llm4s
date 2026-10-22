@@ -300,6 +300,14 @@ client library; see [Elasticsearch](../guide/vector-store#elasticsearch) and
 libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-elasticsearch" % llm4sVersion
 ```
 
+To keep them in Redis (Redis Stack, or Redis 8 and later) or Valkey (with `valkey-search`), add the Redis store
+(Experimental). It brings the Jedis client; see [Redis and Valkey](../guide/vector-store#redis-and-valkey).
+
+```scala
+// same version as llm4s-rag
+libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-redis" % llm4sVersion
+```
+
 ### For agent memory
 
 ```scala

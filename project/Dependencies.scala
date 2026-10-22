@@ -90,6 +90,10 @@ object Versions {
   // review alongside the existing neo4j-harness/Netty compatibility constraint.
   val neo4j = "5.27.0"
 
+  // Jedis (MIT), the Redis client of `llm4s-vectorstore-redis` (#1470) only. Chosen over Lettuce for its footprint:
+  // commons-pool2, gson, org.json and redis-authx-core besides slf4j-api, where Lettuce brings Netty and Reactor.
+  val jedis = "8.0.2"
+
   // Spring Boot: the starter is built against the oldest supported 3.x release. CI's "Spring Boot 3.x (latest)"
   // job runs the starter's specs again with `-Dllm4s.springBootVersion=<latest 3.x>`, so the supported range is
   // tested at both ends; nothing else reads the property.
@@ -196,6 +200,9 @@ object Deps {
 
   // Neo4j
   val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
+
+  // Redis
+  val jedis = "redis.clients" % "jedis" % Versions.jedis
 
   // Spring Boot
   val springBootAutoConfigure = "org.springframework.boot" % "spring-boot-autoconfigure" % Versions.springBoot

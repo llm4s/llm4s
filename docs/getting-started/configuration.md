@@ -935,6 +935,7 @@ also set in `application.conf` or with `-D`.
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
 | `ELASTICSEARCH_URL`, `ELASTICSEARCH_INDEX`, `ELASTICSEARCH_API_KEY`, `ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD` | `llm4s.vectorstore.elasticsearch.*`, read by `ElasticsearchVectorStoreConfigLoader` | `llm4s-vectorstore-elasticsearch` |
 | `OPENSEARCH_URL`, `OPENSEARCH_INDEX`, `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD`, `OPENSEARCH_TOKEN` | `llm4s.vectorstore.opensearch.*`, read by `OpenSearchVectorStoreConfigLoader` | `llm4s-vectorstore-elasticsearch` |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_TLS`, `REDIS_USERNAME`, `REDIS_PASSWORD`, `REDIS_VECTOR_INDEX` | `llm4s.vectorstore.redis.*`, read by `RedisVectorStoreConfigLoader` | `llm4s-vectorstore-redis` |
 
 **Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
 every chat provider's endpoint and model variable (`AZURE_API_BASE`, `AZURE_API_VERSION`,

@@ -36,6 +36,7 @@ The `VectorStore` trait provides a backend-agnostic interface for storing and se
 - **Qdrant** - Cloud-native vector database via REST API
 - **Elasticsearch** - `dense_vector` kNN search in a cluster you already run, in the separate module `llm4s-vectorstore-elasticsearch` (Experimental); see [Elasticsearch](#elasticsearch)
 - **OpenSearch** - `knn_vector` search with the k-NN plugin, in the same module (Experimental); see [OpenSearch](#opensearch)
+- **Redis and Valkey** - KNN search over a vector index in the Redis (Redis Stack, Redis 8+) or Valkey (`valkey-search`) you already run, in the separate module `llm4s-vectorstore-redis` (Experimental); see [Redis and Valkey](#redis-and-valkey)
 
 **Keyword Backends (for hybrid search):**
 - **SQLite FTS5** - File-based or in-memory BM25 search (default)
@@ -306,6 +307,103 @@ deprecated by OpenSearch, and a newer cluster may refuse to create an NMSLIB ind
 already has it. The `knn_vector` dimension limit is 16,000. `OpenSearchVectorStoreSpec` in `modules/it` (`@Docker`
 tier, `OPENSEARCH_TEST_URL`) runs every operation against a real cluster, on each engine.
 
+### Redis and Valkey
+
+`RedisVectorStore` keeps the vectors as hashes in a Redis server with the Redis Query Engine (Redis Stack, or Redis 8
+and later, where search is built in) or a Valkey server with the `valkey-search` module (the `valkey-bundle` image),
+and searches them through a vector index. Redis speaks RESP rather than HTTP, so the module brings a client library,
+[Jedis](https://github.com/redis/jedis) (MIT); it stays out of the store's API. It lives in its own module
+(Experimental):
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-redis" % llm4sVersion
+```
+
+```scala
+import org.llm4s.vectorstore.redis._
+
+// Local server without authentication:
+// docker run -p 6379:6379 redis/redis-stack-server:7.4.0-v8   (or valkey/valkey-bundle:9.0.6)
+val local = RedisVectorStore.local(index = "my-vectors")
+
+// A remote server: TLS, an ACL user and a password
+val config = RedisConfig("redis.example.com", port = 6380)
+  .withTls(true)
+  .withUsername("app")
+  .withPassword(password)
+  .withIndex("my-vectors")
+  .withDistanceMetric(RedisDistanceMetric.Cosine) // or InnerProduct, L2
+  .withAlgorithm(RedisVectorAlgorithm.Hnsw)       // or Flat
+  .withDimensions(1536)                           // unset: the first record's size
+val store = RedisVectorStore(config)
+```
+
+Or from configuration, at the app edge:
+
+```hocon
+llm4s.vectorstore.redis {
+  host           = "redis.example.com"   # REDIS_HOST; default localhost
+  port           = 6380                  # REDIS_PORT; default 6379
+  tls            = true                  # REDIS_TLS; default false
+  username       = ${?REDIS_USERNAME}    # unset: the default user
+  password       = ${?REDIS_PASSWORD}    # unset: no authentication
+  index          = "my-vectors"          # REDIS_VECTOR_INDEX; default llm4s-vectors
+  distanceMetric = COSINE                # COSINE | IP | L2
+  algorithm      = HNSW                  # HNSW | FLAT
+  dimensions     = 1536
+  # keyPrefix    = "my-vectors:"         # default "<index>:"
+  # database     = 0
+  # timeout      = 10 seconds
+}
+```
+
+```scala
+import org.llm4s.config.RedisVectorStoreConfigLoader
+
+val store = for {
+  config <- RedisVectorStoreConfigLoader.default()
+  store  <- RedisVectorStore(config)
+} yield store
+```
+
+How it maps onto Redis:
+
+- **Records**: each record is a hash at `<keyPrefix><id>`, holding the ID, the content, the metadata as a JSON object,
+  the vector as little-endian `FLOAT32` bytes, a write sequence number, and the metadata again as encoded tags.
+  `upsert` and `upsertBatch` are one pipeline of `DEL` and `HSET` per record, so an upsert replaces the whole record.
+  A record whose size differs from the index's is refused before anything is sent.
+- **Index**: created on the first upsert when it does not exist (`FT.CREATE ... ON HASH PREFIX 1 <keyPrefix>`), with
+  the `VECTOR` field (`embedding`: the configured algorithm, distance and size), a sortable `NUMERIC` field for write
+  order, and two `TAG` fields for metadata. An index that exists is used as it is. Reads of an index that does not
+  exist yet answer as an empty store. `clear()` drops the index and deletes the store's keys; the next upsert creates
+  it again.
+- **Search**: a KNN query, `(<filter>)=>[KNN k @embedding $BLOB]`, so the filter is a pre-filter and `topK` results come
+  back when that many records match. Redis reports a distance; the score is `1 - distance / 2` for `COSINE` and `IP`
+  (that is `(1 + cosine) / 2`) and `1 / (1 + distance)` for `L2`, clamped to `[0, 1]`.
+- **Filters**: any metadata value can be filtered on; they are all strings. The schema of a search index is fixed and
+  metadata keys are not, so every entry is one tag of a `TAG` field, encoded (hex bytes) so that no value can clash
+  with the tag separator, case folding, whitespace trimming or query escaping. `Equals` and `In` match entries,
+  `HasKey` matches keys, `Contains` is a wildcard query (`w'...'`), and `And`, `Or` and `Not` combine clauses. An
+  empty `In` matches nothing and is answered without a query.
+- **Deletes**: `delete` and `deleteBatch` are one `DEL`. `deleteByPrefix` walks the store's keys with `SCAN`;
+  `deleteByFilter` deletes the matching records a page at a time. Both return the number deleted.
+- **Errors**: a connection failure is a `NetworkError` (a `TimeoutError` when the server does not answer in time),
+  refused credentials (`NOAUTH`, `WRONGPASS`, `NOPERM`) an `AuthenticationError`, and any other error reply a
+  `ProcessingError` with the server's message.
+
+Valkey: the `valkey-search` in Valkey 9.0 (`valkey-bundle:9.0`) answers only vector queries. On it `upsert`, `get`,
+`getBatch`, `delete`, `deleteBatch`, `deleteByPrefix`, `clear` and `search` with every filter but `Contains` work (the
+index is created without `SORTABLE`, which it refuses), while `count` and `stats` over an index, `list` and
+`deleteByFilter` are refused with the server's message, as is `Contains`, which has no wildcard query there.
+
+Limits to know: `Contains` needs the Redis Query Engine 2.6 or later. A wildcard expands to at most
+`search-max-prefix-expansions` distinct values (200 by default), so `Contains` over a key with more distinct values than that may miss records. A search reply holds at most
+`search-max-search-results` records (10,000 by default), which bounds `topK` and `list`'s `offset + limit`. The store
+connects to one standalone server, not a cluster, and the Redis Query Engine indexes only database 0 on most
+deployments. `deleteByPrefix` and `clear()` scan the keyspace. Without `tls` the password crosses the network in clear
+text: keep that to a trusted network. `RedisVectorStoreSpec` and `ValkeyVectorStoreSpec` in `modules/it` (`@Docker`
+tier, `REDIS_TEST_URL` and `VALKEY_TEST_URL`) run every operation against real servers.
+
 ---
 
 ## Core Concepts
@@ -487,7 +585,7 @@ store.deleteByFilter(Equals("archived", "true"))
 ### Using VectorStoreFactory
 
 `VectorStoreFactory` covers the backends inside `llm4s-rag` (SQLite, pgvector, Qdrant). A backend in a module of its
-own, such as [Elasticsearch](#elasticsearch) or [OpenSearch](#opensearch), is built with its own constructor, and any `VectorStore` can be passed
+own, such as [Elasticsearch](#elasticsearch), [OpenSearch](#opensearch) or [Redis](#redis-and-valkey), is built with its own constructor, and any `VectorStore` can be passed
 wherever one is taken.
 
 ```scala

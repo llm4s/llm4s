@@ -294,6 +294,7 @@ lazy val llm4s = (project in file("."))
     core,
     rag,
     vectorstoreElasticsearch,
+    vectorstoreRedis,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -749,6 +750,30 @@ lazy val vectorstoreElasticsearch = (project in file("modules/vectorstore-elasti
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
+// `llm4s-vectorstore-redis` (#1470): `RedisVectorStore`, a `VectorStore` over Redis Query Engine (Redis Stack, Redis 8)
+// or Valkey Search: an `FT.CREATE` index over hashes with a `VECTOR` field, KNN `FT.SEARCH` with the metadata filter as
+// TAG clauses. Redis speaks RESP, so this module brings a client library, Jedis, which no other module resolves; it
+// stays out of the public API (the store talks to it through an internal command interface, faked in the unit tests).
+// Experimental, like any new module until it has users. Its suite against a real server is `RedisVectorStoreSpec` in
+// `modules/it` (@Docker tier).
+lazy val vectorstoreRedis = (project in file("modules/vectorstore-redis"))
+  .dependsOn(rag)
+  .settings(
+    name := "llm4s-vectorstore-redis",
+    commonSettings,
+    // Measured 97.38% statement coverage
+    // (`sbt coverage vectorstoreRedis/test vectorstoreRedis/coverageReport`) on its first version.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.jedis,
       Deps.ujson,
       Deps.scalatest % Test
     )
@@ -1874,6 +1899,8 @@ lazy val it = (project in file("modules/it"))
     rag,
     // ElasticsearchVectorStoreSpec (#1469), a @Docker suite against a real cluster
     vectorstoreElasticsearch,
+    // RedisVectorStoreSpec (#1470), a @Docker suite against Redis Stack
+    vectorstoreRedis,
     knowledgegraph,
     memory % "compile->compile;test->test",
     memoryPostgres,
@@ -1962,6 +1989,7 @@ lazy val docs = (project in file("modules/docs"))
     core,
     rag,
     vectorstoreElasticsearch,
+    vectorstoreRedis,
     knowledgegraph,
     memory,
     memoryPostgres,
@@ -2016,6 +2044,7 @@ lazy val docs = (project in file("modules/docs"))
         (core / Compile / sources).value ++
         (rag / Compile / sources).value ++
         (vectorstoreElasticsearch / Compile / sources).value ++
+        (vectorstoreRedis / Compile / sources).value ++
         (knowledgegraph / Compile / sources).value ++
         (memory / Compile / sources).value ++
         (memoryPostgres / Compile / sources).value ++

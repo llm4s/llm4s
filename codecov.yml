@@ -41,6 +41,10 @@ flags:
     paths:
       - modules/vectorstore-elasticsearch/src/main/scala
     carryforward: true
+  vectorstore-redis:
+    paths:
+      - modules/vectorstore-redis/src/main/scala
+    carryforward: true
   knowledgegraph:
     paths:
       - modules/knowledgegraph/src/main/scala

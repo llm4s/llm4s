@@ -94,6 +94,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
 | `vectorstore.elasticsearch` — `ElasticsearchVectorStore`, a `VectorStore` over the Elasticsearch REST API (`dense_vector` kNN, metadata filters, `_bulk`), with `ElasticsearchConfig` and `ElasticsearchVectorStoreConfigLoader`; no Elasticsearch client library — **new** | `llm4s-vectorstore-elasticsearch` (`modules/vectorstore-elasticsearch`) | Experimental |
 | `vectorstore.opensearch` — `OpenSearchVectorStore`, the OpenSearch dialect of the same store (`knn_vector` with the k-NN plugin, the `knn` query, efficient or post-filtering per engine), with `OpenSearchConfig` and `OpenSearchVectorStoreConfigLoader` — **new** | `llm4s-vectorstore-elasticsearch` (`modules/vectorstore-elasticsearch`) | Experimental |
+| `vectorstore.redis` — `RedisVectorStore`, a `VectorStore` over Redis Query Engine (Redis Stack, Redis 8+) or Valkey's `valkey-search` (`FT.CREATE` vector index over hashes, KNN `FT.SEARCH`, metadata filters as `TAG` clauses), with `RedisConfig` and `RedisVectorStoreConfigLoader`; Jedis, kept out of the API — **new** | `llm4s-vectorstore-redis` (`modules/vectorstore-redis`) | Experimental |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |

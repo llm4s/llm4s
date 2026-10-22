@@ -78,6 +78,7 @@ llm4s/
 │   ├── core/                  # Core library (published)
 │   ├── rag/                   # RAG, vector stores, chunking, reranking, extraction (published)
 │   ├── vectorstore-elasticsearch/ # ElasticsearchVectorStore and OpenSearchVectorStore over their REST APIs (published)
+│   ├── vectorstore-redis/     # RedisVectorStore over Redis Query Engine or valkey-search, via Jedis (published)
 │   ├── knowledgegraph/        # Knowledge graph model, storage, query (published)
 │   ├── memory/                # Agent memory: managers, in-memory + SQLite stores (published)
 │   ├── memory-postgres/       # Agent memory: Postgres/pgvector store (published)
