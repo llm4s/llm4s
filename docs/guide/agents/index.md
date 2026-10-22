@@ -381,8 +381,15 @@ LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
     .build();
 ```
 
-Tools defined from Kotlin (`llm4s-kotlin-api`) do not see it yet
-([#1495](https://github.com/llm4s/llm4s/issues/1495)).
+A tool declared with the Kotlin DSL (`llm4s-kotlin-api`) reads it as `args.idempotencyKey`, `null` outside an agent
+run ([The Kotlin DSL](../java#the-kotlin-dsl)):
+
+```kotlin
+tool("refund", "Refunds a charge once") {
+    param<String>("charge", "The charge to refund")
+    handler { args -> billing.refund(args.get<String>("charge"), args.idempotencyKey) }
+}
+```
 
 The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
 issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
@@ -393,9 +400,8 @@ model request made again because the first response was never stored. The bounda
 - The key de-duplicates only where the external system honours it. Without one, a side effect can
   happen more than once; the runtime never promises exactly-once execution.
 - A tool sees the key only when it reads it: `ToolContext.idempotencyKey` in an `AgentTool`,
-  `params.call` in a `ToolFunction`, `idempotencyKey()` in a Java tool's `JToolArgs`. One that
-  ignores it - and a tool written with the Kotlin API, which cannot read it yet
-  ([#1495](https://github.com/llm4s/llm4s/issues/1495)) - runs at least once like any other.
+  `params.call` in a `ToolFunction`, `idempotencyKey()` in a Java tool's `JToolArgs`, `idempotencyKey` in a
+  Kotlin tool's `ToolArgs`. One that ignores it runs at least once like any other.
 - An approved or edited call keeps the key it was proposed with, and a call that asked a question
   keeps it when it resumes. Make a tool's first run, before approval or an answer, free of side
   effects.

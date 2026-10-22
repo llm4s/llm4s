@@ -133,10 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** a Kotlin DSL to `llm4s-kotlin-api` over the Java facade's builders: `tool`/`tools` with `param<T>`,
+  `optionalParam<T>` and a `suspend` `handler` whose `ToolArgs` reads typed arguments and the call's `idempotencyKey`
+  and `toolCallId` (the Kotlin half of [#1740](https://github.com/llm4s/llm4s/issues/1740)), `completionOptions { ... }`
+  for the new `LLMClientKt.complete(query, options)`, client blocks `Llm4s.openAi { ... }` (and `anthropic`, `gemini`,
+  `ollama`, `openAiCompatible`, `azureOpenAi`) and `Llm4s.createAgent(client, tools)`; cancelling the coroutine that
+  runs a turn cancels a suspended handler [#1495](https://github.com/llm4s/llm4s/issues/1495); see the
+  [Java guide](docs/guide/java.md#the-kotlin-dsl).
 - **Added** the call's id and idempotency key for Java tools run by an agent: `JToolArgs.toolCallId()` and
   `JToolArgs.idempotencyKey()` (`Optional<String>`, empty outside an agent run), read by a `JTool.builder` lambda from
-  its `args` and by a `@Tool` method from a `JToolArgs` parameter the model does not see; Kotlin tools follow with
-  [#1495](https://github.com/llm4s/llm4s/issues/1495) [#1740](https://github.com/llm4s/llm4s/issues/1740).
+  its `args` and by a `@Tool` method from a `JToolArgs` parameter the model does not see, and by a Kotlin DSL tool's
+  handler as `ToolArgs.idempotencyKey` and `ToolArgs.toolCallId` (`null` outside an agent run) [#1495](https://github.com/llm4s/llm4s/issues/1495) [#1740](https://github.com/llm4s/llm4s/issues/1740).
 - **Added** `llm4s-reactor` (Experimental): `Streams.toFlux(client, query | conversation[, options])` returns a streamed
   reply as a Reactor `Flux<String>` over `JLlmClient.streamAsPublisher`, with backpressure, and cancellation that
   interrupts the provider call [#1492](https://github.com/llm4s/llm4s/issues/1492); see [Java Reactor](docs/guide/java-reactor.md).

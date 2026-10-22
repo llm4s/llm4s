@@ -24,6 +24,19 @@ class JvmSurfaceTest {
         AgentStreamItem.Event::class.java,
         AgentStreamItem.Done::class.java,
         LLMException::class.java,
+        Class.forName("org.llm4s.kotlin.ToolDslKt"),
+        Class.forName("org.llm4s.kotlin.CompletionOptionsDslKt"),
+        ToolsSpec::class.java,
+        ToolSpec::class.java,
+        ToolArgs::class.java,
+        CompletionOptionsSpec::class.java,
+        ClientSpec::class.java,
+        OpenAiSpec::class.java,
+        AnthropicSpec::class.java,
+        GeminiSpec::class.java,
+        OllamaSpec::class.java,
+        OpenAiCompatibleSpec::class.java,
+        AzureOpenAiSpec::class.java,
     )
 
     private fun mentioned(t: Type): List<Class<*>> = when (t) {

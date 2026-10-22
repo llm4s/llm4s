@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runInterruptible
+import org.llm4s.javaapi.ConversationBuilder
+import org.llm4s.javaapi.JCompletionOptions
 import org.llm4s.javaapi.JLlmClient
 
 /**
@@ -30,6 +32,18 @@ class LLMClientKt internal constructor(internal val underlying: JLlmClient) : Au
      */
     suspend fun complete(query: String): String = runInterruptible(Dispatchers.IO) {
         underlying.complete(query).unwrap("LLM call failed")
+    }
+
+    /**
+     * Suspends until the LLM answers [query], sent as a user message with [options] - built with [completionOptions]
+     * or `JCompletionOptions.builder()` (#1495). Throws [LLMException] if the underlying call fails.
+     *
+     * ```kotlin
+     * val reply = client.complete("Name a colour", completionOptions { temperature = 0.2; maxTokens = 20 })
+     * ```
+     */
+    suspend fun complete(query: String, options: JCompletionOptions): String = runInterruptible(Dispatchers.IO) {
+        underlying.complete(ConversationBuilder.create().user(query).build(), options).unwrap("LLM call failed")
     }
 
     /**

@@ -627,6 +627,60 @@ LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
 `idempotencyKey()` and `toolCallId()` (the id the model gave the call) are `Optional<String>`s: present for every call
 an agent runs, the key the same in every run of one call, and empty when the tool runs outside an agent.
 
+## The Kotlin DSL
+
+`llm4s-kotlin-api` declares the same tools, options and clients with a Kotlin DSL
+([#1495](https://github.com/llm4s/llm4s/issues/1495)). Each block builds the Java facade's object - a `JTool`, a
+`JCompletionOptions`, a provider's client builder - so it behaves exactly as the Java code above, and a failure throws
+`LLMException` (an option out of range, `IllegalArgumentException`) instead of returning a failed `LlmResult`:
+
+```kotlin
+import org.llm4s.javaapi.JReasoningEffort
+import org.llm4s.kotlin.Llm4s
+import org.llm4s.kotlin.completionOptions
+import org.llm4s.kotlin.tools
+import kotlin.time.Duration.Companion.seconds
+
+val client = Llm4s.openAi {                // also anthropic, gemini, ollama, openAiCompatible, azureOpenAi
+    apiKey = System.getenv("OPENAI_API_KEY")
+    model = "gpt-4o-mini"
+    requestTimeout = 30.seconds
+}
+
+val reply = client.complete("Name a colour", completionOptions {
+    temperature = 0.2
+    maxTokens = 200
+    reasoning = JReasoningEffort.LOW
+})
+
+val agent = Llm4s.createAgent(client, tools {
+    tool("add", "Adds two numbers") {
+        param<Long>("a", "First")
+        param<Long>("b", "Second")
+        handler { args -> args.get<Long>("a") + args.get<Long>("b") }
+    }
+    tool("refund", "Refunds a charge once") {
+        param<String>("charge", "The charge to refund")
+        handler { args -> billing.refund(args.get<String>("charge"), args.idempotencyKey) }
+    }
+})
+val result = agent.run("What is 2 + 3?")   // a suspend function: call it in a coroutine
+```
+
+A client block takes the fields of its Java builder (see [Configure in code](#configure-in-code)), with a
+`kotlin.time.Duration` for each timeout; `completionOptions(base) { ... }` starts from existing options. `tool` declares
+one tool and `tools` a list of them, to which `add` appends one built with `JTool.builder` or `JTool.fromAnnotated`.
+`param<T>` and `optionalParam<T>` take the types `JTool.builder` does - `String`, `Int`, `Long`, `Short`, `Byte`,
+`Double`, `Float`, `Boolean` or an enum - and the handler reads them with `args.get<T>(name)`, or `args.getOrNull<T>(name)`
+for an optional one the model may leave out. `args.idempotencyKey` and `args.toolCallId` describe the call
+([#1740](https://github.com/llm4s/llm4s/issues/1740)), `null` outside an agent run; `args.java` is the `JToolArgs`
+underneath.
+
+The handler is a `suspend` function. The agent runs a tool on a thread of its own, which waits for the handler in a
+coroutine of its own (`runBlocking`), not in the caller's. Cancelling the coroutine that runs the turn - the caller of
+`run`, a collector of `stream`, a `withTimeout` - cancels the turn, which interrupts that thread and so cancels the
+handler: a suspended `delay`, `withContext` or other cancellable call throws `CancellationException`.
+
 ## Embeddings
 
 An embedding model turns a text into a vector, a `float[]`, and texts that mean similar things get vectors that point

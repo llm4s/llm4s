@@ -555,7 +555,9 @@ pass the version sbt published.
 
 Its entry point is `org.llm4s.kotlin.Llm4s`: `createDefaultClient()` builds an `LLMClientKt` from `application.conf`,
 and `wrapClient(JLlmClient)` wraps one configured in code with the Java facade's builders (see the Java guide's
-[Configure in code](../guide/java#configure-in-code)); `createAgent` and `wrapAgent` give an `AgentKt`.
+[Configure in code](../guide/java#configure-in-code)); `createAgent` and `wrapAgent` give an `AgentKt`. A Kotlin DSL
+declares tools (`tools { tool(...) { ... } }`), completion options (`completionOptions { ... }`) and clients
+(`Llm4s.openAi { ... }`); see the Java guide's [Kotlin DSL](../guide/java#the-kotlin-dsl).
 
 ### For image generation and vision
 
