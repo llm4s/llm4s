@@ -5,7 +5,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
 
+import org.llm4s.javaapi.CompletionStream;
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
@@ -143,6 +145,28 @@ final class GuideSnippets {
         JAgentResult result = agent.run("What is the weather in Paris?").get();
 
         return result;
+    }
+
+    /** The "Streaming the reply" block (#1485). */
+    static JCompletion streaming(JLlmClient client, Conversation conversation) {
+        JCompletion reply;
+        try (CompletionStream stream = client.stream(conversation, System.out::print).get()) {
+            reply = stream.await().get();
+        }
+        System.out.println();
+
+        Flow.Publisher<String> pieces = client.streamAsPublisher(conversation);
+
+        pieces.subscribe(new PrintingSubscriber());
+        return reply;
+    }
+
+    /** Only for the spec: prints what the publisher sends, as the guide's Reactor or RxJava code would. */
+    static final class PrintingSubscriber implements Flow.Subscriber<String> {
+        public void onSubscribe(Flow.Subscription subscription) { subscription.request(Long.MAX_VALUE); }
+        public void onNext(String piece) { }
+        public void onError(Throwable error) { }
+        public void onComplete() { }
     }
 
     /** The "Structured output" block (#1486). */

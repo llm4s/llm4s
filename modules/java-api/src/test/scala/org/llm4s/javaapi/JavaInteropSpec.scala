@@ -160,6 +160,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JToolHandler],
     classOf[Tool],
     classOf[Param],
+    classOf[CompletionStream],
+    classOf[CompletionStreamListener],
     classOf[JLlmClient],
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
@@ -491,6 +493,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     classOf[JTool],
     classOf[JTool.Builder],
     classOf[JToolArgs],
+    classOf[CompletionStream],
     classOf[JLlmClient],
     classOf[JEmbeddingClient],
     classOf[JCompletionOptions],
@@ -549,9 +552,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   private def internalClasses: Set[String] = Set(
     "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
     "org.llm4s.javaapi.JTools",          // a Java tool's schema, the reading of its arguments and its result (#1484)
-    "org.llm4s.javaapi.JavaRecords",     // a Java record's JSON Schema, and the record read back (#1486)
-    "org.llm4s.javaapi.LlmErrorKinds",   // how LlmException reads an LLMError: its kind, status and retry delay
-    "org.llm4s.javaapi.ClientBuilds"     // what the client builders' build() does with their settings
+    "org.llm4s.javaapi.CompletionPublisher", // the Flow.Publisher of JLlmClient.streamAsPublisher (#1485)
+    "org.llm4s.javaapi.JavaRecords",         // a Java record's JSON Schema, and the record read back (#1486)
+    "org.llm4s.javaapi.LlmErrorKinds",       // how LlmException reads an LLMError: its kind, status and retry delay
+    "org.llm4s.javaapi.ClientBuilds"         // what the client builders' build() does with their settings
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */

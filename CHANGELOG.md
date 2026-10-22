@@ -116,6 +116,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** agent tools defined from Java: `@Tool`/`@Param` methods (`JTool.fromAnnotated`) and lambdas
   (`JTool.builder(...).param(...).handler(...)`), given to `Llm4s.createAgentWithTools`; arguments are read into Java
   values without a JSON library, and a handler's exception is a tool error the model sees [#1484](https://github.com/llm4s/llm4s/issues/1484).
+- **Added** token streaming to the Java facade: `JLlmClient.stream(..., CompletionStreamListener)` returns a
+  cancellable `CompletionStream` (`onPartial`, then `onComplete` or `onError` once), and `streamAsPublisher` a cold
+  `Flow.Publisher<String>` that holds the provider for a slow subscriber [#1485](https://github.com/llm4s/llm4s/issues/1485).
 - **Added** structured output into a Java record: `JLlmClient.complete(query, Record.class)` and the conversation
   overloads derive the record's JSON Schema and read the answer back, with failures naming the field [#1486](https://github.com/llm4s/llm4s/issues/1486).
 - **Added** `llm4s-java-rag` (Experimental), a Java facade for RAG: `JRag.builder()` over a `JEmbeddingClient`, `ingest`
