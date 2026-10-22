@@ -1,7 +1,8 @@
 package org.llm4s.pekko
 
+import org.apache.pekko.Done
 import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.scaladsl.Sink
+import org.apache.pekko.stream.scaladsl.{ Keep, Sink }
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.model.StreamedChunk
@@ -158,6 +159,49 @@ class LLMClientPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     Await.result(LLMClientPekko(counting.client).streamComplete(Fixtures.conversation).runWith(Sink.seq), Patience)
     counting.exited.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true
     Fixtures.awaitCondition(!counting.thread.get.isAlive) shouldBe true
+  }
+
+  it should "materialize a Future[Done] that completes once the provider call has returned" in {
+    val counting = new Fixtures.Counting(3)
+    val (done, chunks) =
+      LLMClientPekko(counting.client).streamComplete(Fixtures.conversation).toMat(Sink.seq)(Keep.both).run()
+    Await.result(chunks, Patience) should have size 3
+    Await.result(done, Patience) shouldBe Done
+    counting.exited.getCount shouldBe 0
+  }
+
+  it should "complete the Future[Done] after a cancellation only once the interrupted call has returned" in {
+    val parks = new Fixtures.ParksAfterFirst
+    val (done, probe) = LLMClientPekko(parks.client)
+      .streamComplete(Fixtures.conversation)
+      .toMat(TestSink[StreamedChunk]())(Keep.both)
+      .run()
+    probe.request(1)
+    probe.within(Patience)(probe.expectNext().id) shouldBe "c1"
+    parks.started.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    done.isCompleted shouldBe false
+    probe.cancel()
+    Await.result(done, Patience) shouldBe Done
+    // the provider has given up by then: its thread is free and nothing is left running
+    parks.exited.getCount shouldBe 0
+    parks.interruptions.get shouldBe 1
+  }
+
+  it should "succeed the Future[Done] when the stream fails" in {
+    val failing = new LLMClientStub((_, _, _) => Left(NetworkError("down", None, "http://x")))
+    val (done, chunks) =
+      LLMClientPekko(failing).streamComplete(Fixtures.conversation).toMat(Sink.seq)(Keep.both).run()
+    Await.result(chunks.failed, Patience) shouldBe a[LLMException]
+    Await.result(done, Patience) shouldBe Done
+  }
+
+  it should "complete the Future[Done] at once for a buffer below 1" in {
+    val (done, chunks) = LLMClientPekko(chunksClient(2))
+      .streamComplete(Fixtures.conversation, bufferSize = 0)
+      .toMat(Sink.seq)(Keep.both)
+      .run()
+    Await.result(chunks.failed, Patience) shouldBe a[LLMException]
+    Await.result(done, Patience) shouldBe Done
   }
 
   it should "call the provider once per materialization, and only when materialized" in {

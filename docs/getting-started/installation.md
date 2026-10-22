@@ -83,6 +83,8 @@ snippets below show `llm4s-core` only; add the provider module the same way, wit
 
 ```
 
+For Java, the [Maven quick start](maven) has a complete `pom.xml` for `llm4s-java-api_3`.
+
 ### Gradle (Kotlin DSL)
 
 Gradle does **not** resolve Scala cross-version suffixes automatically — you must append the `_3` suffix explicitly (LLM4S is Scala 3 only):
@@ -505,6 +507,7 @@ The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency 
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersion  // Java facade
+libraryDependencies += "org.llm4s" %% "llm4s-java-rag"             % llm4sVersion  // Java facade for RAG (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
@@ -513,7 +516,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersio
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
 [`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
-`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect`,
+`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-java-rag` puts `llm4s-rag`'s
+pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a separate artifact so that a Java
+facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-effect`,
 `llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
 
 ### For Kotlin (coroutines and Flow)
@@ -605,6 +610,16 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVer
 writes, event logs and run claims - in one SQLite file, so a run survives a restart and `recover` continues it
 in a new process. It brings the SQLite JDBC driver (`org.xerial:sqlite-jdbc`), which `llm4s-agent` itself does
 not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-sqlite-store).
+
+### For agent threads shared across machines (PostgreSQL checkpointer)
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-postgres" % llm4sVersion // same version as llm4s-agent
+```
+
+`PostgresCheckpointer` (`org.llm4s.agent.graph.postgres`) keeps the same threads in a PostgreSQL schema that
+runtimes on several machines share, with claims and retention judged by the database's clock. It brings the
+PostgreSQL JDBC driver and HikariCP. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-postgresql-store).
 
 ### For semantic memory in agents
 

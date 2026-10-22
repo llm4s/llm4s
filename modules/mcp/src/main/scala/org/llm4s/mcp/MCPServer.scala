@@ -227,7 +227,9 @@ class MCPServer(
     logger.info(s"Executing tool: $toolName")
     toolMap.get(toolName) match {
       case Some(tool) =>
-        tool.execute(arguments) match {
+        MCPToolCallMeta
+          .fromParams(request.params, request.id)
+          .fold(tool.execute(arguments))(tool.execute(arguments, _)) match {
           case Right(resultJson) =>
             val resultString = resultJson match {
               case ujson.Str(s) => s

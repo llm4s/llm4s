@@ -82,6 +82,9 @@ val reply = for {
 - **A system prompt is always sent.** If the conversation has no system message the client adds
   `You are Claude, a helpful AI assistant.`
 - **Model listing:** the provider can list the models your key can use.
+- **Web search:** `webSearch = true` in a section adds Anthropic's server-side `web_search` tool to every request;
+  the sources the answer cites arrive on `Completion.citations` (see
+  [Web search](../../docs/guide/providers.md#web-search)).
 
 ## Tests
 

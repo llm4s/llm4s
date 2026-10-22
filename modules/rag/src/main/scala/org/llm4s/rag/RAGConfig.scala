@@ -400,13 +400,21 @@ final case class RAGConfig(
    *
    * Example:
    * {{{
+   * import org.llm4s.config.Llm4sConfig
+   * import org.llm4s.model.ModelRegistryService
+   * import org.llm4s.rag.RAG
+   * import org.llm4s.rag.RAG.RAGConfigOps
+   *
+   * // ProviderRegistry.default is a given already.
+   * given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
+   *
    * for {
    *   searchIndex <- PgSearchIndex.fromJdbcUrl(jdbcUrl, user, password)
    *   _           <- searchIndex.initializeSchema()
    *   rag <- RAG.builder()
    *     .withEmbeddings("openai")
    *     .withSearchIndex(searchIndex)
-   *     .build()
+   *     .build
    * } yield rag
    * }}}
    *

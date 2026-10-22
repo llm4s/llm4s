@@ -7,7 +7,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.springframework.beans.factory.support.AbstractBeanDefinition
-import org.springframework.boot.actuate.health.HealthIndicator
+import BootLine.HealthIndicator
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.context.annotation.ImportCandidates
 import org.springframework.boot.test.context.FilteredClassLoader
@@ -41,8 +41,8 @@ object StarterContractSpec {
     @Bean def myOwnClient(): JLlmClient = JLlmClientTestFactory.create(client { () =>
       closes.incrementAndGet(); ()
     })
-    @Bean def myOwnTemplate(c: JLlmClient): LLM4STemplate       = StarterTestSupport.template(c)
-    @Bean def myOwnIndicator(c: JLlmClient): LlmHealthIndicator = StarterTestSupport.indicator(c)
+    @Bean def myOwnTemplate(c: JLlmClient): LLM4STemplate = StarterTestSupport.template(c)
+    @Bean def myOwnIndicator(c: JLlmClient): LlmIndicator = StarterTestSupport.indicator(c)
   }
 }
 
@@ -52,7 +52,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
   private val secret = "sk-SUPER-SECRET-KEY-1234567890"
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[ActuatorAutoConfiguration]))
 
   private def failureText(ctx: AssertableApplicationContext): String = {
     ctx.getStartupFailure should not be null
@@ -79,7 +79,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         ctx.getStartupFailure shouldBe null
         ctx.getBean(classOf[JLlmClient]) should not be null
         ctx.getBean(classOf[LLM4STemplate]) should not be null
-        ctx.getBean(classOf[LlmHealthIndicator]) should not be null
+        ctx.getBean(classOf[LlmIndicator]) should not be null
         val p = ctx.getBean(classOf[Llm4sProperties])
         p.apiKey shouldBe secret
         p.baseUrl shouldBe "https://example.invalid/v1"
@@ -106,7 +106,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         ctx.getStartupFailure shouldBe null
         ctx.getBeansOfType(classOf[JLlmClient]).keySet.asScala shouldBe Set("myOwnClient")
         ctx.getBeansOfType(classOf[LLM4STemplate]).keySet.asScala shouldBe Set("myOwnTemplate")
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).keySet.asScala shouldBe Set("myOwnIndicator")
+        ctx.getBeansOfType(classOf[LlmIndicator]).keySet.asScala shouldBe Set("myOwnIndicator")
       }
   }
 
@@ -115,7 +115,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       ctx.getStartupFailure shouldBe null
       ctx.getBeansOfType(classOf[JLlmClient]).size shouldBe 0
       ctx.getBeansOfType(classOf[LLM4STemplate]).size shouldBe 0
-      ctx.getBeansOfType(classOf[LlmHealthIndicator]).size shouldBe 0
+      ctx.getBeansOfType(classOf[LlmIndicator]).size shouldBe 0
     }
   }
 
@@ -141,18 +141,38 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       .run { ctx =>
         ctx.getStartupFailure shouldBe null
         ctx.getBeansOfType(classOf[LLM4STemplate]).size shouldBe 1
-        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size shouldBe 0
+        ctx.getBeansOfType(classOf[LlmIndicator]).size shouldBe 0
       }
   }
 
   it should "list every auto-configuration in AutoConfiguration.imports, all loadable" in {
     val names =
       ImportCandidates.load(classOf[org.springframework.boot.autoconfigure.AutoConfiguration], getClass.getClassLoader)
+    // By name: each health configuration's indicator extends the HealthIndicator of one Spring Boot line only.
     names.getCandidates.asScala.filter(_.startsWith("org.llm4s.")).toSet shouldBe Set(
-      classOf[Llm4sAutoConfiguration].getName,
-      classOf[LlmActuatorAutoConfiguration].getName,
-      classOf[LlmMetricsAutoConfiguration].getName
+      "org.llm4s.spring.Llm4sAutoConfiguration",
+      "org.llm4s.spring.LlmActuatorAutoConfiguration",
+      "org.llm4s.spring.LlmBoot4ActuatorAutoConfiguration",
+      "org.llm4s.spring.LlmMetricsAutoConfiguration"
     )
+  }
+
+  it should s"register one health indicator, its Spring Boot ${BootLine.Major} one, with both health configurations listed" in {
+    // An application gets every configuration in AutoConfiguration.imports: the other line's must stand aside.
+    new ApplicationContextRunner()
+      .withConfiguration(
+        AutoConfigurations.of(
+          classOf[Llm4sAutoConfiguration],
+          classOf[LlmActuatorAutoConfiguration],
+          classOf[LlmBoot4ActuatorAutoConfiguration]
+        )
+      )
+      .withPropertyValues("llm4s.provider=ollama", "llm4s.model=llama3")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[HealthIndicator]).keySet.asScala shouldBe Set("llmHealthIndicator")
+        ctx.getBean("llmHealthIndicator") shouldBe a[LlmIndicator]
+      }
   }
 
   "LlmMetricsAutoConfiguration" should "be ordered after Boot's MeterRegistry configurations and before the client" in {
@@ -162,19 +182,13 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       classOf[org.springframework.boot.autoconfigure.AutoConfiguration]
     )
     meta.before().toSeq should contain(classOf[Llm4sAutoConfiguration])
-    (meta.afterName().toSeq should contain).allOf(
-      classOf[org.springframework.boot.actuate.autoconfigure.metrics.MetricsAutoConfiguration].getName,
-      classOf[org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration].getName,
-      classOf[
-        org.springframework.boot.actuate.autoconfigure.metrics.`export`.simple.SimpleMetricsExportAutoConfiguration
-      ].getName
-    )
+    (meta.afterName().toSeq should contain).allElementsOf(BootLine.meterRegistryAutoConfigurations.map(_.getName))
   }
 
-  "LlmActuatorAutoConfiguration" should "be ordered after Llm4sAutoConfiguration, so the client bean is already defined" in {
+  s"The Spring Boot ${BootLine.Major} health configuration" should "be ordered after Llm4sAutoConfiguration, so the client bean is already defined" in {
     // The alphabetical default order already happens to put Llm4s first, so only the declared
     // ordering protects @ConditionalOnBean(JLlmClient) if either class is ever renamed.
-    val meta = classOf[LlmActuatorAutoConfiguration].getAnnotation(
+    val meta = classOf[ActuatorAutoConfiguration].getAnnotation(
       classOf[org.springframework.boot.autoconfigure.AutoConfiguration]
     )
     meta.after().toSeq should contain(classOf[Llm4sAutoConfiguration])
@@ -272,7 +286,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       .run { ctx =>
         (ctx.getBean(classOf[Llm4sProperties]).toString should not).include(secret)
         (ctx.getBean(classOf[JLlmClient]).toString should not).include(secret)
-        val details = ctx.getBean(classOf[LlmHealthIndicator]).health().getDetails.asScala.values.map(_.toString)
+        val details = ctx.getBean(classOf[LlmIndicator]).health().getDetails.asScala.values.map(_.toString)
         details.exists(_.contains(secret)) shouldBe false
       }
     val p = new Llm4sProperties

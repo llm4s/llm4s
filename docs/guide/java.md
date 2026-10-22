@@ -596,8 +596,8 @@ text or purpose is a failed result of kind `VALIDATION`, and an interrupt one of
 response has the kind of its HTTP status - `401` reads as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as
 `VALIDATION`, any other as `SERVICE`, with `getStatusCode()`. A provider that cannot be reached is `NETWORK`, and one
 that does not answer in time `TIMEOUT`; any other failure with no status, such as a reply that cannot be read, is
-`OTHER`. A vector store to keep the vectors in and search them is
-[#1491](https://github.com/llm4s/llm4s/issues/1491).
+`OTHER`. To keep the vectors in a store, search them and answer questions from what they find, see
+[Java RAG](java-rag) (`llm4s-java-rag`).
 
 ## Testing your code
 
@@ -654,10 +654,10 @@ available from Java yet, each with the issue that tracks it:
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
 | Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
-| A vector store and RAG | [Embeddings](#embeddings) are here; storing and searching them is [#1491](https://github.com/llm4s/llm4s/issues/1491) |
 
 ## Where next
 
+- [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.
 - [Spring Boot](spring-boot): auto-configuration, a template bean and a health indicator on top of this module.
 - [Basic usage](basic-usage) and [providers](providers): the same concepts in Scala, and every provider's configuration.
 - [Gradle integration](../getting-started/gradle): dependency recipes for Gradle builds.

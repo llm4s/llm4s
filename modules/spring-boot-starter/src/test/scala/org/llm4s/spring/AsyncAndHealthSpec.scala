@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.{ Health, Status }
+import BootLine.{ Health, Status }
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.{ Bean, Configuration }
@@ -108,7 +108,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
   private val secret = "sk-TOPSECRET-1234567890abcdef"
 
   private val runner = new ApplicationContextRunner()
-    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[LlmActuatorAutoConfiguration]))
+    .withConfiguration(AutoConfigurations.of(classOf[Llm4sAutoConfiguration], classOf[ActuatorAutoConfiguration]))
     .withPropertyValues("llm4s.provider=ollama", "llm4s.model=m")
 
   private def withPool[A](p: ExecutorService)(f: ExecutorService => A): A =
@@ -301,7 +301,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     clock: AtomicLong = new AtomicLong(0),
     ttl: Duration = Duration.ofSeconds(60),
     timeout: Duration = Duration.ofSeconds(5)
-  ) = new LlmHealthIndicator(
+  ) = new LlmIndicator(
     provider.client,
     HealthSettings("openai", "gpt-4o", probe, ttl, timeout, Seq(secret)),
     ex,
@@ -377,7 +377,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     val plain    = "correct-horse-battery"
     val provider = new FakeProvider(_ => Left(APIError("openai", s"rejected credential $plain")))
     withPool(pool(1)) { ex =>
-      val ind = new LlmHealthIndicator(
+      val ind = new LlmIndicator(
         provider.client,
         HealthSettings("openai", "gpt-4o", true, Duration.ofSeconds(60), Duration.ofSeconds(5), Seq(plain)),
         ex
@@ -516,7 +516,7 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
         p.health.probe shouldBe true
         p.health.probeTtl shouldBe Duration.ofMinutes(5)
         p.health.probeTimeout shouldBe Duration.ofSeconds(2)
-        val ind = ctx.getBean(classOf[LlmHealthIndicator])
+        val ind = ctx.getBean(classOf[LlmIndicator])
         (1 to 5).foreach(_ => ind.health().getStatus shouldBe Status.UP)
         ProbeClientConfig.provider.calls.get shouldBe 1
       }
