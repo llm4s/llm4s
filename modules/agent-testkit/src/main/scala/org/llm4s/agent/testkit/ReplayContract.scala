@@ -174,6 +174,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
       limit: Int
     ) =
       alive(underlying.incompleteThreads(tenantId, after, limit))
+    def latestOfRuns(threadId: ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      alive(underlying.latestOfRuns(threadId, runIds))
     def sweep(
       policy: org.llm4s.agent.graph.SweepPolicy,
       after: Option[org.llm4s.agent.graph.ThreadId],
@@ -229,6 +231,8 @@ trait ReplayContract extends AnyFlatSpecLike with Matchers with EitherValues wit
       limit: Int
     ) =
       underlying.incompleteThreads(tenantId, after, limit)
+    def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      underlying.latestOfRuns(threadId, runIds)
     def sweep(
       policy: org.llm4s.agent.graph.SweepPolicy,
       after: Option[org.llm4s.agent.graph.ThreadId],

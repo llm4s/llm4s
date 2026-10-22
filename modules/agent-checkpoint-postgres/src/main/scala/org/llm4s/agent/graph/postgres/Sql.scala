@@ -132,8 +132,8 @@ private[postgres] object Sql:
     s"SELECT COALESCE(MAX(position) + 1, 0) FROM ${t.history} WHERE thread_id = ?"
 
   def insertHistory(t: Tables): String =
-    s"""INSERT INTO ${t.history} (thread_id, position, checkpoint_id, status, committed_at, checkpoint_json)
-       |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+    s"""INSERT INTO ${t.history} (thread_id, position, checkpoint_id, status, committed_at, checkpoint_json, run_id)
+       |VALUES (?, ?, ?, ?, ?, ?, ?)""".stripMargin
 
   /** A blocked turn retracted back to the newest settled checkpoint (statuses bound as the 3rd and 4th parameters). */
   def retract(t: Tables): String =
@@ -151,12 +151,52 @@ private[postgres] object Sql:
   def positionById(t: Tables): String = s"SELECT position FROM ${t.history} WHERE thread_id = ? AND checkpoint_id = ?"
 
   /**
-   * The history oldest first, with each checkpoint's commit time: what `prune` decides on; and the run that committed
-   * each when `withRuns` (a sweep's protected thread), empty otherwise.
+   * The history oldest first, with each checkpoint's commit time and the run that committed it (`run_id`, NULL for a
+   * row whose JSON could not be read when it was backfilled): what `prune` and a sweep decide on.
    */
-  def historyAges(t: Tables, withRuns: Boolean = false): String =
-    val run = if withRuns then "checkpoint_json::json ->> 'runId'" else "''"
-    s"SELECT position, checkpoint_id, committed_at, $run FROM ${t.history} WHERE thread_id = ? ORDER BY position"
+  def historyAges(t: Tables): String =
+    s"SELECT position, checkpoint_id, committed_at, run_id FROM ${t.history} WHERE thread_id = ? ORDER BY position"
+
+  /**
+   * The run-id lookup (design 4.55): the newest checkpoint any of the runs bound first (a `text[]`) committed on the
+   * thread bound second - one backwards probe of the `(thread_id, run_id, position)` index per run.
+   */
+  def latestOfRuns(t: Tables): String =
+    s"""SELECT h.checkpoint_json FROM unnest(?::text[]) AS r(run_id)
+       |CROSS JOIN LATERAL (
+       |  SELECT position, checkpoint_json FROM ${t.history}
+       |  WHERE thread_id = ? AND run_id = r.run_id ORDER BY position DESC LIMIT 1) h
+       |ORDER BY h.position DESC LIMIT 1""".stripMargin
+
+  /** Marks the thread's open queue entries as having outlived their thread: `deleteThread`, in its transaction. */
+  def queueThreadDeleted(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET thread_deleted = true WHERE thread_id = ? AND state = 'open'"
+
+  /**
+   * A queue entry's attempt, as run `?` on thread `?`, recorded before a delete of the thread marked the entry: fenced
+   * until the entry is reclaimed, open or closed, since its worker may still hold a claim taken before the close.
+   */
+  def orphanedAttempt(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueAttempts} a JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id
+       |WHERE a.thread_id = ? AND a.run_id = ? AND e.thread_deleted LIMIT 1""".stripMargin
+
+  /** Marks every open entry that recorded run `?` (bound second) on thread `?` as admitted: in a commit's transaction. */
+  def admitAttempt(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET admitted = true
+       |WHERE state = 'open' AND NOT admitted AND entry_id IN (
+       |  SELECT entry_id FROM ${t.queueAttempts} WHERE thread_id = ? AND run_id = ?)""".stripMargin
+
+  /** Whether a run id already names a checkpoint or a queue attempt on the thread (bound twice). */
+  def runIdUsed(t: Tables): String =
+    s"""SELECT EXISTS (SELECT 1 FROM ${t.queueAttempts} WHERE thread_id = ? AND run_id = ?)
+       |    OR EXISTS (SELECT 1 FROM ${t.history} WHERE thread_id = ? AND run_id = ?)""".stripMargin
+
+  /** The positions `prune` keeps for open queue entries: the newest checkpoint of each run they recorded on the thread. */
+  def queueEvidence(t: Tables): String =
+    s"""SELECT MAX(h.position) FROM ${t.history} h
+       |JOIN ${t.queueAttempts} a ON a.thread_id = h.thread_id AND a.run_id = h.run_id
+       |JOIN ${t.queueEntries} e ON e.entry_id = a.entry_id AND e.state = 'open'
+       |WHERE h.thread_id = ? GROUP BY h.run_id""".stripMargin
 
   def deleteHistoryAt(t: Tables): String = s"DELETE FROM ${t.history} WHERE thread_id = ? AND position = ?"
 
@@ -230,3 +270,108 @@ private[postgres] object Sql:
     s"""SELECT checkpoint_json FROM ${t.threads}
        |WHERE parent_thread_id = ? AND child_order > ? AND checkpoint_json IS NOT NULL
        |ORDER BY child_order LIMIT ?""".stripMargin
+
+  // ---- the run queue (design 4.55) ----
+
+  private def queueColumns: String = PostgresRunQueue.Columns
+
+  /** A thread's open entries in the order they run (rule 5): attempted first, then `Interrupt` entries, then by id. */
+  val QueueRunOrder: String = "(attempt_count = 0), is_interrupt DESC, entry_id"
+
+  /** The head of `e`'s thread, as a correlated subquery. */
+  def queueHeadOf(t: Tables): String =
+    s"""SELECT h.entry_id FROM ${t.queueEntries} h WHERE h.thread_id = e.thread_id AND h.state = 'open'
+       |ORDER BY $QueueRunOrder LIMIT 1""".stripMargin
+
+  /** Another open entry of `e`'s thread holding a live lease at the time bound, as a correlated subquery. */
+  def queueLiveSibling(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueEntries} o WHERE o.thread_id = e.thread_id AND o.state = 'open' AND o.entry_id <> e.entry_id
+       |  AND o.lease_token IS NOT NULL AND o.lease_expires_at > ?""".stripMargin
+
+  def queueEntry(t: Tables): String       = s"SELECT $queueColumns FROM ${t.queueEntries} WHERE entry_id = ?"
+  def lockedQueueEntry(t: Tables): String = s"${queueEntry(t)} FOR UPDATE"
+  def queueEntryThread(t: Tables): String = s"SELECT thread_id FROM ${t.queueEntries} WHERE entry_id = ?"
+
+  def queueEntryByKey(t: Tables): String =
+    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE key_scope = ? AND submission_key = ? FOR UPDATE"
+
+  def openQueueEntries(t: Tables): String =
+    s"SELECT $queueColumns FROM ${t.queueEntries} WHERE thread_id = ? AND state = 'open' ORDER BY $QueueRunOrder"
+
+  def nextQueueEntryId(t: Tables): String = s"SELECT nextval('${t.queueEntryIds}')"
+  def nextLeaseToken(t: Tables): String   = s"SELECT nextval('${t.queueLeaseTokens}')"
+
+  def issuedQueueEntries(t: Tables): String =
+    s"SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM ${t.queueEntryIds}"
+
+  def insertQueueEntry(t: Tables): String =
+    s"""INSERT INTO ${t.queueEntries}
+       |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
+       | max_attempts, attempt_count, submitted_at, thread_deleted, admitted, state)
+       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open')""".stripMargin
+
+  /**
+   * Candidate heads for `take` past entry id `?` (the agents, the time, that id, then the time again), skipping rows
+   * another worker holds.
+   */
+  def queueCandidates(t: Tables): String =
+    s"""SELECT e.entry_id, e.thread_id FROM ${t.queueEntries} e
+       |WHERE e.state = 'open' AND e.agent_id = ANY(?) AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND e.entry_id > ?
+       |  AND e.entry_id = (${queueHeadOf(t)})
+       |  AND NOT EXISTS (${queueLiveSibling(t)})
+       |ORDER BY e.entry_id
+       |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
+
+  /** Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock. */
+  def queueTakeable(t: Tables): String =
+    s"""SELECT 1 FROM ${t.queueEntries} e
+       |WHERE e.entry_id = ? AND e.state = 'open' AND (e.lease_token IS NULL OR e.lease_expires_at <= ?)
+       |  AND e.entry_id = (${queueHeadOf(t)})
+       |  AND NOT EXISTS (${queueLiveSibling(t)})""".stripMargin
+
+  def siblingLeases(t: Tables): String =
+    s"""SELECT lease_expires_at FROM ${t.queueEntries}
+       |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL FOR UPDATE""".stripMargin
+
+  def endSiblingLeases(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL
+       |WHERE thread_id = ? AND state = 'open' AND entry_id <> ? AND lease_token IS NOT NULL""".stripMargin
+
+  def setLease(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET lease_holder = ?, lease_token = ?, lease_expires_at = ? WHERE entry_id = ?"
+
+  def renewLease(t: Tables): String = s"UPDATE ${t.queueEntries} SET lease_expires_at = ? WHERE entry_id = ?"
+
+  def releaseLease(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?"
+
+  def insertQueueAttempt(t: Tables): String =
+    s"""INSERT INTO ${t.queueAttempts} (entry_id, attempt, thread_id, run_id, started_at, holder)
+       |VALUES (?, ?, ?, ?, ?, ?)""".stripMargin
+
+  def countQueueAttempt(t: Tables): String =
+    s"UPDATE ${t.queueEntries} SET attempt_count = attempt_count + 1 WHERE entry_id = ?"
+
+  def queueAttemptsOf(t: Tables): String =
+    s"SELECT run_id, started_at, holder FROM ${t.queueAttempts} WHERE entry_id = ? ORDER BY attempt"
+
+  /** Closes entry `?` (state, outcome and time bound first), recording the thread's last event number then. */
+  def closeQueueEntry(t: Tables): String =
+    s"""UPDATE ${t.queueEntries} e
+       |SET state = ?, outcome_json = ?, closed_at = ?, lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL,
+       |  closed_seq = COALESCE((SELECT th.next_seq - 1 FROM ${t.threads} th WHERE th.thread_id = e.thread_id), 0)
+       |WHERE entry_id = ?""".stripMargin
+
+  /** [[closeQueueEntry]], only while the entry is open with no attempt (checked on the locked row). */
+  def closeUnstartedQueueEntry(t: Tables): String = s"${closeQueueEntry(t)} AND state = 'open' AND attempt_count = 0"
+
+  def reclaimableQueueEntries(t: Tables): String =
+    s"""SELECT entry_id FROM ${t.queueEntries} WHERE state <> 'open' AND closed_at <= ?
+       |ORDER BY closed_at, entry_id LIMIT ? FOR UPDATE SKIP LOCKED""".stripMargin
+
+  def deleteQueueAttempts(t: Tables): String =
+    s"DELETE FROM ${t.queueAttempts} WHERE entry_id = ANY(?::text[]::bigint[])"
+
+  def deleteQueueEntries(t: Tables): String =
+    s"DELETE FROM ${t.queueEntries} WHERE entry_id = ANY(?::text[]::bigint[])"

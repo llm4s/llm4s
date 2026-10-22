@@ -80,6 +80,9 @@ import scala.util.Try
  *    the thread registry (design 4.52) - by their latest checkpoint, their claim judged by the store's clock, and when
  *    the store last committed a checkpoint or metadata to them, by that clock, never one of another tenant, a child
  *    thread, one with no checkpoint, or one [[deleteThread]] removed;
+ *  - answer [[latestOfRuns]] - the newest checkpoint any of a set of runs committed on a thread, the run-id lookup
+ *    a run queue's entry classifies its attempts by (Stage 5 rule 4, design 4.55) - by an index on the run, and keep
+ *    the checkpoint it answers with through [[prune]] while an open entry of the store's run queue names that run;
  *  - visit every thread it holds, tombstones included, through [[sweep]], a bounded page at a time, pruning each as
  *    [[prune]] does and reclaiming old tombstones, but never what the sweep's [[org.llm4s.agent.graph.SweepGuard SweepGuard]] protects;
  *  - return from every call within a bound it documents (#1919) - see below.
@@ -287,6 +290,20 @@ trait Checkpointer:
   def incompleteThreads(tenantId: Option[TenantId], after: Option[ThreadCursor], limit: Int): Result[ThreadPage]
 
   /**
+   * The run-id lookup (Stage 5 rule 4, design 4.55): the newest checkpoint in `threadId`'s history whose
+   * [[org.llm4s.agent.graph.Checkpoint!.runId Checkpoint.runId]] is one of `runIds`, or `None` if none of them committed one that is still kept -
+   * none of them was admitted, or the thread was deleted since. A run queue's attempt asks it with the
+   * [[org.llm4s.agent.graph.RunId RunId]]s its entry recorded, before it touches the thread, to learn whether the entry's input was
+   * admitted, whatever ran on the thread since: the thread's latest checkpoint alone cannot say, because a direct
+   * run after the attempt died would have replaced it. Newest is by place in the history, not by `createdAt`.
+   *
+   * A store answers it by an index on the thread and run, within its bound, however long the history; an empty
+   * `runIds` is `Right(None)`. While an open entry of the store's run queue names a run, [[prune]] keeps the newest
+   * checkpoint that run committed, so the lookup never loses the evidence an open entry depends on. Needs no claim.
+   */
+  def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]]
+
+  /**
    * The store-wide retention sweep (design 4.53): one bounded page of the threads the store holds, tombstones
    * included, in an order of the store's own that every call follows - the threads after `after` in it, whether or not
    * the store still holds `after`, at most `policy.batchSize` of them - with the next page's cursor when more follow.
@@ -300,7 +317,8 @@ trait Checkpointer:
    *  - its history is pruned by `policy.retention` exactly as [[prune]] prunes it, judged by the store's clock against
    *    the store's commit times - except that, of a protected thread, the newest checkpoint each of its protected
    *    `RunId`s committed (`Checkpoint.runId`) is kept as well, whatever the policy, while the rest is pruned as usual
-   *    and the events' floor follows the policy alone;
+   *    and the events' floor follows the policy alone; and so, as [[prune]] does, is the newest checkpoint each run an
+   *    open entry of the store's run queue recorded committed (design 4.55), whatever the guard answers;
    *  - its tombstone ([[deleteThread]]) is reclaimed - removed, with the place it kept among its parent's children -
    *    when `policy.tombstoneAge` is set, the store last deleted the thread more than that long ago by its clock,
    *    nothing has been stored under the id since, and the thread is not protected. Reclaiming raises the store's
@@ -398,7 +416,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     json: ujson.Value,
     tenant: Option[String],
     graphId: String,
-    deleting: Boolean
+    deleting: Boolean,
+    /** Its place in the thread's history: increasing along the thread, also across a retraction. */
+    position: Long
   )
 
   final private case class ThreadRecord(
@@ -420,6 +440,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     metadata: ThreadMetadata = ThreadMetadata.empty,
     /** When the store last committed a checkpoint or metadata to the thread, by its clock; a delete removes it. */
     updatedAt: Instant = Instant.EPOCH,
+    /** The newest checkpoint of each run in `history`: the run-id lookup's index (design 4.55). */
+    runs: Map[String, Stored] = Map.empty,
     /** When the store last deleted a thread of the id, by its clock: the tombstone's age (design 4.53). */
     deletedAt: Option[Instant] = None
   ):
@@ -456,6 +478,19 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   /** Signalled, under `lock`, whenever a commit appends events or a thread is deleted. */
   private val appended = lock.newCondition()
+
+  /**
+   * The store's run queue (design 4.55), in the same memory as its checkpoints and under the same lock: its open
+   * entries learn of their thread's deletion in [[deleteThread]], under the lock the delete is made under, and
+   * [[prune]] keeps the newest checkpoint of every run an open entry of it recorded.
+   */
+  val runQueue: org.llm4s.agent.service.InMemoryRunQueue =
+    new org.llm4s.agent.service.InMemoryRunQueue(
+      clock,
+      lock,
+      (threadId, runId) => withLock(lock)(record(threadId).runs.contains(runId.value)),
+      threadId => withLock(lock)(record(threadId).nextSeq - 1)
+    )
 
   private def record(threadId: ThreadId): ThreadRecord =
     threads.getOrElse(
@@ -504,6 +539,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
 
   private def stale(threadId: ThreadId, current: ThreadRecord, token: FencingToken): GraphError =
     GraphError.StaleClaim(threadId.value, token, current.claim.map(c => FencingToken(c.token)))
+
+  /** The newest checkpoint of each run in `history`, oldest first. */
+  private def indexed(history: Vector[Stored]): Map[String, Stored] = history.iterator.map(s => s.runId -> s).toMap
 
   private def settled(status: CheckpointStatus): Boolean =
     status == CheckpointStatus.Completed || status == CheckpointStatus.Failed
@@ -569,42 +607,55 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
-      // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
-      // records handed back can alias what is durable
-      val committedAt = clock.instant()
-      val stored = commit.events.zipWithIndex.map { (draft, i) =>
-        val seq = current.nextSeq + i
-        (seq, upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft)), committedAt)
-      }
-      val records = stored.map((_, json, _) => upickle.default.read[EventRecord](json))
-      val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
-      // a blocked turn is retracted back to the newest settled checkpoint, which stays
-      val kept =
-        if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
-        else current.history
-      val added = commit.checkpoint.map { c =>
-        Stored(c.id, c.runId, c.status, committedAt, Checkpoint.toJson(c), c.tenantId, c.snapshot.graphId, c.deleting)
-      }
-      // released before this commit's own records are applied
-      val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
-        commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
-      store(
-        threadId,
-        current.copy(
-          effects = effects,
-          history = kept ++ added,
-          pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
-          events = current.events ++ stored,
-          nextSeq = current.nextSeq + stored.size,
-          child = commit.checkpoint.fold(current.child)(placed(threadId, current, _)),
-          metadata = commit.metadata.getOrElse(current.metadata),
-          updatedAt =
-            if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
+    // a queued attempt recorded before a delete never writes to the id again, whatever thread holds it (design 4.55)
+    val orphaned =
+      commit.checkpoint.filter(c => runQueue.orphaned(threadId, RunId(c.runId))).map { checkpoint =>
+        invalid(
+          s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )
-      )
-      if stored.nonEmpty then appended.signalAll()
-      records
+      }
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).orElse(orphaned).toLeft(()).map {
+      _ =>
+        // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
+        // records handed back can alias what is durable
+        val committedAt = clock.instant()
+        val stored = commit.events.zipWithIndex.map { (draft, i) =>
+          val seq = current.nextSeq + i
+          (seq, upickle.default.writeJs(EventRecord.committed(threadId.value, seq, commit.token, draft)), committedAt)
+        }
+        val records = stored.map((_, json, _) => upickle.default.read[EventRecord](json))
+        val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
+        // a blocked turn is retracted back to the newest settled checkpoint, which stays
+        val kept =
+          if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
+          else current.history
+        val position = current.history.lastOption.fold(0L)(_.position + 1)
+        val added = commit.checkpoint.map { c =>
+          val json = Checkpoint.toJson(c)
+          Stored(c.id, c.runId, c.status, committedAt, json, c.tenantId, c.snapshot.graphId, c.deleting, position)
+        }
+        // released before this commit's own records are applied
+        val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
+          commit.effects.map(r => r.key.value -> StoredEffect(r.taskId, r.lineage, EffectRecord.toJson(r)))
+        store(
+          threadId,
+          current.copy(
+            effects = effects,
+            history = kept ++ added,
+            runs = if commit.retractTurn then indexed(kept ++ added) else current.runs ++ added.map(s => s.runId -> s),
+            pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
+            events = current.events ++ stored,
+            nextSeq = current.nextSeq + stored.size,
+            child = commit.checkpoint.fold(current.child)(placed(threadId, current, _)),
+            metadata = commit.metadata.getOrElse(current.metadata),
+            updatedAt =
+              if commit.checkpoint.isDefined || commit.metadata.isDefined then committedAt else current.updatedAt
+          )
+        )
+        // an open queue entry whose attempt this is was admitted, whatever a later retraction removes (design 4.55)
+        commit.checkpoint.foreach(c => runQueue.committed(threadId, RunId(c.runId)))
+        if stored.nonEmpty then appended.signalAll()
+        records
     }
   }
 
@@ -655,8 +706,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         val now    = clock.instant()
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
         // by when each was committed, never by its producer's own timestamp
+        // an open queue entry's admission evidence (rule 4, design 4.55) is protected as the sweep's guard's runs are
+        val queued = runQueue.keptRuns(threadId).map(RunId(_))
         val (byPolicy, evidence) =
-          RetentionSweep.kept(current.history, policy, cutoff, _.committedAt, _.runId, protectedRuns)
+          RetentionSweep.kept(current.history, policy, cutoff, _.committedAt, _.runId, protectedRuns ++ queued)
         val keptIds = byPolicy.map(_.id).toSet
         val events  = current.events.map((seq, json, at) => (seq, upickle.default.read[EventRecord](json), at))
         // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
@@ -673,6 +726,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           threadId,
           current.copy(
             history = current.history.filter(c => kept(c.id)),
+            runs = indexed(current.history.filter(c => kept(c.id))),
             events = current.events.filter(_._1 >= floor),
             earliestSeq = floor
           )
@@ -741,6 +795,13 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       case Right(result)     => result
       case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
 
+  def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]] = withLock(lock) {
+    val runs = record(threadId).runs
+    runIds.iterator.flatMap(run => runs.get(run.value)).maxByOption(_.position) match
+      case None         => Right(None)
+      case Some(stored) => Checkpoint.fromJson(stored.json).map(Some(_))
+  }
+
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = withLock(lock) {
     val current = record(threadId)
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
@@ -763,7 +824,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       })
     refused match
       case Some(error) => Left(error)
-      case None        =>
+      case None =>
+        runQueue.threadDeleted(threadId)
         // a tombstone: nothing of the thread but where its numbering ended, so a new thread of the id
         // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
         // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
@@ -775,6 +837,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
             threadId,
             current.copy(
               history = Vector.empty,
+              runs = Map.empty,
               pendingWrites = Vector.empty,
               claim = None,
               effects = Map.empty,

@@ -86,11 +86,11 @@ final class PostgresCheckpointer private (
 
   import PostgresCheckpointer.*
 
-  private val t                  = PostgresSchema.Tables(config.schema)
-  @volatile private var shut     = false
-  private given ErrorContext     = ErrorContext(config.schema)
-  private val callTimeout        = config.callTimeout
-  private val transactionSetting = settings(callTimeout)
+  private[postgres] val t                            = PostgresSchema.Tables(config.schema)
+  @volatile private var shut                         = false
+  private[postgres] given errorContext: ErrorContext = ErrorContext(config.schema)
+  private val callTimeout                            = config.callTimeout
+  private val transactionSetting                     = settings(callTimeout)
   private val notifier = new ChangeNotifier(
     ChangeNotifier.channelFor(config.schema),
     listenerConnection(dataSource, config),
@@ -171,60 +171,74 @@ final class PostgresCheckpointer private (
     }
     val unanchored =
       Option.when(commit.retractTurn && commit.checkpoint.isEmpty)(invalid("retractTurn needs a new checkpoint"))
-    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).toLeft(()).map { _ =>
-      // a thread with a claim always has a row
-      val row = current.getOrElse(throw new IllegalStateException("a claimed thread has no row"))
-      // what retention judges age by: the database's clock, never the producer's timestamps (rule 1)
-      val committedAt =
-        if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
-        else Instant.EPOCH
-      commit.checkpoint.foreach(writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, _))
-      appendWrites(c, threadId, commit.pendingWrites)
-      // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
-      commit.metadata.foreach { metadata =>
-        update(
-          c,
-          Sql.setMetadata(t),
-          Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
-          committedAt,
-          threadId.value
+    // a queued attempt recorded before a delete never writes to the id again (design 4.55); the thread's row is
+    // locked, and a delete locks it too, so the delete's marks are seen
+    def orphaned = commit.checkpoint
+      .filter(c0 => query(c, Sql.orphanedAttempt(t), threadId.value, c0.runId)(_ => ()).nonEmpty)
+      .map(checkpoint =>
+        invalid(
+          s"run ${checkpoint.runId} is an attempt of a queue entry whose thread was deleted after it was recorded"
         )
-      }
-      // released before this commit's own records are applied
-      if commit.checkpoint.isDefined then
-        query(c, Sql.effectTasks(t), threadId.value)(rows =>
-          (rows.getString(1), TaskId(rows.getString(2)), rows.getString(3))
-        ).filter((_, task, lineage) => commit.releasesEffect(task, lineage)).foreach { (key, _, _) =>
-          update(c, Sql.deleteEffect(t), threadId.value, key)
+      )
+    fenced.orElse(conflict).orElse(duplicate).orElse(misdirected).orElse(unanchored).orElse(orphaned).toLeft(()).map {
+      _ =>
+        // a thread with a claim always has a row
+        val row = current.getOrElse(throw new IllegalStateException("a claimed thread has no row"))
+        // what retention judges age by: the database's clock, never the producer's timestamps (rule 1)
+        val committedAt =
+          if commit.checkpoint.isDefined || commit.events.nonEmpty || commit.metadata.isDefined then clockNow(c)
+          else Instant.EPOCH
+        commit.checkpoint.foreach { checkpoint =>
+          writeCheckpoint(c, threadId, row, commit.retractTurn, committedAt, checkpoint)
+          // an open queue entry whose attempt this is was admitted, whatever a later retraction removes (design 4.55)
+          update(c, Sql.admitAttempt(t), threadId.value, checkpoint.runId)
         }
-      commit.effects.foreach { record =>
-        update(
-          c,
-          Sql.upsertEffect(t),
-          threadId.value,
-          record.key.value,
-          record.taskId.value,
-          record.lineage,
-          commit.token.value,
-          ujson.write(EffectRecord.toJson(record))
-        )
-      }
-      val stored = commit.events.zipWithIndex.map { (draft, i) =>
-        val seq = row.nextSeq + i
-        (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
-      }
-      if stored.nonEmpty then
-        Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
-          stored.foreach { (seq, draft, json) =>
-            bind(insert, threadId.value, seq, draft.checkpointId, committedAt, json)
-            insert.addBatch()
+        appendWrites(c, threadId, commit.pendingWrites)
+        // the registry's metadata (schema 2): empty is kept as none, so an emptied row can go
+        commit.metadata.foreach { metadata =>
+          update(
+            c,
+            Sql.setMetadata(t),
+            Option.unless(metadata.isEmpty)(ujson.write(metadata.toJson)),
+            committedAt,
+            threadId.value
+          )
+        }
+        // released before this commit's own records are applied
+        if commit.checkpoint.isDefined then
+          query(c, Sql.effectTasks(t), threadId.value)(rows =>
+            (rows.getString(1), TaskId(rows.getString(2)), rows.getString(3))
+          ).filter((_, task, lineage) => commit.releasesEffect(task, lineage)).foreach { (key, _, _) =>
+            update(c, Sql.deleteEffect(t), threadId.value, key)
           }
-          insert.executeBatch(): Unit
+        commit.effects.foreach { record =>
+          update(
+            c,
+            Sql.upsertEffect(t),
+            threadId.value,
+            record.key.value,
+            record.taskId.value,
+            record.lineage,
+            commit.token.value,
+            ujson.write(EffectRecord.toJson(record))
+          )
         }
-        update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
-        notifyCommit(c, threadId)
-      // handed back decoded from what was stored, as a later read would see them
-      stored.map((_, _, json) => upickle.default.read[EventRecord](json))
+        val stored = commit.events.zipWithIndex.map { (draft, i) =>
+          val seq = row.nextSeq + i
+          (seq, draft, upickle.default.write(EventRecord.committed(threadId.value, seq, commit.token, draft)))
+        }
+        if stored.nonEmpty then
+          Using.resource(c.prepareStatement(Sql.insertEvent(t))) { insert =>
+            stored.foreach { (seq, draft, json) =>
+              bind(insert, threadId.value, seq, draft.checkpointId, committedAt, json)
+              insert.addBatch()
+            }
+            insert.executeBatch(): Unit
+          }
+          update(c, Sql.setNextSeq(t), row.nextSeq + stored.size, threadId.value)
+          notifyCommit(c, threadId)
+        // handed back decoded from what was stored, as a later read would see them
+        stored.map((_, _, json) => upickle.default.read[EventRecord](json))
     }
   }
 
@@ -261,7 +275,8 @@ final class PostgresCheckpointer private (
       checkpoint.id,
       checkpoint.status.toString,
       committedAt,
-      json
+      json,
+      checkpoint.runId
     )
     update(
       c,
@@ -368,11 +383,14 @@ final class PostgresCheckpointer private (
     val cutoff = policy.maxAge.map(age => clockNow(c).minusNanos(age.toNanos))
     // oldest first: (position, id, committed at, run)
     val history =
-      query(c, Sql.historyAges(t, withRuns = protectedRuns.nonEmpty), threadId.value)(rows =>
+      query(c, Sql.historyAges(t), threadId.value)(rows =>
         (rows.getLong(1), rows.getString(2), instant(rows, 3), Option(rows.getString(4)).getOrElse(""))
       )
     val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
-    val keptPositions    = (kept ++ evidence).map(_._1).toSet
+    // and an open queue entry's admission evidence (rule 4, design 4.55): the newest checkpoint each of its runs
+    // committed, read in this transaction
+    val queued        = query(c, Sql.queueEvidence(t), threadId.value)(_.getLong(1)).toSet
+    val keptPositions = (kept ++ evidence).map(_._1).toSet ++ queued
     history.filterNot(h => keptPositions(h._1)).foreach(h => update(c, Sql.deleteHistoryAt(t), threadId.value, h._1))
     // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
     val byCheckpoint =
@@ -463,6 +481,25 @@ final class PostgresCheckpointer private (
       else if limit <= 0 then Right(Vector.empty)
       else Right(query(c, Sql.eventsAfter(t), threadId.value, afterSeq, limit)(_.getString(1)))
     }.flatMap(rows => decoding("eventsAfter", "event")(rows.map(upickle.default.read[EventRecord](_))))
+
+  def latestOfRuns(threadId: ThreadId, runIds: Set[RunId]): Result[Option[Checkpoint]] =
+    if runIds.isEmpty then Right(None)
+    else
+      reading("latestOfRuns") { c =>
+        query(c, Sql.latestOfRuns(t), runIds.toVector.map(_.value).toArray, threadId.value)(
+          _.getString(1)
+        ).headOption match
+          case None       => Right(None)
+          case Some(json) => decodeCheckpoint("latestOfRuns", json).map(Some(_))
+      }
+
+  /**
+   * The store's run queue (design 4.55), in the same schema and over the same pool as its checkpoints: its open
+   * entries learn of their thread's deletion in [[deleteThread]]'s own transaction, its leases expire by the same
+   * database clock as claims, and [[prune]] keeps the newest checkpoint of every run an open entry recorded. Closing
+   * the store closes it.
+   */
+  lazy val runQueue: org.llm4s.agent.service.RunQueue = new PostgresRunQueue(this)
 
   /**
    * [[eventsAfter]], waiting for a commit when there is nothing to return yet (see `Checkpointer.awaitEventsAfter`). The
@@ -573,6 +610,9 @@ final class PostgresCheckpointer private (
         Vector(t.events, t.pendingWrites, t.history, t.effects).foreach { table =>
           update(c, s"DELETE FROM $table WHERE thread_id = ?", threadId.value)
         }
+        // the thread's open queue entries learn of the delete in its own transaction (design 4.55), so none of them
+        // runs on a new thread of the id, whatever the deleted thread numbered
+        update(c, Sql.queueThreadDeleted(t), threadId.value)
         update(c, Sql.tombstone(t), clockNow(c), threadId.value)
         dropIfEmpty(c, threadId)
         // a reader waiting inside the deleted log is told at once
@@ -599,11 +639,11 @@ final class PostgresCheckpointer private (
   // ---- transactions ----
 
   /** `body` in one read-committed transaction that locks the rows it writes; see [[call]]. */
-  private def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[postgres] def writing[A](operation: String)(body: Connection => Result[A]): Result[A] =
     call(operation, transactionSetting)(body)
 
   /** `body` in one repeatable-read, read-only transaction, so what it reads is one snapshot; see [[call]]. */
-  private def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
+  private[postgres] def reading[A](operation: String)(body: Connection => Result[A]): Result[A] =
     call(operation, s"SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY; $transactionSetting")(body)
 
   /**
@@ -665,7 +705,7 @@ final class PostgresCheckpointer private (
 
   // ---- rows ----
 
-  private def clockNow(c: Connection): Instant = query(c, s"SELECT $clockSql")(instant(_, 1)).head
+  private[postgres] def clockNow(c: Connection): Instant = query(c, s"SELECT $clockSql")(instant(_, 1)).head
 
   private def readRow(c: Connection, threadId: ThreadId, sql: String): Option[Row] =
     query(c, sql, threadId.value) { rows =>
@@ -883,7 +923,7 @@ object PostgresCheckpointer:
     GraphError.StaleClaim(threadId.value, token, current.flatMap(_.claim).map(c => FencingToken(c.token)))
 
   /** PostgreSQL keeps microseconds: an instant the store hands back is one it can store exactly. */
-  private def micros(at: Instant): Instant = at.truncatedTo(ChronoUnit.MICROS)
+  private[postgres] def micros(at: Instant): Instant = at.truncatedTo(ChronoUnit.MICROS)
 
   private def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
     results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
@@ -1014,7 +1054,7 @@ object PostgresCheckpointer:
 
   // ---- errors ----
 
-  final private case class ErrorContext(schema: String)
+  final private[postgres] case class ErrorContext(schema: String)
 
   private def failure(operation: String, message: String, cause: Option[Throwable])(using
     context: ErrorContext
@@ -1030,7 +1070,7 @@ object PostgresCheckpointer:
   ): LLMError =
     failure(operation, s"a stored $what does not decode: $problem", cause)
 
-  private def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
+  private[postgres] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>
       undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
     )
@@ -1113,7 +1153,8 @@ object PostgresCheckpointer:
 
   // ---- JDBC ----
 
-  private def instant(rows: ResultSet, index: Int): Instant = rows.getObject(index, classOf[OffsetDateTime]).toInstant
+  private[postgres] def instant(rows: ResultSet, index: Int): Instant =
+    rows.getObject(index, classOf[OffsetDateTime]).toInstant
 
   private def bind(statement: PreparedStatement, params: Any*): Unit =
     params.zipWithIndex.foreach { (param, i) =>
@@ -1132,13 +1173,13 @@ object PostgresCheckpointer:
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))
     case other => statement.setObject(index, other)
 
-  private def update(c: Connection, sql: String, params: Any*): Unit =
+  private[postgres] def update(c: Connection, sql: String, params: Any*): Unit =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       statement.executeUpdate(): Unit
     }
 
-  private def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
+  private[postgres] def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
       Using.resource(statement.executeQuery()) { rows =>

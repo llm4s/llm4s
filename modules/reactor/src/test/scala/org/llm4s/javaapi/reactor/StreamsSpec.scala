@@ -14,6 +14,7 @@ import reactor.test.StepVerifier
 import java.time.Duration
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
+import scala.jdk.CollectionConverters.*
 
 /** `Streams.toFlux` (#1492): a reply's text as a Reactor `Flux`, checked with `StepVerifier`. */
 class StreamsSpec extends AnyFlatSpec with Matchers {
@@ -65,15 +66,27 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "end with onError carrying an LlmException of the failure's kind" in {
-    fluxes(wrap(emitting(Seq("a"), Left(NetworkError("down", None, "http://x"))))).foreach { flux =>
+    fluxes(wrap(emitting(Seq("a", "b"), Left(NetworkError("down", None, "http://x"))))).foreach { flux =>
       StepVerifier
         .create(flux)
-        // the publisher's error may overtake a piece still in its buffer (SubmissionPublisher.closeExceptionally)
-        .thenConsumeWhile(_ == "a")
+        .expectNext("a", "b") // every piece before the failure, then the error (#2198)
         .expectErrorSatisfies {
           case e: LlmException => e.getKind shouldBe LlmErrorKind.NETWORK
           case other           => fail(s"not an LlmException: $other")
         }
+        .verify(Deadline)
+    }
+  }
+
+  it should "deliver every piece before the error, with any demand (#2198)" in {
+    val pieces = (1 to 150).map(_.toString)
+    val client = wrap(emitting(pieces, Left(NetworkError("down", None, "http://x"))))
+    (1 to 20).foreach { _ =>
+      StepVerifier.create(Streams.toFlux(client, "q")).expectNextSequence(pieces.asJava).expectError().verify(Deadline)
+      StepVerifier
+        .create(Streams.toFlux(client, "q").limitRate(1))
+        .expectNextSequence(pieces.asJava)
+        .expectError()
         .verify(Deadline)
     }
   }

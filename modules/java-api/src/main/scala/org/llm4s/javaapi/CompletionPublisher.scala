@@ -7,12 +7,15 @@ import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation }
 
 import java.util.concurrent.{ Flow, SubmissionPublisher }
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.LockSupport
 
 /**
  * The `Flow.Publisher` of [[JLlmClient.streamAsPublisher]] (#1485): cold, one provider call per subscription, on a
  * thread of its own. Each piece of text is submitted to a `SubmissionPublisher` of `bufferSize`, which blocks the
  * provider's thread while the subscriber's buffer is full, so nothing is dropped. A subscription cancelled before the
- * end interrupts the call. The stream completes after the last piece, or fails with an [[LlmException]].
+ * end interrupts the call. The stream completes after the last piece, or fails with an [[LlmException]] - also after
+ * the last piece: `closeExceptionally` signals `onError` ahead of whatever is still buffered (#2198), so a failure
+ * first waits, on the provider's thread, until the subscriber has taken every piece, or has cancelled.
  */
 final private[javaapi] class CompletionPublisher(
   start: Either[LLMError, (LLMClient, Conversation, CompletionOptions)],
@@ -52,7 +55,23 @@ final private[javaapi] class CompletionPublisher(
         .flatten
     )
     Thread.interrupted(): Unit
-    result.fold(e => publisher.closeExceptionally(new LlmException(e)), _ => publisher.close())
+    result.fold(
+      e => { awaitDrained(publisher, cancelled); publisher.closeExceptionally(new LlmException(e)) },
+      _ => publisher.close()
+    )
+  }
+
+  /**
+   * Waits until the subscriber has consumed every submitted piece, or has gone. Like a full buffer, it waits on the
+   * subscriber's demand, holding only the provider's (virtual) thread; it polls, backing off to
+   * [[CompletionPublisher.MaxDrainPollNanos]], because `SubmissionPublisher` signals no drain.
+   */
+  private def awaitDrained(publisher: SubmissionPublisher[String], cancelled: AtomicBoolean): Unit = {
+    var pause = CompletionPublisher.MinDrainPollNanos
+    while (!cancelled.get && publisher.estimateMaximumLag() > 0) {
+      LockSupport.parkNanos(pause)
+      pause = math.min(pause * 2, CompletionPublisher.MaxDrainPollNanos)
+    }
   }
 
   /** Submits `text`, or - once the subscriber has cancelled - interrupts the call instead. */
@@ -81,4 +100,8 @@ private[javaapi] object CompletionPublisher {
 
   /** Pieces of text a subscriber may fall behind by before the provider's thread waits for it. */
   val BufferSize: Int = 64
+
+  /** The first and the longest pause while a failure waits for the subscriber to take its last pieces. */
+  private val MinDrainPollNanos: Long = 50_000L
+  private val MaxDrainPollNanos: Long = 10_000_000L
 }

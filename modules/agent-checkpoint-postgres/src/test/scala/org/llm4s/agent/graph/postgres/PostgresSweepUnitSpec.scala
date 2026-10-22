@@ -51,7 +51,7 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
       case (sql, Vector(id)) if sql == Sql.lockedRow(t) || sql == Sql.lockedRowIfFree(t) => Vector(rowOf(id))
       case (sql, Vector("a", _, _)) if sql == Sql.reclaim(t)                             => Vector(Vector(7L))
       case (sql, _) if sql == Sql.reclaim(t)                                             => Vector.empty
-      case (sql, _) if sql == Sql.historyAges(t, withRuns = true) =>
+      case (sql, _) if sql == Sql.historyAges(t) =>
         Vector(Vector(1L, "b1", now, "r"), Vector(2L, "b2", now, "s"))
     }
     val store  = script.store()
@@ -138,9 +138,10 @@ class PostgresSweepUnitSpec extends AnyFlatSpec with Matchers with EitherValues 
     Sql.ensureRow(t) should include(s"FROM ${t.reclaimed}")
   }
 
-  "The sweep's statements" should "read runs only for a protected thread, and migrate schema 2 to 3" in {
-    Sql.historyAges(t) should include("''")
-    Sql.historyAges(t, withRuns = true) should include("->> 'runId'")
+  "The sweep's statements" should "read each checkpoint's run from its indexed column, and migrate schema 2 to 3" in {
+    // the run is the history row's own `run_id` (schema 4), never decoded from the checkpoint's JSON
+    Sql.historyAges(t) should include("run_id")
+    (Sql.historyAges(t) should not).include("runId")
     val step = PostgresSchema.steps(2)(t)
     step.head should include("ADD COLUMN deleted_at timestamptz")
     step.mkString should include(s"CREATE TABLE ${t.reclaimed}")

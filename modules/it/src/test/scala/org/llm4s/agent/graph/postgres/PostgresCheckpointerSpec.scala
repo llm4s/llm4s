@@ -237,9 +237,57 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
+  /** The schema as a version-3 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionThree(config: PostgresCheckpointerConfig): Unit = {
+    val q = s""""${config.schema}""""
+    PgCheckpointerDb.execute(
+      s"""DROP TABLE $q.checkpoint_queue_attempts, $q.checkpoint_queue_entries;
+         |DROP SEQUENCE $q.checkpoint_queue_entry_ids, $q.checkpoint_queue_lease_tokens;
+         |DROP INDEX $q.checkpoint_history_run;
+         |ALTER TABLE $q.checkpoint_history DROP COLUMN run_id;
+         |UPDATE $q.checkpoint_schema SET version = 3""".stripMargin
+    )
+  }
+
+  "A version-3 schema" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = ThreadId("v3-thread")
+    val token  = store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
+    store.commit(t, Commit(token, Some(checkpoint("c1", None, t).withRunId("run-a")))).value
+    store.commit(t, Commit(token, Some(checkpoint("c2", Some("c1"), t).withRunId("run-b")))).value
+    store.commit(t, Commit(token, Some(checkpoint("c3", Some("c2"), t).withRunId("run-c")))).value
+    store.close()
+    asVersionThree(config)
+    val q = s""""${config.schema}""""
+    // one damaged row must not stop the schema opening: it keeps no run id
+    PgCheckpointerDb.execute(
+      s"UPDATE $q.checkpoint_history SET checkpoint_json = 'not json' WHERE checkpoint_id = 'c3'"
+    )
+
+    val reopened = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.scalar(s"SELECT COUNT(*) FROM $q.checkpoint_history WHERE run_id IS NULL")(_.getInt(1)) shouldBe 1
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    reopened.latestOfRuns(t, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
+    reopened.latestOfRuns(t, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
+    reopened.runQueue.openEntries(None, t).value shouldBe empty
+    // the queue's tables are there, with every column W1 reads
+    val queued = reopened.runQueue
+      .submit(
+        org.llm4s.agent.service.Submission(
+          t,
+          org.llm4s.agent.AgentId.unsafe("upgraded"),
+          org.llm4s.agent.service.QueuedInput.query("q")
+        )
+      )
+      .value
+    reopened.runQueue.entry(None, queued.entryId).value.admitted shouldBe false
+    reopened.close()
+  }
+
   // ---- the thread registry (design 4.52) ----
 
-  /** The schema `q` (quoted) as a version-2 build left it: no tombstone reclamation (design 4.53). */
+  /** The schema `q` (quoted) as a version-2 build left it, once [[asVersionThree]] has: no tombstone reclamation (design 4.53). */
   private def asVersionTwo(q: String): Unit = {
     PgCheckpointerDb.execute(s"ALTER TABLE $q.checkpoint_threads DROP COLUMN deleted_at")
     PgCheckpointerDb.execute(s"DROP TABLE $q.checkpoint_reclaimed")
@@ -255,6 +303,7 @@ class PostgresCheckpointerSpec
     store.deleteThread(gone, token, None).value
     store.close()
     val q = s""""${config.schema}""""
+    asVersionThree(config)
     asVersionTwo(q)
 
     val reopened = PgCheckpointerDb.store(config)
@@ -293,6 +342,7 @@ class PostgresCheckpointerSpec
     committed(deleting, CheckpointStatus.Running, deleting = true)
     val before = store.threads(ThreadQuery(tenant)).value
     store.close()
+    asVersionThree(config)
     val q = s""""${config.schema}""""
     asVersionTwo(q)
     Vector("", "_status", "_agent", "_claimed", "_metadata").foreach { suffix =>

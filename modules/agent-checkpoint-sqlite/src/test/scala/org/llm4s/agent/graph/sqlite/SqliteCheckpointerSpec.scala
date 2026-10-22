@@ -44,8 +44,21 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
-  /** The file as a version-8 build left it: no tombstone reclamation (design 4.53). */
+  /** The file as a version-9 build left it: no run queue and no run ids on history rows (design 4.55). */
+  private def asVersionNine(path: Path): Unit =
+    exec(
+      path,
+      "DROP TABLE llm4s_checkpoint_queue_attempts",
+      "DROP TABLE llm4s_checkpoint_queue_entries",
+      "DELETE FROM llm4s_checkpoint_meta WHERE key IN ('last_entry', 'last_lease')",
+      "DROP INDEX llm4s_checkpoint_history_run",
+      "ALTER TABLE llm4s_checkpoint_history DROP COLUMN run_id",
+      "UPDATE llm4s_checkpoint_schema SET version = 9"
+    )
+
+  /** The file as a version-8 build left it: no tombstone reclamation (design 4.53), nor anything after it. */
   private def asVersionEight(path: Path): Unit =
+    asVersionNine(path)
     exec(
       path,
       "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN deleted_nanos",
@@ -157,9 +170,9 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           _ == 1,
           s"round $round: not exactly one schema version row"
         ),
-        // one row each: the last token and the reclamation mark
+        // one row each: the last token, the reclamation mark, and the last entry and lease issued
         read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
-          _ == 2,
+          _ == 4,
           s"round $round: not exactly one row per meta key"
         ),
         read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
@@ -1175,6 +1188,45 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
         ) shouldBe true
         steps.exists(_.contains("TEMP B-TREE")) shouldBe false
       }
+    }
+  }
+
+  "A version-9 file" should "open at the current version, its history rows' run ids backfilled for the run-id lookup" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v9-thread")
+    val first  = SqliteCheckpointer.open(db).value
+    val token  = first.claim(thread, ClaimRequest(RunId("run"), None, ttl)).value.token
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c1", None, token).withRunId("run-a")))).value
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c2", Some("c1"), token).withRunId("run-b")))).value
+    first.commit(thread, Commit(token, Some(checkpoint(thread, "c3", Some("c2"), token).withRunId("run-c")))).value
+    first.release(thread, token).value
+    first.close()
+    asVersionNine(db)
+    // one damaged row must not stop the file opening: it keeps no run id
+    exec(db, "UPDATE llm4s_checkpoint_history SET checkpoint_json = 'not json' WHERE checkpoint_id = 'c3'")
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_history WHERE run_id IS NULL")(_.getInt(1)) shouldBe 1
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    reopened.latestOfRuns(thread, Set(RunId("run-a"))).value.map(_.id) shouldBe Some("c1")
+    reopened.latestOfRuns(thread, Set(RunId("run-a"), RunId("run-b"))).value.map(_.id) shouldBe Some("c2")
+    reopened.runQueue.openEntries(None, thread).value shouldBe empty
+    // the queue's tables are there, with every column W1 reads
+    val queued = reopened.runQueue
+      .submit(
+        org.llm4s.agent.service.Submission(
+          thread,
+          org.llm4s.agent.AgentId.unsafe("upgraded"),
+          org.llm4s.agent.service.QueuedInput.query("q")
+        )
+      )
+      .value
+    reopened.runQueue.entry(None, queued.entryId).value.admitted shouldBe false
+    reopened.close()
+    val steps = plan(db, (SqliteCheckpointer.LatestOfRunSql, Vector[Any]("v9-thread", "run-a")))
+    withClue(steps.mkString("\n")) {
+      steps.exists(_.contains("USING INDEX llm4s_checkpoint_history_run")) shouldBe true
+      steps.exists(_.contains("TEMP B-TREE")) shouldBe false
     }
   }
 }

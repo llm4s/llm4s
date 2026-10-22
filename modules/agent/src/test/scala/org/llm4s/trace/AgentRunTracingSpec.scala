@@ -217,6 +217,8 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
       after: Option[org.llm4s.agent.graph.ThreadCursor],
       limit: Int
     ) = underlying.incompleteThreads(tenantId, after, limit)
+    def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+      underlying.latestOfRuns(threadId, runIds)
     def sweep(
       policy: org.llm4s.agent.graph.SweepPolicy,
       after: Option[org.llm4s.agent.graph.ThreadId],

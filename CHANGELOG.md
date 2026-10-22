@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [migration](docs/reference/migration.md#store-wide-retention-and-tombstone-reclamation-2059).
 - `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
   `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
+- `Checkpointer.latestOfRuns` is a new abstract method every store implements, with SQLite schema 10 and PostgreSQL schema 4;
+  [migration](docs/reference/migration.md#the-run-queue-2134).
 - `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
   and `GraphError.UnsupportedStoreSchema` is a new case; [migration](docs/reference/migration.md#the-postgresql-checkpointer-2130).
 - `Checkpointer.children` is a new abstract method every store implements, `Checkpointer.deleteThread` takes a
@@ -76,6 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `Checkpointer.sweep`: store-wide retention in bounded pages, reclaiming old tombstones while their readers are still
   told the thread was deleted [#2059](https://github.com/llm4s/llm4s/issues/2059); [design §4.53](docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md).
 - **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
+- **Added** the durable run queue: `RunQueue` and `RunSubmitter` (`org.llm4s.agent.service`) in the in-memory, SQLite and PostgreSQL
+  stores, `RunQueueContract`, and `llm4s.agent.queue` settings [#2134](https://github.com/llm4s/llm4s/issues/2134); [design §4.55](docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md).
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
@@ -140,6 +144,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ollama`, `openAiCompatible`, `azureOpenAi`) and `Llm4s.createAgent(client, tools)`; cancelling the coroutine that
   runs a turn cancels a suspended handler [#1495](https://github.com/llm4s/llm4s/issues/1495); see the
   [Java guide](docs/guide/java.md#the-kotlin-dsl).
+- **Fixed** `JLlmClient.streamAsPublisher` (and so `llm4s-reactor`'s `Streams.toFlux`) delivering a failed call's
+  `onError` ahead of pieces still buffered: every piece streamed before the failure now reaches the subscriber, in
+  order, before the error, with any demand and with a full buffer [#2198](https://github.com/llm4s/llm4s/issues/2198).
 - **Added** the call's id and idempotency key for Java tools run by an agent: `JToolArgs.toolCallId()` and
   `JToolArgs.idempotencyKey()` (`Optional<String>`, empty outside an agent run), read by a `JTool.builder` lambda from
   its `args` and by a `@Tool` method from a `JToolArgs` parameter the model does not see, and by a Kotlin DSL tool's

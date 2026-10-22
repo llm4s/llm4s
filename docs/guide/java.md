@@ -416,7 +416,8 @@ are made one at a time, never on your thread; one that throws stops the call, an
 Reactor (`JdkFlowAdapter`), RxJava and Mutiny adapt it without another llm4s dependency, and `llm4s-reactor` returns
 it as a `Flux<String>` ([Java Reactor](java-reactor)). Each subscription makes its own
 call. A subscriber slower than the model holds the provider's thread rather than losing text, and cancelling the
-subscription cancels the call. Streaming yields text only; tool-call deltas are not streamed.
+subscription cancels the call. A failed call ends with `onError` (an `LlmException`) after every piece that streamed
+before the failure. Streaming yields text only; tool-call deltas are not streamed.
 
 ## Structured output
 

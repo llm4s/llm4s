@@ -163,6 +163,13 @@ A store can be swept, a bounded page at a time, and a deleted thread's tombstone
 - **Paging children after a reclaimed child** refuses that cursor with a `ValidationError`, as for any id the store does not know as a child.
 - **Schemas move on, with no way back.** SQLite schema 9 and PostgreSQL schema 3 record when each tombstone was deleted and hold the reclamation mark; the tombstones a store already holds are dated from the upgrade. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### The run queue (#2134)
+
+Runs can be submitted to a durable queue that workers on any machine take ([design 4.55](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md)). Code that only runs agents changes nothing; these change:
+
+- **A new abstract `Checkpointer` method.** `latestOfRuns(threadId, runIds): Result[Option[Checkpoint]]` answers the newest checkpoint any of a set of runs committed on a thread, by an index on the run. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store that also offers a `RunQueue` keeps, through `prune`, the newest checkpoint of every run an open entry recorded, and passes `RunQueueContract`.
+- **Schemas move on, with no way back.** SQLite schema 10 and PostgreSQL schema 4, the step after store-wide retention's, add `run_id` to every history row (backfilled from its JSON when the store opens, and indexed by thread, run and position) and the queue's two tables. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

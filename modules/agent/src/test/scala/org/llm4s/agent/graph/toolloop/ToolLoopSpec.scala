@@ -448,6 +448,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
         after: Option[org.llm4s.agent.graph.ThreadCursor],
         limit: Int
       ) = store.incompleteThreads(tenantId, after, limit)
+      def latestOfRuns(threadId: org.llm4s.agent.graph.ThreadId, runIds: Set[org.llm4s.agent.graph.RunId]) =
+        store.latestOfRuns(threadId, runIds)
       def sweep(
         policy: org.llm4s.agent.graph.SweepPolicy,
         after: Option[org.llm4s.agent.graph.ThreadId],

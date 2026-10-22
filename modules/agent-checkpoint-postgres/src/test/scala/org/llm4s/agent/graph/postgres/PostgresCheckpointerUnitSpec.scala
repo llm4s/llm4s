@@ -71,8 +71,23 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
 
   it should "name every table and sequence inside the configured schema, quoted" in {
     val t = PostgresSchema.Tables("agents")
-    Vector(t.version, t.tokens, t.childOrder, t.threads, t.history, t.pendingWrites, t.events, t.effects).foreach {
-      _ should startWith("\"agents\".checkpoint_")
+    Vector(
+      t.version,
+      t.tokens,
+      t.childOrder,
+      t.threads,
+      t.history,
+      t.pendingWrites,
+      t.events,
+      t.effects,
+      t.queueEntryIds,
+      t.queueLeaseTokens,
+      t.queueEntries,
+      t.queueAttempts
+    ).foreach(_ should startWith("\"agents\".checkpoint_"))
+    // the run queue's tables (version 4) are in the schema too
+    PostgresSchema.steps(3)(t).filter(s => s.startsWith("CREATE") && !s.startsWith("CREATE FUNCTION pg_temp")).foreach {
+      statement => withClue(statement)(statement should include("\"agents\".checkpoint_"))
     }
     val ddl = PostgresSchema.steps(0)(t)
     ddl.filter(_.startsWith("CREATE TABLE")) should have size 5
@@ -89,8 +104,9 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     val t          = PostgresSchema.Tables("agents")
     val statements = sqlStatements(t)
     statements.size should be > 30
-    // `FOR UPDATE SKIP LOCKED` is a row lock, not a table
-    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b|SKIP\b)([^\s(]+)""".r
+    // `FOR UPDATE SKIP LOCKED` / `FOR UPDATE OF e` is a row lock, not a table; a set-returning function in FROM (the
+    // run-id lookup's `unnest` of its parameter) reads no table, nor does a lateral join: its subquery names its own
+    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b|SKIP\b|OF\b)(?!unnest\()(?!LATERAL\b)([^\s(]+)""".r
     statements.foreach { sql =>
       tableRef.findAllMatchIn(sql).map(_.group(1)).foreach { name =>
         withClue(sql)(name should startWith("\"agents\".checkpoint_"))
