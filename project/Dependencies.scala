@@ -101,17 +101,17 @@ object Deps {
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
   // Only the annotations and assertions, so the Java guide's JUnit 5 example compiles; ScalaTest runs it (#1497)
-  val junitJupiterApi = "org.junit.jupiter"      % "junit-jupiter-api" % Versions.junitJupiter
-  val fansi           = "com.lihaoyi"           %% "fansi"             % Versions.fansi
+  val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter
+  val fansi           = "com.lihaoyi"      %% "fansi"             % Versions.fansi
   // llm4s-reactor (#1492): the Flux adapter over the Java facade's Flow.Publisher, and StepVerifier for its specs
-  val reactorCore = "io.projectreactor" % "reactor-core" % Versions.reactor
-  val reactorTest = "io.projectreactor" % "reactor-test" % Versions.reactor
-  val ox              = "com.softwaremill.ox"   %% "core"              % Versions.ox
-  val postgres        = "org.postgresql"         % "postgresql"        % Versions.postgres
-  val sqlite          = "org.xerial"             % "sqlite-jdbc"       % Versions.sqlite
-  val config          = "com.typesafe"           % "config"            % Versions.config
-  val hikariCP        = "com.zaxxer"             % "HikariCP"          % Versions.hikariCP
-  val pureConfig      = "com.github.pureconfig" %% "pureconfig-core"   % Versions.pureconfig
+  val reactorCore = "io.projectreactor"      % "reactor-core"    % Versions.reactor
+  val reactorTest = "io.projectreactor"      % "reactor-test"    % Versions.reactor
+  val ox          = "com.softwaremill.ox"   %% "core"            % Versions.ox
+  val postgres    = "org.postgresql"         % "postgresql"      % Versions.postgres
+  val sqlite      = "org.xerial"             % "sqlite-jdbc"     % Versions.sqlite
+  val config      = "com.typesafe"           % "config"          % Versions.config
+  val hikariCP    = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
+  val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
   val openaiJava = "com.openai"         % "openai-java"    % Versions.openaiJava
   val anthropic  = "com.anthropic"      % "anthropic-java" % Versions.anthropic

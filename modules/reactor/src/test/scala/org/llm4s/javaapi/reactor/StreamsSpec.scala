@@ -68,7 +68,8 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
     fluxes(wrap(emitting(Seq("a"), Left(NetworkError("down", None, "http://x"))))).foreach { flux =>
       StepVerifier
         .create(flux)
-        .expectNext("a")
+        // the publisher's error may overtake a piece still in its buffer (SubmissionPublisher.closeExceptionally)
+        .thenConsumeWhile(_ == "a")
         .expectErrorSatisfies {
           case e: LlmException => e.getKind shouldBe LlmErrorKind.NETWORK
           case other           => fail(s"not an LlmException: $other")
