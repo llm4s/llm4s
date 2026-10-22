@@ -193,4 +193,94 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.latest(thread).value shouldBe None
     store.eventsAfter(thread, 0L, 10).value shouldBe empty
   }
+
+  // ---- the retention sweep (design 4.53); every store's cases are CheckpointerContract's ----
+
+  private def checkpointOn(on: ThreadId, id: String, parent: Option[String], run: String) =
+    Checkpoint(
+      Checkpoint.CurrentFormat,
+      id,
+      parent,
+      on.value,
+      run,
+      CheckpointStatus.Running,
+      now,
+      GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false)
+    )
+
+  /** Claims `on`, commits one checkpoint per `(id, run)` with an event each, and returns the claim's token. */
+  private def chain(store: InMemoryCheckpointer, on: ThreadId, runs: Vector[(String, String)]): FencingToken =
+    val token = store.claim(on, ClaimRequest(RunId("run"), None, ttl)).value.token
+    runs.foldLeft(Option.empty[String]) { case (parent, (id, run)) =>
+      store.commit(on, Commit(token, Some(checkpointOn(on, id, parent, run)), Vector.empty, Vector(event(id)))).value
+      Some(id)
+    }: Unit
+    token
+
+  private def historyIds(store: InMemoryCheckpointer, on: ThreadId): Vector[String] =
+    store.history(on, None, 100).value.map(_.id)
+
+  "The sweep" should "page through every thread, reclaim an old tombstone, and number a new thread of its id past it" in {
+    val clock = new MutableClock(now)
+    val store = InMemoryCheckpointer(clock)
+    val live  = ThreadId("b-live")
+    chain(store, live, Vector("c1" -> "run", "c2" -> "run"))
+    val gone  = ThreadId("a-gone")
+    val token = chain(store, gone, Vector("d1" -> "run"))
+    store.deleteThread(gone, token, None).value shouldBe (())
+    clock.advance(2.days)
+
+    val policy = SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), tombstoneAge = Some(1.day), batchSize = 1)
+    val first  = store.sweep(policy, None, SweepGuard.none).value
+    first shouldBe SweepPage(1, 1, Some(gone))
+    store.sweep(policy, first.next, SweepGuard.none).value shouldBe SweepPage(1, 0, None)
+    historyIds(store, live) shouldBe Vector("c2")
+
+    // the deleted thread numbered event 1, so its tombstone started at 3: its readers are still refused
+    store.eventsAfter(gone, 1L, 10).left.value shouldBe GraphError.ThreadDeleted(gone.value, 1L, 3L)
+    store.eventsAfter(gone, 0L, 10).value shouldBe empty
+    // and a new thread of any id numbers from the mark
+    val fresh = ThreadId("c-fresh")
+    val held  = store.claim(fresh, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store.commit(fresh, Commit(held, None, Vector.empty, Vector(event("f")))).value.map(_.seq) shouldBe Vector(3L)
+  }
+
+  it should "keep a protected thread's tombstone and its runs' evidence, and change nothing when the guard fails" in {
+    val clock = new MutableClock(now)
+    val store = InMemoryCheckpointer(clock)
+    val live  = ThreadId("live")
+    chain(store, live, Vector("a1" -> "a", "a2" -> "a", "b1" -> "b"))
+    val gone  = ThreadId("gone")
+    val token = chain(store, gone, Vector("d1" -> "run"))
+    store.deleteThread(gone, token, None).value shouldBe (())
+    clock.advance(2.days)
+    val policy = SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), tombstoneAge = Some(1.day))
+
+    val unreachable = org.llm4s.error.ValidationError("guard", "unreachable")
+    store.sweep(policy, None, _ => Left(unreachable)).left.value shouldBe unreachable
+    historyIds(store, live) shouldBe Vector("b1", "a2", "a1")
+
+    val guard = SweepGuard.of(Map(live -> Set(RunId("a")), gone -> Set.empty))
+    store.sweep(policy, None, guard).value shouldBe SweepPage(2, 0, None)
+    historyIds(store, live) shouldBe Vector("b1", "a2")
+    store.sweep(policy, None, SweepGuard.none).value shouldBe SweepPage(2, 1, None)
+    historyIds(store, live) shouldBe Vector("b1")
+  }
+
+  it should "count a tombstone's age from its last delete, which does not move its numbering on" in {
+    val clock = new MutableClock(now)
+    val store = InMemoryCheckpointer(clock)
+    val gone  = ThreadId("gone")
+    store.deleteThread(gone, chain(store, gone, Vector("d1" -> "run")), None).value shouldBe (())
+    clock.advance(2.days)
+    // claimed again and deleted again, numbering nothing: the tombstone is kept, its numbering as it was
+    val again = store.claim(gone, ClaimRequest(RunId("again"), None, ttl)).value.token
+    store.deleteThread(gone, again, None).value shouldBe (())
+    store.eventsAfter(gone, 1L, 10).left.value shouldBe GraphError.ThreadDeleted(gone.value, 1L, 3L)
+    val policy = SweepPolicy(tombstoneAge = Some(1.day))
+    store.sweep(policy, None, SweepGuard.none).value shouldBe SweepPage(1, 0, None)
+    clock.advance(2.days)
+    store.sweep(policy, None, SweepGuard.none).value shouldBe SweepPage(1, 1, None)
+    store.sweep(policy, None, SweepGuard.none).value shouldBe SweepPage(0, 0, None)
+  }
 }

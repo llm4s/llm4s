@@ -40,14 +40,18 @@ import scala.util.Try
  *    number - including after compaction, pruning, a failed commit or [[deleteThread]]: a thread's
  *    first event is `1` unless a thread of the same id that numbered events was deleted, and then it
  *    is one past the deleted thread's next number `n` - `n` itself is skipped - so a new thread of the
- *    id numbers on past every event of the old one;
+ *    id numbers on past every event of the old one; once [[sweep]] has reclaimed a tombstone, a thread
+ *    whose id has none starts at the store's reclamation mark instead of `1` - at or past the first
+ *    number of every tombstone it reclaimed - so a reclaimed id's new thread still numbers on past the
+ *    old one (design 4.53);
  *  - record on each event the token of the commit that stored it ([[org.llm4s.agent.graph.EventRecord.token EventRecord.token]],
  *    [[org.llm4s.agent.graph.EventRecord.committed EventRecord.committed]]), so a run's events can be told from those of an earlier run that had
  *    the same `RunId`;
  *  - refuse a read of the log after a number of a deleted thread of the id - from `1` up to the
  *    skipped `n`, exclusive ([[org.llm4s.agent.graph.Checkpointer.deleted Checkpointer.deleted]]) - with [[org.llm4s.agent.graph.GraphError.ThreadDeleted GraphError.ThreadDeleted]],
- *    from [[eventsAfter]] and [[awaitEventsAfter]] alike, so a reader that was following the deleted
- *    thread never takes the new one for its continuation; a read from `0` reads the current thread
+ *    from [[eventsAfter]] and [[awaitEventsAfter]] alike, also once [[sweep]] has reclaimed the deleted
+ *    thread's tombstone, so a reader that was following the deleted thread never takes the new one for
+ *    its continuation; a read from `0` reads the current thread
  *    from its first event, and a watch waiting in [[awaitEventsAfter]] from inside a log that is
  *    deleted gets that refusal within about its `timeout` (from its next call, for the polling default);
  *  - keep events until [[compactEvents]] or [[prune]] removes them, and report the earliest sequence
@@ -76,6 +80,8 @@ import scala.util.Try
  *    the thread registry (design 4.52) - by their latest checkpoint, their claim judged by the store's clock, and when
  *    the store last committed a checkpoint or metadata to them, by that clock, never one of another tenant, a child
  *    thread, one with no checkpoint, or one [[deleteThread]] removed;
+ *  - visit every thread it holds, tombstones included, through [[sweep]], a bounded page at a time, pruning each as
+ *    [[prune]] does and reclaiming old tombstones, but never what the sweep's [[org.llm4s.agent.graph.SweepGuard SweepGuard]] protects;
  *  - return from every call within a bound it documents (#1919) - see below.
  *
  * '''Every call returns within a bound.''' A store times out its own calls: it documents a bound, set by its
@@ -280,6 +286,35 @@ trait Checkpointer:
    */
   def incompleteThreads(tenantId: Option[TenantId], after: Option[ThreadCursor], limit: Int): Result[ThreadPage]
 
+  /**
+   * The store-wide retention sweep (design 4.53): one bounded page of the threads the store holds, tombstones
+   * included, in an order of the store's own that every call follows - the threads after `after` in it, whether or not
+   * the store still holds `after`, at most `policy.batchSize` of them - with the next page's cursor when more follow.
+   * A caller sweeps the whole store by calling again with each page's `next` until it is `None`; a thread created
+   * while a caller pages may be visited in that pass or only in the next.
+   *
+   * Before it changes anything of the page it asks `guard` which of the page's threads are protected
+   * ([[org.llm4s.agent.graph.SweepGuard SweepGuard]]), and a `Left` from the guard ends the call with nothing
+   * changed. Then, for each thread of the page:
+   *
+   *  - its history is pruned by `policy.retention` exactly as [[prune]] prunes it, judged by the store's clock against
+   *    the store's commit times - except that, of a protected thread, the newest checkpoint each of its protected
+   *    `RunId`s committed (`Checkpoint.runId`) is kept as well, whatever the policy, while the rest is pruned as usual
+   *    and the events' floor follows the policy alone;
+   *  - its tombstone ([[deleteThread]]) is reclaimed - removed, with the place it kept among its parent's children -
+   *    when `policy.tombstoneAge` is set, the store last deleted the thread more than that long ago by its clock,
+   *    nothing has been stored under the id since, and the thread is not protected. Reclaiming raises the store's
+   *    reclamation mark to the tombstone's first number, so a new thread of the id - or of any id without a tombstone -
+   *    numbers its events on past the old thread's, and a read from inside the reclaimed log is still
+   *    [[org.llm4s.agent.graph.GraphError.ThreadDeleted GraphError.ThreadDeleted]] ([[eventsAfter]]). Only paging
+   *    [[children]] after a reclaimed child refuses its cursor.
+   *
+   * Like [[prune]], it needs no claim and changes nothing a run reads or writes; it reads no tenant, for it is the
+   * operator's, store-wide. Each call returns within the store's bound, whatever the store holds. Run one sweep at a
+   * time per store (a worker's schedule does: Stage 5, W2); two at once are safe, only wasteful.
+   */
+  def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage]
+
   /** Drops events with `seq < beforeSeq`; replay can then start no earlier than `beforeSeq`. */
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]
 
@@ -294,12 +329,13 @@ trait Checkpointer:
    * [[awaitEventsAfter]] on commits wakes it on a delete too. Deleting a thread whose tombstone has
    * numbered no event since does not move the numbering on again.
    *
-   * '''The tombstone is kept for good.''' A deleted id keeps a small record - its next event number,
-   * nothing of the thread's data - which nothing removes: neither [[prune]] nor a later delete. It is
-   * what lets a reader of the deleted log, in any process, be told the thread was deleted, and a new
-   * thread of the id be numbered past it, however long after the delete either happens. A store
-   * whose threads are deleted often - every failed one-shot `Agent.run` forgets its thread - grows by
-   * one such record per deleted thread that numbered an event. Fenced like a [[commit]]: only while `token` is
+   * '''The tombstone is kept until [[sweep]] reclaims it.''' A deleted id keeps a small record - its next event
+   * number and when the store deleted it, nothing of the thread's data - which neither [[prune]] nor a later delete
+   * removes. It is what lets a reader of the deleted log, in any process, be told the thread was deleted, and a new
+   * thread of the id be numbered past it. A store whose threads are deleted often - every failed one-shot `Agent.run`
+   * forgets its thread, and child retention deletes children - grows by one such record per deleted thread that
+   * numbered an event until a sweep with a `tombstoneAge` reclaims the old ones; a reclaimed tombstone's readers are
+   * still told the thread was deleted, through the store's reclamation mark (design 4.53). Fenced like a [[commit]]: only while `token` is
    * the thread's current claim, checked atomically with the delete, and otherwise
    * `Left(GraphError.StaleClaim)` with nothing deleted - so a deleter that lost its claim (it
    * expired and another run took the thread over, or it was released) deletes nothing of the run
@@ -356,6 +392,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   /** One stored checkpoint: its JSON, with the fields the store itself reads; `committedAt` by the store's clock. */
   final private case class Stored(
     id: String,
+    runId: String,
     status: CheckpointStatus,
     committedAt: Instant,
     json: ujson.Value,
@@ -382,15 +419,35 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     /** The thread's metadata (design 4.52); a delete removes it. */
     metadata: ThreadMetadata = ThreadMetadata.empty,
     /** When the store last committed a checkpoint or metadata to the thread, by its clock; a delete removes it. */
-    updatedAt: Instant = Instant.EPOCH
+    updatedAt: Instant = Instant.EPOCH,
+    /** When the store last deleted a thread of the id, by its clock: the tombstone's age (design 4.53). */
+    deletedAt: Option[Instant] = None
   ):
     def latestId: Option[String] = history.lastOption.map(_.id)
-    def isEmpty: Boolean = history.isEmpty && claim.isEmpty && nextSeq == 1L && effects.isEmpty && metadata.isEmpty
+
+    /** Holds nothing a record the store would make for a new id does not: no thread, and no tombstone. */
+    def isEmpty: Boolean = history.isEmpty && claim.isEmpty && nextSeq == firstSeq && deletedAt.isEmpty &&
+      effects.isEmpty && metadata.isEmpty
+
+    /**
+     * Only a tombstone, deleted before `cutoff`, with nothing stored under the id since - no claim but one that expired
+     * before `cutoff` as well - so a sweep may reclaim it.
+     */
+    def reclaimable(cutoff: Instant): Boolean =
+      history.isEmpty && pendingWrites.isEmpty && events.isEmpty && nextSeq == firstSeq && effects.isEmpty &&
+        metadata.isEmpty && deletedAt.exists(_.isBefore(cutoff)) && claim.forall(_.expiresAt.isBefore(cutoff))
 
   final private case class StoredEffect(taskId: TaskId, lineage: String, json: ujson.Value)
 
-  private val threads   = mutable.Map.empty[String, ThreadRecord]
+  // ordered by id, so a sweep pages through it
+  private val threads   = mutable.TreeMap.empty[String, ThreadRecord]
   private var lastToken = 0L
+
+  /**
+   * The first event number of a thread whose id has no record: `1` until a sweep reclaims a tombstone, then the
+   * highest first number of every tombstone reclaimed, so a reclaimed id's next thread numbers on past it (design 4.53).
+   */
+  private var reclaimedFirst = 1L
 
   /** Each parent's children, by their place among them: the index [[children]] pages. */
   private val childIndex = mutable.Map.empty[String, mutable.TreeMap[Long, String]]
@@ -401,7 +458,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private val appended = lock.newCondition()
 
   private def record(threadId: ThreadId): ThreadRecord =
-    threads.getOrElse(threadId.value, ThreadRecord(Vector.empty, Vector.empty, Vector.empty, 1L, 1L, None, 1L))
+    threads.getOrElse(
+      threadId.value,
+      ThreadRecord(Vector.empty, Vector.empty, Vector.empty, reclaimedFirst, reclaimedFirst, None, reclaimedFirst)
+    )
 
   private def store(threadId: ThreadId, record: ThreadRecord): Unit =
     if record.isEmpty then remove(threadId) else threads.update(threadId.value, record)
@@ -524,7 +584,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         if commit.retractTurn then current.history.take(current.history.lastIndexWhere(c => settled(c.status)) + 1)
         else current.history
       val added = commit.checkpoint.map { c =>
-        Stored(c.id, c.status, committedAt, Checkpoint.toJson(c), c.tenantId, c.snapshot.graphId, c.deleting)
+        Stored(c.id, c.runId, c.status, committedAt, Checkpoint.toJson(c), c.tenantId, c.snapshot.graphId, c.deleting)
       }
       // released before this commit's own records are applied
       val effects = current.effects.filterNot((_, e) => commit.releasesEffect(e.taskId, e.lineage)) ++
@@ -583,34 +643,69 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   }
 
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = withLock(lock) {
+    pruned(threadId, policy, Set.empty)
+  }
+
+  /** [[prune]], also keeping the newest checkpoint each of `protectedRuns` committed; under `lock`. */
+  private def pruned(threadId: ThreadId, policy: RetentionPolicy, protectedRuns: Set[RunId]): Result[Unit] =
     val current = record(threadId)
     if current.history.isEmpty && current.events.isEmpty then Right(())
     else
       Try {
         val now    = clock.instant()
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
-        // the latest checkpoint is always kept, whatever its age
-        val (older, latest) = current.history.splitAt(current.history.size - 1)
         // by when each was committed, never by its producer's own timestamp
-        val young   = older.filter(c => cutoff.forall(cut => !c.committedAt.isBefore(cut)))
-        val kept    = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptIds = kept.map(_.id).toSet
+        val (byPolicy, evidence) =
+          RetentionSweep.kept(current.history, policy, cutoff, _.committedAt, _.runId, protectedRuns)
+        val keptIds = byPolicy.map(_.id).toSet
         val events  = current.events.map((seq, json, at) => (seq, upickle.default.read[EventRecord](json), at))
         // events are kept while their checkpoints are: from the oldest kept checkpoint's first event on
         val byCheckpoint =
-          if kept.size == current.history.size then None
+          if byPolicy.size == current.history.size then None
           else events.collectFirst { case (seq, e, _) if e.checkpointId.exists(keptIds) => seq }
         val byAge = cutoff.map { cut =>
           events.collectFirst { case (seq, _, at) if !at.isBefore(cut) => seq }.getOrElse(current.nextSeq)
         }
         val bySize = policy.maxEvents.map(n => current.nextSeq - n)
         val floor  = (Vector(current.earliestSeq) ++ byCheckpoint ++ byAge ++ bySize).max.min(current.nextSeq)
+        val kept   = keptIds ++ evidence.map(_.id)
         store(
           threadId,
-          current.copy(history = kept, events = current.events.filter(_._1 >= floor), earliestSeq = floor)
+          current.copy(
+            history = current.history.filter(c => kept(c.id)),
+            events = current.events.filter(_._1 >= floor),
+            earliestSeq = floor
+          )
         )
       }.toResult
-  }
+
+  def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
+    val page = withLock(lock) {
+      val from = after.fold(threads.keysIterator)(a => threads.keysIteratorFrom(a.value).dropWhile(_ == a.value))
+      from.take(policy.batchSize + 1).map(ThreadId(_)).toVector
+    }
+    val visited = page.take(policy.batchSize)
+    // asked outside the lock: the guard may read another store
+    guard.retained(visited).flatMap { protectedRuns =>
+      withLock(lock) {
+        val cutoff = policy.tombstoneAge.map(age => clock.instant().minusNanos(age.toNanos))
+        visited
+          .foldLeft[Result[Int]](Right(0)) { (reclaimed, threadId) =>
+            reclaimed.flatMap { count =>
+              threads.get(threadId.value) match
+                case Some(current) if !protectedRuns.contains(threadId) && cutoff.exists(current.reclaimable) =>
+                  // readers of the reclaimed log are still refused: a new thread of the id starts past it
+                  reclaimedFirst = math.max(reclaimedFirst, current.firstSeq)
+                  remove(threadId)
+                  Right(count + 1)
+                case Some(_) if policy.retention != RetentionPolicy.keepAll =>
+                  pruned(threadId, policy.retention, protectedRuns.getOrElse(threadId, Set.empty)).map(_ => count)
+                case _ => Right(count)
+            }
+          }
+          .map(SweepPage(visited.size, _, RetentionSweep.next(page, policy.batchSize)))
+      }
+    }
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = withLock(lock) {
     val current = record(threadId)
@@ -673,8 +768,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
         // numbers on past it, one number skipped (see `deleted`), and a reader of the deleted log is told
         // it was deleted; a thread that numbered no event leaves nothing, and a tombstone that numbered no
         // event since its delete is kept as it is, so deleting it again moves nothing on
-        if current.nextSeq == 1L then remove(threadId)
-        else if current.nextSeq == current.firstSeq && current.firstSeq > 1L then
+        val now = clock.instant()
+        if current.nextSeq == current.firstSeq && current.deletedAt.isEmpty then remove(threadId)
+        else if current.nextSeq == current.firstSeq then
           store(
             threadId,
             current.copy(
@@ -683,7 +779,8 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
               claim = None,
               effects = Map.empty,
               metadata = ThreadMetadata.empty,
-              updatedAt = Instant.EPOCH
+              updatedAt = Instant.EPOCH,
+              deletedAt = Some(now)
             )
           )
         else
@@ -691,7 +788,17 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           // the tombstone keeps the thread's place among its parent's children, so a page boundary survives
           store(
             threadId,
-            ThreadRecord(Vector.empty, Vector.empty, Vector.empty, first, first, None, first, child = current.child)
+            ThreadRecord(
+              Vector.empty,
+              Vector.empty,
+              Vector.empty,
+              first,
+              first,
+              None,
+              first,
+              child = current.child,
+              deletedAt = Some(now)
+            )
           )
         appended.signalAll()
         Right(())

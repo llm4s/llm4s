@@ -19,9 +19,49 @@ private[postgres] object Sql:
   /** A thread's row, locked for the rest of the transaction. */
   def lockedRow(t: Tables): String = s"${row(t)} FOR UPDATE"
 
+  /**
+   * A thread's row, locked for the rest of the transaction - or no row if another transaction holds its lock: a sweep
+   * reclaiming tombstones under the exclusive reclamation lock skips a row in use rather than wait for it (design 4.53).
+   */
+  def lockedRowIfFree(t: Tables): String = s"${row(t)} FOR UPDATE SKIP LOCKED"
+
+  /** A row for a new id, numbering from the reclamation mark (schema 3, design 4.53). */
   def ensureRow(t: Tables): String =
-    s"""INSERT INTO ${t.threads} (thread_id, next_seq, earliest_seq, first_seq) VALUES (?, 1, 1, 1)
+    s"""INSERT INTO ${t.threads} (thread_id, next_seq, earliest_seq, first_seq)
+       |SELECT ?, first_seq, first_seq, first_seq FROM ${t.reclaimed}
        |ON CONFLICT (thread_id) DO NOTHING""".stripMargin
+
+  /** The first event number of a thread whose id has no row (schema 3). */
+  def reclaimedFirst(t: Tables): String = s"SELECT first_seq FROM ${t.reclaimed}"
+
+  def raiseReclaimed(t: Tables): String = s"UPDATE ${t.reclaimed} SET first_seq = GREATEST(first_seq, ?)"
+
+  /**
+   * The transaction-scoped advisory lock, keyed by the name bound, that orders reclaiming tombstones before creating a
+   * row: a sweep takes it exclusively while it reclaims, a claim on an id with no row shares it while it creates one,
+   * so a row is never created from a reclamation mark a reclamation in flight is about to raise.
+   */
+  val lockReclamation: String  = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"
+  val shareReclamation: String = "SELECT pg_advisory_xact_lock_shared(hashtextextended(?, 0))"
+
+  /** A page of the store's threads, tombstones included, by primary key: from the start, and after an id. */
+  def sweepPage(t: Tables): String = s"SELECT thread_id FROM ${t.threads} ORDER BY thread_id LIMIT ?"
+  def sweepPageAfter(t: Tables): String =
+    s"SELECT thread_id FROM ${t.threads} WHERE thread_id > ? ORDER BY thread_id LIMIT ?"
+
+  /**
+   * Removes the thread's row if it is only a tombstone, deleted before the cutoff bound second, with nothing stored
+   * under the id since - no checkpoint, event, metadata, effect or pending write, and no claim but one that expired
+   * before the cutoff (bound third) - returning its first event number.
+   */
+  def reclaim(t: Tables): String =
+    s"""DELETE FROM ${t.threads} th
+       |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.next_seq = th.first_seq AND th.metadata IS NULL
+       |  AND th.deleted_at IS NOT NULL AND th.deleted_at < ?
+       |  AND (th.claim_token IS NULL OR th.claim_expires_at < ?)
+       |  AND NOT EXISTS (SELECT 1 FROM ${t.effects} e WHERE e.thread_id = th.thread_id)
+       |  AND NOT EXISTS (SELECT 1 FROM ${t.pendingWrites} w WHERE w.thread_id = th.thread_id)
+       |RETURNING th.first_seq""".stripMargin
 
   def setClaim(t: Tables): String =
     s"""UPDATE ${t.threads}
@@ -32,21 +72,23 @@ private[postgres] object Sql:
 
   def dropIfEmpty(t: Tables): String =
     s"""DELETE FROM ${t.threads} th
-       |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.claim_token IS NULL AND th.next_seq = 1
-       |  AND th.metadata IS NULL
+       |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.claim_token IS NULL AND th.next_seq = th.first_seq
+       |  AND th.deleted_at IS NULL AND th.metadata IS NULL
        |  AND NOT EXISTS (SELECT 1 FROM ${t.effects} e WHERE e.thread_id = th.thread_id)""".stripMargin
 
   /**
    * Empties the row of a deleted thread into its tombstone. Every SET expression reads the row as it was: the next
    * thread starts one past the deleted one's next number, which is never used (`Checkpointer.deleted`); a thread that
    * numbered no event leaves nothing, and a tombstone that numbered no event since its delete keeps its numbering.
-   * The child place stays, so a page boundary survives.
+   * The child place stays, so a page boundary survives. A tombstone records when it was deleted (bound first, schema
+   * 3); a row that numbered no event and was never deleted records nothing, so it can go.
    */
   def tombstone(t: Tables): String =
-    val moved = "CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END"
+    val moved = "CASE WHEN next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END"
     s"""UPDATE ${t.threads}
        |SET checkpoint_id = NULL, checkpoint_json = NULL,
        |    next_seq = $moved, first_seq = $moved, earliest_seq = $moved,
+       |    deleted_at = CASE WHEN next_seq <> first_seq OR deleted_at IS NOT NULL THEN ? ELSE NULL END,
        |    claim_holder = NULL, claim_token = NULL, claim_expires_at = NULL, claim_tenant = NULL,
        |    tenant_id = NULL, graph_id = NULL, thread_status = NULL, updated_at = NULL, metadata = NULL
        |WHERE thread_id = ?""".stripMargin
@@ -108,9 +150,13 @@ private[postgres] object Sql:
 
   def positionById(t: Tables): String = s"SELECT position FROM ${t.history} WHERE thread_id = ? AND checkpoint_id = ?"
 
-  /** The history oldest first, with each checkpoint's commit time: what `prune` decides on. */
-  def historyAges(t: Tables): String =
-    s"SELECT position, checkpoint_id, committed_at FROM ${t.history} WHERE thread_id = ? ORDER BY position"
+  /**
+   * The history oldest first, with each checkpoint's commit time: what `prune` decides on; and the run that committed
+   * each when `withRuns` (a sweep's protected thread), empty otherwise.
+   */
+  def historyAges(t: Tables, withRuns: Boolean = false): String =
+    val run = if withRuns then "checkpoint_json::json ->> 'runId'" else "''"
+    s"SELECT position, checkpoint_id, committed_at, $run FROM ${t.history} WHERE thread_id = ? ORDER BY position"
 
   def deleteHistoryAt(t: Tables): String = s"DELETE FROM ${t.history} WHERE thread_id = ? AND position = ?"
 

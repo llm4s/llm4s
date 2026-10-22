@@ -36,7 +36,8 @@ import scala.util.{ Try, Using }
  *  - '''Fenced deletes, numbered incarnations.''' [[deleteThread]] checks the deleter's token in its own write
  *    transaction, as a commit does. It keeps the thread's next event number in the file, so a new thread of the same
  *    id numbers its events past the deleted one's, in this process and every other, and a read from inside the
- *    deleted log is refused with `GraphError.ThreadDeleted`.
+ *    deleted log is refused with `GraphError.ThreadDeleted` - also once a sweep has reclaimed the tombstone, through
+ *    the file's reclamation mark (design 4.53, [[sweep]]).
  *  - '''Data only.''' Checkpoints, pending writes and events are stored as JSON - the checkpoint through
  *    `Checkpoint.toJson`, which records its format version - and decoded on read, so nothing executable is stored.
  *  - '''Change notification by polling.''' SQLite cannot tell a connection that another has committed, so this
@@ -354,25 +355,42 @@ final class SqliteCheckpointer private (
    * whatever other stores on the file are doing; it takes no claim, as the contract says.
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit] = writing("prune") { c =>
+    pruneRow(c, threadId, policy, Set.empty)
+  }
+
+  /** [[prune]] inside the caller's write transaction, also keeping the newest checkpoint each of `protectedRuns` committed. */
+  private def pruneRow(
+    c: Connection,
+    threadId: ThreadId,
+    policy: RetentionPolicy,
+    protectedRuns: Set[RunId]
+  ): Result[Unit] =
     readRow(c, threadId) match
       case None => Right(())
       case Some(current) =>
         val now    = clock.instant()
         val cutoff = policy.maxAge.map(age => now.minusNanos(age.toNanos))
-        // oldest first: (position, id, committed at) - a row from before schema 7 has its producer's time instead
+        // oldest first: (position, id, committed at, run) - a row from before schema 7 has its producer's time instead;
+        // the run is read only for a protected thread, whose newest checkpoint of each protected run is kept
+        val runColumn = if protectedRuns.isEmpty then "''" else "json_extract(checkpoint_json, '$.runId')"
         val history = query(
           c,
-          """SELECT position, checkpoint_id, COALESCE(committed_second, created_second),
-            |  CASE WHEN committed_second IS NULL THEN created_nano ELSE committed_nano END
+          s"""SELECT position, checkpoint_id, COALESCE(committed_second, created_second),
+            |  CASE WHEN committed_second IS NULL THEN created_nano ELSE committed_nano END, $runColumn
             |FROM llm4s_checkpoint_history WHERE thread_id = ? ORDER BY position""".stripMargin,
           threadId.value
-        )(rows => (rows.getLong(1), rows.getString(2), Instant.ofEpochSecond(rows.getLong(3), rows.getLong(4))))
-        // the latest checkpoint is always kept, whatever its age
-        val (older, latest) = history.splitAt(history.size - 1)
-        val young           = older.filter((_, _, at) => cutoff.forall(cut => !at.isBefore(cut)))
-        val kept            = policy.maxCheckpoints.fold(young ++ latest)(n => (young ++ latest).takeRight(n))
-        val keptPositions   = kept.map(_._1).toSet
-        history.filterNot((position, _, _) => keptPositions(position)).foreach { (position, _, _) =>
+        )(rows =>
+          (
+            rows.getLong(1),
+            rows.getString(2),
+            Instant.ofEpochSecond(rows.getLong(3), rows.getLong(4)),
+            Option(rows.getString(5)).getOrElse("")
+          )
+        )
+        val (kept, evidence) = RetentionSweep.kept(history, policy, cutoff, _._3, _._4, protectedRuns)
+        val keptPositions    = (kept ++ evidence).map(_._1).toSet
+        history.filterNot(h => keptPositions(h._1)).foreach { h =>
+          val position = h._1
           update(
             c,
             "DELETE FROM llm4s_checkpoint_history WHERE thread_id = ? AND position = ?",
@@ -410,13 +428,76 @@ final class SqliteCheckpointer private (
           update(c, "DELETE FROM llm4s_checkpoint_events WHERE thread_id = ? AND seq < ?", threadId.value, floor)
           update(c, "UPDATE llm4s_checkpoint_threads SET earliest_seq = ? WHERE thread_id = ?", floor, threadId.value)
         }
-  }
+
+  /**
+   * One page of the sweep (design 4.53): the page's thread ids read in one read transaction by the primary key, the
+   * guard asked outside any transaction, then the page pruned and its old tombstones reclaimed in one write
+   * transaction, so the call is bounded as every write is. A tombstone is reclaimed only if, inside that transaction,
+   * its row still holds nothing but where its numbering ended - no checkpoint, event, effect, metadata or claim
+   * newer than the cutoff - so a thread created again over it meanwhile is kept.
+   */
+  def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
+    reading("sweep") { c =>
+      // no lower bound for the first page, so every id - the empty one included - is visited
+      val (where, bound) = after.fold(("", Vector.empty[Any]))(a => ("WHERE thread_id > ?", Vector(a.value)))
+      Right(
+        query(
+          c,
+          s"SELECT thread_id FROM llm4s_checkpoint_threads $where ORDER BY thread_id LIMIT ?",
+          (bound :+ (policy.batchSize + 1))*
+        )(rows => ThreadId(rows.getString(1)))
+      )
+    }.flatMap { page =>
+      val visited = page.take(policy.batchSize)
+      guard.retained(visited).flatMap { protectedRuns =>
+        if visited.isEmpty then Right(SweepPage(0, 0, None))
+        else
+          writing("sweep") { c =>
+            val now    = clock.instant()
+            val cutoff = policy.tombstoneAge.map(age => epochNanos(now.minusNanos(age.toNanos)))
+            val pruned = visited.foldLeft[Result[Int]](Right(0)) { (count, threadId) =>
+              count.flatMap { reclaimed =>
+                val reclaim = cutoff.filter(_ => !protectedRuns.contains(threadId)).flatMap { cut =>
+                  query(
+                    c,
+                    """SELECT first_seq FROM llm4s_checkpoint_threads th
+                      |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.next_seq = th.first_seq
+                      |  AND th.metadata_json IS NULL AND th.deleted_nanos IS NOT NULL AND th.deleted_nanos < ?
+                      |  AND (th.claim_token IS NULL OR th.claim_expires_second * 1000000000 + th.claim_expires_nano < ?)
+                      |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = th.thread_id)
+                      |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_pending_writes w WHERE w.thread_id = th.thread_id)""".stripMargin,
+                    threadId.value,
+                    cut,
+                    cut
+                  )(_.getLong(1)).headOption
+                }
+                reclaim match
+                  case Some(first) =>
+                    // readers of the reclaimed log are still refused: a new thread of the id starts past it
+                    update(
+                      c,
+                      "UPDATE llm4s_checkpoint_meta SET value = MAX(value, ?) WHERE key = 'reclaimed_first'",
+                      first
+                    )
+                    update(c, "DELETE FROM llm4s_checkpoint_threads WHERE thread_id = ?", threadId.value)
+                    Right(reclaimed + 1)
+                  case None if policy.retention != RetentionPolicy.keepAll =>
+                    pruneRow(c, threadId, policy.retention, protectedRuns.getOrElse(threadId, Set.empty))
+                      .map(_ => reclaimed)
+                  case None => Right(reclaimed)
+              }
+            }
+            pruned.map(SweepPage(visited.size, _, RetentionSweep.next(page, policy.batchSize)))
+          }
+      }
+    }
 
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
     reading("eventsAfter") { c =>
-      val row      = readRow(c, threadId)
-      val first    = row.fold(1L)(_.firstSeq)
-      val earliest = row.fold(1L)(_.earliestSeq)
+      val row = readRow(c, threadId)
+      // an id with no row numbers from the reclamation mark (design 4.53)
+      val first    = row.fold(reclaimedFirst(c))(_.firstSeq)
+      val earliest = row.fold(first)(_.earliestSeq)
       // a reader from the start reads the thread now under the id, from its first event
       if Checkpointer.deleted(afterSeq, first) then Left(GraphError.ThreadDeleted(threadId.value, afterSeq, first))
       else if math.max(afterSeq, first - 1) + 1 < earliest then
@@ -534,13 +615,15 @@ final class SqliteCheckpointer private (
           // and a tombstone that numbered no event since its delete keeps its numbering
           """UPDATE llm4s_checkpoint_threads
             |SET checkpoint_id = NULL, checkpoint_json = NULL,
-            |    next_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-            |    first_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
-            |    earliest_seq = CASE WHEN next_seq > 1 AND next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    next_seq = CASE WHEN next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    first_seq = CASE WHEN next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    earliest_seq = CASE WHEN next_seq <> first_seq THEN next_seq + 1 ELSE next_seq END,
+            |    deleted_nanos = CASE WHEN next_seq <> first_seq OR deleted_nanos IS NOT NULL THEN ? ELSE NULL END,
             |    claim_holder = NULL, claim_token = NULL, claim_expires_second = NULL, claim_expires_nano = NULL,
             |    claim_tenant = NULL, claim_tenant_token = NULL,
             |    tenant_id = NULL, graph_id = NULL, thread_status = NULL, updated_nanos = NULL, metadata_json = NULL
             |WHERE thread_id = ?""".stripMargin,
+          epochNanos(clock.instant()),
           threadId.value
         )
         dropIfEmpty(c, threadId)
@@ -857,12 +940,19 @@ object SqliteCheckpointer:
       Row(Option(rows.getString(1)), rows.getLong(2), rows.getLong(3), rows.getLong(4), claim)
     }.headOption
 
+  /** A row for a new id, numbering from the reclamation mark (design 4.53); inside the caller's write transaction. */
   private def ensureRow(c: Connection, threadId: ThreadId): Unit =
     update(
       c,
-      "INSERT OR IGNORE INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq) VALUES (?, 1, 1)",
+      """INSERT OR IGNORE INTO llm4s_checkpoint_threads (thread_id, next_seq, earliest_seq, first_seq)
+        |SELECT ?, value, value, value FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'""".stripMargin,
       threadId.value
     )
+
+  /** The first event number of a thread whose id has no row: `1` until a sweep reclaims a tombstone (design 4.53). */
+  private def reclaimedFirst(c: Connection): Long =
+    query(c, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'")(_.getLong(1)).headOption
+      .getOrElse(1L)
 
   private def setClaim(c: Connection, threadId: ThreadId, claim: Option[Claim]): Unit =
     update(
@@ -885,7 +975,8 @@ object SqliteCheckpointer:
     update(
       c,
       """DELETE FROM llm4s_checkpoint_threads
-        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = 1 AND metadata_json IS NULL
+        |WHERE thread_id = ? AND checkpoint_id IS NULL AND claim_token IS NULL AND next_seq = first_seq
+        |  AND deleted_nanos IS NULL AND metadata_json IS NULL
         |  AND NOT EXISTS (SELECT 1 FROM llm4s_checkpoint_effects e WHERE e.thread_id = llm4s_checkpoint_threads.thread_id)""".stripMargin,
       threadId.value
     )

@@ -89,7 +89,8 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     val t          = PostgresSchema.Tables("agents")
     val statements = sqlStatements(t)
     statements.size should be > 30
-    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b)([^\s(]+)""".r
+    // `FOR UPDATE SKIP LOCKED` is a row lock, not a table
+    val tableRef = """(?i)\b(?:FROM|INTO|UPDATE|JOIN)\s+(?!SET\b|SKIP\b)([^\s(]+)""".r
     statements.foreach { sql =>
       tableRef.findAllMatchIn(sql).map(_.group(1)).foreach { name =>
         withClue(sql)(name should startWith("\"agents\".checkpoint_"))

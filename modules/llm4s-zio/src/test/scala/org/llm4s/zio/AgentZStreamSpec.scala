@@ -66,6 +66,12 @@ object AgentZStreamSpec extends ZIOSpecDefault {
       after: Option[org.llm4s.agent.graph.ThreadCursor],
       limit: Int
     ) = underlying.incompleteThreads(tenantId, after, limit)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }
@@ -107,6 +113,12 @@ object AgentZStreamSpec extends ZIOSpecDefault {
       after: Option[org.llm4s.agent.graph.ThreadCursor],
       limit: Int
     ) = underlying.incompleteThreads(tenantId, after, limit)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: org.llm4s.agent.graph.RetentionPolicy) = underlying.prune(threadId, policy)
   }

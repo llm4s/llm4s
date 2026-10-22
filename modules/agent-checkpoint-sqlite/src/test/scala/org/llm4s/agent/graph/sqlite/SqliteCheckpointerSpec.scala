@@ -44,8 +44,18 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-8 build left it: no tombstone reclamation (design 4.53). */
+  private def asVersionEight(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_threads DROP COLUMN deleted_nanos",
+      "DELETE FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'",
+      "UPDATE llm4s_checkpoint_schema SET version = 8"
+    )
+
   /** The file as a version-7 build left it: no thread registry (design 4.52). */
   private def asVersionSeven(path: Path): Unit =
+    asVersionEight(path)
     exec(
       path,
       (Vector("", "_status", "_agent", "_claimed").map(s => s"DROP INDEX llm4s_checkpoint_threads_registry$s") ++
@@ -147,9 +157,10 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
           _ == 1,
           s"round $round: not exactly one schema version row"
         ),
+        // one row each: the last token and the reclamation mark
         read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
-          _ == 1,
-          s"round $round: not exactly one meta row"
+          _ == 2,
+          s"round $round: not exactly one row per meta key"
         ),
         read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
       )
@@ -334,6 +345,35 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     reopened.commit(thread, Commit(token, events = Vector(event("e6")))).value.map(_.seq) shouldBe Vector(6L)
     reopened.compactEvents(thread, 2L).value
     reopened.eventsAfter(thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L, 6L)
+    reopened.close()
+  }
+
+  "A version-8 file" should "date its tombstones from the upgrade, and number new threads from 1 until one is reclaimed" in {
+    val db    = SqliteFiles.fresh()
+    val clock = ManualClock(Instant.now())
+    val store = SqliteFiles.opened(db, clock)
+    val gone  = ThreadId("gone")
+    val token = store.claim(gone, ClaimRequest(RunId("run"), None, ttl)).value.token
+    store.commit(gone, Commit(token, Some(checkpoint(gone, "c1", None, token)), events = Vector(event("a")))).value
+    store.deleteThread(gone, token, None).value
+    store.close()
+    asVersionEight(db)
+
+    val reopened = SqliteFiles.opened(db, clock)
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    scalar(db, "SELECT value FROM llm4s_checkpoint_meta WHERE key = 'reclaimed_first'")(_.getLong(1)) shouldBe 1L
+    val stamped =
+      scalar(db, "SELECT deleted_nanos FROM llm4s_checkpoint_threads WHERE thread_id = 'gone'")(_.getLong(1))
+    math.abs(stamped - SqliteCheckpointer.epochNanos(Instant.now())) should be < 60L * 1000000000L
+    // a new id numbers from 1, as before the upgrade
+    val fresh = ThreadId("fresh")
+    val held  = reopened.claim(fresh, ClaimRequest(RunId("run"), None, ttl)).value.token
+    reopened.commit(fresh, Commit(held, events = Vector(event("f")))).value.map(_.seq) shouldBe Vector(1L)
+    // the tombstone's age counts from the upgrade
+    reopened.sweep(SweepPolicy(tombstoneAge = Some(1.hour)), None, SweepGuard.none).value.reclaimed shouldBe 0
+    clock.advance(2.hours)
+    reopened.sweep(SweepPolicy(tombstoneAge = Some(1.hour)), None, SweepGuard.none).value.reclaimed shouldBe 1
+    reopened.eventsAfter(gone, 1L, 10).left.value shouldBe GraphError.ThreadDeleted("gone", 1L, 3L)
     reopened.close()
   }
 

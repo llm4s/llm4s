@@ -53,7 +53,12 @@ import scala.jdk.CollectionConverters.*
  *    checkpoint names another parent; the thread registry (design 4.52) - metadata kept and replaced only by a fenced
  *    commit, a tenant's root threads listed newest first by commit time, paged, filtered by status (judged by the latest
  *    checkpoint and a live claim, by the store's clock), agent, metadata and age, and its incomplete threads oldest
- *    first, never another tenant's, a child or a deleted thread; and claims and fencing - one
+ *    first, never another tenant's, a child or a deleted thread; the retention sweep (design 4.53) - every thread,
+ *    tombstones included, visited once in pages of at most `batchSize`, each pruned as `prune` prunes it, by commit
+ *    time, a protected thread keeping the newest checkpoint of each protected run and its tombstone, a failing guard
+ *    changing nothing, and a tombstone reclaimed only once older than `tombstoneAge` by the store's clock, its log's
+ *    readers still refused with `ThreadDeleted` and a new thread of the id numbered past it, across a reopen (on
+ *    storage of its own, [[isolatedCheckpointer]]); and claims and fencing - one
  *    live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock (naming the expired claim's
  *    holder as `takenOverFrom`), the tenant recorded on each claim - a holder named, in a refusal or as
@@ -141,6 +146,16 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     store +: Vector.fill(n - 1)(sibling(store, clock))
 
   /**
+   * A store over storage of its own, which no other case shares, whose claims expire by `clock`: for the cases of the
+   * retention sweep (design 4.53), which page through every thread the store holds and, by reclaiming tombstones, move
+   * the store-wide mark new threads number their events from - which would change what the other cases see. The default
+   * is [[newCheckpointer]], right for a store that gives each case new storage; a store whose cases share a database
+   * overrides it with a new database or schema. [[reopen]] and [[sibling]] must open the same storage as the store they
+   * are given.
+   */
+  protected def isolatedCheckpointer(clock: Clock): Checkpointer = newCheckpointer(clock)
+
+  /**
    * Closes a store a case opened besides its own - a [[contenders]] store - once the case is done with it.
    * The default closes an `AutoCloseable` store and leaves any other alone.
    */
@@ -194,10 +209,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s"contract-${java.util.UUID.randomUUID()}-${threadIds.incrementAndGet()}"
   )
 
-  final private class Store:
-    val clock: ManualClock                      = ManualClock(start)
-    @volatile private var current: Checkpointer = newCheckpointer(clock)
-    val thread: ThreadId                        = newThread()
+  final private class Store(isolated: Boolean = false):
+    val clock: ManualClock = ManualClock(start)
+    @volatile private var current: Checkpointer =
+      if isolated then isolatedCheckpointer(clock) else newCheckpointer(clock)
+    val thread: ThreadId = newThread()
 
     /** The store; another instance over the same storage after [[reopened]]. */
     def store: Checkpointer = current
@@ -242,14 +258,15 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       token: Option[FencingToken] = None,
       on: ThreadId = thread,
       status: CheckpointStatus = CheckpointStatus.Running,
-      createdAt: Instant = start
+      createdAt: Instant = start,
+      runId: String = "run"
     ): Checkpoint =
       Checkpoint(
         Checkpoint.CurrentFormat,
         id,
         parent,
         on.value,
-        "run",
+        runId,
         status,
         createdAt,
         GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false),
@@ -1506,6 +1523,204 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.prune(newThread(), RetentionPolicy(maxCheckpoints = Some(1), maxEvents = Some(0))).value shouldBe (())
   }
 
+  // ---- the retention sweep (design 4.53) ----
+
+  /** Sweeps the whole store, page by page, recording each page's threads as the guard is asked about them. */
+  private def sweepAll(
+    store: Checkpointer,
+    policy: SweepPolicy,
+    guard: SweepGuard = SweepGuard.none
+  ): (Vector[SweepPage], Vector[Vector[ThreadId]]) =
+    val pages = Vector.newBuilder[Vector[ThreadId]]
+    val recording: SweepGuard = threads =>
+      pages += threads
+      guard.retained(threads)
+    @scala.annotation.tailrec
+    def loop(after: Option[ThreadId], done: Vector[SweepPage]): Vector[SweepPage] =
+      if done.size > 1000 then fail("the sweep never reached the end of the store")
+      val page = store.sweep(policy, after, recording).value
+      page.next match
+        case None       => done :+ page
+        case Some(next) => loop(Some(next), done :+ page)
+    val swept = loop(None, Vector.empty)
+    (swept, pages.result())
+
+  private def reclaimed(sweep: (Vector[SweepPage], Vector[Vector[ThreadId]])): Int = sweep._1.map(_.reclaimed).sum
+
+  it should "sweep every thread the store holds in pages of at most batchSize, each once, pruning each as prune does" in {
+    val s       = Store(isolated = true)
+    val threads = Vector.fill(5)(newThread())
+    threads.foreach { t =>
+      val token = s.claim("run", t).value.token
+      Vector("c1", "c2", "c3").foldLeft(Option.empty[String]) { (parent, id) =>
+        s.commit(token, Some(s.checkpoint(id, parent, on = t)), events = Vector(s.event(id, Some(id))), on = t).value
+        Some(id)
+      }: Unit
+    }
+    val deleted = newThread()
+    val gone    = s.claim("run", deleted).value.token
+    s.commit(gone, Some(s.checkpoint("d1", None, on = deleted)), events = Vector(s.event("d")), on = deleted).value
+    s.store.deleteThread(deleted, gone, None).value shouldBe (())
+    val all = (threads :+ deleted).sortBy(_.value)
+
+    // keepAll visits and changes nothing
+    sweepAll(s.store, SweepPolicy(batchSize = 4))._1.map(_.examined).sum shouldBe 6
+    threads.foreach(t => s.historyIds(t) shouldBe Vector("c3", "c2", "c1"))
+
+    val (pages, visited) = sweepAll(s.store, SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), batchSize = 2))
+    pages.map(_.examined) shouldBe Vector(2, 2, 2)
+    pages.map(_.reclaimed).sum shouldBe 0
+    pages.init.foreach(_.next shouldBe defined)
+    // the tombstone is a thread the store holds, so it is visited too; every thread exactly once
+    visited.foreach(_.size should be <= 2)
+    visited.flatten.sortBy(_.value) shouldBe all
+    threads.foreach { t =>
+      s.historyIds(t) shouldBe Vector("c3")
+      s.store.eventsAfter(t, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(t.value, 3L)
+    }
+    // a page after a thread the store does not hold starts from that thread's place in the store's order
+    val first = visited.head.head
+    s.store.sweep(SweepPolicy(batchSize = 10), Some(first), SweepGuard.none).value.examined shouldBe 5
+    s.store.sweep(SweepPolicy(batchSize = 10), Some(newThread()), SweepGuard.none).value.next shouldBe None
+  }
+
+  it should "visit every id in a sweep, the empty one included" in {
+    val s     = Store(isolated = true)
+    val empty = ThreadId("")
+    val token = s.claim("run", empty).value.token
+    Vector("c1", "c2").foldLeft(Option.empty[String]) { (parent, id) =>
+      s.commit(token, Some(s.checkpoint(id, parent, on = empty)), on = empty).value
+      Some(id)
+    }: Unit
+    val (pages, visited) = sweepAll(s.store, SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), batchSize = 1))
+    visited.flatten shouldBe Vector(empty)
+    pages.map(_.examined).sum shouldBe 1
+    s.historyIds(empty) shouldBe Vector("c2")
+  }
+
+  it should "prune in a sweep by when the store committed, never by a skewed producer's own timestamps" in {
+    val s      = Store(isolated = true)
+    val token  = s.claim("run").value.token
+    val future = start.plus(java.time.Duration.ofDays(365))
+    val past   = start.minus(java.time.Duration.ofDays(365))
+    def commitAt(id: String, parent: Option[String], at: Instant) =
+      s.commit(token, Some(s.checkpoint(id, parent, createdAt = at)), events = Vector(s.event(id, Some(id), at))).value
+    commitAt("old", None, future)
+    s.advance(40.minutes)
+    commitAt("young", Some("old"), past)
+    commitAt("latest", Some("young"), past)
+    s.advance(10.minutes)
+    sweepAll(s.store, SweepPolicy(RetentionPolicy(maxAge = Some(30.minutes))))._1.map(_.examined).sum shouldBe 1
+    s.historyIds() shouldBe Vector("latest", "young")
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 2L)
+  }
+
+  it should "keep, of a protected thread, the newest checkpoint each protected run committed, pruning the rest" in {
+    val s     = Store(isolated = true)
+    val token = s.claim("run").value.token
+    // runs a, a, b, c: the newest of a's is a2, and c's is the latest
+    Vector("a1" -> "a", "a2" -> "a", "b1" -> "b", "c1" -> "c").foldLeft(Option.empty[String]) {
+      case (parent, (id, run)) =>
+        s.commit(token, Some(s.checkpoint(id, parent, runId = run)), events = Vector(s.event(id, Some(id)))).value
+        Some(id)
+    }: Unit
+    val policy = SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)))
+    sweepAll(s.store, policy, SweepGuard.of(Map(s.thread -> Set(RunId("a"), RunId("c")))))
+    s.historyIds() shouldBe Vector("c1", "a2")
+    s.store.checkpoint(s.thread, "a2").value.map(_.runId) shouldBe Some("a")
+    // the events follow the policy alone
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+    // unprotected, the evidence goes as any old checkpoint does
+    sweepAll(s.store, policy)
+    s.historyIds() shouldBe Vector("c1")
+  }
+
+  it should "reclaim a tombstone deleted longer ago than tombstoneAge by the store's clock, and none younger or claimed since" in {
+    val s     = Store(isolated = true)
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
+    val reused = newThread()
+    val r1     = s.claim("r1", reused).value.token
+    s.commit(r1, events = Vector(s.event("r")), on = reused).value
+    s.store.deleteThread(reused, r1, None).value shouldBe (())
+    // a thread with a checkpoint is never reclaimed, however old
+    val kept = newThread()
+    s.commit(s.claim("k", kept).value.token, Some(s.checkpoint("k1", None, on = kept)), on = kept).value
+
+    val policy = SweepPolicy(tombstoneAge = Some(2.hours))
+    s.advance(1.hour)
+    reclaimed(sweepAll(s.store, policy)) shouldBe 0
+    // claimed again an hour after its delete: its claim, live or lapsed, is newer than the cutoff for a while
+    s.claim("r2", reused).value
+    s.advance(2.hours)
+    reclaimed(sweepAll(s.store, policy)) shouldBe 1
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe a[GraphError.ThreadDeleted]
+    s.store.eventsAfter(reused, 1L, 10).refused shouldBe GraphError.ThreadDeleted(reused.value, 1L, 3L)
+    // once its claim lapsed longer than tombstoneAge ago, nobody can still write under the id
+    s.advance(3.hours)
+    reclaimed(sweepAll(s.store, policy)) shouldBe 1
+    reclaimed(sweepAll(s.store, policy)) shouldBe 0
+    s.historyIds(kept) shouldBe Vector("k1")
+  }
+
+  it should "refuse a reader of a reclaimed log, and number a new thread of the id past it, across a reopen" in {
+    val s     = Store(isolated = true)
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
+    s.store.deleteThread(s.thread, token, None).value shouldBe (())
+    s.advance(2.days)
+    reclaimed(sweepAll(s.store, SweepPolicy(tombstoneAge = Some(1.day)))) shouldBe 1
+
+    // the tombstone is gone, yet the old log's readers are still told the thread was deleted, by every store
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    s.store.eventsAfter(s.thread, 1L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 1L, 5L)
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 3L, 10, 1.hour)).refused shouldBe
+      GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    s.other().eventsAfter(s.thread, 2L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 2L, 5L)
+    s.store.eventsAfter(s.thread, 0L, 10).value shouldBe empty
+
+    s.reopened()
+    val again = s.claim("again").value.token
+    s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2")))
+      .value
+      .map(_.seq) shouldBe Vector(5L, 6L)
+    s.store.eventsAfter(s.thread, 3L, 10).refused shouldBe GraphError.ThreadDeleted(s.thread.value, 3L, 5L)
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq) shouldBe Vector(5L, 6L)
+    // an id that never had a tombstone numbers from the mark too
+    val fresh = newThread()
+    s.commit(s.claim("fresh", fresh).value.token, events = Vector(s.event("f")), on = fresh).value.map(_.seq) shouldBe
+      Vector(5L)
+    // and a claim that commits nothing leaves nothing behind, as before
+    val idle = newThread()
+    val held = s.claim("idle", idle).value.token
+    s.store.release(idle, held).value shouldBe (())
+    sweepAll(s.store, SweepPolicy.keepAll)._1.map(_.examined).sum shouldBe 2
+  }
+
+  it should "never reclaim a protected thread's tombstone, and change nothing when the guard fails" in {
+    val s     = Store(isolated = true)
+    val token = s.claim("run").value.token
+    s.chain(token, Vector("c1", "c2"))
+    val deleted = newThread()
+    val gone    = s.claim("run", deleted).value.token
+    s.commit(gone, events = Vector(s.event("d")), on = deleted).value
+    s.store.deleteThread(deleted, gone, None).value shouldBe (())
+    s.advance(2.days)
+    val policy = SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), tombstoneAge = Some(1.day))
+
+    val unreachable         = ValidationError("guard", "the queue is unreachable")
+    val failing: SweepGuard = _ => Left(unreachable)
+    s.store.sweep(policy, None, failing).refused shouldBe unreachable
+    s.historyIds() shouldBe Vector("c2", "c1")
+
+    reclaimed(sweepAll(s.store, policy, SweepGuard.of(Map(deleted -> Set.empty)))) shouldBe 0
+    s.historyIds() shouldBe Vector("c2")
+    s.store.eventsAfter(deleted, 1L, 10).refused shouldBe GraphError.ThreadDeleted(deleted.value, 1L, 3L)
+    reclaimed(sweepAll(s.store, policy)) shouldBe 1
+    s.store.eventsAfter(deleted, 1L, 10).refused shouldBe GraphError.ThreadDeleted(deleted.value, 1L, 3L)
+  }
+
   it should "delete a thread's whole history, and keep it across a close and reopen" in {
     val s     = Store()
     val token = s.claim("run").value.token
@@ -2279,6 +2494,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         after: Option[org.llm4s.agent.graph.ThreadCursor],
         limit: Int
       ) = s.store.incompleteThreads(tenantId, after, limit)
+      def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard) = s.store.sweep(policy, after, guard)
       def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     val first   = GraphRuntime(counted, claims = ClaimPolicy(ttl = ttl, renewEvery = 20.millis))
@@ -2456,6 +2672,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
         after: Option[org.llm4s.agent.graph.ThreadCursor],
         limit: Int
       ) = s.store.incompleteThreads(tenantId, after, limit)
+      def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard) = s.store.sweep(policy, after, guard)
       def checkpoint(threadId: ThreadId, checkpointId: String) = s.store.checkpoint(threadId, checkpointId)
       def prune(threadId: ThreadId, policy: RetentionPolicy)   = s.store.prune(threadId, policy)
     completed(GraphRuntime(s.store, claims = neverRenewed).start(s.thread, w.graph, Vector("a"), config("a")).value)

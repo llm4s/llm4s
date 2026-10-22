@@ -103,6 +103,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       after: Option[org.llm4s.agent.graph.ThreadCursor],
       limit: Int
     ) = underlying.incompleteThreads(tenantId, after, limit)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
   }
@@ -179,6 +185,12 @@ class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with
       after: Option[org.llm4s.agent.graph.ThreadCursor],
       limit: Int
     ) = underlying.incompleteThreads(tenantId, after, limit)
+    def sweep(
+      policy: org.llm4s.agent.graph.SweepPolicy,
+      after: Option[org.llm4s.agent.graph.ThreadId],
+      guard: org.llm4s.agent.graph.SweepGuard
+    ) =
+      underlying.sweep(policy, after, guard)
     def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
     def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
   }

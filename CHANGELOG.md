@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
   `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
-- Checkpoint format 8 and SQLite schema 8: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- Checkpoint format 8 and SQLite schema 9: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).
+- `Checkpointer.sweep` is a new abstract method every store implements, and a tombstone is no longer kept for good;
+  [migration](docs/reference/migration.md#store-wide-retention-and-tombstone-reclamation-2059).
 - `Checkpointer.threads` and `Checkpointer.incompleteThreads` are new abstract methods every store implements, and
   `Commit` carries `metadata`; [migration](docs/reference/migration.md#the-thread-registry-2132).
 - `RetentionPolicy.maxAge` is judged by when the store committed each checkpoint and event, not the producer's timestamps,
@@ -71,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one listening connection per store, polling while it is down [#2131](https://github.com/llm4s/llm4s/issues/2131); [design §4.51](docs/design/typed-agent-runtime/4.51-stage-5-slice-s2-cross-machine-change-notification.md).
 - **Added** the thread registry: thread metadata (`RunConfig.metadata` at start, `GraphRuntime.updateMetadata`), tenant-scoped
   `Checkpointer.threads` search and `incompleteThreads`, indexed in every store [#2132](https://github.com/llm4s/llm4s/issues/2132); [design §4.52](docs/design/typed-agent-runtime/4.52-stage-5-slice-s3-thread-registry.md).
+- **Added** `Checkpointer.sweep`: store-wide retention in bounded pages, reclaiming old tombstones while their readers are still
+  told the thread was deleted [#2059](https://github.com/llm4s/llm4s/issues/2059); [design §4.53](docs/design/typed-agent-runtime/4.53-stage-5-slice-s4-store-wide-retention-and-tombstone-reclamation.md).
 - **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
