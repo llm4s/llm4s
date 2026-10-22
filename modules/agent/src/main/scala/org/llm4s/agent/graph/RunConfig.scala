@@ -86,6 +86,11 @@ object RunBudgets:
  * ([[GraphError.TenantMismatch]]; `None` and `Some` differ). The principal is recorded on the run's
  * `RunStarted`, `RunRecovered` and `RunResumed` events and is never checked.
  *
+ * `metadata`, when not empty, is the thread's [[ThreadMetadata]] (design 4.52): a top-level `start` sets it in its
+ * claim commit, replacing what the thread had, and refuses metadata that breaks its limits with a `ValidationError`
+ * before it claims anything. `recover`, `resume` and a child thread's run leave it as it is; change it with
+ * [[GraphRuntime.updateMetadata]].
+ *
  * `interruptBefore` and `interruptAfter` are the run's static breakpoints ([[BreakpointPhase]]): a
  * task of a node in `interruptBefore` is held before it runs, and one of a node in `interruptAfter`
  * after it ran, each as an interrupt of its own that [[GraphRuntime.resume]] answers with
@@ -402,7 +407,11 @@ final class RunContext private[graph] (
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
 
-  /** Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. */
+  /**
+   * Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. A no-op once the
+   * task's run has ended - released the thread, or lost its claim - so a node that keeps its context, or a thread of
+   * its own, past its run sends nothing into a later run's subscriptions (#1737).
+   */
   def progress(name: String, version: Int, payload: ujson.Value): Unit = sink.progress(name, version, payload)
 
   /** Forwards a delegated child's event to this task's thread's nested subscribers (design 4.47). */

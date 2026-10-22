@@ -19,5 +19,5 @@ object StarterTestSupport {
   def settings(probe: Boolean = false, secrets: Seq[String] = Nil): HealthSettings =
     HealthSettings("openai", "gpt-4o", probe, Duration.ofSeconds(60), Duration.ofSeconds(5), secrets)
 
-  def indicator(client: JLlmClient): LlmHealthIndicator = new LlmHealthIndicator(client, settings(), pool)
+  def indicator(client: JLlmClient): LlmIndicator = new LlmIndicator(client, settings(), pool)
 }

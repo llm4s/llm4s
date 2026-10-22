@@ -33,6 +33,7 @@ private[postgres] object Sql:
   def dropIfEmpty(t: Tables): String =
     s"""DELETE FROM ${t.threads} th
        |WHERE th.thread_id = ? AND th.checkpoint_id IS NULL AND th.claim_token IS NULL AND th.next_seq = 1
+       |  AND th.metadata IS NULL
        |  AND NOT EXISTS (SELECT 1 FROM ${t.effects} e WHERE e.thread_id = th.thread_id)""".stripMargin
 
   /**
@@ -46,7 +47,8 @@ private[postgres] object Sql:
     s"""UPDATE ${t.threads}
        |SET checkpoint_id = NULL, checkpoint_json = NULL,
        |    next_seq = $moved, first_seq = $moved, earliest_seq = $moved,
-       |    claim_holder = NULL, claim_token = NULL, claim_expires_at = NULL, claim_tenant = NULL
+       |    claim_holder = NULL, claim_token = NULL, claim_expires_at = NULL, claim_tenant = NULL,
+       |    tenant_id = NULL, graph_id = NULL, thread_status = NULL, updated_at = NULL, metadata = NULL
        |WHERE thread_id = ?""".stripMargin
 
   // ---- checkpoints ----
@@ -54,8 +56,35 @@ private[postgres] object Sql:
   def latest(t: Tables): String =
     s"SELECT checkpoint_json FROM ${t.threads} WHERE thread_id = ? AND checkpoint_json IS NOT NULL"
 
+  /** The latest checkpoint, and the registry's columns that follow it (schema 2). */
   def setLatest(t: Tables): String =
-    s"UPDATE ${t.threads} SET checkpoint_id = ?, checkpoint_json = ? WHERE thread_id = ?"
+    s"""UPDATE ${t.threads}
+       |SET checkpoint_id = ?, checkpoint_json = ?, tenant_id = ?, graph_id = ?, thread_status = ?, updated_at = ?
+       |WHERE thread_id = ?""".stripMargin
+
+  // ---- the thread registry (schema 2) ----
+
+  /** The thread's metadata as a JSON object, NULL for none, and when the store committed it. */
+  def setMetadata(t: Tables): String =
+    s"UPDATE ${t.threads} SET metadata = CAST(? AS jsonb), updated_at = ? WHERE thread_id = ?"
+
+  /** The predicate every registry index shares: root threads with a registered latest checkpoint. */
+  val Registered: String = "parent_thread_id IS NULL AND thread_status IS NOT NULL"
+
+  /** Whether a live claim holds the thread at the time bound: its expiry after it (NULL, so false, for none). */
+  val LiveClaim: String = "claim_expires_at > ?"
+
+  /**
+   * A page of the registry, and one row more to tell whether another follows, given its `WHERE` clause: newest first
+   * by commit time, then thread id - compared byte by byte (`COLLATE "C"`), as the indexes are - or oldest first. The
+   * last column is whether a live claim holds the thread, at the time bound first.
+   */
+  def registryPage(t: Tables, where: String, newestFirst: Boolean): String =
+    val order = if newestFirst then "DESC" else "ASC"
+    s"""SELECT thread_id, tenant_id, graph_id, thread_status, checkpoint_id, metadata::text, updated_at,
+       |  COALESCE($LiveClaim, false)
+       |FROM ${t.threads} WHERE $where
+       |ORDER BY updated_at $order, thread_id COLLATE "C" $order LIMIT ?""".stripMargin
 
   def nextPosition(t: Tables): String =
     s"SELECT COALESCE(MAX(position) + 1, 0) FROM ${t.history} WHERE thread_id = ?"

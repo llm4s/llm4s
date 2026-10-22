@@ -21,7 +21,8 @@ import scala.util.{ Try, Using }
  *    `claim_tenant_token` the token of the claim it was recorded for, so the tenant is the claim's only when the two
  *    tokens agree), and from version 6 the parent the latest checkpoint's origin names (`parent_thread_id`) with the
  *    thread's place among that parent's children (`child_order`, one past the file's highest, which a tombstone keeps), indexed
- *    by `(parent_thread_id, child_order)`. `deleteThread` keeps the row of a thread that numbered any event,
+ *    by `(parent_thread_id, child_order)`, and from version 8 the thread registry's columns ([[addThreadRegistry]]).
+ *    `deleteThread` keeps the row of a thread that numbered any event,
  *    emptied, as a tombstone: `next_seq`, `first_seq` and the replay floor move one past the deleted thread's next
  *    number, so a new thread of the same id numbers its events past the deleted one's, and a read from inside the
  *    deleted log is told so (`GraphError.ThreadDeleted`). The tombstone holds no data of the deleted thread.
@@ -35,6 +36,8 @@ import scala.util.{ Try, Using }
  *  - `llm4s_checkpoint_effects` (version 3): the thread's effect records (design §4.24), one JSON `EffectRecord`
  *    per `(thread, effect key)`, with the task it belongs to - its id and, from version 4, its lineage - which
  *    decide when a commit releases it (`Commit.releasesEffect`), and the token of the commit that wrote it.
+ *  - `llm4s_checkpoint_thread_metadata` (version 8): each thread's metadata (design 4.52), entry by entry, indexed by
+ *    `(key, value)` for the registry's equality search; `deleteThread` removes a thread's.
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -44,7 +47,7 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 7
+  val Current: Int = 8
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
@@ -57,8 +60,94 @@ private[sqlite] object SqliteSchema:
     3 -> addEffectLineages,
     4 -> addClaimTenants,
     5 -> addChildThreads,
-    6 -> addCommitTimes
+    6 -> addCommitTimes,
+    7 -> addThreadRegistry
   )
+
+  /** The partial index predicate every registry index shares: root threads with a registered latest checkpoint. */
+  private val Registered = "parent_thread_id IS NULL AND thread_status IS NOT NULL"
+
+  /**
+   * Version 8: the thread registry (Stage 5 slice S3, design 4.52). Each thread's row gains what `threads` and
+   * `incompleteThreads` filter and order by - its latest checkpoint's tenant (`tenant_id`), graph (`graph_id`) and
+   * status (`thread_status`, `Deleted` while a cascade delete is under way), when the store last committed a
+   * checkpoint or metadata to it (`updated_nanos`, epoch nanoseconds by the store's clock), and its metadata as JSON
+   * (`metadata_json`, NULL for none) - and `llm4s_checkpoint_thread_metadata` holds the metadata entry by entry, for
+   * equality search. Partial indexes on root threads serve each filter newest first and oldest first.
+   *
+   * A version-7 file's threads are backfilled a row at a time from their latest checkpoint, `updated_nanos` from its
+   * commit time (or, for a row from before schema 7, its creation time); they have no metadata. A latest checkpoint
+   * this build cannot read is logged and left out of the registry, as [[ensureHistory]] leaves it out of the history.
+   */
+  private def addThreadRegistry(connection: Connection): Unit =
+    ensureHistory(connection)
+    statements(
+      connection,
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN tenant_id TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN graph_id TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN thread_status TEXT",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN updated_nanos INTEGER",
+      "ALTER TABLE llm4s_checkpoint_threads ADD COLUMN metadata_json TEXT",
+      """CREATE TABLE llm4s_checkpoint_thread_metadata (
+        |  thread_id TEXT NOT NULL,
+        |  key       TEXT NOT NULL,
+        |  value     TEXT NOT NULL,
+        |  PRIMARY KEY (thread_id, key)
+        |) WITHOUT ROWID""".stripMargin,
+      "CREATE INDEX llm4s_checkpoint_thread_metadata_entry ON llm4s_checkpoint_thread_metadata (key, value, thread_id)",
+      s"""CREATE INDEX llm4s_checkpoint_threads_registry
+         |ON llm4s_checkpoint_threads (tenant_id, updated_nanos, thread_id) WHERE $Registered""".stripMargin,
+      s"""CREATE INDEX llm4s_checkpoint_threads_registry_status
+         |ON llm4s_checkpoint_threads (tenant_id, thread_status, updated_nanos, thread_id) WHERE $Registered""".stripMargin,
+      s"""CREATE INDEX llm4s_checkpoint_threads_registry_agent
+         |ON llm4s_checkpoint_threads (tenant_id, graph_id, updated_nanos, thread_id) WHERE $Registered""".stripMargin,
+      s"""CREATE INDEX llm4s_checkpoint_threads_registry_claimed
+         |ON llm4s_checkpoint_threads (tenant_id, updated_nanos, thread_id)
+         |WHERE $Registered AND claim_token IS NOT NULL""".stripMargin
+    )
+    // the ids first, so no cursor is open on the table while its rows are updated; then one checkpoint at a time
+    val threads = Using.resource(connection.createStatement()) { select =>
+      Using.resource(
+        select.executeQuery("SELECT thread_id FROM llm4s_checkpoint_threads WHERE checkpoint_json IS NOT NULL")
+      )(rows => Iterator.continually(rows).takeWhile(_.next()).map(_.getString(1)).toVector)
+    }
+    Using.resources(
+      connection.prepareStatement("SELECT checkpoint_json FROM llm4s_checkpoint_threads WHERE thread_id = ?"),
+      connection.prepareStatement(
+        """SELECT COALESCE(committed_second, created_second),
+          |  CASE WHEN committed_second IS NULL THEN created_nano ELSE committed_nano END
+          |FROM llm4s_checkpoint_history WHERE thread_id = ? AND checkpoint_id = ?""".stripMargin
+      ),
+      connection.prepareStatement(
+        """UPDATE llm4s_checkpoint_threads SET tenant_id = ?, graph_id = ?, thread_status = ?, updated_nanos = ?
+          |WHERE thread_id = ?""".stripMargin
+      )
+    ) { (latest, committed, backfill) =>
+      threads.foreach { thread =>
+        latest.setString(1, thread)
+        val json = Using.resource(latest.executeQuery())(rows => if rows.next() then rows.getString(1) else null)
+        decoded(json) match
+          case Left(problem) =>
+            logger.warn(
+              "Thread {}'s latest checkpoint cannot be read, so it is not in the registry: {}",
+              thread,
+              problem
+            )
+          case Right(checkpoint) =>
+            committed.setString(1, thread)
+            committed.setString(2, checkpoint.id)
+            val at = Using.resource(committed.executeQuery()) { found =>
+              if found.next() then java.time.Instant.ofEpochSecond(found.getLong(1), found.getLong(2))
+              else checkpoint.createdAt
+            }
+            backfill.setString(1, checkpoint.tenantId.orNull)
+            backfill.setString(2, checkpoint.snapshot.graphId)
+            backfill.setString(3, if checkpoint.deleting then "Deleted" else checkpoint.status.toString)
+            backfill.setLong(4, Math.addExact(Math.multiplyExact(at.getEpochSecond, 1000000000L), at.getNano.toLong))
+            backfill.setString(5, thread)
+            backfill.executeUpdate(): Unit
+      }
+    }
 
   /**
    * Version 7: when the store committed each checkpoint and event, by its clock (Stage 5 rule 1, design 4.50), which

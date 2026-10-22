@@ -158,11 +158,16 @@ Choose your path based on what you want to build:
 
 ## Quick Reference: Key Features
 
+The snippets in this section assume a `client: LLMClient` (built as in [your first program](first-example)) and,
+for agents, a `tools: ToolRegistry`.
+
 ### Agents
 Build sophisticated multi-turn agents with automatic tool calling.
 
 ```scala
-val agent = Agent.builder("assistant", client).withTools(tools).build()
+import org.llm4s.agent.Agent
+
+val agent = Agent.builder("assistant", client).withTools(tools).build()   // Result[Agent]
 val result = agent.flatMap(_.run("Your query"))
 ```
 
@@ -174,6 +179,14 @@ val result = agent.flatMap(_.run("Your query"))
 Give LLMs access to external functions and APIs.
 
 ```scala
+import org.llm4s.toolapi.{ Schema, ToolBuilder }
+
+def search(query: String): String = s"Results for $query"   // your implementation
+
+val searchSchema = Schema
+  .`object`[Map[String, Any]]("Search parameters")
+  .withProperty(Schema.property("query", Schema.string("What to search for")))
+
 val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", searchSchema)
   .withHandler(params => params.getString("query").map(search))
   .buildSafe()   // Result[ToolFunction[Map[String, Any], String]]
@@ -187,7 +200,13 @@ val tool = ToolBuilder[Map[String, Any], String]("search", "Search the web", sea
 Functional conversation management without mutation.
 
 ```scala
-val result2 = agent.continueConversation(result1, "Next question")
+import org.llm4s.agent.Agent
+
+val turns = for {
+  agent   <- Agent.builder("assistant", client).withTools(tools).build()
+  result1 <- agent.run("First question")
+  result2 <- agent.continueConversation(result1, "Next question")
+} yield result2
 ```
 
 [Learn more →](/guide/agents/#multi-turn-conversations)
@@ -198,6 +217,8 @@ val result2 = agent.continueConversation(result1, "Next question")
 Automatically manage token windows and prune history.
 
 ```scala
+import org.llm4s.agent.{ ContextWindowConfig, PruningStrategy }
+
 val config = ContextWindowConfig(
   maxMessages = Some(20),
   pruningStrategy = PruningStrategy.OldestFirst
@@ -212,6 +233,9 @@ val config = ContextWindowConfig(
 Get real-time token-by-token responses.
 
 ```scala
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+
+val conversation = Conversation(Seq(UserMessage("Tell me a story")))
 client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(print))
 ```
 
@@ -222,9 +246,9 @@ client.streamComplete(conversation, onChunk = chunk => chunk.content.foreach(pri
 ### Observability
 Trace LLM calls with Langfuse integration.
 
-```scala
-// Automatic tracing when configured
-TRACING_MODE=langfuse
+```bash
+# Automatic tracing when configured (with llm4s-observability on the classpath)
+export TRACING_MODE=langfuse
 ```
 
 [Learn more →](../guide/observability)
@@ -245,6 +269,8 @@ Create and search vector embeddings.
 Connect to external Model Context Protocol servers.
 
 ```scala
+import org.llm4s.mcp.{ MCPServerConfig, MCPToolRegistry }
+
 // llm4s-mcp: an MCPToolRegistry is a ToolRegistry, so an agent takes it like any other
 val tools = new MCPToolRegistry(Seq(MCPServerConfig.stdio("files", Seq("npx", "my-mcp-server"))))
 ```
@@ -319,11 +345,12 @@ def askQuestion(question: String): String = {
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
     response <- client.complete(
-      List(
-        SystemMessage("You are a helpful Q&A assistant."),
-        UserMessage(question)
-      ),
-      None
+      Conversation(
+        Seq(
+          SystemMessage("You are a helpful Q&A assistant."),
+          UserMessage(question)
+        )
+      )
     )
   } yield response.content
 
@@ -395,7 +422,7 @@ val config = ContextWindowConfig(
 )
 
 // Pruning is middleware on the agent: it trims what each model call is sent,
-// and the thread keeps the full history
+// and the thread keeps the full history (client and tools as in the quick reference above)
 val result = for {
   agent  <- Agent.builder("assistant", client)
     .withTools(tools)

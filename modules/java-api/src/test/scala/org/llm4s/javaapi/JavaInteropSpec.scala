@@ -22,7 +22,8 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   private val internalByDesign: Set[(Class[?], String)] = Set(
     classOf[JLlmClient]         -> "underlying",
     classOf[Answer]             -> "underlying",
-    classOf[JCompletionOptions] -> "underlying"
+    classOf[JCompletionOptions] -> "underlying",
+    classOf[JTool]              -> "function"
   )
 
   private def isInternal(m: Method): Boolean = internalByDesign(m.getDeclaringClass -> m.getName)
@@ -153,6 +154,16 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   /** The facade's Java-visible classes: every one a Java caller calls or implements. */
   private def facade: List[Class[_]] = List(
     classOf[LlmResult[_]],
+    classOf[FakeLlmClient],
+    classOf[FakeLlmClient.Builder],
+    classOf[JTool],
+    classOf[JTool.Builder],
+    classOf[JToolArgs],
+    classOf[JToolHandler],
+    classOf[Tool],
+    classOf[Param],
+    classOf[CompletionStream],
+    classOf[CompletionStreamListener],
     classOf[JLlmClient],
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
@@ -380,11 +391,15 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   /** Every public static method the facade means Java callers to call, by class. Nothing else may be one. */
   private def intendedStatics: Map[Class[_], Set[String]] = Map(
+    // a test double's entry points: a script of replies, or a builder that mixes in failures (#1497)
+    classOf[FakeLlmClient] -> Set("replying(String[])", "builder()"),
+    classOf[JTool]         -> Set("builder(String,String)", "fromAnnotated(Object)"),
     Class.forName("org.llm4s.javaapi.Llm4s") -> Set(
       "createDefaultClient()",
       "createClient(ProviderConfig)",
       "createClient(ProviderConfig,MetricsCollector)",
       "wrapClient(LLMClient)",
+      "createAgentWithTools(JLlmClient,List)",
       "wrapEmbeddingClient(EmbeddingClient,EmbeddingModelConfig)",
       "createDefaultEmbeddingClient()",
       "createEmbeddingClient(String)",
@@ -479,6 +494,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   /** The facade's Scala classes whose constructors only the package may call: each takes the package's token first. */
   private def tokenGuarded: List[Class[_]] = List(
     classOf[LlmResult[_]],
+    classOf[JTool],
+    classOf[JTool.Builder],
+    classOf[JToolArgs],
+    classOf[CompletionStream],
     classOf[JLlmClient],
     classOf[JEmbeddingClient],
     classOf[JCompletionOptions],
@@ -536,8 +555,12 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
    */
   private def internalClasses: Set[String] = Set(
     "org.llm4s.javaapi.FacadeInternals", // reads core's Scala values into the facade's types
-    "org.llm4s.javaapi.LlmErrorKinds",   // how LlmException reads an LLMError: its kind, status and retry delay
-    "org.llm4s.javaapi.ClientBuilds"     // what the client builders' build() does with their settings
+    "org.llm4s.javaapi.FakeLlmClients",  // FakeLlmClient's script entries and scripted LLMClient (#1497)
+    "org.llm4s.javaapi.JTools",          // a Java tool's schema, the reading of its arguments and its result (#1484)
+    "org.llm4s.javaapi.CompletionPublisher", // the Flow.Publisher of JLlmClient.streamAsPublisher (#1485)
+    "org.llm4s.javaapi.JavaRecords",         // a Java record's JSON Schema, and the record read back (#1486)
+    "org.llm4s.javaapi.LlmErrorKinds",       // how LlmException reads an LLMError: its kind, status and retry delay
+    "org.llm4s.javaapi.ClientBuilds"         // what the client builders' build() does with their settings
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */

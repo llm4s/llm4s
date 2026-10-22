@@ -20,6 +20,10 @@ A comprehensive, type-safe framework for building LLM-powered applications in Sc
 [Get Started](/getting-started/installation){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/llm4s/llm4s){: .btn .fs-5 .mb-4 .mb-md-0 }
 
+**Follow LLM4S**
+
+{% include follow-links.html style="buttons" %}
+
 ---
 
 ## Upcoming Events
@@ -32,6 +36,16 @@ Meet the LLM4S community at a talk near you, or join the weekly Dev Hour online.
 [Follow the Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA){: .btn }
 
 {% include events-script.html %}
+
+---
+
+## LLM4S Around the World
+
+Snapshots from LLM4S talks held around the world. Select a picture to open it full size.
+
+{% include talk-snapshots.html %}
+
+[See all talks and events](/events/){: .btn .btn-primary }
 
 ---
 

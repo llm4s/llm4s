@@ -22,7 +22,8 @@ import scala.util.Using
  *    spent: the latest checkpoint as JSON with its id (the thread's version), the next event number, the replay floor
  *    (`earliest_seq`) and the first event number of the thread now under the id (`first_seq`), the claim (holder,
  *    token, expiry by the database's clock, tenant), and the parent the latest checkpoint's origin names with the
- *    thread's place among that parent's children. Every write to a thread locks this row first (`FOR UPDATE`), so the
+ *    thread's place among that parent's children, and from version 2 the thread registry's columns and metadata
+ *    ([[addThreadRegistry]]). Every write to a thread locks this row first (`FOR UPDATE`), so the
  *    checks a write makes and the write itself see one state of the thread. `deleteThread` keeps the row of a thread
  *    that numbered any event, emptied, as a tombstone, exactly as the SQLite store does.
  *  - `checkpoint_history`: every checkpoint of every thread's history, latest included, as JSON, keyed by
@@ -43,13 +44,61 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 1
+  val Current: Int = 2
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables)
+  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry)
+
+  /**
+   * Version 2: the thread registry (Stage 5 slice S3, design 4.52). Each thread's row gains what `threads` and
+   * `incompleteThreads` filter and order by: its latest checkpoint's tenant (`tenant_id`), graph (`graph_id`) and
+   * status (`thread_status`, `Deleted` while a cascade delete is under way), when the store last committed a
+   * checkpoint or metadata to it (`updated_at`, by the database's clock), and its metadata (`metadata`, a JSON object,
+   * NULL for none). Partial indexes on root threads serve each filter newest first and oldest first - thread ids
+   * compared byte by byte (`COLLATE "C"`), whatever the database's collation - and a GIN index metadata containment.
+   * The indexes lead with `tenant_key`, which the database generates from `tenant_id` (`=` and the tenant, or empty
+   * for none), because an index scan is in the order of the columns after one compared by equality, not by `IS NULL`.
+   *
+   * A version-1 schema's threads are backfilled from their latest checkpoint's JSON (written by this build line,
+   * format 8: `tenantId` absent or a string, `deleting` absent or a boolean), `updated_at` from its commit time. They
+   * have no metadata.
+   */
+  private def addThreadRegistry(t: Tables): Vector[String] =
+    val registered = "WHERE parent_thread_id IS NULL AND thread_status IS NOT NULL"
+    Vector(
+      s"""ALTER TABLE ${t.threads}
+         |  ADD COLUMN tenant_id     text,
+         |  ADD COLUMN graph_id      text,
+         |  ADD COLUMN thread_status text,
+         |  ADD COLUMN updated_at    timestamptz,
+         |  ADD COLUMN metadata      jsonb,
+         |  ADD COLUMN tenant_key    text GENERATED ALWAYS AS (COALESCE('=' || tenant_id, '')) STORED""".stripMargin,
+      s"""UPDATE ${t.threads} th
+         |SET tenant_id = src.j ->> 'tenantId',
+         |    graph_id = src.j -> 'snapshot' ->> 'graphId',
+         |    thread_status = CASE WHEN COALESCE((src.j ->> 'deleting')::boolean, false) THEN 'Deleted'
+         |                         ELSE src.j ->> 'status' END,
+         |    updated_at = COALESCE(
+         |      (SELECT h.committed_at FROM ${t.history} h
+         |       WHERE h.thread_id = th.thread_id AND h.checkpoint_id = th.checkpoint_id),
+         |      (src.j ->> 'createdAt')::timestamptz)
+         |FROM (SELECT thread_id, checkpoint_json::jsonb AS j FROM ${t.threads} WHERE checkpoint_json IS NOT NULL) src
+         |WHERE src.thread_id = th.thread_id""".stripMargin,
+      s"""CREATE INDEX checkpoint_threads_registry
+         |ON ${t.threads} (tenant_key, updated_at, thread_id COLLATE "C") $registered""".stripMargin,
+      s"""CREATE INDEX checkpoint_threads_registry_status
+         |ON ${t.threads} (tenant_key, thread_status, updated_at, thread_id COLLATE "C") $registered""".stripMargin,
+      s"""CREATE INDEX checkpoint_threads_registry_agent
+         |ON ${t.threads} (tenant_key, graph_id, updated_at, thread_id COLLATE "C") $registered""".stripMargin,
+      s"""CREATE INDEX checkpoint_threads_registry_claimed
+         |ON ${t.threads} (tenant_key, updated_at, thread_id COLLATE "C")
+         |$registered AND claim_expires_at IS NOT NULL""".stripMargin,
+      s"""CREATE INDEX checkpoint_threads_registry_metadata
+         |ON ${t.threads} USING gin (metadata jsonb_path_ops) $registered""".stripMargin
+    )
 
   /** The qualified name of each table and sequence in `schema`. */
   final case class Tables(schema: String):

@@ -101,6 +101,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |
 | `knowledgegraph` — **carved** (`knowledgegraph/graphrag` ships in `llm4s-rag`) | `llm4s-knowledgegraph` | Experimental |
 | `javaapi` — the Java facade (`Llm4s`, `JLlmClient`, `JAgent`, `AgentStream`, `AgentStreamListener`, `StreamEvents`, `Answer`, `PendingInterrupt`, `InterruptKind`, `BreakpointPhase`, `ConversationBuilder`, `LlmResult`, `LlmException`) — **new** | `llm4s-java-api` (`modules/java-api`) | Beta |
+| `javaapi.rag` — the Java facade for RAG (`JRag`, `JRagBuilder`, `JRagStore`, `JRagAnswer`, `JRagSource`) over `llm4s-rag`, in a module of its own so a chat-only Java user does not receive `llm4s-rag`'s dependencies — **new** | `llm4s-java-rag` (`modules/java-rag`) | Experimental |
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
@@ -135,7 +136,7 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 | Artifacts | Minimum JDK | Tested on | Why |
 |---|---|---|---|
-| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio`, `llm4s-agent-testkit` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)), and `llm4s-agent-testkit`'s `CheckpointerContract` runs its cases on virtual threads |
+| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-java-rag`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio`, `llm4s-agent-testkit` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)), and `llm4s-agent-testkit`'s `CheckpointerContract` runs its cases on virtual threads |
 | `llm4s-core` and every module that depends on it | 21 | 21 | `ToolRegistry` starts a virtual thread (`Thread.ofVirtual`), a JDK 21 API, so `llm4s-core` does not compile against an older JDK |
 | `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
 | `llm4s-media`, `llm4s-workspace-shared` | 21 | 21 | neither depends on `llm4s-core` or uses a JDK 21 API, but they are compiled to JDK 21 bytecode like every other artifact, and only JDK 21 is tested |

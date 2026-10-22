@@ -113,6 +113,7 @@ llm4s/
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
+│   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.1
 │   ├── samples/               # Usage examples

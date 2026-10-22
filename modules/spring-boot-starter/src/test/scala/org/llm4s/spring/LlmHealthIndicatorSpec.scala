@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.Status
+import BootLine.Status
 
 class LlmHealthIndicatorSpec extends AnyFlatSpec with Matchers {
 

@@ -1,6 +1,6 @@
 package org.llm4s.pekko
 
-import org.apache.pekko.NotUsed
+import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.Source
 import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.error.LLMError
@@ -43,12 +43,15 @@ trait LLMClientPekko {
    *    downstream) interrupts the provider's thread.
    *  - '''Errors''': if the call fails mid-stream, the chunks already received are emitted first, then the stream
    *    fails with [[LLMException]]. A `bufferSize` below 1 fails the stream at once.
+   *  - '''Materialized value''': a `Future[Done]` that completes once the provider call has returned (after a
+   *    cancellation too, once the interrupted call has given up), so its thread is free and nothing is left
+   *    running. It never fails: how the call ended is the stream's own completion or failure.
    */
   def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     bufferSize: Int = LLMClientPekko.DefaultBufferSize
-  ): Source[StreamedChunk, NotUsed]
+  ): Source[StreamedChunk, Future[Done]]
 
   /**
    * An [[AgentPekko]] backed by this client: `Agent.builder(id, client)` with `configure` applied.
@@ -76,9 +79,8 @@ object LLMClientPekko {
       conversation: Conversation,
       options: CompletionOptions,
       bufferSize: Int
-    ): Source[StreamedChunk, NotUsed] =
+    ): Source[StreamedChunk, Future[Done]] =
       BlockingSource("llm4s-pekko-llm", bufferSize)(() => new ChunkProducer(underlying, conversation, options))
-        .mapMaterializedValue(_ => NotUsed)
 
     def agent(id: String)(configure: AgentBuilder => AgentBuilder): Result[AgentPekko] =
       configure(Agent.builder(id, underlying)).build().map(AgentPekko(_))
