@@ -447,15 +447,15 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       error.message should include("no-such-provider")
     }
 
-    // Loading does not check that a base URL is a URL (each client parses it on its first call), so this
-    // pins the next best thing: the call fails at once, with an error ReliableClient does not retry.
-    "fail the first call, without retrying, when its base URL is not a URL" in {
+    // Loading checks that a base URL is an http(s) URL with a host (#2347), so a broken one is reported
+    // against its key before any client is built, rather than failing on the first call.
+    "refuse to load a section whose base URL is not a URL, naming the key" in {
       Seq("openai", "anthropic", "ollama").foreach { id =>
-        val key     = if (id == "ollama") "" else """apiKey = "k""""
-        val section = s"""llm4s.providers.$id-badurl { provider = "$id", model = "m", baseUrl = "not a url", $key }"""
-        val result  = load(s"$id-badurl", section).flatMap(LLMConnect.getClient(_)).flatMap(_.complete(hello))
-        withClue(s"$id: $result") {
-          retryable(result.left.value) shouldBe false
+        val key   = if (id == "ollama") "" else """apiKey = "k""""
+        val error = errorFor(s"$id-badurl", s"""provider = "$id", model = "m", baseUrl = "not a url", $key""")
+        withClue(s"$id: $error") {
+          error shouldBe a[ConfigurationError]
+          error.message should include(s"llm4s.providers.$id-badurl.baseUrl")
         }
       }
     }

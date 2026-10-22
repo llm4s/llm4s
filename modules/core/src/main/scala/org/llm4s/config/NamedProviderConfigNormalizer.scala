@@ -83,15 +83,24 @@ private[config] object NamedProviderConfigNormalizer:
         ProviderTimeouts.validatedAt(s"llm4s.providers.${providerName.asName}.timeouts", t.request, t.stream)
       }
 
+    // A blank value is unset, as before: the provider's default applies, or its required-field error.
+    // Anything else must be an http(s) URL with a host (#2347), rather than failing on the first call.
+    val baseUrl: Result[Option[BaseUrl]] =
+      section.baseUrl.map(_.trim).filter(_.nonEmpty) match
+        case None => Right(None)
+        case Some(url) =>
+          BaseUrlValidation.validate(s"llm4s.providers.${providerName.asName}.baseUrl", url).map(u => Some(BaseUrl(u)))
+
     for
       id       <- providerType
       model    <- modelName
+      baseUrl  <- baseUrl
       auth     <- authConfig
       timeouts <- timeouts
     yield NamedProviderConfig(
       provider = id,
       model = ModelName(model),
-      baseUrl = section.baseUrl.map(_.trim).filter(_.nonEmpty).map(BaseUrl(_)),
+      baseUrl = baseUrl,
       apiKey = section.apiKey.map(_.trim).filter(_.nonEmpty).map(ApiKey(_)),
       headers = section.headers.getOrElse(Map.empty),
       // Trimmed and kept as read. Which of these the provider accepts is decided by

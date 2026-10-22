@@ -223,6 +223,15 @@ private[config] object EmbeddingsConfigLoader {
             .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
             .map(_ => section)
         }
+        .flatMap { section =>
+          // A blank baseUrl is unset, so the provider's default applies; any other must be an http(s) URL (#2347).
+          trimmed(section.baseUrl)
+            .fold[Result[EmbeddingProviderSection]](Right(section))(url =>
+              BaseUrlValidation
+                .validate(EmbeddingConfigSpec.fieldPath(descriptor.id, "baseUrl"), url)
+                .map(_ => section)
+            )
+        }
   }
 
   /**

@@ -146,6 +146,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Changed** an `ollama` section's `baseUrl` to default to `http://localhost:11434`, so a local section needs only
   `provider` and `model`; `OLLAMA_BASE_URL` is the one documented variable (`baseUrl = ${?OLLAMA_BASE_URL}`) [#1991](https://github.com/llm4s/llm4s/issues/1991).
+- **Changed** a `llm4s.providers.<name>` section's and a `llm4s.embeddings.<id>` block's `baseUrl` to be checked when
+  that section is loaded: it must be an absolute `http` or `https` URL with a host, or the load fails with a
+  `ConfigurationError` naming the key and the value (its userinfo, query and fragment redacted). A config whose
+  `baseUrl` was already broken (`localhost:11434`, `htp://...`, a space) now fails at load instead of on the first call;
+  a blank `baseUrl` is still unset, and other sections are unaffected [#2347](https://github.com/llm4s/llm4s/issues/2347).
 - **Changed** the OpenAI, Ollama, Voyage, Jina and Cohere embedding providers to return an unreachable or slow provider
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
