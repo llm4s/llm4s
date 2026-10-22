@@ -304,6 +304,7 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues w
       def recordAttempt(lease: Lease, runId: RunId)                   = f.queue.recordAttempt(lease, runId)
       def close(lease: Lease, outcome: EntryOutcome)                  = f.queue.close(lease, outcome)
       def reclaim(ticketLifetime: FiniteDuration, limit: Int)         = f.queue.reclaim(ticketLifetime, limit)
+      def openRuns(threads: Vector[ThreadId])                         = f.queue.openRuns(threads)
     }
     val id = polling.submit(Submission(thread, agent, QueuedInput.query("q"))).value.entryId
     polling.awaitClosed(None, id, 150.millis).value.isOpen shouldBe true

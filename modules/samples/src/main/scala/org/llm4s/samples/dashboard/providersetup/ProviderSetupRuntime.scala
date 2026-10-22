@@ -401,29 +401,25 @@ private[providersetup] object ProviderSetupRuntime:
           baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
         )
       case cfg: DeepSeekConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: CohereConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: MistralConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: ZaiConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: VertexAIConfig =>
         cfg.copy(
           model = input.flatMap(_.model).getOrElse(cfg.model),

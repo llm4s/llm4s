@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the commit; [migration](docs/reference/migration.md#child-threads-2045).
 - `deleteThread` and `Agent.forget` cascade to child threads; [migration](docs/reference/migration.md#child-threads-2045).
 - Child threads refuse direct `start`, `recover`, `resume`, `fork`, `updateState` and `deleteThread` (`GraphError.ChildThread`); [migration](docs/reference/migration.md#child-threads-2045).
+- `DeepSeekConfig`, `ZaiConfig`, `XaiConfig`, `MistralConfig` and `CohereConfig` are growth-prone types: build them with
+  `X(...)` or `X.fromValues` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`;
+  [migration](docs/reference/migration.md#the-openai-compatible-provider-configs-are-growth-safe-2264).
 - `ToolRetryPolicy` is a growth-prone type: build it with `ToolRetryPolicy(...)` and change it with `with*`; `new` and
   `.copy` are private; [migration](docs/reference/migration.md#toolretrypolicy-is-growth-safe-1708).
 - `MemoryManagerConfig` is a growth-prone type: build it with `MemoryManagerConfig(...)` and change it with `with*`;
@@ -48,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the materialized value, changes; [migration](docs/reference/migration.md#llmclientpekkostreamcomplete-materializes-futuredone-1848).
 - `TraceEvent.CustomEvent`, `TokenUsageRecorded`, `ErrorOccurred` and `AgentRunEnded` gain a `span` field, and an agent
   run's OpenTelemetry spans and Langfuse trace ids change: positional patterns and dashboards break; [migration](docs/reference/migration.md#one-trace-per-run-2137).
+- `ServiceError`'s extractor binds five fields (`retryAfter` added) and `ServiceError.ServiceErrorOps` is gone
+  (`isRecoverableStatus` is a method of `ServiceError`): four-field patterns and the import break; [migration](docs/reference/migration.md#serviceerror-extractor-and-isrecoverablestatus-2266).
 
 ### Agent subagents (Phase 4)
 
@@ -83,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, its `CheckpointStore` carrying the store's `runQueue`, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
 - **Added** the durable run queue: `RunQueue` and `RunSubmitter` (`org.llm4s.agent.service`) in the in-memory, SQLite and PostgreSQL
   stores, entries carrying the submitter's `TraceContext`, `RunQueueContract`, and `llm4s.agent.queue` settings [#2134](https://github.com/llm4s/llm4s/issues/2134); [design §4.55](docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md).
+- **Added** `AgentWorker` (`org.llm4s.agent.service`): takes queued runs, recovers a dead worker's entries once their leases
+  expire, settles exhausted ones, runs the retention sweep, drains on shutdown and answers health; `llm4s.agent.worker`
+  settings (`WorkerConfigLoader`) [#2135](https://github.com/llm4s/llm4s/issues/2135); [design §4.56](docs/design/typed-agent-runtime/4.56-stage-5-slice-w2-workers.md).
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
@@ -147,6 +155,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NetworkError("Request timeout")`, as a socket timeout already was, so `ReliableClient` retries it. The `anthropic` client
   also returns an unreachable server as a recoverable `NetworkError` instead of an `UnknownError`, and a 429's
   `Retry-After` on its `RateLimitError`, as the other providers do [#380](https://github.com/llm4s/llm4s/issues/380).
+- **Fixed** `HttpResponse#ensureSuccess` and `Result#mapServiceError` dropping a failed response's request id and
+  `Retry-After`: `ensureSuccess` reads `x-request-id` / `request-id` / `x-amzn-requestid` / `apim-request-id` and a
+  `Retry-After` of delta-seconds or an HTTP-date into the `ServiceError`, and `mapServiceError` keeps both, so the
+  model listers' errors carry the provider's correlation id and retry hint [#2266](https://github.com/llm4s/llm4s/issues/2266).
 
 ### Java & Kotlin APIs
 

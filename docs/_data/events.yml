@@ -171,6 +171,9 @@
   speakers: [Kannupriya Kalra]
   image: /image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
   url: https://e-cellvips.netlify.app/events/ecell-orientation-2026
+  slides:
+    - label: Slides
+      url: /image_assets/talks/VIPS_TC_2026/LLM4S_Foundation_A_Retrospective_VIPS_TC_2026_Kannupriya_Kalra.pdf
   links:
     - label: "For queries: Contact E-Cell"
       url: "mailto:ecell@vips.edu"

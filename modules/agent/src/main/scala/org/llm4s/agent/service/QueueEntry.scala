@@ -256,17 +256,35 @@ enum AttemptStart:
 
 /**
  * What [[RunQueue.take]] may take: the head entry of a thread whose agent is one of `agents`, leased to `holder` for
- * `ttl` from now, by the store's clock.
+ * `ttl` from now, by the store's clock - passing over the entries of `skip`, which the worker has just found it cannot
+ * run (W2: its agent's graph version cannot restore the thread), so they do not hide the heads behind them. A skipped
+ * head still holds its own thread back (rule 5); only other threads' heads are taken past it. `skip` is bounded by
+ * [[TakeRequest.MaxSkip]].
  */
 @Experimental
 final case class TakeRequest private (
   holder: String,
   agents: Set[AgentId],
-  ttl: scala.concurrent.duration.FiniteDuration
-)
+  ttl: scala.concurrent.duration.FiniteDuration,
+  skip: Set[EntryId]
+):
+  def withSkip(ids: Set[EntryId]): TakeRequest = TakeRequest(holder, agents, ttl, ids)
 
 @Experimental
 object TakeRequest:
+
+  /** The most entries one take may pass over, so its query stays within the store's bound. */
+  val MaxSkip: Int = 256
+
   def apply(holder: String, agents: Set[AgentId], ttl: scala.concurrent.duration.FiniteDuration): TakeRequest =
+    apply(holder, agents, ttl, Set.empty)
+
+  def apply(
+    holder: String,
+    agents: Set[AgentId],
+    ttl: scala.concurrent.duration.FiniteDuration,
+    skip: Set[EntryId]
+  ): TakeRequest =
     require(ttl > scala.concurrent.duration.Duration.Zero, s"ttl must be positive, was $ttl")
-    new TakeRequest(holder, agents, ttl)
+    require(skip.size <= MaxSkip, s"skip holds ${skip.size} entries, more than $MaxSkip")
+    new TakeRequest(holder, agents, ttl, skip)

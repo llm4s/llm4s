@@ -42,7 +42,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return different values for different model configs" in {
-    val config4_5 = testConfig.copy(contextWindow = 32000)
+    val config4_5 = testConfig.withContextWindow(32000)
     val client    = new ZaiClient(config4_5)
     client.getContextWindow() shouldBe 32000
   }
@@ -55,7 +55,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return custom reserve completion when configured" in {
-    val customConfig = testConfig.copy(reserveCompletion = 8192)
+    val customConfig = testConfig.withReserveCompletion(8192)
     val client       = new ZaiClient(customConfig)
     client.getReserveCompletion() shouldBe 8192
   }

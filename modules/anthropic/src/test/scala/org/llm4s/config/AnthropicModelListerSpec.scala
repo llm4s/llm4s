@@ -152,3 +152,18 @@ class AnthropicModelListerSpec extends AnyFunSuite with Matchers:
       case Right(descriptor) => descriptor.modelLister shouldBe Some(AnthropicModelLister)
       case Left(err)         => fail(s"Expected the Anthropic provider to be registered, got error: ${err.message}")
   }
+
+  test("Anthropic lister keeps a failed listing's request id and Retry-After on its ServiceError (#2266)") {
+    val config = namedConfig(ProviderId("anthropic"), "claude-sonnet-4-20250514", apiKey = Some("sk-ant-test"))
+    val response = HttpResponse(
+      503,
+      """{"error":"overloaded"}""",
+      Map("request-id" -> Seq("req-2266"), "retry-after" -> Seq("12"))
+    )
+    AnthropicModelLister.listModels(config, MockHttpClient(response)) match
+      case Left(err: org.llm4s.error.ServiceError) =>
+        err.httpStatus shouldBe 503
+        err.requestId shouldBe Some("req-2266")
+        err.retryAfter shouldBe Some(scala.concurrent.duration.DurationInt(12).seconds)
+      case other => fail(s"Expected a ServiceError, got $other")
+  }

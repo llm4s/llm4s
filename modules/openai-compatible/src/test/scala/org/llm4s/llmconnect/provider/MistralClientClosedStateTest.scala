@@ -86,7 +86,7 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "mistral-large-latest")
+    val config = createTestConfig.withModel("mistral-large-latest")
     val client = new MistralClient(config)
 
     client.close()

@@ -387,6 +387,17 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.take(agents = Set.empty) shouldBe None
   }
 
+  it should "pass over the heads a take skips, a skipped head still holding its own thread back" in {
+    val c       = Case()
+    val skipped = c.submit().value
+    c.submit().value
+    val next    = c.submit(on = c.newThread()).value
+    val passing = c.queue.take(TakeRequest("worker-1", Set(c.agent), ttl, Set(skipped.entryId))).value
+    passing.value.entry.id shouldBe next.entryId
+    c.queue.take(TakeRequest("worker-1", Set(c.agent), ttl, Set(skipped.entryId))).value shouldBe None
+    c.take().value.entry.id shouldBe skipped.entryId
+  }
+
   it should "lease for ttl by the store's clock, and let another holder take an expired lease over" in {
     val c     = Case()
     val id    = c.submit().value.entryId
@@ -839,6 +850,27 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     sweepAll(c, SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1)), batchSize = SweepPolicy.MaxBatchSize))
     c.checkpointer.latestOfRuns(c.thread, Set(RunId(run))).value.map(_.id) shouldBe Some("admitted")
     c.checkpointer.history(c.thread, None, 100).value.map(_.id) shouldBe Vector("direct-3", "admitted")
+  }
+
+  it should "answer the attempts of every tenant's open entries by thread, for the sweep's guard" in {
+    val c       = Case()
+    val quiet   = c.newThread()
+    val waiting = c.newThread()
+    val closed  = c.newThread()
+    c.submit().value
+    c.submit(on = waiting, tenant = Some(TenantId("t2"))).value
+    c.submit(on = closed).value
+    val leased = c.take().value
+    val run    = RunId(s"run-${unique()}")
+    c.queue.recordAttempt(leased.lease, run).value shouldBe a[AttemptStart.Recorded]
+    c.take().value.entry.threadId shouldBe waiting
+    val other = c.take().value
+    other.entry.threadId shouldBe closed
+    c.queue.recordAttempt(other.lease, RunId(s"run-${unique()}")).value shouldBe a[AttemptStart.Recorded]
+    c.queue.close(other.lease, EntryOutcome.Done(None, None)).value
+    c.queue.openRuns(Vector(c.thread, quiet, waiting, closed)).value shouldBe
+      Map(c.thread -> Set(run), waiting -> Set.empty[RunId])
+    c.queue.openRuns(Vector.empty).value shouldBe Map.empty
   }
 
   it should "keep refusing a deleted entry's attempt once a sweep has reclaimed the thread's tombstone" in {
