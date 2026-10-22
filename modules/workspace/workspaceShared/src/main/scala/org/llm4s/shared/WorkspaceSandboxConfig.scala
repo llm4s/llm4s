@@ -209,15 +209,11 @@ object WorkspaceSandboxConfig {
     "voila",
     "marimo",
     // Package and project runners and version managers: fetch and run a package, or run the command named in their
-    // arguments (`npx`, `uvx`, `uv run`, `poetry run`, `npm exec`, `conda run`, `pyenv exec`) (#1845)
+    // arguments (`npx`, `uvx`, `uv run`, `poetry run`, `conda run`, `pyenv exec`) (#1845). `npm`, `pnpm` and `yarn` are build tools
+    // an operator may add (their `exec` / `dlx` run any package, so adding one means allowing that)
     "npx",
     "pnpx",
     "bunx",
-    "npm",
-    "pnpm",
-    "yarn",
-    "yarnpkg",
-    "corepack",
     "pipx",
     "uv",
     "uvx",

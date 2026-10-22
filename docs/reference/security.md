@@ -121,7 +121,7 @@ links out of the workspace, and any path argument can name a file outside it
   `ContainerisedWorkspace`'s `extraAllowedCommands`); a shell, an interpreter (`python`, `node`, `awk`, `java`,
   `scala`, ... and every `python*`, `pypy*`, `jython*`, `lua*`, `ipython*`, `bpython*` or `jupyter*` name), a
   Python front-end or notebook tool (`pydoc`, `papermill`, ...), a package or project runner (`npx`, `uv`, `poetry`,
-  `conda`, `npm`, ...), a launcher such as `env`, `xargs` or `setsid`, the dynamic loader (musl's `libc.musl-*.so.1`
+  `conda`, ...), a launcher such as `env`, `xargs` or `setsid`, the dynamic loader (musl's `libc.musl-*.so.1`
   too), `sed` and editors that run a command, a scheduler, a Windows program that runs another
   (`regsvr32`, `forfiles`, `msbuild`, ...), the cmd.exe built-ins `call` and `start`, or a `.bat` / `.cmd` batch file
   cannot be added, and with the `locked` profile no name can ([#1761](https://github.com/llm4s/llm4s/issues/1761),

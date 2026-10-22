@@ -284,7 +284,7 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-  it should "refuse each #1845 entry as a .cmd / .bat batch file (npx.cmd, npm.cmd are how Windows installs them)" in {
+  it should "refuse each #1845 entry as a .cmd / .bat batch file (npx.cmd is how Windows installs it)" in {
     for {
       base <- Refused1845
       name <- Seq(s"$base.cmd", s"${base.toUpperCase}.CMD", s"$base.bat")
@@ -363,6 +363,12 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
         "condaenv-tool",
         "nodemon-x",
         "poetryx",
+        // build tools an operator may add: their `exec` / `dlx` running a package is the operator's trade-off
+        "npm",
+        "pnpm",
+        "yarn",
+        "yarnpkg",
+        "corepack",
         "jq"
       )
     )
@@ -553,11 +559,6 @@ object WorkspaceSandboxConfigSpec {
     "npx",
     "pnpx",
     "bunx",
-    "npm",
-    "pnpm",
-    "yarn",
-    "yarnpkg",
-    "corepack",
     "pipx",
     "uv",
     "uvx",

@@ -206,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** (security) the workspace runner refuses more ways round `WORKSPACE_EXTRA_COMMANDS`: rsync's daemon mode
   (`--daemon`, `--config`, `--dparam`, `-M`), sftp's `-b` batch file and scp's `-D`, a `tar` or `rsync` argument naming
   a file on another host (`host:path`, `host::module`, `rsync://`), Python front-ends, notebook tooling, package and
-  project runners (`ipython`, `pydoc`, `jupyter`, `npx`, `uv`, `poetry`, `conda`, ...), and musl's loader as
+  project runners (`ipython`, `pydoc`, `jupyter`, `npx`, `uv`, `poetry`, `conda`, ...; `npm`, `yarn`, `pnpm` stay
+  allowed build tools), and musl's loader as
   `libc.musl-*.so.1` [#1845](https://github.com/llm4s/llm4s/issues/1845); [sandbox](docs/reference/workspace-sandbox.md).
 
 ### Build & tooling

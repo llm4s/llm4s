@@ -66,7 +66,7 @@ These cannot be added (`WorkspaceSandboxConfig.NeverAllowedCommands`), as any of
 | Interpreters | `python`, `py`, `pyw`, `pypy`, `jython`, `perl`, `ruby`, `irb`, `node`, `nodejs`, `deno`, `bun`, `php`, `lua`, `luajit`, `tclsh`, `wish`, `awk` (`gawk`, `mawk`, `nawk`), `java`, `javaw`, `jshell`, `jjs`, `jrunscript`, `scala`, `kotlin`, `kotlinc`, `groovy`, `r`, `rscript`, `julia`, `guile`, `racket`, `swipl`, `sbcl`, `clisp`, `erl`, `escript`, `iex`, `elixir`, `ghci`, `runghc`, `ocaml`, `osascript`, `dc`, `make`, `gmake`, `expect` |
 | Interpreter families, by prefix | every name starting `python`, `pypy`, `jython`, `lua`, `ipython`, `bpython` or `jupyter` (`python3.7m`, `python3-dbg`, `pypy3.10`, `luajit-2.1`, `ipython3`, `jupyter-lab`, `jupyter-nbconvert`) |
 | Python front-ends and notebook tooling | `ipython`, `bpython`, `ptpython`, `ptipython`, `pydoc`, `pdb`, `idle`, `jupyter`, `papermill`, `voila`, `marimo` |
-| Package and project runners, version managers | `npx`, `pnpx`, `bunx`, `npm`, `pnpm`, `yarn`, `yarnpkg`, `corepack`, `pipx`, `uv`, `uvx`, `poetry`, `pipenv`, `pdm`, `hatch`, `rye`, `conda`, `mamba`, `micromamba`, `pixi`, `tox`, `nox`, `pyenv`, `rbenv`, `nodenv`, `asdf`, `mise`, `volta`, `fnm` (each runs the command or package named in its arguments: `npx`, `uv run`, `npm exec`, `conda run`, `pyenv exec`) |
+| Package and project runners, version managers | `npx`, `pnpx`, `bunx`, `pipx`, `uv`, `uvx`, `poetry`, `pipenv`, `pdm`, `hatch`, `rye`, `conda`, `mamba`, `micromamba`, `pixi`, `tox`, `nox`, `pyenv`, `rbenv`, `nodenv`, `asdf`, `mise`, `volta`, `fnm` (each runs the command or package named in its arguments: `npx`, `uv run`, `conda run`, `pyenv exec`) |
 | Editors that run a command | `sed` (GNU `e`, `s///e`), `vi`, `vim`, `nvim`, `ex`, `view`, `emacs` |
 | Launchers | `env`, `xargs`, `nohup`, `nice`, `timeout`, `exec`, `eval`, `setsid`, `stdbuf`, `chroot`, `ionice`, `flock`, `watch`, `script`, `time`, `systemd-run`, `parallel`, `prlimit`, `numactl`, `unbuffer`, `tini`, `tmux`, `screen`, `fakeroot`, `proot` |
 | The dynamic loader | `ld.so`, `ld-linux*.so*`, `ld-musl*.so*`, `ld64.so*`, and musl's loader under its C library names `libc.musl-*.so*` and `libc.so*` |
@@ -79,16 +79,17 @@ A name is matched ignoring case, a `.exe` / `.com` extension and a trailing vers
 `scala3` is `scala`). A `.bat` or `.cmd` name is refused too: Windows runs a batch file through cmd.exe, outside the
 runner's cmd.exe checks. A name may hold only ASCII letters, digits, `.`, `_`, `+` and `-`, so no Unicode spelling of
 a refused name (fullwidth letters, a Kelvin sign that lower-cases to `k`, a character Windows best-fits to a
-letter) is accepted. Build tools (`sbt`, `mvn`, `gradle`, `scala-cli`, `cargo`) are not refused: they run the
-project's code by design, which is what an operator adds them for. `npm`, `yarn` and `pnpm` are refused with the
-package runners, since `npm exec` / `yarn dlx` / `pnpm dlx` fetch and run any package by name.
+letter) is accepted. Build tools (`sbt`, `mvn`, `gradle`, `scala-cli`, `cargo`, `npm`) are not refused: they run the
+project's code by design, which is what an operator adds them for. Note that `npm exec`, `yarn dlx` and `pnpm dlx`
+(and every package's lifecycle scripts) fetch and run arbitrary packages, so allowing `npm`, `yarn`, `pnpm` or
+`corepack` means allowing that.
 
 **The list is a speed bump, not a boundary.** No list names every program that can run another: most tools with a
 hook, plugin, pager, editor or helper-program option can, and catalogues such as
 [GTFOBins](https://gtfobins.github.io/) and [LOLBAS](https://lolbas-project.github.io/) list hundreds - `man -P`,
 `sqlite3 -cmd .shell`, `psql` and `mysql` shell escapes, `ssh-keygen -D lib.so`, an `openssl` engine, `gpg`'s exec
 options, `wget --use-askpass`, `cmake -P`, `gcc -wrapper` and `-fplugin`, and every package manager's install
-scripts (`pip`, `cargo`, `go`, and the runners above). That is why an added program must be one you trust to
+scripts (`npm`, `yarn`, `pnpm`, `pip`, `cargo`, `go`, and the runners above). That is why an added program must be one you trust to
 run any code. For the archive and copy tools operators most often add, the runner refuses the options that run a
 program, as it does for `sort` and `cp` (see [Command policy](#command-policy)): `tar --to-command`, `-I` /
 `--use-compress-program`, `--checkpoint-action`, `-F` / `--info-script`; `zip -TT` / `--unzip-command`; `rsync -e` /
