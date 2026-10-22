@@ -112,10 +112,9 @@ List<String> firstFive = Streams.toFlux(client, "Write a long story").take(5).co
 
 ## Handling a failure
 
-A failed call ends the `Flux` with `onError`, carrying an `LlmException` whose `getKind()` says what went wrong, as in
-the [Java guide](java#handling-a-failure). Pieces still waiting in the buffer when the call fails may not be
-delivered before the error. `toFlux` never throws: a `null` client, query, conversation or options is a
-`Flux` that fails on subscription with kind `VALIDATION`.
+A failed call ends the `Flux` with `onError`, after every piece that streamed before the failure, carrying an
+`LlmException` whose `getKind()` says what went wrong, as in the [Java guide](java#handling-a-failure). `toFlux` never
+throws: a `null` client, query, conversation or options is a `Flux` that fails on subscription with kind `VALIDATION`.
 
 ```java
 String text = Streams.toFlux(client, "Hello")

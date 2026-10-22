@@ -229,17 +229,49 @@ class JCompletionStreamSpec extends AnyFlatSpec with Matchers {
       .isSuccess shouldBe true
   }
 
-  /** A subscriber that requests `batch` at a time and records what it receives. */
+  /**
+   * A subscriber that requests `batch` at a time (none up front for 0) and records what it receives, and how many
+   * pieces it had when the error came.
+   */
   private class Collecting(batch: Long = Long.MaxValue) extends Flow.Subscriber[String] {
     val items                                   = new CopyOnWriteArrayList[String]()
     val done                                    = new CountDownLatch(1)
     val error                                   = new AtomicReference[Throwable]()
+    val itemsAtError                            = new AtomicInteger(-1)
     @volatile var sub: Flow.Subscription        = _
-    def onSubscribe(s: Flow.Subscription): Unit = { sub = s; s.request(batch) }
-    def onNext(item: String): Unit              = { items.add(item); if (batch != Long.MaxValue) sub.request(batch) }
-    def onError(t: Throwable): Unit             = { error.set(t); done.countDown() }
-    def onComplete(): Unit                      = done.countDown()
-    def awaitDone(): Boolean                    = done.await(DeadlineSeconds, TimeUnit.SECONDS)
+    def onSubscribe(s: Flow.Subscription): Unit = { sub = s; if (batch > 0) s.request(batch) }
+    def onNext(item: String): Unit  = { items.add(item); if (batch > 0 && batch != Long.MaxValue) sub.request(batch) }
+    def onError(t: Throwable): Unit = { itemsAtError.set(items.size); error.set(t); done.countDown() }
+    def onComplete(): Unit          = done.countDown()
+    def awaitDone(): Boolean        = done.await(DeadlineSeconds, TimeUnit.SECONDS)
+  }
+
+  /** A client that streams `n` pieces, "1" to "n", counting each before it is offered, then fails. */
+  private class FailsAfter(n: Int) {
+    val produced = new AtomicInteger(0)
+    val thread   = new AtomicReference[Thread]()
+    val client = new Scripted(
+      onChunk => {
+        thread.set(Thread.currentThread())
+        (1 to n).foreach { i =>
+          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", content = Some(s"$i")))
+        }
+        Left(NetworkError("down", None, "http://x"))
+      },
+      () => Left(NetworkError("down", None, "http://x"))
+    )
+    val expected: List[String] = (1 to n).map(_.toString).toList
+  }
+
+  /** `s` got every piece of `f`, in order, and then - not before the last - the failure. */
+  private def deliveredThenFailed(s: Collecting, f: FailsAfter): Unit = {
+    s.awaitDone() shouldBe true
+    s.items.asScala.toList shouldBe f.expected
+    s.itemsAtError.get shouldBe f.expected.size
+    s.error.get match {
+      case e: LlmException => e.getKind shouldBe LlmErrorKind.NETWORK
+      case other           => fail(s"not an LlmException: $other")
+    }
   }
 
   "JLlmClient.streamAsPublisher" should "publish each piece in order, then complete, one call per subscription" in {
@@ -273,6 +305,61 @@ class JCompletionStreamSpec extends AnyFlatSpec with Matchers {
       case e: LlmException => e.getKind shouldBe LlmErrorKind.NETWORK
       case other           => fail(s"not an LlmException: $other")
     }
+  }
+
+  it should "deliver every piece before the error to a fast subscriber (#2198)" in {
+    (1 to 50).foreach { _ =>
+      val f = new FailsAfter(200)
+      val s = new Collecting
+      wrap(f.client).streamAsPublisher("hi").subscribe(s)
+      deliveredThenFailed(s, f)
+    }
+  }
+
+  it should "deliver every piece before the error to a subscriber requesting one at a time (#2198)" in {
+    (1 to 20).foreach { _ =>
+      val f = new FailsAfter(100)
+      val s = new Collecting(batch = 1)
+      wrap(f.client).streamAsPublisher("hi").subscribe(s)
+      deliveredThenFailed(s, f)
+    }
+  }
+
+  it should "hold the error behind a full buffer until the subscriber takes its pieces, then need no more demand (#2198)" in {
+    (1 to 10).foreach { _ =>
+      val f = new FailsAfter(CompletionPublisher.BufferSize)
+      val s = new Collecting(batch = 0)
+      wrap(f.client).streamAsPublisher("hi").subscribe(s)
+      awaitCondition(f.produced.get == CompletionPublisher.BufferSize && s.sub != null) shouldBe true
+      s.done.await(50, TimeUnit.MILLISECONDS) shouldBe false
+      s.items.size shouldBe 0
+      s.sub.request(CompletionPublisher.BufferSize.toLong) // exactly the pieces: none left over for the error
+      deliveredThenFailed(s, f)
+    }
+  }
+
+  it should "deliver the pieces then the error when the provider was held by the full buffer (#2198)" in {
+    val f = new FailsAfter(CompletionPublisher.BufferSize * 3)
+    val s = new Collecting(batch = 0)
+    wrap(f.client).streamAsPublisher("hi").subscribe(s)
+    awaitCondition(f.produced.get > 0 && s.sub != null) shouldBe true
+    s.done.await(100, TimeUnit.MILLISECONDS) shouldBe false
+    f.produced.get should be <= (CompletionPublisher.BufferSize + 1) // held: the buffer, plus the piece it waits on
+    s.sub.request(Long.MaxValue)
+    deliveredThenFailed(s, f)
+  }
+
+  it should "stop waiting to deliver a failure's pieces when the subscription is cancelled" in {
+    val f = new FailsAfter(5)
+    val s = new Collecting(batch = 0)
+    wrap(f.client).streamAsPublisher("hi").subscribe(s)
+    awaitCondition(f.produced.get == 5 && s.sub != null && f.thread.get != null) shouldBe true
+    s.sub.request(2)
+    awaitCondition(s.items.size == 2) shouldBe true
+    s.sub.cancel()
+    f.thread.get.join(java.time.Duration.ofSeconds(DeadlineSeconds)) shouldBe true
+    s.items.asScala.toList shouldBe List("1", "2")
+    s.error.get shouldBe null
   }
 
   it should "interrupt the call when the subscription is cancelled" in {
