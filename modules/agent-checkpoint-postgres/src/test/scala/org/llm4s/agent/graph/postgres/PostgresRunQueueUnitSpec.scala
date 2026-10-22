@@ -48,7 +48,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     token: Any = null,
     expires: OffsetDateTime = null,
     outcome: String = null,
-    admitted: Boolean = false
+    admitted: Boolean = false,
+    trace: String = null
   ): Vector[Any] =
     Vector(
       id,
@@ -69,7 +70,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       outcome,
       if outcome == null then null else now,
       if outcome == null then null else 4L,
-      admitted
+      admitted,
+      trace
     )
 
   private def leased(id: Long, token: Long) = Lease(EntryId.unsafe(id), LeaseToken(token), "w", later.toInstant)
@@ -105,9 +107,27 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
         "-",
         null,
         RunQueueSettings.DefaultMaxAttempts,
-        now
+        now,
+        null
       )
     )
+  }
+
+  it should "store the submitter's trace context as its traceparent, and read it back onto the entry" in {
+    val context = org.llm4s.trace.TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val s = script {
+      case (sql, _) if sql == Sql.nextQueueEntryId(t)            => Vector(Vector(7L))
+      case (sql, Vector("t1")) if sql == Sql.openQueueEntries(t) => Vector(entry(7, trace = context.traceParent))
+      case (sql, Vector(7L)) if sql == Sql.queueEntry(t)         => Vector(entry(7, trace = context.traceParent))
+    }
+    val queue = s.store().runQueue
+    queue
+      .submit(
+        Submission(thread, agent, QueuedInput.query("q"), policy = BusyThreadPolicy.Enqueue).withTraceContext(context)
+      )
+      .value
+    s.madeWith(Sql.insertQueueEntry(t)).map(_.last) shouldBe Vector(context.traceParent)
+    queue.entry(None, EntryId.unsafe(7)).value.trace shouldBe Some(context)
   }
 
   it should "refuse a Reject submission to a thread with an open entry, inserting nothing" in {

@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ GraphError, RunId, TenantId, ThreadId }
 import org.llm4s.agent.service.*
 import org.llm4s.error.ValidationError
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 import java.sql.{ Connection, ResultSet }
@@ -79,7 +80,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             scope,
             submission.submissionKey.map(_.value),
             submission.maxAttempts,
-            micros(now)
+            micros(now),
+            submission.traceContext.map(_.traceParent)
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
@@ -326,6 +328,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         BusyThreadPolicy.valueOf(row.policy),
         row.key.map(SubmissionKey.unsafe),
         row.maxAttempts,
+        row.traceParent.map(t => TraceContext.parse(t).fold(e => throw new IllegalStateException(e.message), identity)),
         row.submitted,
         recorded,
         row.admitted,
@@ -370,7 +373,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       Option(r.getString(16)),
       at(17),
       long(18),
-      r.getBoolean(19)
+      r.getBoolean(19),
+      Option(r.getString(20))
     )
 
 private[postgres] object PostgresRunQueue:
@@ -381,7 +385,7 @@ private[postgres] object PostgresRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at, closed_seq, admitted""".stripMargin
+      |closed_at, closed_seq, admitted, trace_parent""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -402,7 +406,8 @@ private[postgres] object PostgresRunQueue:
     outcome: Option[String],
     closed: Option[Instant],
     closedSeq: Option[Long],
-    admitted: Boolean
+    admitted: Boolean,
+    traceParent: Option[String]
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */

@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.service.*
 import org.llm4s.error.{ CancelledError, ValidationError }
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 import org.scalatest.{ Assertion, EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpecLike
@@ -26,7 +27,8 @@ import scala.jdk.CollectionConverters.*
  *     RunQueueContract.Stores(store, store.runQueue)
  * }}}
  *
- * The cases are the ones the `RunQueue` Scaladoc states: submission - entries read back as submitted, ids in
+ * The cases are the ones the `RunQueue` Scaladoc states: submission - entries read back as submitted (the submitter's
+ * trace context included, kept through a reopen and a retried key), ids in
  * submission order, the per-thread run order of rule 5 (an attempted entry first, then `Interrupt` entries, then the
  * rest, each by id; a later `Interrupt` closing an earlier one that has not started), `Reject` refused while the thread
  * has an open entry, and submission keys looked up or inserted per tenant; tenant scoping and the `TicketExpired` /
@@ -191,6 +193,24 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val recover = c.submit(input = QueuedInput.Recover).value
     same(c.entry(resume.entryId).input, QueuedInput.Resume(answers))
     c.entry(recover.entryId).input shouldBe QueuedInput.Recover
+  }
+
+  it should "keep the submitter's trace context with the entry, the first submission's under a retried key" in {
+    val c       = Case()
+    val context = TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7", sampled = false)
+    val key     = SubmissionKey.of(s"key-${unique()}").toOption.get
+    val traced  = Submission(c.thread, c.agent, QueuedInput.query("hello"), policy = BusyThreadPolicy.Enqueue)
+    val id      = c.queue.submit(traced.withSubmissionKey(key).withTraceContext(context)).value.entryId
+    val plain   = c.submit().value.entryId
+    c.entry(id).trace shouldBe Some(context)
+    c.entry(plain).trace shouldBe None
+    // a retry under the key carries its own request's context: the same submission, answered with the first's entry
+    val retried = c.queue.submit(traced.withSubmissionKey(key).withTraceContext(TraceContext.random())).value
+    retried shouldBe Ticket(id, c.thread, Some(0), existing = true)
+    c.reopened()
+    c.entry(id).trace shouldBe Some(context)
+    c.take().value.entry.trace shouldBe Some(context)
+    c.entry(id).attemptConfig(RunId("attempt-1")).traceContext shouldBe Some(context)
   }
 
   it should "keep what it stores apart from the input a caller passed" in {

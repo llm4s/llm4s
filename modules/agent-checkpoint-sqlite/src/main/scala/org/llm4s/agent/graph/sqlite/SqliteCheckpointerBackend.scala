@@ -39,7 +39,7 @@ final class SqliteCheckpointerBackend extends CheckpointerBackend:
           ConfigurationError(s"Invalid ${settings.key("busyTimeout")}: ${e.message}", List(settings.key("busyTimeout")))
         )
       store <- SqliteCheckpointer.open(path, Clock.systemUTC(), config)
-    yield CheckpointStore(kind, store)
+    yield CheckpointStore(kind, store).withRunQueue(store.runQueue)
 
   private def path(settings: CheckpointerSettings, raw: String): Result[Path] =
     Try(Paths.get(raw)).toEither.left.map { e =>

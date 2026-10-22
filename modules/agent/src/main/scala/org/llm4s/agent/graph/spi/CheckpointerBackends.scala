@@ -107,7 +107,8 @@ object CheckpointerBackends:
   private object InMemoryBackend extends CheckpointerBackend:
     val kind: String = MemoryKind
     def open(settings: CheckpointerSettings): Result[CheckpointStore] =
-      Right(CheckpointStore.unmanaged(kind, new InMemoryCheckpointer()))
+      val store = new InMemoryCheckpointer()
+      Right(CheckpointStore.unmanaged(kind, store).withRunQueue(store.runQueue))
 
   /** One step of the scan, anything thrown (a `LinkageError` from a stale jar included) becoming a failure. */
   private def guarded[A](what: => String)(body: => A): Either[String, A] =

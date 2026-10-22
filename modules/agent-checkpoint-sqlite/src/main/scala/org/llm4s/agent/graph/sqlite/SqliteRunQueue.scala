@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ GraphError, RunId, TenantId, ThreadId }
 import org.llm4s.agent.service.*
 import org.llm4s.error.ValidationError
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 import java.sql.{ Connection, ResultSet }
@@ -57,8 +58,8 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             c,
             """INSERT INTO llm4s_checkpoint_queue_entries
               |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-              | max_attempts, attempt_count, submitted_nanos, thread_deleted, admitted, state)
-              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'open')""".stripMargin,
+              | max_attempts, attempt_count, submitted_nanos, thread_deleted, admitted, state, trace_parent)
+              |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 0, 'open', ?)""".stripMargin,
             id,
             submission.threadId.value,
             submission.agentId.value,
@@ -69,7 +70,8 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             scope,
             submission.submissionKey.map(_.value),
             submission.maxAttempts,
-            now
+            now,
+            submission.traceContext.map(_.traceParent)
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
@@ -300,6 +302,7 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         BusyThreadPolicy.valueOf(row.policy),
         row.key.map(SubmissionKey.unsafe),
         row.maxAttempts,
+        row.traceParent.map(t => TraceContext.parse(t).fold(e => throw new IllegalStateException(e.message), identity)),
         fromEpochNanos(row.submitted),
         attempts,
         row.admitted,
@@ -335,7 +338,7 @@ private[sqlite] object SqliteRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_nanos, thread_deleted, lease_holder, lease_token, lease_expires_nanos, outcome_json,
-      |closed_nanos, closed_seq, admitted""".stripMargin
+      |closed_nanos, closed_seq, admitted, trace_parent""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -356,7 +359,8 @@ private[sqlite] object SqliteRunQueue:
     outcome: Option[String],
     closed: Option[Long],
     closedSeq: Option[Long],
-    admitted: Boolean
+    admitted: Boolean,
+    traceParent: Option[String]
   )
 
   def raw(r: ResultSet): Raw =
@@ -380,7 +384,8 @@ private[sqlite] object SqliteRunQueue:
       Option(r.getString(16)),
       long(17),
       long(18),
-      r.getInt(19) == 1
+      r.getInt(19) == 1,
+      Option(r.getString(20))
     )
 
   def runIdUsed(threadId: String, runId: RunId): ValidationError =

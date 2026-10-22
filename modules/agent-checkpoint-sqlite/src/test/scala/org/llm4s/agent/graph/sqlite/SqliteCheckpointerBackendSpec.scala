@@ -35,6 +35,8 @@ class SqliteCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eithe
     val sqlite = store.checkpointer.asInstanceOf[SqliteCheckpointer]
     sqlite.path shouldBe file
     store.checkpointer.latest(ThreadId("t")).value shouldBe None
+    // the file's queue, on the store's own connection
+    store.runQueue.value shouldBe theSameInstanceAs(sqlite.runQueue)
     Files.exists(file) shouldBe true
     store.close()
     sqlite.isClosed shouldBe true

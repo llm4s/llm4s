@@ -33,7 +33,7 @@ import org.llm4s.types.Result
  *       url     <- settings.string("url")
  *       timeout <- settings.duration("callTimeout", 5.seconds)
  *       store   <- MyStore.open(url, timeout)
- *     yield CheckpointStore(kind, store, () => store.close())
+ *     yield CheckpointStore(kind, store, () => store.close()).withRunQueue(store.runQueue) // if it has one
  * }}}
  */
 @Experimental

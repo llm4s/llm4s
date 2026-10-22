@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 /**
@@ -12,6 +13,11 @@ import org.llm4s.types.Result
  * [[RunSubmitter]]). A `submissionKey` makes the submit idempotent: a second submit with the key of an entry the store
  * still holds returns that entry's ticket, and a different submission under the key is refused
  * ([[QueueError.SubmissionKeyReused]]).
+ *
+ * `traceContext` is the submitter's trace position (design 4.58): the entry stores it ([[QueueEntry.trace]]) and every
+ * attempt runs with it as `RunConfig.traceContext` ([[QueueEntry.attemptConfig]]), so all of an entry's attempts, on
+ * whatever worker or machine, sit in the submitter's trace. A retry under the same key may carry another context (a
+ * new request's span): it is not part of [[sameAs]], and the entry keeps the first submission's.
  *
  * `apply` and the `with*` setters throw `IllegalArgumentException` for `maxAttempts` below 1; [[Submission.of]]
  * returns it as a `ValidationError`.
@@ -24,21 +30,27 @@ final case class Submission private (
   input: QueuedInput,
   policy: BusyThreadPolicy,
   submissionKey: Option[SubmissionKey],
-  maxAttempts: Int
+  maxAttempts: Int,
+  traceContext: Option[TraceContext]
 ):
   def withTenantId(t: TenantId): Submission = withTenantId(Some(t))
   def withTenantId(t: Option[TenantId]): Submission =
-    Submission(threadId, agentId, input, t, policy, submissionKey, maxAttempts)
+    Submission(threadId, agentId, input, t, policy, submissionKey, maxAttempts, traceContext)
   def withPolicy(p: BusyThreadPolicy): Submission =
-    Submission(threadId, agentId, input, tenantId, p, submissionKey, maxAttempts)
+    Submission(threadId, agentId, input, tenantId, p, submissionKey, maxAttempts, traceContext)
   def withSubmissionKey(k: SubmissionKey): Submission = withSubmissionKey(Some(k))
   def withSubmissionKey(k: Option[SubmissionKey]): Submission =
-    Submission(threadId, agentId, input, tenantId, policy, k, maxAttempts)
-  def withMaxAttempts(n: Int): Submission = Submission(threadId, agentId, input, tenantId, policy, submissionKey, n)
+    Submission(threadId, agentId, input, tenantId, policy, k, maxAttempts, traceContext)
+  def withMaxAttempts(n: Int): Submission =
+    Submission(threadId, agentId, input, tenantId, policy, submissionKey, n, traceContext)
+  def withTraceContext(c: TraceContext): Submission = withTraceContext(Some(c))
+  def withTraceContext(c: Option[TraceContext]): Submission =
+    Submission(threadId, agentId, input, tenantId, policy, submissionKey, maxAttempts, c)
 
   /**
    * Whether `other` is this submission again, as a retry under the same key would send it: everything but
-   * `maxAttempts`, which a retry may have read from changed settings.
+   * `maxAttempts`, which a retry may have read from changed settings, and `traceContext`, which a retry's own request
+   * names afresh.
    */
   def sameAs(other: Submission): Boolean =
     threadId == other.threadId && agentId == other.agentId && tenantId == other.tenantId &&
@@ -59,11 +71,12 @@ object Submission:
     tenantId: Option[TenantId] = None,
     policy: BusyThreadPolicy = BusyThreadPolicy.Reject,
     submissionKey: Option[SubmissionKey] = None,
-    maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts
+    maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts,
+    traceContext: Option[TraceContext] = None
   ): Submission =
     val found = problems(maxAttempts)
     require(found.isEmpty, found.mkString("; "))
-    new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts)
+    new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts, traceContext)
 
   def of(
     threadId: ThreadId,
@@ -72,10 +85,12 @@ object Submission:
     tenantId: Option[TenantId] = None,
     policy: BusyThreadPolicy = BusyThreadPolicy.Reject,
     submissionKey: Option[SubmissionKey] = None,
-    maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts
+    maxAttempts: Int = RunQueueSettings.DefaultMaxAttempts,
+    traceContext: Option[TraceContext] = None
   ): Result[Submission] =
     problems(maxAttempts) match
-      case Nil   => Right(new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts))
+      case Nil =>
+        Right(new Submission(threadId, agentId, tenantId, input, policy, submissionKey, maxAttempts, traceContext))
       case found => Left(ValidationError("submission", found))
 
 /**

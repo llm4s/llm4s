@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ Checkpointer, EventRecord, TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
+import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
 import scala.concurrent.duration.FiniteDuration
@@ -35,6 +36,7 @@ final class RunSubmitter(
   /**
    * Queues `input` for `threadId`, run by `agentId` for `tenantId`, and answers its ticket - or, with a `submissionKey`
    * the tenant's queue already holds for the same submission, that entry's ticket. See [[RunQueue.submit]].
+   * `traceContext` is the submitter's trace position, which every attempt continues ([[Submission.traceContext]]).
    */
   def submit(
     threadId: ThreadId,
@@ -42,10 +44,11 @@ final class RunSubmitter(
     input: QueuedInput,
     tenantId: Option[TenantId] = None,
     policy: BusyThreadPolicy = BusyThreadPolicy.Reject,
-    submissionKey: Option[SubmissionKey] = None
+    submissionKey: Option[SubmissionKey] = None,
+    traceContext: Option[TraceContext] = None
   ): Result[Ticket] =
     Submission
-      .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts)
+      .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts, traceContext)
       .flatMap(queue.submit)
 
   /** The entry `entryId` of `tenantId`, as it is now. */

@@ -36,6 +36,9 @@ class PostgresCheckpointerBackendItSpec extends AnyFlatSpec with Matchers with E
     pg.config.maxPoolSize shouldBe 2
     store.checkpointer.latest(ThreadId("absent")).value shouldBe None
     RuntimeConfigLoader.runtime(source, store.checkpointer).isRight shouldBe true
+    // the schema's queue, on the store's own pool: no queue setting repeats the connection
+    store.runQueue.value shouldBe theSameInstanceAs(pg.runQueue)
+    store.runQueue.value.openEntries(None, ThreadId("absent")).value shouldBe empty
     store.close()
     pg.isClosed shouldBe true
     PgCheckpointerDb.dropSchema(schema)

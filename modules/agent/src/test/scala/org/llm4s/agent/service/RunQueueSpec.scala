@@ -5,7 +5,7 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.ForwardingCheckpointer
 import org.llm4s.config.RunQueueConfigLoader
 import org.llm4s.error.{ ConfigurationError, ValidationError }
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import pureconfig.ConfigSource
@@ -13,7 +13,7 @@ import pureconfig.ConfigSource
 import java.time.Instant
 import scala.concurrent.duration.*
 
-class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
+class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
   private val start  = Instant.parse("2026-10-21T12:00:00Z")
   private val agent  = AgentId.of("assistant").value
@@ -41,6 +41,7 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       BusyThreadPolicy.Enqueue,
       None,
       3,
+      None,
       start,
       Vector(Attempt(RunId("r1"), start, "w")),
       admitted,
@@ -115,9 +116,11 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     val store   = InMemoryCheckpointer()
     val runtime = new GraphRuntime(store)
     val client  = ScriptedLLMClient.of(CompletionFixture.simple("hello back"))
-    val built   = Agent.builder("assistant", client).withRuntime(runtime).build().value
+    val tracing = new org.llm4s.agent.delegation.NestedStreamSpec.Recording
+    val built   = Agent.builder("assistant", client).withRuntime(runtime).withTracing(tracing).build().value
     val queue   = store.runQueue
-    queue.submit(Submission(thread, agent, QueuedInput.query("hello"))).value
+    val context = org.llm4s.trace.TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    queue.submit(Submission(thread, agent, QueuedInput.query("hello")).withTraceContext(context)).value
     val leased = queue.take(TakeRequest("worker", Set(agent), 30.seconds)).value.get
     val run    = RunId.random()
     val recorded = queue.recordAttempt(leased.lease, run).value match {
@@ -135,8 +138,15 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
       case QueuedInput.Start(input) => upickle.default.read[org.llm4s.agent.graph.toolloop.AgentInput](input).query
       case other                    => fail(s"unexpected $other")
     }
-    built.run(thread, query, RunConfig(runId = run)).value.answer shouldBe Some("hello back")
+    val config = recorded.attemptConfig(run)
+    config.runId shouldBe run
+    config.traceContext shouldBe Some(context)
+    built.run(thread, query, config).value.answer shouldBe Some("hello back")
     store.latestOfRuns(thread, Set(run)).value.map(_.id) shouldBe store.latest(thread).value.map(_.checkpoint.id)
+    // the attempt is in the submitter's trace: its run span is under the submitter's, as is what its thread records
+    val ended = tracing.events.collect { case e: org.llm4s.trace.TraceEvent.AgentRunEnded => e }
+    ended.map(_.span.flatMap(_.parent)) shouldBe Vector(Some(context))
+    store.latest(thread).value.value.checkpoint.trace.value.traceId shouldBe context.traceId
     val outcome = plan() match {
       case AttemptPlan.Close(o) => o
       case other                => fail(s"unexpected $other")

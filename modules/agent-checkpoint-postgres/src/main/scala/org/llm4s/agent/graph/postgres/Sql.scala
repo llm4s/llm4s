@@ -307,8 +307,8 @@ private[postgres] object Sql:
   def insertQueueEntry(t: Tables): String =
     s"""INSERT INTO ${t.queueEntries}
        |(entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, key_scope, submission_key,
-       | max_attempts, attempt_count, submitted_at, thread_deleted, admitted, state)
-       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open')""".stripMargin
+       | max_attempts, attempt_count, submitted_at, thread_deleted, admitted, state, trace_parent)
+       |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, false, false, 'open', ?)""".stripMargin
 
   /**
    * Candidate heads for `take` past entry id `?` (the agents, the time, that id, then the time again), skipping rows

@@ -1,8 +1,9 @@
 package org.llm4s.agent.service
 
 import org.llm4s.agent.AgentId
-import org.llm4s.agent.graph.{ CheckpointStatus, RunId, TenantId, ThreadId }
+import org.llm4s.agent.graph.{ CheckpointStatus, RunConfig, RunId, TenantId, ThreadId }
 import org.llm4s.annotation.Experimental
+import org.llm4s.trace.TraceContext
 
 import java.time.Instant
 import scala.util.Try
@@ -134,6 +135,8 @@ object EntryOutcome:
  * holds it, if one does - a lease that has expired by the store's clock may be taken over.
  *
  * @param maxAttempts the most attempts the entry may make, fixed at submission
+ * @param trace the submitter's trace context ([[Submission.traceContext]]), which every attempt continues
+ *   ([[attemptConfig]]); `None` when the submission named none
  * @param attempts the attempts recorded, oldest first, each before it touched the thread
  * @param admitted whether a run of one of `attempts` has committed a checkpoint on the thread - set by the store in
  *   that commit's own transaction, and kept when the checkpoint later leaves the history (a direct run's
@@ -152,6 +155,7 @@ final case class QueueEntry private (
   policy: BusyThreadPolicy,
   submissionKey: Option[SubmissionKey],
   maxAttempts: Int,
+  trace: Option[TraceContext],
   submittedAt: Instant,
   attempts: Vector[Attempt],
   admitted: Boolean,
@@ -164,6 +168,15 @@ final case class QueueEntry private (
 ):
   /** Whether the entry is still to run or running: it has no outcome. */
   def isOpen: Boolean = outcome.isEmpty
+
+  /**
+   * The `RunConfig` an attempt at the entry runs with (Stage 5 rule 4, design 4.58): as run `runId` - the attempt's,
+   * recorded by [[RunQueue.recordAttempt]] - for the entry's tenant, continuing the submitter's trace context
+   * ([[trace]]), so every attempt of the entry is in the submitter's trace whatever worker or machine runs it. A
+   * recover or resume of a thread whose entry has no `trace` continues the trace its checkpoint records.
+   */
+  def attemptConfig(runId: RunId): RunConfig =
+    RunConfig(runId = runId, tenantId = tenantId).withTraceContext(trace)
 
   /** The [[org.llm4s.agent.graph.RunId RunId]]s of every attempt, the set the run-id lookup takes (`Checkpointer.latestOfRuns`). */
   def runIds: Set[RunId] = attempts.iterator.map(_.runId).toSet
@@ -181,6 +194,7 @@ object QueueEntry:
     policy: BusyThreadPolicy,
     submissionKey: Option[SubmissionKey],
     maxAttempts: Int,
+    trace: Option[TraceContext],
     submittedAt: Instant,
     attempts: Vector[Attempt],
     admitted: Boolean,
@@ -200,6 +214,7 @@ object QueueEntry:
       policy,
       submissionKey,
       maxAttempts,
+      trace,
       submittedAt,
       attempts,
       admitted,

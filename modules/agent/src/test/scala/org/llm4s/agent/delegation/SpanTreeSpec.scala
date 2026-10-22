@@ -10,6 +10,7 @@ import org.scalatest.{ EitherValues, LoneElement, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -250,6 +251,54 @@ class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     runEnds(tracing).filter(_.threadId == "t1").last.span.value.parent shouldBe Some(recorded)
     tracing.events.foreach(_.span.value.context.traceId shouldBe recorded.traceId)
     store.latest(ThreadId("t1")).value.value.checkpoint.trace shouldBe Some(recorded)
+  }
+
+  it should "never let a racing continuation's stale context win over the one admitted before it" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    // two workers over one store. The loser has read the suspended checkpoint - the work's first trace - and is held
+    // at its claim while the winner resumes the thread with an explicit context, which its checkpoints then record
+    val loserRun = RunId("loser")
+    val reached  = new CountDownLatch(1)
+    val proceed  = new CountDownLatch(1)
+    val store = new ForwardingCheckpointer(new InMemoryCheckpointer()) {
+      override def claim(threadId: ThreadId, request: ClaimRequest) =
+        if request.holder == loserRun then
+          reached.countDown()
+          proceed.await(10, TimeUnit.SECONDS)
+        super.claim(threadId, request)
+    }
+    def worker(tracing: Recording) = lead(approvingClient())
+      .withRuntime(new GraphRuntime(store))
+      .withTracing(tracing)
+      .withSubagents(asking(probe(new AtomicInteger(0))))
+      .build()
+      .value
+    val loserTracing  = new Recording
+    val winnerTracing = new Recording
+    val loser         = worker(loserTracing)
+    val winner        = worker(winnerTracing)
+    val first         = winner.run(ThreadId("t1"), "go").value
+    val started       = store.latest(ThreadId("t1")).value.value.checkpoint.trace.value
+    val id            = suspendedOf(first).delegated.loneElement._1
+    val pool          = Executors.newSingleThreadExecutor()
+    try {
+      val racing =
+        pool.submit(() => loser.startResume(ThreadId("t1"), Map(first.approve(id)), RunConfig(runId = loserRun)))
+      reached.await(10, TimeUnit.SECONDS) shouldBe true
+      winner.resume(ThreadId("t1"), Map(first.approve(id)), RunConfig().withTraceContext(submitter)).value
+      proceed.countDown()
+      // the loser's admission is fenced on the checkpoint it read, which the winner moved past: it runs nothing
+      racing.get(10, TimeUnit.SECONDS).isLeft shouldBe true
+    } finally {
+      proceed.countDown()
+      pool.shutdownNow()
+    }
+
+    started.traceId should not be submitter.traceId
+    store.latest(ThreadId("t1")).value.value.checkpoint.trace shouldBe Some(submitter)
+    runEnds(winnerTracing).filter(_.threadId == "t1").last.span.value.parent shouldBe Some(submitter)
+    loserTracing.events shouldBe empty
+    store.eventsAfter(ThreadId("t1"), 0, 1000).value.map(_.runId) should not contain loserRun.value
   }
 
   "a child recovered by a later run of its parent" should "continue the trace its origin recorded, under the same call" in {

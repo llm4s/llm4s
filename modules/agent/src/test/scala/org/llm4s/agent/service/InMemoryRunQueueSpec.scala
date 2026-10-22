@@ -364,6 +364,11 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues w
       (Some(TenantId("t")), BusyThreadPolicy.Interrupt, Some(key), 2)
     set.withTenantId(None).withSubmissionKey(None).tenantId shouldBe None
     set.sameAs(set.withMaxAttempts(5)) shouldBe true
+    // a retry's own request names another trace context: still the same submission
+    val traced = set.withTraceContext(org.llm4s.trace.TraceContext.random())
+    traced.traceContext shouldBe defined
+    set.sameAs(traced) shouldBe true
+    traced.withTraceContext(None).traceContext shouldBe None
     set.sameAs(set.withPolicy(BusyThreadPolicy.Enqueue)) shouldBe false
     an[IllegalArgumentException] should be thrownBy base.withMaxAttempts(0)
     Submission.of(thread, agent, QueuedInput.Recover).value.maxAttempts shouldBe RunQueueSettings.DefaultMaxAttempts

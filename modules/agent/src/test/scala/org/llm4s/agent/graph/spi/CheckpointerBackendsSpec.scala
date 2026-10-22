@@ -43,6 +43,8 @@ class CheckpointerBackendsSpec extends AnyFlatSpec with Matchers with EitherValu
     val store = CheckpointerBackends.empty.find("MEMORY").value.open(CheckpointerSettings("memory")).value
     store.kind shouldBe "memory"
     store.checkpointer shouldBe a[InMemoryCheckpointer]
+    // the queue in the same store: what a submission through it records, the checkpointer's commit fence sees
+    store.runQueue.value shouldBe theSameInstanceAs(store.checkpointer.asInstanceOf[InMemoryCheckpointer].runQueue)
     CheckpointerBackends.empty.kinds shouldBe Vector("memory")
     CheckpointerBackends.empty.find("sqlite") shouldBe None
   }
@@ -90,6 +92,22 @@ class CheckpointerBackendsSpec extends AnyFlatSpec with Matchers with EitherValu
     closes shouldBe 1
     store.isClosed shouldBe true
     store.toString shouldBe "CheckpointStore(x)"
+  }
+
+  it should "answer a ConfigurationError for the run queue of a store given none, and share its close with the queue's" in {
+    var closes = 0
+    val memory = new InMemoryCheckpointer()
+    val plain  = CheckpointStore("x", memory, () => closes += 1)
+    val error  = plain.runQueue.left.value
+    error shouldBe a[ConfigurationError]
+    error.message should include("'x'")
+    val queued = plain.withRunQueue(memory.runQueue)
+    queued.runQueue.value shouldBe theSameInstanceAs(memory.runQueue)
+    (queued.kind, queued.checkpointer) shouldBe (plain.kind, plain.checkpointer)
+    queued.close()
+    plain.close()
+    closes shouldBe 1
+    plain.isClosed shouldBe true
   }
 
   "CheckpointerSettings.redact" should "hide the values of every credential-like key and parameter" in {

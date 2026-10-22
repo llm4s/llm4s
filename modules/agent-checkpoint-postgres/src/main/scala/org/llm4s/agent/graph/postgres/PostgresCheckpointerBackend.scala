@@ -29,7 +29,7 @@ final class PostgresCheckpointerBackend extends CheckpointerBackend:
     PostgresCheckpointerBackend
       .connection(settings)
       .flatMap(c => PostgresCheckpointer.open(c.url, c.user, c.password, c.config))
-      .map(CheckpointStore(kind, _))
+      .map(store => CheckpointStore(kind, store).withRunQueue(store.runQueue))
 
 object PostgresCheckpointerBackend:
 
