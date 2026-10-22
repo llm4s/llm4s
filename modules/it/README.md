@@ -108,6 +108,22 @@ fails *structured output*: that is a client finding, not a test bug.
 not apply (and `reasoningSetup` if a reasoning model exists), and call `registerCapabilityContract()` after the
 spec's own tests.
 
+## Provider switching and failover
+
+`ProviderSwitchingFailoverSpec` (`@Local`, issue #380) builds the OpenAI, Anthropic and Ollama clients the way an
+application does - named sections under `llm4s.providers`, `Llm4sConfig.provider`, `LLMConnect.getClient` - and points
+each at its own local mock server speaking that provider's wire format (`LocalProviderTestServer` from
+`llm4s-provider-testkit`). It checks that the providers switch in one JVM without leaking keys or models into each other's
+requests, stream and report model metadata after switching, map a tool call, token usage and a 401, 429 or 500 to the
+same `Completion` and `LLMError`, and turn an unreachable or silent server into a retryable error. Config errors name the
+section, and a section changed through system properties is picked up on the next load.
+
+llm4s has no built-in failover client, so the failover tests cover the documented pattern
+([reliability guide](../../docs/reliability-guide.md), the cookbook's `FallbackRecipe`): each provider in its own
+`ReliableClient`, the second asked only when the first still fails - after its retries, or at once while its circuit is open.
+The mock servers send `x-should-retry: false` on errors so the vendor SDKs leave retrying to `ReliableClient`, and no test
+asserts on elapsed time.
+
 ## Running the containerised tier
 
 ```bash

@@ -130,6 +130,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as the HTTP client's `NetworkError`/`TimeoutError` (recoverable) rather than a code-less `EmbeddingError` [#1781](https://github.com/llm4s/llm4s/issues/1781).
 - **Changed** `llm4s-watsonx` (Beta) to send `presencePenalty` and `frequencyPenalty` (when not 0.0) and `responseFormat`
   (`json_object`, `json_schema`) on the chat API instead of dropping them; `reasoning` is still ignored [#1314](https://github.com/llm4s/llm4s/issues/1314).
+- **Fixed** the `openai`, `azure`, `requesty` and `anthropic` clients returning a request that hit its `timeouts.request`
+  as a non-retryable `UnknownError` (OkHttp's call timeout, `InterruptedIOException("timeout")`): it is now a recoverable
+  `NetworkError("Request timeout")`, as a socket timeout already was, so `ReliableClient` retries it. The `anthropic` client
+  also returns an unreachable server as a recoverable `NetworkError` instead of an `UnknownError`, and a 429's
+  `Retry-After` on its `RateLimitError`, as the other providers do [#380](https://github.com/llm4s/llm4s/issues/380).
 
 ### Java & Kotlin APIs
 
@@ -228,6 +233,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** `ProviderSwitchingFailoverSpec`, a `@Local` suite in `modules/it` (part of `sbt test`): OpenAI, Anthropic and
+  Ollama clients built from named sections switch in one JVM against local mock servers, with streaming, tool calls, token
+  usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,
+  a section reloaded from system properties, and failover through `ReliableClient` plus a fallback provider
+  [#380](https://github.com/llm4s/llm4s/issues/380).
 - **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual

@@ -1,6 +1,6 @@
 package org.llm4s.core.safety
 
-import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, UnknownError }
+import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, RateLimitError, UnknownError }
 import org.llm4s.testutil.{ EchoedCredentials, LinearTime, PerformanceTest, SmallStack }
 import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
@@ -49,6 +49,17 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     unknownWithCause(new RuntimeException("""{"status": 4010}"""))
     unknownWithCause(new RuntimeException("status: 4290"))
     unknownWithCause(new RuntimeException("http_status=14290"))
+  }
+
+  it should "map OkHttp's call timeout, InterruptedIOException(\"timeout\"), to a retryable NetworkError (#380)" in {
+    val timeout = new java.io.InterruptedIOException("timeout")
+    DefaultErrorMapper(timeout) match {
+      case e: NetworkError =>
+        e.message shouldBe "Request timeout"
+        e.cause shouldBe Some(timeout)
+        LLMError.isRecoverable(e) shouldBe true
+      case other => fail(s"expected a NetworkError, got $other")
+    }
   }
 
   it should "map an exception without a message to UnknownError" in {

@@ -1819,6 +1819,8 @@ lazy val it = (project in file("modules/it"))
     traceOpentelemetry,
     agent,
     agentTestkit % Test,
+    // ProviderSwitchingFailoverSpec (#380): mock provider servers and application-style config loading
+    providerTestkit % Test,
     // CodingWorkspaceIntegrationSpec (design 4.38): a scripted model, and a run suspended and resumed over SQLite
     testkit               % Test,
     agentCheckpointSqlite % Test,

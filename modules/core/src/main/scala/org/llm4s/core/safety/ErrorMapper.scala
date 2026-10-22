@@ -108,7 +108,9 @@ object DefaultErrorMapper extends ErrorMapper {
   def apply(t: Throwable): LLMError = t match {
     case ex if CancelledError.isCancellation(ex) =>
       CancelledError("unknown", Some(ex))
-    case _: java.net.SocketTimeoutException =>
+    // A SocketTimeoutException, and OkHttp's call timeout (`InterruptedIOException("timeout")`, which the
+    // openai-java and Anthropic SDKs surface): a real interruption was classified as a cancellation above.
+    case _: java.io.InterruptedIOException =>
       NetworkError("Request timeout", Some(t), "unknown")
     case _: java.net.ConnectException =>
       NetworkError("Connection failed", Some(t), "unknown")
