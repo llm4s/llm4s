@@ -225,6 +225,33 @@ class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     agent.runtime.history(ThreadId("t1"), None, 1).value.loneElement.trace shouldBe Some(submitter)
   }
 
+  it should "continue the trace of the checkpoint the continuation is admitted over, not of an earlier read" in {
+    import DelegatedSuspensionSpec.{ approvingClient, asking, probe, suspendedOf }
+    val tracing = new Recording
+    // any read outside the admission sees another trace, as one would after another worker's continuation moved the
+    // thread on between that read and this admission
+    val stale = TraceContext("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "00f067aa0ba902b7")
+    val store = new ForwardingCheckpointer(new InMemoryCheckpointer()) {
+      override def history(threadId: ThreadId, before: Option[String], limit: Int) =
+        super.history(threadId, before, limit).map(_.map(_.withTrace(stale)))
+    }
+    val agent = lead(approvingClient())
+      .withRuntime(new GraphRuntime(store))
+      .withTracing(tracing)
+      .withSubagents(asking(probe(new AtomicInteger(0))))
+      .build()
+      .value
+    val first    = agent.run(ThreadId("t1"), "go").value
+    val recorded = store.latest(ThreadId("t1")).value.value.checkpoint.trace.value
+    val id       = suspendedOf(first).delegated.loneElement._1
+    val resumed  = agent.startResume(ThreadId("t1"), Map(first.approve(id))).value
+    resumed.await().value
+
+    runEnds(tracing).filter(_.threadId == "t1").last.span.value.parent shouldBe Some(recorded)
+    tracing.events.foreach(_.span.value.context.traceId shouldBe recorded.traceId)
+    store.latest(ThreadId("t1")).value.value.checkpoint.trace shouldBe Some(recorded)
+  }
+
   "a child recovered by a later run of its parent" should "continue the trace its origin recorded, under the same call" in {
     val tracing    = new Recording
     val childCalls = new AtomicInteger(0)

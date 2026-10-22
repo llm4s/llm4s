@@ -638,7 +638,7 @@ private[agent] object ChildRunner:
       case Right(h) =>
         streamed += h.runId
         val parent = Some(origin.parent -> ctx.run.position.runId)
-        ended(Agent.awaitBlocking(agent.agentRun(h, Some(events), drain = true, trace, parent = parent)))
+        ended(Agent.awaitBlocking(agent.agentRun(h, Some(events), drain = true, parent = parent)))
       // another runtime started it, settled it, or moved it on between the read and the admission
       case Left(
             _: GraphError.ThreadExists | _: GraphError.NothingToRecover | _: GraphError.IncompleteRun |

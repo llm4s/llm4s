@@ -6,7 +6,7 @@ import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
-import org.llm4s.trace.{ TraceContext, Tracing }
+import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -207,11 +207,7 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    continuing(threadId, config).flatMap(traced =>
-      runtime
-        .recover(threadId, loop.graph, configured(traced))
-        .map(agentRun(_, None, drain = false, traced.traceContext))
-    )
+    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
 
   /**
    * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
@@ -236,11 +232,9 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    for
-      traced  <- continuing(threadId, config)
-      grouped <- routed(threadId, answers, traced)
-      handle  <- runtime.resume(threadId, loop.graph, grouped, configured(traced))
-    yield agentRun(handle, None, drain = false, traced.traceContext)
+    routed(threadId, answers, config).flatMap(grouped =>
+      runtime.resume(threadId, loop.graph, grouped, configured(config)).map(agentRun(_, None, drain = false))
+    )
 
   /**
    * `answers` as the runtime takes them (design 4.46): composite answers to delegated interrupts, checked against the
@@ -377,15 +371,15 @@ final class Agent private[agent] (
   private def resumeWith(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
-    requested: RunConfig,
+    config: RunConfig,
     listening: Listening
   ): Result[AgentRun] =
-    for
-      config  <- continuing(threadId, requested)
-      grouped <- routed(threadId, answers, config)
-      (observer, scope) = observed(config, listening)
-      handle <- runtime.resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
-    yield agentRun(handle, Some(scope), listening.drain, config.traceContext)
+    routed(threadId, answers, config).flatMap { grouped =>
+      val (observer, scope) = observed(config, listening)
+      runtime
+        .resume(threadId, loop.graph, grouped, configured(config), observer = Some(observer))
+        .map(agentRun(_, Some(scope), listening.drain))
+    }
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
@@ -402,13 +396,11 @@ final class Agent private[agent] (
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
     else begin.flatMap(Agent.awaitBlocking)
 
-  private def recoverWith(threadId: ThreadId, requested: RunConfig, listening: Listening): Result[AgentRun] =
-    continuing(threadId, requested).flatMap { config =>
-      val (observer, scope) = observed(config, listening)
-      runtime
-        .recover(threadId, loop.graph, configured(config), observer = Some(observer))
-        .map(agentRun(_, Some(scope), listening.drain, config.traceContext))
-    }
+  private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
+    val (observer, scope) = observed(config, listening)
+    runtime
+      .recover(threadId, loop.graph, configured(config), observer = Some(observer))
+      .map(agentRun(_, Some(scope), listening.drain))
 
   private def startWith(
     threadId: ThreadId,
@@ -435,7 +427,7 @@ final class Agent private[agent] (
             observer
           )
         )
-    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain), config.traceContext))
+    started.map(agentRun(_, watching.map(_._2), listening.exists(_.drain)))
 
   /**
    * [[start]] on `threadId` only if the thread is new, checked atomically at admission: an existing thread is
@@ -460,7 +452,7 @@ final class Agent private[agent] (
           GraphError.ThreadExists(threadId.value),
           amend = _ => Right(record)
         )
-        .map(agentRun(_, None, drain = false, config.traceContext))
+        .map(agentRun(_, None, drain = false))
 
   /** An observer whose listener is `listening`'s scoped to the run `config` starts, calling its `onEnd` at the scope's end. */
   private def observed(config: RunConfig, listening: Listening): (Observer, RunScope) =
@@ -474,26 +466,18 @@ final class Agent private[agent] (
     else Message.validateConversation(history.toList)
 
   /**
-   * `config` for a continuation - a resume or recover - of `threadId` (design 4.58): with no trace context of its own
-   * it continues the trace the thread's latest checkpoint records ([[org.llm4s.agent.graph.Checkpoint.trace]]), so
-   * every run of one piece of work - and the child a suspended `task` call started - is in one trace. A failed read
-   * fails the continuation, never silently starting a new trace.
+   * The turn `handle` runs. Its tracing continues the trace context the run's admission settled
+   * ([[RunHandle.traceContext]], design 4.58): a run's own `RunConfig.traceContext`, else - for a resume or recover -
+   * the trace the work started in, read from the checkpoint the run was admitted over, so every run of one piece of
+   * work, and the child a suspended `task` call started, is in one trace.
    */
-  private def continuing(threadId: ThreadId, config: RunConfig): Result[RunConfig] =
-    if config.traceContext.isDefined then Right(config)
-    else
-      runtime
-        .history(threadId, None, 1, config)
-        .map(_.headOption.flatMap(_.trace).fold(config)(config.withTraceContext))
-
   private[agent] def agentRun(
     handle: RunHandle[TurnOutput],
     scope: Option[RunScope],
     drain: Boolean,
-    continues: Option[TraceContext],
     parent: Option[(ThreadId, RunId)] = None
   ): AgentRun =
-    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, continues)
+    AgentRun(handle, loop, id, runtime, tracing, scope, drain, parent, handle.traceContext)
 
 object Agent:
   private val logger = LoggerFactory.getLogger(classOf[Agent])
