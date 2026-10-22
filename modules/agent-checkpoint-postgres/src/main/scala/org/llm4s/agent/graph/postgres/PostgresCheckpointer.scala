@@ -382,8 +382,10 @@ final class PostgresCheckpointer private (
    * returns within three times the store's bound: the page's ids read by the primary key; the guard asked outside any
    * transaction; then, if the policy reclaims, the page's old tombstones reclaimed under the reclamation lock (taken
    * exclusively, so no claim creates a row from the mark meanwhile), each row locked in id order as every call locks
-   * rows and removed only if it is still only an old tombstone; then the rest of the page pruned, the rows locked in
-   * that same order. Time is the database's.
+   * rows - skipping a row another call holds, which is in use and so no tombstone to reclaim, for a sweep holding the
+   * reclamation lock never waits on a live thread's commit while every claim of a new id waits on it - and removed
+   * only if it is still only an old tombstone; then the rest of the page pruned, the rows locked in that same order.
+   * Time is the database's.
    */
   def sweep(policy: SweepPolicy, after: Option[ThreadId], guard: SweepGuard): Result[SweepPage] =
     reading("sweep") { c =>
@@ -403,7 +405,7 @@ final class PostgresCheckpointer private (
               query(c, Sql.lockReclamation, reclamationLock)(_ => ()): Unit
               val cutoff = clockNow(c).minusNanos(age.toNanos)
               val gone = candidates.flatMap { threadId =>
-                lockRow(c, threadId).flatMap { _ =>
+                readRow(c, threadId, Sql.lockedRowIfFree(t)).flatMap { _ =>
                   query(c, Sql.reclaim(t), threadId.value, cutoff, cutoff)(_.getLong(1)).headOption.map(threadId -> _)
                 }
               }

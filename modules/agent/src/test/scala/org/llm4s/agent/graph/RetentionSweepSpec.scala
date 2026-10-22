@@ -55,4 +55,12 @@ class RetentionSweepSpec extends AnyFlatSpec with Matchers with EitherValues {
     RetentionSweep.next(ids, 2) shouldBe Some(ThreadId("b"))
     RetentionSweep.next(ids, 3) shouldBe None
   }
+
+  "SweepPage" should "set each field on its own" in {
+    val page = SweepPage(3, 1, None)
+    page.withExamined(5) shouldBe SweepPage(5, 1, None)
+    page.withReclaimed(2) shouldBe SweepPage(3, 2, None)
+    page.withNext(ThreadId("t")).next shouldBe Some(ThreadId("t"))
+    page.withNext(ThreadId("t")).withNext(None) shouldBe page
+  }
 }

@@ -19,6 +19,12 @@ private[postgres] object Sql:
   /** A thread's row, locked for the rest of the transaction. */
   def lockedRow(t: Tables): String = s"${row(t)} FOR UPDATE"
 
+  /**
+   * A thread's row, locked for the rest of the transaction - or no row if another transaction holds its lock: a sweep
+   * reclaiming tombstones under the exclusive reclamation lock skips a row in use rather than wait for it (design 4.53).
+   */
+  def lockedRowIfFree(t: Tables): String = s"${row(t)} FOR UPDATE SKIP LOCKED"
+
   /** A row for a new id, numbering from the reclamation mark (schema 3, design 4.53). */
   def ensureRow(t: Tables): String =
     s"""INSERT INTO ${t.threads} (thread_id, next_seq, earliest_seq, first_seq)
