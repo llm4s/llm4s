@@ -597,22 +597,26 @@ llm4s.agent {
 ```
 
 ```scala
-import org.llm4s.config.{ CheckpointerConfigLoader, RuntimeConfigLoader }
+import org.llm4s.agent.service.RunSubmitter
+import org.llm4s.config.{ CheckpointerConfigLoader, RunQueueConfigLoader, RuntimeConfigLoader }
 
 for
-  store   <- CheckpointerConfigLoader.open()            // a CheckpointStore: close it when the application stops
-  runtime <- RuntimeConfigLoader.runtime(store.checkpointer)
-  agent   <- Agent.builder("assistant", client).withRuntime(runtime).build()
-yield (store, agent)
+  store     <- CheckpointerConfigLoader.open()          // a CheckpointStore: close it when the application stops
+  runtime   <- RuntimeConfigLoader.runtime(store.checkpointer)
+  agent     <- Agent.builder("assistant", client).withRuntime(runtime).build()
+  queue     <- store.runQueue                           // the store's own run queue, on the same connection or pool
+  settings  <- RunQueueConfigLoader.load()              // llm4s.agent.queue
+  submitter  = new RunSubmitter(queue, store.checkpointer, settings)
+yield (store, agent, submitter)
 ```
 
 - **`memory`** is built into `llm4s-agent` and is the default; **`sqlite`** needs `llm4s-agent-checkpoint-sqlite` and
   **`postgres`** `llm4s-agent-checkpoint-postgres`. Each store module ships its block's defaults in its own
   `reference.conf`. A kind whose module is not on the classpath fails only `open`, with an error naming the module.
-- **The store's run queue comes with it.** `store.runQueue` is the queue in the same database as the checkpoints, on
-  the checkpointer's own connection or pool, so `llm4s.agent.queue` holds only the queue's own settings:
-  `RunQueueConfigLoader.load().map(new RunSubmitter(queue, store.checkpointer, _))`. All three built-in kinds have
-  one; a store whose backend gave it none answers a `ConfigurationError`.
+- **The store's run queue comes with it.** `store.runQueue` (a `Result[RunQueue]`) is the queue in the same database
+  as the checkpoints, on the checkpointer's own connection or pool, so `llm4s.agent.queue` holds only the queue's own
+  settings, as above. All three built-in kinds have one; a store whose backend gave it none answers a
+  `ConfigurationError`.
 - **Only the selected kind's block is read**, so a half-written `postgres` block does not matter while `kind = sqlite`.
 - **Credentials stay out of logs.** No setting's value reaches a log line or an error; set the password through its
   variable rather than in a checked-in file.
