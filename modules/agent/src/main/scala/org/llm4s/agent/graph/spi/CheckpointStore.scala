@@ -63,7 +63,10 @@ final class CheckpointStore private (
 
 object CheckpointStore:
 
-  /** `checkpointer`, with `close` releasing what was opened for it, and no run queue until [[CheckpointStore!.withRunQueue]]. */
+  /**
+   * `checkpointer`, with `close` releasing what was opened for it, and no run queue until
+   * [[CheckpointStore!.withRunQueue]].
+   */
   def apply(kind: String, checkpointer: Checkpointer, close: () => Unit): CheckpointStore =
     new CheckpointStore(kind, checkpointer, None, close, new AtomicBoolean(false))
 
