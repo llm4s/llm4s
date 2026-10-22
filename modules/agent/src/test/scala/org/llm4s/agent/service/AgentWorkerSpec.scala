@@ -156,6 +156,22 @@ class AgentWorkerSpec
     latest.runId shouldBe entry.attempts.head.runId.value
   }
 
+  it should "run each attempt in the submitter's trace" in {
+    val store   = InMemoryCheckpointer()
+    val worker  = workerOf(store, Seq(QueuedAgent(agentOver(store, answering("x")))))
+    val on      = thread()
+    val context = org.llm4s.trace.TraceContext("4bf92f3577b34da6a3ce929d0e0e4736", "00f067aa0ba902b7")
+    val id = store.runQueue
+      .submit(
+        Submission(on, agentId, QueuedInput.query("q"), policy = BusyThreadPolicy.Enqueue).withTraceContext(context)
+      )
+      .value
+      .entryId
+    worker.start()
+    closed(store, id).outcome.value shouldBe a[EntryOutcome.Done]
+    store.latest(on).value.value.checkpoint.trace.map(_.traceId) shouldBe Some(context.traceId)
+  }
+
   it should "run a queued resume and a queued recover" in {
     val store   = InMemoryCheckpointer()
     val entered = new Semaphore(0)

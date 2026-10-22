@@ -405,7 +405,7 @@ final class AgentWorker private (
           case AttemptPlan.Close(outcome) => Next.Close(outcome)
           case AttemptPlan.Recover if admitted.isDefined =>
             val message = s"attempts exhausted: queue entry ${entry.id.value} made ${entry.attempts.size} attempts"
-            val config  = RunConfig().withRunId(RunId.random()).withTenantId(entry.tenantId)
+            val config  = entry.attemptConfig(RunId.random())
             agent.agent.settleQueued(
               entry.threadId,
               entry.runIds,
@@ -426,9 +426,10 @@ final class AgentWorker private (
   /** The attempt `runId` at `entry`, recorded: acts on [[AttemptPlan]], and on how the run it starts ends. */
   private def run(slot: Slot, entry: QueueEntry, agent: QueuedAgent, runId: RunId): Next =
     read(entry) match
-      case Left(error) => unread(entry, error)
+      case Left(error)               => unread(entry, error)
       case Right((admitted, latest)) =>
-        val config = attemptConfig(entry, runId)
+        // its run id, the entry's tenant and the submitter's trace context, so every attempt is in one trace
+        val config = entry.attemptConfig(runId)
         val begun: Either[EntryOutcome, Result[AgentRun]] = AttemptPlan.of(entry, admitted, latest) match
           case AttemptPlan.Close(outcome) => Left(outcome)
           case AttemptPlan.Recover        => Right(agent.agent.startRecover(entry.threadId, config))
@@ -479,13 +480,6 @@ final class AgentWorker private (
                 )
               )
               Next.Expire
-
-  /**
-   * The config attempt `runId` at `entry` runs with: its run id and the entry's tenant. #2213 adds the entry's trace
-   * context here (`.withTraceContext(entry.traceContext)`), so every attempt of an entry is in its submitter's trace.
-   */
-  private def attemptConfig(entry: QueueEntry, runId: RunId): RunConfig =
-    RunConfig().withRunId(runId).withTenantId(entry.tenantId)
 
   // ---- retention ----
 
