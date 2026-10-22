@@ -253,6 +253,21 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues w
     f.queue.entry(None, id).value.admitted shouldBe true
   }
 
+  it should "keep an open entry's newest checkpoint through prune and a sweep, and let it go once the entry closes" in {
+    val f      = Fixture()
+    val leased = { f.submit().value; f.take().value }
+    f.attempt(leased.lease, "r1")
+    f.commit("r1", "admitted").value
+    (1 to 2).foreach(n => f.commit("direct", s"direct-$n").value)
+    f.store.prune(thread, RetentionPolicy(maxCheckpoints = Some(1))).value
+    f.store.history(thread, None, 10).value.map(_.id) shouldBe Vector("direct-2", "admitted")
+    f.store.sweep(SweepPolicy(RetentionPolicy(maxCheckpoints = Some(1))), None, SweepGuard.none).value
+    f.store.latestOfRuns(thread, Set(RunId("r1"))).value.map(_.id) shouldBe Some("admitted")
+    f.queue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    f.store.prune(thread, RetentionPolicy(maxCheckpoints = Some(1))).value
+    f.store.history(thread, None, 10).value.map(_.id) shouldBe Vector("direct-2")
+  }
+
   // ---- reclamation ----
 
   it should "reclaim closed entries oldest first, freeing their keys and the deletion fence on their attempts" in {
@@ -351,6 +366,7 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues w
     set.sameAs(set.withMaxAttempts(5)) shouldBe true
     set.sameAs(set.withPolicy(BusyThreadPolicy.Enqueue)) shouldBe false
     an[IllegalArgumentException] should be thrownBy base.withMaxAttempts(0)
+    Submission.of(thread, agent, QueuedInput.Recover).value.maxAttempts shouldBe RunQueueSettings.DefaultMaxAttempts
   }
 
   "The queue's ids and settings" should "encode as plain JSON values and order by number" in {
