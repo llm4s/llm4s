@@ -114,7 +114,9 @@ client.complete(conversation).handleErrorWith {
 
 [Serving an Agent over HTTP](http-reference-apps) is a tested http4s (Ember) app over `AgentIO[IO]`: `POST /chat`
 answers as JSON and `POST /chat/stream` streams the answer as server-sent events, with errors mapped to HTTP statuses
-and the run cancelled when the client disconnects. Run it with `sbt "examplesHttp/run --fake"`.
+and the run cancelled when the client disconnects. Run it with `sbt "examplesHttp/run --fake"`. The same guide has a
+Tapir variant: the two endpoints as Tapir definitions with typed error outputs, served by `tapir-http4s-server` over
+the same `AgentIO[IO]`, with generated OpenAPI documentation and a Swagger UI at `/docs`.
 
 ## Environment variables
 

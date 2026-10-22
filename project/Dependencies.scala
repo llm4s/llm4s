@@ -49,6 +49,11 @@ object Versions {
   // cats-effect and fs2 versions above.
   val http4s = "0.23.30"
 
+  // Tapir, for the unpublished reference app in modules/examples-http (#1459) only. 1.11.20 is the last release
+  // built on the cats-effect, fs2 and http4s versions above (1.11.21 needs cats-effect 3.6); its Swagger UI bundle
+  // brings tapir-openapi-docs, sttp-apispec's YAML writer (circe, circe-yaml) and the swagger-ui webjar.
+  val tapir = "1.11.20"
+
   // ZIO
   val zio = "2.1.16"
 
@@ -144,6 +149,10 @@ object Deps {
   val http4sEmberServer = "org.http4s" %% "http4s-ember-server" % Versions.http4s
   val http4sEmberClient = "org.http4s" %% "http4s-ember-client" % Versions.http4s
   val http4sDsl         = "org.http4s" %% "http4s-dsl"          % Versions.http4s
+
+  // Tapir (unpublished modules/examples-http only; see Versions)
+  val tapirHttp4sServer    = "com.softwaremill.sttp.tapir" %% "tapir-http4s-server"     % Versions.tapir
+  val tapirSwaggerUiBundle = "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % Versions.tapir
 
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp

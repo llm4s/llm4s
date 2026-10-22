@@ -1393,10 +1393,11 @@ lazy val deployService = (project in file("modules/deploy-service"))
   .settings(DeployServiceDocker.settings)
 
 // Reference apps that serve an llm4s agent over HTTP, `POST /chat` and `POST /chat/stream` (#1459): http4s over
-// `llm4s-effect` and ZIO HTTP over `llm4s-zio`; Tapir follows. One module for both stacks: they share the protocol,
-// the error mapping and the settings, and their dependencies do not conflict (ZIO HTTP's Netty is on no other
-// classpath here, and its zio is `llm4s-zio`'s). Its own module, not part of `samples`, so the HTTP stacks stay
-// off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
+// `llm4s-effect`, ZIO HTTP over `llm4s-zio`, and Tapir endpoints served by tapir-http4s-server on the http4s app's
+// Ember server. One module for all three: they share the protocol, the error mapping and the settings, and their
+// dependencies do not conflict (ZIO HTTP's Netty is on no other classpath here, its zio is `llm4s-zio`'s, and Tapir
+// 1.11.20 is built on the same cats-effect, fs2 and http4s). Its own module, not part of `samples`, so the HTTP
+// stacks stay off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
 // service would, and it is in neither the published artifacts nor the `docs` Scaladoc aggregate.
 lazy val examplesHttp = (project in file("modules/examples-http"))
   .dependsOn(
@@ -1424,13 +1425,18 @@ lazy val examplesHttp = (project in file("modules/examples-http"))
       Deps.fs2,
       Deps.http4sEmberServer,
       Deps.http4sDsl,
+      Deps.tapirHttp4sServer,
+      Deps.tapirSwaggerUiBundle,
       Deps.zioHttp,
       Deps.http4sEmberClient % Test,
       Deps.scalatest         % Test
     ),
     appLogging,
     publish / skip := true,
-    // Measured 98.33% statement coverage (`sbt coverage examplesHttp/test examplesHttp/coverageReport`), by the
+    // The Tapir app's documentation types: `derives Schema` expands there to Tapir's derivation code, hundreds of
+    // synthetic statements that the OpenAPI tests exercise but statement coverage cannot attribute.
+    coverageExcludedFiles := ".*examples/http/tapir/ChatSchemas\\.scala",
+    // Measured 98.77% statement coverage (`sbt coverage examplesHttp/test examplesHttp/coverageReport`), by the
     // routes in memory and the servers on ephemeral ports. The entry points are excluded via
     // ThisBuild / coverageExcludedPackages. Floor is the measured value rounded down to the nearest 5. Never lower it.
     coverageFloor(95)

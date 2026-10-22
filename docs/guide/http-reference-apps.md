@@ -19,7 +19,7 @@ serves the same two endpoints, so they can be compared:
 |---|---|---|
 | http4s (Ember) | [`llm4s-effect`](cats-effect): `AgentIO[IO]`, an fs2 `Stream` | available |
 | ZIO HTTP (Netty) | [`llm4s-zio`](zio): `AgentZ`, `ZStream` | available |
-| Tapir | endpoint definitions with streaming bodies | planned ([#1459](https://github.com/llm4s/llm4s/issues/1459)) |
+| Tapir, served by http4s (Ember) | endpoint definitions interpreted by `tapir-http4s-server`, over `AgentIO[IO]`; OpenAPI docs at `/docs` | available |
 
 The module is not published: it is code to read and copy. Its HTTP dependencies stay in it. The apps share what does
 not depend on the stack: the request and event JSON (`ChatProtocol`), the error mapping (`HttpErrors`), the command
@@ -43,11 +43,12 @@ sbt examplesHttp/run
 LLM4S_PROVIDER=openai-main sbt examplesHttp/run    # with OPENAI_API_KEY set
 ```
 
-`run` starts the http4s app; the ZIO HTTP app takes the same arguments through `runMain`:
+`run` starts the http4s app; the ZIO HTTP and Tapir apps take the same arguments through `runMain`:
 
 ```bash
 sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"
 LLM4S_PROVIDER=openai-main sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain"
+sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain --fake"
 ```
 
 `--port N` and `--host H` change the address (default `127.0.0.1:8080`). Then:
@@ -70,7 +71,7 @@ curl -N localhost:8080/chat/stream -d '{"message": "What is Scala?"}'
 
 A `: keep-alive` comment is sent every 15 seconds while the run is quiet.
 
-The http4s app turns `AgentIO.stream` - the run's events, then its result - into `ServerSentEvent`s:
+The http4s app (`ChatEvents`) turns `AgentIO.stream` - the run's events, then its result - into `ServerSentEvent`s:
 
 ```scala
 agent
@@ -104,6 +105,10 @@ agent
 The response is that stream as a chunked body (`Body.fromCharSequenceStreamChunked`) with
 `Content-Type: text/event-stream`.
 
+The Tapir app serves the http4s app's stream (`ChatEvents`), encoded with http4s's `ServerSentEvent.encoder`, as a
+Tapir streaming body. It does not use `tapir-http4s-server`'s `serverSentEventsBody`, because sttp's `ServerSentEvent`
+has no comment field for the keep-alive. See [The Tapir app](#the-tapir-app).
+
 Both agents are built with `withStreaming()`, so its model calls stream and their text reaches the run's events as
 `AgentEvents.TextDelta`.
 
@@ -115,6 +120,9 @@ silent. The failed write interrupts the response stream, and interrupting `Agent
 (`AgentRun.cancel`), which interrupts its model call. `Http4sChatServerSpec` shows it: a provider call that parks after
 its first chunk is interrupted once the test's socket closes.
 
+The Tapir app hands the same stream to Ember through `tapir-http4s-server`, so a disconnect cancels the run in the same
+way; `TapirChatServerSpec` makes the same check.
+
 In the ZIO HTTP app, the server interrupts the response stream when the connection closes, or when a write fails;
 interrupting `AgentZ.stream` cancels the run in the same way. `ZioChatServerSpec` makes the same check.
 
@@ -122,6 +130,77 @@ interrupting `AgentZ.stream` cancels the run in the same way. `ZioChatServerSpec
 cancelled. Ember does not watch a connection while it computes a response, so with the http4s app the turn of a client
 that leaves `/chat` runs to the end; use `/chat/stream` when that matters, or bound the run with a timeout
 (`RunConfig().withBudgets(RunBudgets().withTimeout(...))`).
+
+## The Tapir app
+
+`ChatEndpoints` defines the two endpoints as values, independent of any server, with the errors as a typed output:
+`ErrorResponse` (the status, `Retry-After` in seconds, the error body), one `oneOf` variant per status `HttpErrors.of`
+can choose, so the documentation lists each one.
+
+```scala
+val chat: PublicEndpoint[String, ErrorResponse, ujson.Value, Any] =
+  endpoint.post
+    .in("chat")
+    .in(requestBody)
+    .out(jsonBody(summon[Schema[ChatResponse]]).description("The turn's result."))
+    .errorOut(oneOf[ErrorResponse](variant(StatusCode.BadRequest), ErrorStatuses.tail.map(variant)*))
+
+val chatStream: PublicEndpoint[String, ErrorResponse, Stream[IO, Byte], Fs2Streams[IO]] =
+  endpoint.post
+    .in("chat" / "stream")
+    .in(requestBody)
+    .out(header(HeaderNames.CacheControl, "no-cache"))
+    .out(streamTextBody(Fs2Streams[IO])(CodecFormat.TextEventStream(), Some(StandardCharsets.UTF_8)))
+    .errorOut(oneOf[ErrorResponse](variant(StatusCode.BadRequest)))
+```
+
+The `429` variant adds the `Retry-After` header. The request body is read as text and checked by
+`ChatProtocol.message`, so an invalid body gets the shared `400` error body instead of Tapir's own decode-failure
+response. The bodies are the shared protocol's `ujson` values; the case classes in `ChatSchemas` (`derives Schema`)
+only describe them for the documentation.
+
+`TapirChatRoutes` gives the endpoints their logic, the same as the http4s app's, and interprets them with
+`Http4sServerInterpreter`:
+
+```scala
+val chat = ChatEndpoints.chat.serverLogic[IO] { body =>
+  ChatProtocol.message(body) match {
+    case Left(invalid) => IO.pure(Left(ErrorResponse.of(HttpErrors.of(invalid))))
+    case Right(message) =>
+      agent.run(message).attempt.map {
+        case Right(result) => Right(ChatProtocol.result(result))
+        case Left(error)   => Left(ErrorResponse.of(HttpErrors.of(ChatEvents.llmError(error))))
+      }
+  }
+}
+
+val chatStream = ChatEndpoints.chatStream.serverLogicPure[IO] { body =>
+  ChatProtocol.message(body).left.map(invalid => ErrorResponse.of(HttpErrors.of(invalid)))
+    .map(message => ChatEvents(agent, message, heartbeat).through(ServerSentEvent.encoder[IO]))
+}
+
+val routes = Http4sServerInterpreter[IO]().toRoutes(List(chat, chatStream) ++ docs)
+```
+
+It is served on the http4s app's Ember server. Tapir 1.11.20 is the last release built on the cats-effect (3.5.7),
+fs2 (3.11.0) and http4s (0.23.30) versions the module uses; a later Tapir needs cats-effect 3.6.
+
+### The OpenAPI documentation
+
+The same endpoint values are interpreted as an OpenAPI document (`OpenAPIDocsInterpreter`), so the documentation
+cannot drift from what is served. With the Tapir app running:
+
+- `http://localhost:8080/docs` - the Swagger UI, where both endpoints can be tried;
+- `http://localhost:8080/docs/openapi.yaml` - the OpenAPI 3.1 document.
+
+```bash
+sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain --fake"
+curl -s localhost:8080/docs/openapi.yaml
+```
+
+The document has both endpoints, the request, answer and error body schemas, and every error status with its
+description; the `429` response documents `Retry-After`. To watch the stream's events as they arrive, use `curl -N`
+rather than the Swagger UI.
 
 ## Errors
 
@@ -146,7 +225,9 @@ The tests need no API key and no network beyond the loopback. `ChatRoutesSpec` c
 `ScriptedLLMClient` from [`llm4s-testkit`](testing-with-the-testkit): the JSON answer, the order of the streamed
 events, each error's status, and the stream's `error` event. `Http4sChatServerSpec` starts the server on an ephemeral
 port and calls it over real sockets, including the disconnect above. `ZioChatRoutesSpec` (with `Routes.runZIO`) and
-`ZioChatServerSpec` check the ZIO HTTP app the same way.
+`ZioChatServerSpec` check the ZIO HTTP app the same way, and `TapirChatRoutesSpec` and `TapirChatServerSpec` the Tapir
+app. `ChatEndpointsSpec` checks the generated OpenAPI document: both endpoints, their schemas, every error status, and
+`Retry-After` on the `429` response.
 
 ```bash
 sbt examplesHttp/test

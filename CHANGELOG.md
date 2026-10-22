@@ -234,6 +234,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when a streaming client disconnects. Run it with
   `sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"`; the ZIO guide links it.
   Tapir follows [#1459](https://github.com/llm4s/llm4s/issues/1459).
+- **Added** a Tapir reference app to `modules/examples-http`, completing the set: `POST /chat` and `POST /chat/stream`
+  as Tapir endpoint definitions (`ChatEndpoints`), with a typed error output - one variant per status `HttpErrors`
+  chooses, `Retry-After` on `429` - interpreted by `tapir-http4s-server` on the http4s app's Ember server over the same
+  `AgentIO[IO]` and event stream, so a disconnecting client cancels the run in the same way. The same definitions
+  generate the OpenAPI document, served with a Swagger UI at `/docs` (`/docs/openapi.yaml`). Tapir 1.11.20, the last
+  release on the module's cats-effect 3.5, fs2 3.11 and http4s 0.23.30. Run it with
+  `sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain --fake"`
+  [#1459](https://github.com/llm4s/llm4s/issues/1459).
 - **Changed** the Testing Guide to test with `llm4s-testkit`: its eight hand-written `LLMClient` mocks are now
   `ScriptedLLMClient` scripts (canned replies, replies by request, injected errors, a scripted tool call), compiled with
   the page's other snippets [#1475](https://github.com/llm4s/llm4s/issues/1475).

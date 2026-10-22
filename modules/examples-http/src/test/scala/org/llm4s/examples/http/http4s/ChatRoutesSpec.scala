@@ -2,12 +2,9 @@ package org.llm4s.examples.http.http4s
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import fs2.Stream
 import org.http4s.{ MediaType, Method, Request, Response, ServerSentEvent, Status, Uri }
 import org.http4s.implicits.*
-import org.llm4s.agent.{ AgentResult, AgentRun }
-import org.llm4s.agent.graph.{ EventHandlers, EventType, InterruptId, RunConfig, ThreadId }
-import org.llm4s.effect.cats.{ AgentIO, AgentStreamItem, LLMClientIO }
+import org.llm4s.effect.cats.{ AgentIO, LLMClientIO }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, LLMError, NetworkError, RateLimitError, TimeoutError }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -16,11 +13,10 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration.*
 
+import TestAgents.{ agentOver, Failing, Slow }
+
 /** The routes in memory, against a scripted client: no server, no network, no API key. */
 class ChatRoutesSpec extends AnyFlatSpec with Matchers {
-
-  private def agentOver(client: ScriptedLLMClient): AgentIO[IO] =
-    Http4sChatServer.agent(LLMClientIO[IO](client)).unsafeRunSync()
 
   private def post(agent: AgentIO[IO], path: String, body: String): Response[IO] =
     new ChatRoutes(agent).routes.orNotFound
@@ -151,34 +147,5 @@ class ChatRoutesSpec extends AnyFlatSpec with Matchers {
 
   "Another path" should "answer 404" in {
     post(agentOver(hello), "/nope", "{}").status shouldBe Status.NotFound
-  }
-
-  /** An `AgentIO` that fails with a plain exception, as no llm4s effect does. */
-  private object Failing extends Unsupported {
-    override def run(query: String, config: RunConfig): IO[AgentResult] = IO.raiseError(new RuntimeException("boom"))
-    override def stream(threadId: ThreadId, query: String, config: RunConfig): Stream[IO, AgentStreamItem] =
-      Stream.raiseError[IO](new IllegalStateException())
-  }
-
-  /** An `AgentIO` whose stream is quiet for a while, then ends with a real result. */
-  private object Slow extends Unsupported {
-    private val agent = agentOver(ScriptedLLMClient.always(Reply.text("late")))
-    override def stream(threadId: ThreadId, query: String, config: RunConfig): Stream[IO, AgentStreamItem] =
-      Stream.sleep_[IO](200.millis) ++ agent.stream(threadId, query, config)
-  }
-
-  private trait Unsupported extends AgentIO[IO] {
-    private def no[A]: IO[A]                                   = IO.raiseError(new UnsupportedOperationException)
-    def run(query: String, config: RunConfig): IO[AgentResult] = no
-    def continueConversation(previous: AgentResult, query: String, config: RunConfig): IO[AgentResult]         = no
-    def recover(threadId: ThreadId, config: RunConfig): IO[AgentResult]                                        = no
-    def resume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig): IO[AgentResult] = no
-    def stream(threadId: ThreadId, query: String, config: RunConfig): Stream[IO, AgentStreamItem] = Stream.eval(no)
-    def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig) =
-      Stream.eval(no[AgentStreamItem])
-    def streamRecover(threadId: ThreadId, config: RunConfig): Stream[IO, AgentStreamItem] = Stream.eval(no)
-    def events[A](run: AgentRun, eventType: EventType[A]): Stream[IO, A]                  = Stream.eval(no)
-    def events[R](run: AgentRun, handlers: EventHandlers[R]): Stream[IO, R]               = Stream.eval(no)
-    def nestedEvents[R](run: AgentRun, handlers: EventHandlers[R]): Stream[IO, R]         = Stream.eval(no)
   }
 }

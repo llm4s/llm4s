@@ -7,19 +7,15 @@ import org.http4s.{ Method, Request, ServerSentEvent, Status, Uri }
 import org.http4s.client.Client
 import org.http4s.ember.client.EmberClientBuilder
 import org.llm4s.effect.cats.LLMClientIO
-import org.llm4s.error.CancelledError
 import org.llm4s.examples.http.ServerSettings
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
-import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.net.Socket
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.{ CountDownLatch, TimeUnit }
-import java.util.concurrent.locks.LockSupport
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.*
 
 /** The app as a user runs it: an Ember server on an ephemeral port, called over real sockets. */
@@ -68,7 +64,7 @@ class Http4sChatServerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "cancel the run, interrupting the provider call, when the client disconnects mid-stream" in {
-    val provider = new ParksAfterFirstChunk
+    val provider = new TestAgents.ParksAfterFirstChunk
     serving(provider, heartbeat = 50.millis)
       .use { case (base, _) =>
         IO.blocking {
@@ -91,29 +87,5 @@ class Http4sChatServerSpec extends AnyFlatSpec with Matchers {
             .map(withClue("the provider call was never interrupted: ")(_) shouldBe true)
       }
       .unsafeRunSync()
-  }
-
-  /** Streams one chunk, then parks until its thread is interrupted - which only cancelling the run does. */
-  final private class ParksAfterFirstChunk extends LLMClient {
-    val interrupted = new CountDownLatch(1)
-
-    def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Left(CancelledError("complete is not used: the app's agent streams"))
-
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = {
-      onChunk(StreamedChunk(id = "c1", content = Some("partial")))
-      val deadline = System.nanoTime() + 60.seconds.toNanos
-      while (!Thread.currentThread().isInterrupted && System.nanoTime() < deadline)
-        LockSupport.parkNanos(10.millis.toNanos)
-      if (Thread.currentThread().isInterrupted) interrupted.countDown()
-      Left(CancelledError("stream"))
-    }
-
-    def getContextWindow(): Int     = 4096
-    def getReserveCompletion(): Int = 256
   }
 }
