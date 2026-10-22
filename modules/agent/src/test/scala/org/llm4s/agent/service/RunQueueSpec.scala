@@ -298,8 +298,5 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues {
     EntryOutcome.fromJson(EntryOutcome.toJson(interrupted)).value shouldBe interrupted
     interrupted.state shouldBe "interrupted"
     EntryOutcome.fromJson(ujson.Obj("state" -> "lost")).isLeft shouldBe true
-    QueueEntry.attemptsFromJson(QueueEntry.attemptsToJson(Vector(Attempt(RunId("r"), start, "w")))).value shouldBe
-      Vector(Attempt(RunId("r"), start, "w"))
-    QueueEntry.attemptsFromJson(ujson.Str("x")).isLeft shouldBe true
   }
 }

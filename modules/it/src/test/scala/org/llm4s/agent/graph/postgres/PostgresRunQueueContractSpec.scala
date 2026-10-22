@@ -77,7 +77,7 @@ class PostgresRunQueueContractSpec extends AnyFlatSpec with RunQueueContract wit
     val stores  = open(Clock.systemUTC())
     val agent   = AgentId.of(s"scan-${UUID.randomUUID().toString.take(8)}").toOption.get
     val threads = (0 to PostgresRunQueue.Candidates).map(i => ThreadId(s"scan-$i-${UUID.randomUUID()}"))
-    val ids     = threads.map(t => stores.queue.submit(Submission(t, agent, QueuedInput.query("q"))).toOption.get.entryId)
+    val ids = threads.map(t => stores.queue.submit(Submission(t, agent, QueuedInput.query("q"))).toOption.get.entryId)
     // another transaction holds the advisory lock of every thread of the first batch, as submissions deciding their
     // thread's order would
     PgCheckpointerDb.withConnection { c =>

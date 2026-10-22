@@ -211,18 +211,6 @@ object QueueEntry:
       position
     )
 
-  /** Attempts as an entry stores them: `[{"runId", "startedAt", "holder"}, ...]`. */
-  private[llm4s] def attemptsToJson(attempts: Vector[Attempt]): ujson.Value =
-    ujson.Arr.from(attempts.map { a =>
-      ujson.Obj("runId" -> a.runId.value, "startedAt" -> a.startedAt.toString, "holder" -> a.holder)
-    })
-
-  /** The attempts [[attemptsToJson]] stored, or why they cannot be read. */
-  private[llm4s] def attemptsFromJson(json: ujson.Value): Either[String, Vector[Attempt]] =
-    Try(json.arr.toVector.map { a =>
-      Attempt(RunId(a("runId").str), Instant.parse(a("startedAt").str), a("holder").str)
-    }).toEither.left.map(e => s"not an attempt list: ${e.getMessage}")
-
 /**
  * A lease on an open entry, as [[RunQueue.take]] grants it: the worker holding it may record attempts at the entry,
  * renew the lease and close the entry, for as long as no other lease replaced it - expiry, by the store's clock, only
