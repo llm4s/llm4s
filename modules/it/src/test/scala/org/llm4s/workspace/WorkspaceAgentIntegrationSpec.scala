@@ -16,6 +16,7 @@ import org.scalatest.matchers.should.Matchers
 import java.io.File
 import java.nio.file.Files
 import scala.util.Try
+import java.time.Instant
 
 /**
  * An [[Agent]] driving the harness tools over a workspace (`FileTools` over `WorkspaceFileBackend`, `ExecuteTool` over `WorkspaceSandboxBackend`)
@@ -77,7 +78,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       Right(
         Completion(
           id = s"mock-$turn",
-          created = 0L,
+          created = Instant.EPOCH,
           content = message.content,
           model = "mock-model",
           message = message,

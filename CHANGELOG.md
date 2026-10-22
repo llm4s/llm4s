@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `Completion.created` is a `java.time.Instant`, not epoch seconds as a `Long`; `withCreated` and
+  `StreamingAccumulator.toCompletion(created)` take one, and the wire's epoch seconds are converted in each provider
+  client; [migration](docs/reference/migration.md#completioncreated-is-an-instant-2262).
 - `WorkspaceTools` is removed (use `FileTools` over `WorkspaceFileBackend` and `ExecuteTool`); `WorkspaceAgentInterface` gains `fileSnapshot`, `deleteFile` and compare-and-set writes; the runner enforces
   `allowedPaths`/`readOnlyPaths`; [migration](docs/reference/migration.md#workspace-backends-1906).
 - Checkpoint format 8 and SQLite schema 9: an older build refuses what this one writes; [migration](docs/reference/migration.md#child-threads-2045).

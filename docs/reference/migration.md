@@ -264,6 +264,25 @@ which binds them itself; no llm4s library module reads them any more. Their defa
 value that is set but cannot be read (`CHUNK_SIZE=abc`) is now a `ConfigurationError` instead of silently falling back to
 the default.
 
+### `Completion.created` is an `Instant` (#2262)
+
+A point in time in the public API is a `java.time.Instant` ([#2262](https://github.com/llm4s/llm4s/issues/2262)), and
+`Completion.created` was the last raw timestamp: it was a `Long` of epoch seconds. `Completion(created = ...)`,
+`withCreated` and `StreamingAccumulator.toCompletion(created)` now take an `Instant`, and `completion.created` returns
+one. Providers that report a creation time (the OpenAI-format `created` field) still send epoch seconds on the wire; the
+client converts it, and a reply without one gives `Instant.EPOCH`, as `0L` did before. Providers that report none stamp
+the time the reply arrived, as before.
+
+```scala
+import java.time.Instant
+
+val completion = Completion(id = "1", created = Instant.ofEpochSecond(1700000000L), content = "hi", model = "m",
+  message = AssistantMessage("hi"))                     // was created = 1700000000L
+val seconds: Long = completion.created.getEpochSecond   // where code needs the old number
+```
+
+Test fixtures that passed `0L` pass `Instant.EPOCH`.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last

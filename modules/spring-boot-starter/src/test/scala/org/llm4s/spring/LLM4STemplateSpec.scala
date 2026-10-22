@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.ExecutionException
+import java.time.Instant
 
 class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
@@ -22,7 +23,7 @@ class LLM4STemplateSpec extends AnyFlatSpec with Matchers {
 
   private def successTemplate(text: String) = StarterTestSupport.template(
     JLlmClientTestFactory.create(
-      stubClient(Right(Completion("id", 0L, text, "m", AssistantMessage(text))))
+      stubClient(Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text))))
     )
   )
 

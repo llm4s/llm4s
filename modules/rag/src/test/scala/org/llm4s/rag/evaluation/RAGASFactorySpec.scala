@@ -11,6 +11,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class RAGASFactorySpec extends AnyFlatSpec with Matchers {
 
@@ -21,7 +22,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "[]",
           model = "test",
           message = AssistantMessage("[]")

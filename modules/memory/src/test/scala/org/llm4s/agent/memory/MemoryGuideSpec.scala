@@ -301,7 +301,7 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       Right(
         Completion(
           id = "canned",
-          created = 0L,
+          created = Instant.EPOCH,
           content = reply,
           model = "canned",
           message = AssistantMessage(reply),

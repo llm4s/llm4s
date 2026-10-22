@@ -13,6 +13,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.jdk.CollectionConverters._
 import scala.util.Try
+import java.time.Instant
 
 /**
  * Dedicated coverage for [[NoOpTracing]], the tracer every application gets when tracing is
@@ -52,7 +53,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "",
     model = "test-model",
     message = AssistantMessage(None, Seq(toolCall)).withThinking("add them"),

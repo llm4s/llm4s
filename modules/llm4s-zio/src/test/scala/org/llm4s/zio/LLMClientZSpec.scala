@@ -14,12 +14,13 @@ import org.llm4s.llmconnect.model.{
 import org.llm4s.types.Result
 import zio.{ Chunk, Ref, ZIO }
 import zio.test.*
+import java.time.Instant
 
 object LLMClientZSpec extends ZIOSpecDefault {
 
   private val testCompletion = Completion(
     id = "test-id",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "hello",
     model = "test-model",
     message = AssistantMessage(Some("hello"))

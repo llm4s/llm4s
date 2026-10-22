@@ -13,6 +13,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
+import java.time.Instant
 
 /**
  * Tests for RAGPipeline focusing on indexing, search, and lifecycle behaviour.
@@ -75,7 +76,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
       Right(
         Completion(
           id = "mock",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "Answer derived from provided context.",
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some("Answer derived from provided context.")),

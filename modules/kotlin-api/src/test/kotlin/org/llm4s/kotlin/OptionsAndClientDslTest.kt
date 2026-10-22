@@ -26,6 +26,7 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
 import org.llm4s.javaapi.Llm4s as JLlm4s
+import java.time.Instant
 
 /**
  * The options and client DSL (#1495): [completionOptions] builds the [JCompletionOptions] the Java builder does and
@@ -73,7 +74,7 @@ class OptionsAndClientDslTest {
                 seen.set(conversation to options)
                 return Right(
                     Completion.apply(
-                        "id", 0L, "blue", "m",
+                        "id", Instant.EPOCH, "blue", "m",
                         AssistantMessage.apply(Option.apply("blue"), CollectionConverters.asScala(listOf<org.llm4s.llmconnect.model.ToolCall>()).toList(), AssistantMessage.`apply$default$3`()),
                         CollectionConverters.asScala(listOf<org.llm4s.llmconnect.model.ToolCall>()).toList(),
                         Option.empty(), Option.empty(),

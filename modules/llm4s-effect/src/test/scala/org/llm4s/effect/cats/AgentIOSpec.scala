@@ -10,12 +10,13 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOpti
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class AgentIOSpec extends AnyFlatSpec with Matchers {
 
   private def completion(text: String) = Completion(
     id = "test-id",
-    created = 0L,
+    created = Instant.EPOCH,
     content = text,
     model = "test-model",
     message = AssistantMessage(contentOpt = Some(text))

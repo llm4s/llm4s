@@ -20,6 +20,7 @@ import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import java.util.concurrent.locks.LockSupport
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /** Deterministic fixtures for the agent stream specs: latches and parking, no sleeps. */
 private[javaapi] object StreamFixtures {
@@ -31,7 +32,7 @@ private[javaapi] object StreamFixtures {
   val ParkSeconds: Long = 120L
 
   def completion(text: String): Completion =
-    Completion(id = "id", created = 0L, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
 
   def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
 

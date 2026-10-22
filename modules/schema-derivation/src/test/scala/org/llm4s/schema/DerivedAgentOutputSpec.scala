@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.CopyOnWriteArrayList
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /**
  * A derived schema as an agent's response format (#1912, design 4.26): `withOutput(SchemaOf[A].definition)`.
@@ -24,7 +25,7 @@ class DerivedAgentOutputSpec extends AnyFlatSpec with Matchers {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       val reply = replies(asked.size)
       asked.add(options)
-      Right(Completion("id", 0L, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
     }
 
     override def streamComplete(

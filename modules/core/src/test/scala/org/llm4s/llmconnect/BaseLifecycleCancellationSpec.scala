@@ -6,6 +6,7 @@ import org.llm4s.metrics.MetricsCollector
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
 
@@ -54,7 +55,7 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "answer",
           model = "stub-model",
           message = AssistantMessage("answer")

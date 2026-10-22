@@ -6,6 +6,7 @@ import org.llm4s.trace.{ Tracing, TracingComposer, TraceEvent, TracingMode }
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.llmconnect.config.TracingSettings
 import scala.concurrent.duration.*
+import java.time.Instant
 
 class TracingExampleTest extends AnyFunSuite with Matchers {
 
@@ -96,7 +97,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
     val completion = org.llm4s.llmconnect.model.Completion(
       id = "test-id",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = "Test response",
       model = "tracing",
       message = org.llm4s.llmconnect.model.AssistantMessage(

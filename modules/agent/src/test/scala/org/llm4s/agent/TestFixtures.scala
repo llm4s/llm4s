@@ -4,6 +4,7 @@ import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import java.time.Instant
 
 /**
  * Deterministic fake LLM client that always returns the same completion.
@@ -160,7 +161,7 @@ private[agent] object CompletionFixture {
     val message = AssistantMessage(text, Seq.empty)
     Completion(
       id = s"fixture-${System.nanoTime()}",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = text,
       model = "test-model",
       message = message,
@@ -181,7 +182,7 @@ private[agent] object CompletionFixture {
     val message = AssistantMessage("", Seq(tc))
     Completion(
       id = s"fixture-tc-${System.nanoTime()}",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = "",
       model = "test-model",
       message = message,
@@ -194,7 +195,7 @@ private[agent] object CompletionFixture {
   def withMessage(message: AssistantMessage): Completion =
     Completion(
       id = s"fixture-msg-${System.nanoTime()}",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = message.content,
       model = "test-model",
       message = message,
@@ -215,7 +216,7 @@ private[agent] object CompletionFixture {
     val message = AssistantMessage(text, Seq.empty)
     Completion(
       id = s"fixture-usage-${System.nanoTime()}",
-      created = System.currentTimeMillis(),
+      created = Instant.now(),
       content = text,
       model = "test-model",
       message = message,

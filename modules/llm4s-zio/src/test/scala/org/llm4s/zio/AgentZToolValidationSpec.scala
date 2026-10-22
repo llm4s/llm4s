@@ -12,6 +12,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
 import zio.test.*
+import java.time.Instant
 
 /**
  * Tool calls with invalid arguments, driven through `AgentZ`.
@@ -59,13 +60,13 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
   }
 
   private def text(s: String): Completion =
-    Completion(id = "t", created = 0L, content = s, model = "m", message = AssistantMessage(Some(s)))
+    Completion(id = "t", created = Instant.EPOCH, content = s, model = "m", message = AssistantMessage(Some(s)))
 
   private def callWith(i: Int, args: ujson.Value): Completion = {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = args))
     Completion(
       id = s"t$i",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "",
       model = "m",
       message = AssistantMessage("", calls),

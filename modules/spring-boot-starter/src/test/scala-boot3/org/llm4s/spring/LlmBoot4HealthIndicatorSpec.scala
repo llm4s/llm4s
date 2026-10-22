@@ -11,6 +11,7 @@ import org.springframework.mock.env.MockEnvironment
 
 import java.time.Duration
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * The Spring Boot 4 indicator next to the Spring Boot 3 one, on the Boot 3 classpath, which has Boot 4's
@@ -27,7 +28,7 @@ class LlmBoot4HealthIndicatorSpec extends AnyFlatSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   })
 
-  private val ok     = Right(Completion("id", 0L, "ok", "m", AssistantMessage("ok")))
+  private val ok     = Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
   private val failed = Left(APIError("openai", "rejected key sk-abcdefghijklmnop"))
 
   private def boot3(c: JLlmClient, probe: Boolean): (String, Map[String, AnyRef]) = {

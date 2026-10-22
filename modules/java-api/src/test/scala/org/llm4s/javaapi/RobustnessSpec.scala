@@ -11,6 +11,7 @@ import java.io.IOException
 import java.util.Optional
 import java.util.concurrent.{ CountDownLatch, Executors, ExecutionException, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 /** Null-safety, lambda-exception, lifecycle and cause-extraction behaviour for Java callers. */
 class RobustnessSpec extends AnyFlatSpec with Matchers {
@@ -30,7 +31,7 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
   }
 
   private def ok(text: String): Result[Completion] =
-    Right(Completion("id", 0L, text, "m", AssistantMessage(text)))
+    Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
 
   // ---- LlmResult ---------------------------------------------------------------------------
 

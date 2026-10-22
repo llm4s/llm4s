@@ -350,7 +350,7 @@ class TraceCollectorPropertySpec
       val tc = collector()
       val completion = org.llm4s.llmconnect.model.Completion(
         id = "cmp-1",
-        created = 0L,
+        created = Instant.EPOCH,
         content = "",
         model = model,
         message = org.llm4s.llmconnect.model.AssistantMessage("", List.empty)

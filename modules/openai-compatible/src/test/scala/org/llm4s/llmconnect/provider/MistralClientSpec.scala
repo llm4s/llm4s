@@ -13,6 +13,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
 import org.llm4s.model.ModelRegistryService
+import java.time.Instant
 
 /**
  * `MistralClient` against a local server speaking Mistral's `/v1/chat/completions`.
@@ -408,7 +409,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     result.fold(
       err => fail(s"Expected Right, got Left($err)"),
       completion => {
-        completion.created shouldBe 0L
+        completion.created shouldBe Instant.EPOCH
         completion.content shouldBe "World"
       }
     )

@@ -51,7 +51,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
       Right(
         Completion(
           id = "comp-123",
-          created = Instant.now().toEpochMilli,
+          created = Instant.now(),
           content = "Response from LLM",
           model = "gpt-model",
           message = AssistantMessage("Response from LLM"),

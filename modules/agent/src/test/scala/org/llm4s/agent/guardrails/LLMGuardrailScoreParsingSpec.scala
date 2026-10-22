@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * How a judge's reply is read as a score (#1405).
@@ -22,7 +23,7 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = reply,
           model = "test-model",
           message = AssistantMessage(reply),

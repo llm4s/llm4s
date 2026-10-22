@@ -8,6 +8,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.Files
+import java.time.Instant
 
 class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
 
@@ -26,7 +27,7 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some(response)),
@@ -56,7 +57,7 @@ class GroundTruthGeneratorSpec extends AnyFlatSpec with Matchers {
         Right(
           Completion(
             id = "mock",
-            created = 0L,
+            created = Instant.EPOCH,
             content = successResponse,
             model = "mock",
             message = AssistantMessage(contentOpt = Some(successResponse)),

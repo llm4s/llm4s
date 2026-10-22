@@ -8,6 +8,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import java.time.Instant
 
 class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -305,7 +306,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private def createCompletion(): Completion =
     Completion(
       id = "comp-1",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "Hello",
       model = "gpt-4",
       message = AssistantMessage(Some("Hello"), Seq.empty)

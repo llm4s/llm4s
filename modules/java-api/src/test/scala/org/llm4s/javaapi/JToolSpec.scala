@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /** Agent tools defined from Java (#1484): `JTool.builder`, `JTool.fromAnnotated`, `Llm4s.createAgentWithTools`. */
 class JToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
@@ -22,7 +23,7 @@ class JToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
     def reply(conversation: Conversation): Result[Completion] =
       if (n.getAndIncrement() == 0) {
         val message = AssistantMessage(contentOpt = None, toolCalls = Seq(call))
-        Right(Completion("id", 0L, "", "m", message, toolCalls = List(call)))
+        Right(Completion("id", Instant.EPOCH, "", "m", message, toolCalls = List(call)))
       } else {
         val result = conversation.messages.collect { case t: ToolMessage => t.content }.lastOption.getOrElse("none")
         Right(completion(s"tool said: $result"))

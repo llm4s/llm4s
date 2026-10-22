@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.SmallStack
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
@@ -116,7 +117,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.updateTokens(10, 5)
 
-    val completion = accumulator.toCompletion(0L).toOption.get
+    val completion = accumulator.toCompletion(Instant.EPOCH).toOption.get
 
     completion.content shouldBe "content"
     completion.id shouldBe "msg-1"
@@ -274,7 +275,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, Some("thinking")))
     accumulator.updateTokensWithThinking(10, 5, 20)
 
-    val completion = accumulator.toCompletion(0L).toOption.get
+    val completion = accumulator.toCompletion(Instant.EPOCH).toOption.get
 
     completion.content shouldBe "content"
     completion.thinking shouldBe Some("thinking")
@@ -300,8 +301,20 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val accumulator = StreamingAccumulator.create()
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
 
-    val completion = accumulator.toCompletion(created = 1_700_000_000L)
-    completion.toOption.get.created shouldBe 1_700_000_000L
+    val completion = accumulator.toCompletion(created = Instant.ofEpochSecond(1_700_000_000L))
+    completion.toOption.get.created shouldBe Instant.ofEpochSecond(1_700_000_000L)
+  }
+
+  test("should stamp the completion with the current time when no creation time is given") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
+
+    val before  = Instant.now()
+    val created = accumulator.toCompletion.toOption.get.created
+    val after   = Instant.now()
+
+    created.isBefore(before) shouldBe false
+    created.isAfter(after) shouldBe false
   }
 
   test("should return tool calls in the order the stream first named them, on the message too") {
@@ -326,7 +339,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     val completion = accumulator.toCompletion.toOption.get
     completion.message.toolCalls.map(_.id) shouldBe ids
-    accumulator.toCompletion(0L).toOption.get.message.toolCalls.map(_.id) shouldBe ids
+    accumulator.toCompletion(Instant.EPOCH).toOption.get.message.toolCalls.map(_.id) shouldBe ids
   }
 
   // Streamed arguments are model output: nested too deeply they stay a raw Str instead of becoming

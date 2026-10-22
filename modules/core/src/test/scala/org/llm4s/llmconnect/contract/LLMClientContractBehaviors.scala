@@ -8,6 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.mutable.ListBuffer
 import scala.util.Using
+import java.time.Instant
 
 /**
  * Reusable contract behaviour suite for [[LLMClient]] implementations.
@@ -50,7 +51,7 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
     "produce a completion with non-negative created timestamp" in {
       val client     = createClient()
       val completion = client.complete(validConversation)
-      completion.foreach(c => c.created should be >= 0L)
+      completion.foreach(c => c.created.isBefore(Instant.EPOCH) shouldBe false)
     }
 
     "produce a completion with non-empty model string" in {

@@ -12,6 +12,7 @@ import java.util.concurrent.{ ConcurrentLinkedQueue, Executors, TimeUnit }
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * Provider-agnostic contract tests for [[LLMClient.completeStructured]]: what is sent to
@@ -29,7 +30,13 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     .withProperty(org.llm4s.toolapi.PropertyDefinition("nick", Schema.string("Nickname"), required = false))
 
   private def completion(content: String): Completion =
-    Completion(id = "id", created = 0L, content = content, model = "m", message = AssistantMessage(Some(content)))
+    Completion(
+      id = "id",
+      created = Instant.EPOCH,
+      content = content,
+      model = "m",
+      message = AssistantMessage(Some(content))
+    )
 
   /** Thread-safe recording client: all calls are captured, the reply is computed from the request. */
   private class RecordingClient(reply: (Conversation, CompletionOptions) => Result[Completion]) extends LLMClient {

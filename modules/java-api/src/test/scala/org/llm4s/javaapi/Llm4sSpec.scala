@@ -5,12 +5,13 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class Llm4sSpec extends AnyFlatSpec with Matchers {
 
   private val stubClient: LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, "ok", "test-model", AssistantMessage("ok")))
+      Right(Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage("ok")))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
@@ -112,7 +113,7 @@ class Llm4sSpec extends AnyFlatSpec with Matchers {
     val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
     val own = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-        Right(Completion("id", 0L, "mine", "m", AssistantMessage("mine")))
+        Right(Completion("id", Instant.EPOCH, "mine", "m", AssistantMessage("mine")))
       override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int     = 4096

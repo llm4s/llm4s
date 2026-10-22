@@ -27,6 +27,7 @@ import upickle.default.{ macroRW, ReadWriter }
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * `withTracing` traces each run's durable events as `graph.*`/`agent.*` custom events, its model
@@ -75,11 +76,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   private def answer(text: String): Completion =
-    Completion("answer", 0L, text, "test-model", AssistantMessage(text), usage = usage)
+    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text), usage = usage)
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def toolCallCompletion: Completion =
-    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
+    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
 
   private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 

@@ -17,6 +17,7 @@ import org.springframework.context.annotation.{ Bean, Configuration }
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 object StarterContractSpec {
 
@@ -24,7 +25,7 @@ object StarterContractSpec {
 
   def client(onClose: () => Unit = () => ()): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, "mock", "m", AssistantMessage("mock")))
+      Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)
     override def getContextWindow(): Int     = 4096
@@ -318,7 +319,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
         calls.incrementAndGet()
         val text = c.messages.last.content
-        Right(Completion("id", 0L, text, "m", AssistantMessage(text)))
+        Right(Completion("id", Instant.EPOCH, text, "m", AssistantMessage(text)))
       }
       override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
@@ -351,7 +352,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
     val capturing = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
         seenConv.set(c); seenOptions.set(o)
-        Right(Completion("id", 0L, "r", "m", AssistantMessage("r")))
+        Right(Completion("id", Instant.EPOCH, "r", "m", AssistantMessage("r")))
       }
       override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)

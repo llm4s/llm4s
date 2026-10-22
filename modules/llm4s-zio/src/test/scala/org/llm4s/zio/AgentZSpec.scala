@@ -8,12 +8,13 @@ import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOpti
 import org.llm4s.types.Result
 import zio.ZIO
 import zio.test.*
+import java.time.Instant
 
 object AgentZSpec extends ZIOSpecDefault {
 
   private def completion(text: String) = Completion(
     id = "test-id",
-    created = 0L,
+    created = Instant.EPOCH,
     content = text,
     model = "test-model",
     message = AssistantMessage(contentOpt = Some(text))

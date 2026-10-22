@@ -29,6 +29,7 @@ import upickle.default.ReadWriter
 import java.util.concurrent.{ ConcurrentHashMap, CopyOnWriteArrayList }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 object ToolLoopFixtures {
   final case class Lookup(q: String) derives ReadWriter
@@ -43,7 +44,7 @@ object ToolLoopFixtures {
   def completion(message: AssistantMessage, prompt: Int = 10, completion: Int = 5): Completion =
     Completion(
       id = "scripted",
-      created = 0L,
+      created = Instant.EPOCH,
       content = message.content,
       model = "scripted",
       message = message,
@@ -1859,7 +1860,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val client = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
         offered.add(options.tools.map(_.name))
-        Right(Completion("id", 0L, "hello", "model", AssistantMessage("hello", toolCalls = List.empty)))
+        Right(Completion("id", Instant.EPOCH, "hello", "model", AssistantMessage("hello", toolCalls = List.empty)))
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions,

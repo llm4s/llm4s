@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Unit tests for LLM-as-Judge guardrails.
@@ -30,7 +31,7 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test-id",
-          created = System.currentTimeMillis(),
+          created = Instant.now(),
           content = scoreToReturn,
           model = "test-model",
           message = AssistantMessage(scoreToReturn),

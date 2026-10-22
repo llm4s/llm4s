@@ -9,14 +9,15 @@ import org.scalatest.matchers.should.Matchers
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.{ Bean, Configuration }
+import java.time.Instant
 
 object Llm4sAutoConfigurationSpec {
 
   val stubLlmClient: LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, "mock", "m", AssistantMessage("mock")))
+      Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
-      Right(Completion("id", 0L, "mock", "m", AssistantMessage("mock")))
+      Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 512
   }

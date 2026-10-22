@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.jdk.CollectionConverters.*
 import upickle.default._
+import java.time.Instant
 
 class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
 
@@ -30,10 +31,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
         if (callCount == 1) {
           val tc  = ToolCall("call-1", toolName, toolArgs)
           val msg = AssistantMessage(contentOpt = None, toolCalls = Seq(tc))
-          Right(Completion("id", 0L, "", "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, "", "test-model", msg))
         } else {
           val msg = AssistantMessage(contentOpt = Some(finalResponse))
-          Right(Completion("id", 0L, finalResponse, "test-model", msg))
+          Right(Completion("id", Instant.EPOCH, finalResponse, "test-model", msg))
         }
       }
       override def streamComplete(
@@ -164,7 +165,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val capturing = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
         seen.set(conv)
-        Right(Completion("id", 0L, "ok", "m", AssistantMessage("ok")))
+        Right(Completion("id", Instant.EPOCH, "ok", "m", AssistantMessage("ok")))
       }
       override def streamComplete(
         conv: Conversation,

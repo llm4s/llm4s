@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class LLMCompressorSpec extends AnyFlatSpec with Matchers {
 
@@ -24,7 +25,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock-completion-id",
-          created = System.currentTimeMillis() / 1000,
+          created = Instant.now(),
           content = compressed,
           model = "mock-model",
           message = AssistantMessage(compressed),
@@ -43,7 +44,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock-completion-id",
-          created = System.currentTimeMillis() / 1000,
+          created = Instant.now(),
           content = "Compressed.",
           model = "mock-model",
           message = AssistantMessage("Compressed."),

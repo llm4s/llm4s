@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.ReadWriter
+import java.time.Instant
 
 /**
  * The derivation used from a package outside `org.llm4s`, as a user's code is. Its macros are internal to the
@@ -33,7 +34,7 @@ class ExternalUseSpec extends AnyFlatSpec with Matchers {
     var sent: Option[CompletionOptions] = None
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       sent = Some(options)
-      Right(Completion("id", 0L, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
     }
     override def streamComplete(
       conversation: Conversation,

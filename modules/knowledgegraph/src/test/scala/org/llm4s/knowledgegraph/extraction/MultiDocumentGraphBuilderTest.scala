@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.error.ProcessingError
+import java.time.Instant
 
 class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockFactory {
 
@@ -15,7 +16,7 @@ class MultiDocumentGraphBuilderTest extends AnyFunSuite with Matchers with MockF
     content = content,
     model = "test-model",
     toolCalls = Nil,
-    created = 1234567890L,
+    created = Instant.ofEpochSecond(1234567890L),
     message = org.llm4s.llmconnect.model.AssistantMessage(Some(content), Nil),
     usage = None
   )

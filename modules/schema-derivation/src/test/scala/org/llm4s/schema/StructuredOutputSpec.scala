@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicReference
+import java.time.Instant
 
 /** `completeStructuredOf` with a client that answers with a fixed reply and keeps what it was asked. */
 class StructuredOutputSpec extends AnyFlatSpec with Matchers {
@@ -18,7 +19,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       asked.set(Some(options))
-      Right(Completion("id", 0L, reply, "test-model", AssistantMessage(reply)))
+      Right(Completion("id", Instant.EPOCH, reply, "test-model", AssistantMessage(reply)))
     }
 
     override def streamComplete(

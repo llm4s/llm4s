@@ -10,6 +10,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Tests for BenchmarkRunner covering configuration, error handling, and the
@@ -47,7 +48,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "mock",
-          created = 0L,
+          created = Instant.EPOCH,
           content = "A mock answer.",
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some("A mock answer.")),

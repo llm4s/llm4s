@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * `JLlmClient.completion` and the [[JCompletion]] it returns (#1487): the model, usage, cost and tool calls of a reply
@@ -21,7 +22,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
 
   private val full: Completion = Completion(
     id = "reply-1",
-    created = 0L,
+    created = Instant.EPOCH,
     content = "Let me check.",
     model = "gpt-4o-2024-08-06",
     message = AssistantMessage("Let me check.").withThinking("The user wants the weather."),
@@ -39,7 +40,7 @@ class JCompletionSpec extends AnyFlatSpec with Matchers {
     estimatedCost = Some(0.0015)
   )
 
-  private val bare: Completion = Completion("reply-2", 0L, "4", "m", AssistantMessage("4"))
+  private val bare: Completion = Completion("reply-2", Instant.EPOCH, "4", "m", AssistantMessage("4"))
 
   /** A client that records each conversation and options it is sent, and answers with `reply`. */
   private class Recording(reply: => Result[Completion]) extends LLMClient {

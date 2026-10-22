@@ -4,6 +4,7 @@ import org.llm4s.error.NetworkError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import java.time.Instant
 
 /** Shared mock LLM clients for testing. */
 object MockLLMClients {
@@ -17,7 +18,7 @@ object MockLLMClients {
       Right(
         Completion(
           id = "test-id",
-          created = System.currentTimeMillis(),
+          created = Instant.now(),
           content = response,
           model = "test-model",
           message = AssistantMessage(response),
@@ -49,7 +50,7 @@ object MockLLMClients {
       Right(
         Completion(
           id = s"test-id-$responseIndex",
-          created = System.currentTimeMillis(),
+          created = Instant.now(),
           content = response,
           model = "test-model",
           message = AssistantMessage(response),

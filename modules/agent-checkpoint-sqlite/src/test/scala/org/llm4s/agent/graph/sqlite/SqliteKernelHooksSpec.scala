@@ -16,6 +16,7 @@ import upickle.default.ReadWriter
 
 import java.time.Clock
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import java.time.Instant
 
 /**
  * Stage 3 slice C1 (#1902, design §4.22) on a durable store: every hook update, and the prior values an output
@@ -59,7 +60,7 @@ class SqliteKernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   private def completion(message: AssistantMessage): Completion =
-    Completion("c", 0L, message.content, "m", message, message.toolCalls.toList, Some(TokenUsage(10, 5, 15)))
+    Completion("c", Instant.EPOCH, message.content, "m", message, message.toolCalls.toList, Some(TokenUsage(10, 5, 15)))
 
   /** Plays `turns`; the call numbered `failOn` fails while `failing` is set. */
   final private class Model(failing: AtomicBoolean, failOn: Int, turns: AssistantMessage*) extends ModelStep {

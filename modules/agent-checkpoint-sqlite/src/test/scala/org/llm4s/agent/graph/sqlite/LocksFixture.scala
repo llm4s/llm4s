@@ -15,6 +15,7 @@ import upickle.default.ReadWriter
 import java.nio.file.{ Files, Path, StandardCopyOption }
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 /**
  * The agent of `locks-threads.db`, a SQLite file written by `main` after C2 (#1903) and before #1934 recorded a graph's
@@ -38,7 +39,7 @@ object LocksFixture:
   def completion(message: AssistantMessage): Completion =
     Completion(
       id = "fixture",
-      created = 0L,
+      created = Instant.EPOCH,
       content = message.content,
       model = "test-model",
       message = message,

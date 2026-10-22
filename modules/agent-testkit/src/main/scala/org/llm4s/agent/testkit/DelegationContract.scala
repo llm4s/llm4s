@@ -29,6 +29,7 @@ import upickle.default.ReadWriter
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /**
  * The delegation contract (design 4.44), as a ScalaTest suite: a parent agent delegating to a subagent on a store,
@@ -185,7 +186,7 @@ object DelegationContract:
   private def completion(message: AssistantMessage): Completion =
     Completion(
       id = "delegation-contract",
-      created = 0L,
+      created = Instant.EPOCH,
       content = message.content,
       model = "contract-model",
       message = message,

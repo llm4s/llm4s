@@ -621,7 +621,7 @@ class BedrockClient(
 
       Completion(
         id = java.util.UUID.randomUUID().toString,
-        created = System.currentTimeMillis() / 1000,
+        created = Instant.now(),
         content = textContent,
         model = config.model,
         message = message,

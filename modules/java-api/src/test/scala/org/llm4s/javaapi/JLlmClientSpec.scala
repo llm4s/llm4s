@@ -6,12 +6,13 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class JLlmClientSpec extends AnyFlatSpec with Matchers {
 
   private def successClient(content: String): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, content, "test-model", AssistantMessage(content)))
+      Right(Completion("id", Instant.EPOCH, content, "test-model", AssistantMessage(content)))
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
@@ -72,7 +73,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
         options: CompletionOptions
       ): Result[Completion] = {
         capturedOptions = Some(options)
-        Right(Completion("id", 0L, "ok", "test-model", AssistantMessage("ok")))
+        Right(Completion("id", Instant.EPOCH, "ok", "test-model", AssistantMessage("ok")))
       }
       override def streamComplete(
         conversation: Conversation,
@@ -95,7 +96,7 @@ class JLlmClientSpec extends AnyFlatSpec with Matchers {
     var closed = false
     val trackingClient = new LLMClient {
       override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-        Right(Completion("id", 0L, "", "m", AssistantMessage("")))
+        Right(Completion("id", Instant.EPOCH, "", "m", AssistantMessage("")))
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions,

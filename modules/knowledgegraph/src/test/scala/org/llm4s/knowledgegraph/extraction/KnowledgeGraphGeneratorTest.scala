@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.storage.{ GraphStore, InMemoryGraphStore }
+import java.time.Instant
 
 class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFactory {
 
@@ -35,7 +36,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )
@@ -71,7 +72,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )
@@ -95,7 +96,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = badJson,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(badJson), Nil),
       usage = None
     )
@@ -120,7 +121,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonMissingNodes,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonMissingNodes), Nil),
       usage = None
     )
@@ -144,7 +145,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonMissingEdges,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonMissingEdges), Nil),
       usage = None
     )
@@ -192,7 +193,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )
@@ -231,7 +232,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )
@@ -267,7 +268,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )
@@ -311,7 +312,7 @@ class KnowledgeGraphGeneratorTest extends AnyFunSuite with Matchers with MockFac
       content = jsonResponse,
       model = "test-model",
       toolCalls = Nil,
-      created = 1234567890L,
+      created = Instant.ofEpochSecond(1234567890L),
       message = org.llm4s.llmconnect.model.AssistantMessage(Some(jsonResponse), Nil),
       usage = None
     )

@@ -2,12 +2,16 @@ package org.llm4s.llmconnect.model
 
 import org.llm4s.annotation.Stable
 
+import java.time.Instant
+
 /**
  * Represents a completion response from an LLM.
  * This includes the ID, creation timestamp, the assistant's message, and optional token usage statistics.
  *
  * @param id Unique identifier for the completion.
- * @param created Timestamp of when the completion was created.
+ * @param created When the completion was created. Providers that report a creation time (the
+ *                OpenAI-format `created` field, epoch seconds) are converted at the wire boundary;
+ *                providers that report none stamp the time the response was received.
  * @param content The main content of the response.
  * @param model The model that generated this completion.
  * @param message The assistant's message in response to the user's input.
@@ -22,7 +26,7 @@ import org.llm4s.annotation.Stable
 @Stable
 final case class Completion private (
   id: String,
-  created: Long,
+  created: Instant,
   content: String,
   model: String,
   message: AssistantMessage,
@@ -32,7 +36,7 @@ final case class Completion private (
   citations: List[Citation]
 ) {
   def withId(id: String): Completion                               = copy(id = id)
-  def withCreated(created: Long): Completion                       = copy(created = created)
+  def withCreated(created: Instant): Completion                    = copy(created = created)
   def withContent(content: String): Completion                     = copy(content = content)
   def withModel(model: String): Completion                         = copy(model = model)
   def withMessage(message: AssistantMessage): Completion           = copy(message = message)
@@ -88,7 +92,7 @@ object Completion {
   /** Creates a [[Completion]]. Named arguments are the supported way to construct one. */
   def apply(
     id: String,
-    created: Long,
+    created: Instant,
     content: String,
     model: String,
     message: AssistantMessage,

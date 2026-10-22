@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Tests for LLMQueryRewriter.
@@ -31,7 +32,7 @@ class LLMQueryRewriterSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = s"mock-${System.currentTimeMillis()}",
-          created = System.currentTimeMillis() / 1000,
+          created = Instant.now(),
           content = response,
           model = "mock-model",
           message = AssistantMessage(contentOpt = Some(response)),

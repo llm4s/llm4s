@@ -9,6 +9,7 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.concurrent.duration.FiniteDuration
+import java.time.Instant
 
 /** Test doubles for the semantic-memory specs. */
 object MemoryTestSupport:
@@ -22,7 +23,7 @@ object MemoryTestSupport:
       Right(
         Completion(
           id = s"memory-${calls.get}",
-          created = 0L,
+          created = Instant.EPOCH,
           content = text,
           model = "memory-model",
           message = AssistantMessage(text, Seq.empty),

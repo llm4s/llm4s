@@ -14,6 +14,7 @@ import org.scalatest.matchers.should.Matchers
 import org.slf4j.LoggerFactory
 
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * `GuardrailAction.Warn` is documented as "log a warning and let processing continue". These specs pin the
@@ -113,7 +114,7 @@ class GuardrailWarnLoggingSpec extends AnyFlatSpec with Matchers with BeforeAndA
       Right(
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = response,
           model = "test-model",
           message = AssistantMessage(response),

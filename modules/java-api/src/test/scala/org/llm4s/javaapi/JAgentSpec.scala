@@ -11,6 +11,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 class JAgentSpec extends AnyFlatSpec with Matchers {
 
@@ -22,7 +23,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
       Right(
         Completion(
           id = "test-id",
-          created = 0L,
+          created = Instant.EPOCH,
           content = answer,
           model = "test-model",
           message = AssistantMessage(answer),

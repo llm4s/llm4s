@@ -502,7 +502,11 @@ class OpenAICompatibleClient(
 
     Completion(
       id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-      created = json.obj.get("created").flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
+      created = json.obj
+        .get("created")
+        .flatMap(_.numOpt)
+        .flatMap(s => Try(Instant.ofEpochSecond(s.toLong)).toOption)
+        .getOrElse(Instant.EPOCH),
       content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
       message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),

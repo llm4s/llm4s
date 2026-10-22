@@ -6,13 +6,14 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class LLMRerankerSpec extends AnyFlatSpec with Matchers {
 
   // Helper to create mock completion
   private def mockCompletion(content: String): Completion = Completion(
     id = "test-id",
-    created = System.currentTimeMillis(),
+    created = Instant.now(),
     content = content,
     model = "test-model",
     message = AssistantMessage(content)

@@ -553,7 +553,7 @@ class WatsonXClient(
             val usage    = parseUsage(json.objOpt.flatMap(_.get("usage")))
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
-              created = nowSeconds(),
+              created = Instant.ofEpochSecond(nowSeconds()),
               content = text,
               toolCalls = toolCalls,
               usage = usage,

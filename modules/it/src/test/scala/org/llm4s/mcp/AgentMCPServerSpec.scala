@@ -11,6 +11,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration._
+import java.time.Instant
 
 /**
  * An [[Agent]] driving tools served by a real in-process [[MCPServer]] over Streamable HTTP.
@@ -70,7 +71,7 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       Right(
         Completion(
           id = s"mock-$calls",
-          created = 0L,
+          created = Instant.EPOCH,
           content = message.content,
           model = "mock-model",
           message = message,

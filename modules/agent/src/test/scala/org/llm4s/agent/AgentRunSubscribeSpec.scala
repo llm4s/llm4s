@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Using
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import java.time.Instant
 
 /** Run-scoped event delivery: `Agent.stream*` and a late `AgentRun.subscribe`. */
 class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
@@ -63,11 +64,12 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
         case _ => ()
     def all: Vector[StreamEvent] = events.asScala.toVector
 
-  private def answer(text: String): Completion = Completion("answer", 0L, text, "test-model", AssistantMessage(text))
+  private def answer(text: String): Completion =
+    Completion("answer", Instant.EPOCH, text, "test-model", AssistantMessage(text))
 
   private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
   private def calling: Completion =
-    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+    Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
 
   private case class EchoResult(echo: String)
   private object EchoResult:

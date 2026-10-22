@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.model.{ ModelMetadata, ModelPricing, ModelCapabilities, ModelMode }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
@@ -372,7 +373,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
   it should "create Completion with estimated cost" in {
     val completion = Completion(
       id = "test-id",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
@@ -387,7 +388,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
   it should "create Completion without estimated cost (backward compatibility)" in {
     val completion = Completion(
       id = "test-id",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content"),
@@ -400,7 +401,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
   it should "handle None for estimatedCost by default" in {
     val completion = Completion(
       id = "test-id",
-      created = System.currentTimeMillis() / 1000,
+      created = Instant.now(),
       content = "test content",
       model = "test-model",
       message = org.llm4s.llmconnect.model.AssistantMessage("test content")

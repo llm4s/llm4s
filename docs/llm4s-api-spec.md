@@ -107,7 +107,7 @@ case class ToolCall(
 ```scala
 case class Completion(
   id: String,
-  created: Long,
+  created: java.time.Instant,
   message: AssistantMessage,
   usage: Option[TokenUsage] = None
 )

@@ -39,6 +39,7 @@ import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration.*
 import scala.util.Using
 import scala.util.Using.Releasable
+import java.time.Instant
 
 class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
@@ -53,7 +54,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
   private val Patience = 60.seconds
 
   private def completion(text: String): Completion =
-    Completion(id = "id", created = 0L, content = text, model = "m", message = AssistantMessage(Some(text)))
+    Completion(id = "id", created = Instant.EPOCH, content = text, model = "m", message = AssistantMessage(Some(text)))
 
   private def answering(text: String): LLMClient =
     new Fixtures.Scripted(_ => Right(completion(text)), () => Right(completion(text)))
@@ -242,7 +243,7 @@ class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
     val calls = Seq(ToolCall(id = s"call-$i", name = "echo", arguments = ujson.Obj("v" -> "x")))
     Completion(
       id = s"t$i",
-      created = 0L,
+      created = Instant.EPOCH,
       content = "",
       model = "m",
       message = AssistantMessage("", calls),

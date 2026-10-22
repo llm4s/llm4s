@@ -11,6 +11,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicReference
+import java.time.Instant
 
 /**
  * Where a cookbook recipe lives. Each recipe has a page, `docs/examples/cookbook/<id>.md`, that shows its whole source
@@ -73,7 +74,7 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
     reply(conversation, callNumber).map { message =>
       Completion(
         id = s"scripted-$callNumber",
-        created = 0L,
+        created = Instant.EPOCH,
         content = message.content,
         model = "scripted",
         message = message,

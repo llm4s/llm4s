@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.{ Optional, OptionalInt }
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
+import java.time.Instant
 
 /**
  * [[JCompletionOptions]] and `JLlmClient.complete(Conversation, JCompletionOptions)` (#1488). The Java side is
@@ -23,7 +24,7 @@ class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
     val received: ArrayBuffer[CompletionOptions] = ArrayBuffer.empty
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       received += o
-      Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+      Right(Completion("id", Instant.EPOCH, "4", "m", AssistantMessage("4")))
     }
     override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit): Result[Completion] =
       complete(c, o)

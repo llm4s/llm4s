@@ -21,6 +21,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
@@ -83,6 +84,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       completion.content shouldBe "hi"
       completion.model shouldBe "gpt-4o"
       completion.usage.map(_.totalTokens) shouldBe Some(15)
+      completion.created shouldBe Instant.ofEpochSecond(1700000000L) // the wire's epoch seconds
 
       val request = seen.get()
       request.method shouldBe "POST"

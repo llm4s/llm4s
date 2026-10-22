@@ -9,6 +9,7 @@ import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import java.time.Instant
 
 /**
  * Compiles and runs the agent snippet of `docs/guide/builtin-tools.md`.
@@ -26,7 +27,7 @@ class BuiltinToolsGuideAgentSpec extends AnyFlatSpec with Matchers with EitherVa
     private def reply(message: AssistantMessage): Completion =
       Completion(
         id = s"script-$calls",
-        created = 0L,
+        created = Instant.EPOCH,
         content = message.content,
         model = "script",
         message = message,

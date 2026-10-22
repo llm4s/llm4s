@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
+import java.time.Instant
 
 /**
  * Unit tests for ZaiClient.
@@ -267,7 +268,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val completion = helper.testParseCompletion(json)
 
     completion.id shouldBe "chatcmpl-123"
-    completion.created shouldBe 1677652288L
+    completion.created shouldBe Instant.ofEpochSecond(1677652288L)
     completion.model shouldBe "GLM-4.7"
     completion.content shouldBe "Hello! How can I help you today?"
     completion.usage shouldBe Some(TokenUsage(10, 15, 25))
@@ -642,7 +643,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
 
     Completion(
       id = json("id").str,
-      created = json("created").num.toLong,
+      created = Instant.ofEpochSecond(json("created").num.toLong),
       content = contentStr,
       model = json("model").str,
       message = AssistantMessage(

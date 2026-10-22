@@ -24,6 +24,7 @@ import org.llm4s.types.Result
 
 import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
+import java.time.Instant
 
 /**
  * Shared deterministic fixtures for the stream specs: no sleeps, only latches and parking. Adapted from the
@@ -32,7 +33,7 @@ import scala.util.{ Failure, Success, Try }
 private[pekko] object Fixtures {
 
   val completion: Completion =
-    Completion(id = "id", created = 0L, content = "ok", model = "m", message = AssistantMessage(Some("ok")))
+    Completion(id = "id", created = Instant.EPOCH, content = "ok", model = "m", message = AssistantMessage(Some("ok")))
 
   val conversation: Conversation = Conversation(Seq(UserMessage("ping")))
 
@@ -243,8 +244,8 @@ private[pekko] object Fixtures {
           val n = calls.getAndIncrement()
           if (n < turns) {
             val call = ToolCall(s"call-$n", "pinger", ujson.Obj("text" -> "x"))
-            Right(Completion(s"c$n", 0L, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
-          } else if (n == turns) Right(Completion(s"c$n", 0L, "done", "m", AssistantMessage(Some("done"))))
+            Right(Completion(s"c$n", Instant.EPOCH, "", "m", AssistantMessage(None, Seq(call)), toolCalls = List(call)))
+          } else if (n == turns) Right(Completion(s"c$n", Instant.EPOCH, "done", "m", AssistantMessage(Some("done"))))
           else boom
         }
       )
