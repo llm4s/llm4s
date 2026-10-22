@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the checkpoint store chosen in `application.conf` (`llm4s.agent.checkpointer.kind`: `memory`, `sqlite`, `postgres`) through a `CheckpointerBackend` SPI, its `CheckpointStore` carrying the store's `runQueue`, and `ClaimPolicy`/`WatchPolicy` from `llm4s.agent.runtime` (`CheckpointerConfigLoader`, `RuntimeConfigLoader`) [#2133](https://github.com/llm4s/llm4s/issues/2133); [design §4.54](docs/design/typed-agent-runtime/4.54-stage-5-slice-s5-store-configuration.md).
 - **Added** the durable run queue: `RunQueue` and `RunSubmitter` (`org.llm4s.agent.service`) in the in-memory, SQLite and PostgreSQL
   stores, entries carrying the submitter's `TraceContext`, `RunQueueContract`, and `llm4s.agent.queue` settings [#2134](https://github.com/llm4s/llm4s/issues/2134); [design §4.55](docs/design/typed-agent-runtime/4.55-stage-5-slice-w1-run-submission-and-the-durable-run-queue.md).
+- **Added** `AgentWorker` (`org.llm4s.agent.service`): takes queued runs, recovers a dead worker's entries once their leases
+  expire, settles exhausted ones, runs the retention sweep, drains on shutdown and answers health; `llm4s.agent.worker`
+  settings (`WorkerConfigLoader`) [#2135](https://github.com/llm4s/llm4s/issues/2135); [design §4.56](docs/design/typed-agent-runtime/4.56-stage-5-slice-w2-workers.md).
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).

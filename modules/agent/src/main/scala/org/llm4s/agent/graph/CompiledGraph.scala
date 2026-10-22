@@ -273,6 +273,17 @@ final class CompiledGraph[I, O] private[graph] (
       case CheckpointStatus.Completed | CheckpointStatus.Failed =>
         restoring(checkpoint.snapshot, GraphEvolution.Judged.ByContent)
 
+  /**
+   * Whether this graph can take `checkpoint` on as a run would (Stage 5 W2, design 4.56): a `Completed` or `Failed`
+   * one as a new turn's start does ([[restoreAtRest]]), any other as `recover` and `resume` do ([[restoreStored]]).
+   * `GraphError.RestoreRejected` when it cannot - another graph's thread, or a run in flight at another version - so a
+   * worker leaves the entry for one whose graph can.
+   */
+  private[agent] def canContinue(checkpoint: Checkpoint): Result[Unit] =
+    checkpoint.status match
+      case CheckpointStatus.Completed | CheckpointStatus.Failed => restoreAtRest(checkpoint.snapshot).map(_ => ())
+      case _                                                    => restoreStored(checkpoint).map(_ => ())
+
   private def restoring(snapshot: GraphSnapshot, judged: GraphEvolution.Judged): Result[Execution] =
     val atRest = judged == GraphEvolution.Judged.AtRest
     val evolution = snapshot.shape match

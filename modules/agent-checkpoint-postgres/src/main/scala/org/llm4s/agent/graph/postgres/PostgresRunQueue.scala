@@ -127,6 +127,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       store.writing("queue.take") { c =>
         val now    = store.clockNow(c)
         val agents = request.agents.toVector.map(_.value).toArray
+        val skip   = request.skip.map(_.value)
         // the thread's lock, tried: a submission, an attempt or another take on the thread is deciding its order now
         def takeable(id: Long, thread: String): Boolean =
           lockIfFree(c, s"thread:$thread") && query(
@@ -148,7 +149,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             after,
             now
           )(rows => rows.getLong(1) -> rows.getString(2))
-          batch.find(takeable) match
+          batch.filterNot((id, _) => skip(id)).find(takeable) match
             case None if batch.size == Candidates => scan(batch.last._1)
             case chosen                           => chosen
         scan(0L) match
@@ -274,6 +275,16 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       micros(at),
       id
     )
+
+  def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] =
+    if threads.isEmpty then Right(Map.empty)
+    else
+      store.reading("queue.openRuns") { c =>
+        val rows = query(c, Sql.queueOpenRuns(t), threads.distinct.map(_.value).toArray)(r =>
+          ThreadId(r.getString(1)) -> Option(r.getString(2)).map(RunId(_))
+        )
+        Right(rows.groupMapReduce(_._1)(_._2.toSet)(_ ++ _))
+      }
 
   def reclaim(ticketLifetime: FiniteDuration, limit: Int): Result[Int] =
     if limit <= 0 then Right(0)

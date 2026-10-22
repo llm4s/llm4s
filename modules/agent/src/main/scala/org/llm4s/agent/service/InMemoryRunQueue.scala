@@ -191,7 +191,7 @@ final class InMemoryRunQueue private[agent] (
         // one run per thread: no other entry of the thread holds a live lease
         Option.when(!live(head, now) && !ordered.tail.exists(live(_, now)))(head)
       }
-      .filter(head => request.agents.contains(head.agentId))
+      .filter(head => request.agents.contains(head.agentId) && !request.skip.contains(EntryId.unsafe(head.id)))
     heads.minByOption(_.id) match
       case None       => Right(None)
       case Some(head) =>
@@ -295,6 +295,14 @@ final class InMemoryRunQueue private[agent] (
       r.key.foreach(k => keys.remove(r.tenantId.map(_.value) -> k.value))
     }
     Right(expired.size)
+  }
+
+  def openRuns(threads: Vector[ThreadId]): Result[Map[ThreadId, Set[RunId]]] = withLock(lock) {
+    Right(
+      threads.distinct.flatMap { thread =>
+        Option.when(openByThread.contains(thread))(thread -> queueOf(thread).flatMap(_.attempts.map(_.runId)).toSet)
+      }.toMap
+    )
   }
 
   /**

@@ -323,6 +323,12 @@ private[postgres] object Sql:
        |ORDER BY e.entry_id
        |FOR UPDATE OF e SKIP LOCKED LIMIT ${PostgresRunQueue.Candidates}""".stripMargin
 
+  /** The attempts' run ids of the open entries of the threads `?` (an array), one row per entry or attempt. */
+  def queueOpenRuns(t: Tables): String =
+    s"""SELECT e.thread_id, a.run_id FROM ${t.queueEntries} e
+       |LEFT JOIN ${t.queueAttempts} a ON a.entry_id = e.entry_id
+       |WHERE e.state = 'open' AND e.thread_id = ANY(?)""".stripMargin
+
   /** Whether entry `?` is still a takeable head at the time bound twice, checked under the thread's lock. */
   def queueTakeable(t: Tables): String =
     s"""SELECT 1 FROM ${t.queueEntries} e
