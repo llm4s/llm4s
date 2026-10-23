@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.UnknownError
+import org.llm4s.error.{ ConfigurationError, UnknownError }
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 import scala.util.Try
@@ -12,6 +12,20 @@ import scala.util.Try
  * Prints trace events to standard output with ANSI color formatting
  * for improved readability during development and debugging.
  * Returns `Result[Unit]` to support functional composition.
+ *
+ * == Content is withheld unless enabled ==
+ *
+ * By default it prints metadata only: each event's type, timestamp, model, ids, tool names,
+ * success flags, durations, token counts and costs. Text that may hold personal or confidential
+ * data - the query of `AgentInitialized`, the content of `CompletionReceived`, the input and
+ * output of `ToolExecuted`, the field values of a `CustomEvent` (whose data is defined by whoever
+ * emits it, so may hold anything), and the message and context of an error - is replaced
+ * by `[withheld: N chars]` (a `CustomEvent` shows its field names). Standard output is often
+ * collected into logs kept outside the controls applied to the conversation itself (#2311).
+ *
+ * Pass `captureContent = true`, or set `llm4s.tracing.console.captureContent = true`
+ * (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT=true`) when the tracer is built from
+ * `Llm4sConfig.tracing()`, to print that text as well, truncated for readability.
  *
  * == Features ==
  *
@@ -24,7 +38,8 @@ import scala.util.Try
  * == Usage ==
  *
  * {{{
- * val tracing: Tracing = new ConsoleTracing()
+ * val tracing: Tracing = new ConsoleTracing()            // metadata only
+ * val verbose: Tracing = new ConsoleTracing(captureContent = true) // queries, answers, tool I/O too
  *
  * // Trace events functionally
  * for {
@@ -36,10 +51,16 @@ import scala.util.Try
  * @see [[NoOpTracing]] for silent tracing
  * @see `LangfuseTracing` in `llm4s-observability` for production observability
  * @see [[AnsiColors]] for color constants used
+ *
+ * @param captureContent print prompts, completions, tool input/output, custom event data and
+ *                       error messages; `false` (the default) prints metadata only
  */
 @Stable
-class ConsoleTracing extends Tracing {
+class ConsoleTracing(val captureContent: Boolean) extends Tracing {
   import AnsiColors._
+
+  /** A console tracer that prints metadata only: no prompt, completion or tool content. */
+  def this() = this(false)
 
   private def printHeader(title: String): Unit = {
     val sep = separator()
@@ -58,6 +79,19 @@ class ConsoleTracing extends Tracing {
       json
     }
 
+  // `label: value`, truncated at `maxLength`, when content is captured; otherwise only its length.
+  private def content(label: String, value: String, maxLength: Int): String =
+    if (captureContent) s"$label: ${formatJson(value, maxLength)}"
+    else s"$label: [withheld: ${value.length} chars]"
+
+  private def customData(data: ujson.Value): String =
+    if (captureContent) s"Data: $data"
+    else
+      data match {
+        case obj: ujson.Obj => s"Fields: ${obj.obj.keys.mkString(", ")}"
+        case _              => "Data: [withheld]"
+      }
+
   def traceEvent(event: TraceEvent): Result[Unit] =
     Try {
       event match {
@@ -65,7 +99,7 @@ class ConsoleTracing extends Tracing {
           println()
           printSubHeader("AGENT INITIALIZED", GREEN)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${GREEN}Query: ${e.query}$RESET")
+          println(s"${GREEN}${content("Query", e.query, Int.MaxValue)}$RESET")
           println(s"${GREEN}Tools: ${e.tools.mkString(", ")}$RESET")
           println()
 
@@ -76,7 +110,7 @@ class ConsoleTracing extends Tracing {
           println(s"${GREEN}Model: ${e.model}$RESET")
           println(s"${GREEN}ID: ${e.id}$RESET")
           println(s"${GREEN}Tool Calls: ${e.toolCalls}$RESET")
-          println(s"${GREEN}Content: ${formatJson(e.content, 200)}$RESET")
+          println(s"${GREEN}${content("Content", e.content, 200)}$RESET")
           println()
 
         case e: TraceEvent.ToolExecuted =>
@@ -86,8 +120,8 @@ class ConsoleTracing extends Tracing {
           println(s"${CYAN}Tool: ${e.name}$RESET")
           println(s"${CYAN}Success: ${e.success}$RESET")
           println(s"${CYAN}Duration: ${e.duration.toMillis}ms$RESET")
-          println(s"${YELLOW}Input: ${formatJson(e.input, 100)}$RESET")
-          println(s"${GREEN}Output: ${formatJson(e.output, 100)}$RESET")
+          println(s"${YELLOW}${content("Input", e.input, 100)}$RESET")
+          println(s"${GREEN}${content("Output", e.output, 100)}$RESET")
           println()
 
         case e: TraceEvent.ErrorOccurred =>
@@ -95,8 +129,8 @@ class ConsoleTracing extends Tracing {
           printHeader("ERROR OCCURRED")
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
           println(s"${RED}Type: ${e.error.getClass.getSimpleName}$RESET")
-          println(s"${RED}Message: ${e.error.getMessage}$RESET")
-          println(s"${RED}Context: ${e.context}$RESET")
+          println(s"${RED}${content("Message", String.valueOf(e.error.getMessage), Int.MaxValue)}$RESET")
+          println(s"${RED}${content("Context", e.context, Int.MaxValue)}$RESET")
           println()
 
         case e: TraceEvent.TokenUsageRecorded =>
@@ -126,7 +160,7 @@ class ConsoleTracing extends Tracing {
           printSubHeader("CUSTOM EVENT", YELLOW)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
           println(s"${YELLOW}Name: ${e.name}$RESET")
-          println(s"${YELLOW}Data: ${e.data}$RESET")
+          println(s"${YELLOW}${customData(e.data)}$RESET")
           println()
 
         case e: TraceEvent.EmbeddingUsageRecorded =>
@@ -179,7 +213,7 @@ class ConsoleTracing extends Tracing {
           println(s"${GREEN}Duration: ${e.duration.toMillis}ms$RESET")
           println(s"${GREEN}Success: ${e.success}$RESET")
           e.costUsd.foreach(c => println(s"${YELLOW}Cost (USD): $$${f"$c%.6f"}$RESET"))
-          e.errorMessage.foreach(m => println(s"${RED}Error: $m$RESET"))
+          e.errorMessage.foreach(m => println(s"${RED}${content("Error", m, Int.MaxValue)}$RESET"))
           println()
 
         case e: TraceEvent.RAGOperationCompleted =>
@@ -220,4 +254,26 @@ class ConsoleTracing extends Tracing {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
+}
+
+object ConsoleTracing {
+
+  /** The key, within `llm4s.tracing.console`, that turns content capture on. */
+  private[trace] val CaptureContentKey = "captureContent"
+
+  /**
+   * Builds the tracer from the `llm4s.tracing.console` block, as `TracingSettings.extras`
+   * carries it: `captureContent` is `true` or `false` (case-insensitive), `false` when absent.
+   */
+  private[trace] def fromExtras(extras: Map[String, String]): Result[ConsoleTracing] =
+    extras.get(CaptureContentKey).map(_.trim.toLowerCase(java.util.Locale.ROOT)) match {
+      case None | Some("false") => Right(new ConsoleTracing(false))
+      case Some("true")         => Right(new ConsoleTracing(true))
+      case Some(other) =>
+        Left(
+          ConfigurationError(
+            s"llm4s.tracing.console.$CaptureContentKey must be true or false, but is '$other'."
+          )
+        )
+    }
 }

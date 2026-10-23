@@ -418,7 +418,7 @@ LLM4S supports four tracing modes:
 |------|----------|---------------|
 | `langfuse` | Production monitoring | `TRACING_MODE=langfuse` |
 | `opentelemetry` | OpenTelemetry tracing | `TRACING_MODE=opentelemetry` |
-| `console` | Development/debugging | `TRACING_MODE=console` |
+| `console` | Development/debugging (the default; prints metadata only unless `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT=true`) | `TRACING_MODE=console` |
 | `noop` | Disabled | `TRACING_MODE=noop` |
 
 ### Langfuse Setup

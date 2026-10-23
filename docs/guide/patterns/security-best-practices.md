@@ -254,73 +254,9 @@ Please answer based only on the user's question above."""
 
 ### PII Redaction
 
-```text
-object PIIRedaction {
-  
-  import scala.util.matching.Regex
-  
-  object PatternDetectors {
-    val emailPattern = new Regex(
-      """[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"""
-    )
-    
-    val phonePattern = new Regex(
-      """(\d{3}[-.\s]?){2}\d{4}"""
-    )
-    
-    val ssn Pattern = new Regex(
-      """\b\d{3}-\d{2}-\d{4}\b"""
-    )
-    
-    val creditCardPattern = new Regex(
-      """(?:\d[ -]*?){13,16}"""
-    )
-  }
-  
-  class PIIRedactor {
-    def redact(text: String): String = {
-      var result = text
-      
-      // Redact emails
-      result = PatternDetectors.emailPattern.replaceAllIn(
-        result,
-        "[EMAIL]"
-      )
-      
-      // Redact phone numbers
-      result = PatternDetectors.phonePattern.replaceAllIn(
-        result,
-        "[PHONE]"
-      )
-      
-      // Redact SSNs
-      result = PatternDetectors.ssnPattern.replaceAllIn(
-        result,
-        "[SSN]"
-      )
-      
-      // Redact credit cards
-      result = PatternDetectors.creditCardPattern.replaceAllIn(
-        result,
-        "[CREDIT_CARD]"
-      )
-      
-      result
-    }
-  }
-  
-  // Usage
-  def answerWithSanitization(
-    query: String,
-    agent: Agent
-  ): Result[String] = {
-    agent.run(query).map { response =>
-      val redactor = new PIIRedactor()
-      redactor.redact(response.message)
-    }
-  }
-}
-```
+Use the built-in `PIIMasker` and `PIIDetector` guardrails rather than hand-written patterns: they run before a query
+reaches the model and before an answer is returned, and are covered by tests. What they detect, how to attach them and
+their limits are in [Data Protection: personal data in prompts](../data-protection#personal-data-in-prompts).
 
 ---
 
@@ -452,49 +388,9 @@ object ComplianceLogging {
 
 ### Automatic Data Expiration
 
-```text
-object DataRetention {
-  
-  case class DataRecord(
-    id: String,
-    data: String,
-    createdAt: Long,
-    ttlDays: Int
-  ) {
-    def isExpired: Boolean = {
-      val now = System.currentTimeMillis()
-      val expirationTime = createdAt + (ttlDays * 24 * 60 * 60 * 1000L)
-      now > expirationTime
-    }
-  }
-  
-  class RetentionPolicy {
-    def getRetentionDays(dataType: String): Int = dataType match {
-      case "user_query" => 30
-      case "api_key" => 365
-      case "error_log" => 90
-      case "audit_log" => 365 * 7 // 7 years
-      case _ => 30
-    }
-    
-    def scheduleCleanup(): Unit = {
-      val timer = new java.util.Timer()
-      val dailyMs = 24 * 60 * 60 * 1000L
-      
-      timer.scheduleAtFixedRate(
-        new java.util.TimerTask {
-          def run(): Unit = {
-            println("Running data retention cleanup...")
-            // Delete expired records from database
-          }
-        },
-        dailyMs,
-        dailyMs
-      )
-    }
-  }
-}
-```
+Agent thread history is pruned with a `RetentionPolicy` (`maxAge`, `maxCheckpoints`, `maxEvents`) and a store sweep,
+and a user's threads, memories and indexed documents are erased with `Agent.forget`, `MemoryStore.deleteMatching` and
+`VectorStore.deleteByFilter`. See [Data Protection: deleting a user's data](../data-protection#deleting-a-users-data).
 
 ---
 

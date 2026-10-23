@@ -11,6 +11,9 @@ This document covers the threat model, trust boundaries, known risks, and mitiga
 
 ## Data Flow Overview
 
+The per-module inventory of what leaves the process, where it goes and what is kept, with residency
+settings and erasure, is in the [Data Protection guide](../guide/data-protection).
+
 ```
 User Input ──► Agent ──► LLM Provider (API key in header)
                 │              │
