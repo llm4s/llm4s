@@ -382,6 +382,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** a per-module MiMa baseline: `mimaBaselineOverrides` in `build.sbt` gives a frozen module its own baseline
+  release (`"llm4s-<name>" -> Some("X.Y.Z")`) or none (`-> None`) while the others use `mimaBaselineVersion`, so
+  `llm4s-agent` can take a later baseline than the other frozen modules ([RFC 0001](docs/rfcs/0001-agent-baseline.md)).
+  No baseline is chosen: the map is empty and `mimaBaselineVersion` stays `None`, so nothing changes yet.
+  `scripts/mima-dry-run.sh` compares each module with its own baseline, publishing at a second throwaway version when one
+  has its own, checks that a held-back module is compared with nothing, prints each module's baseline with `--list-frozen`,
+  and refuses an entry it cannot read or that names no frozen module; `scripts/test-mima-dry-run.sh` covers each case.
+  API Stability no longer calls 0.4.1 the last release [#2355](https://github.com/llm4s/llm4s/issues/2355).
 - **Changed** the Integration Tests job uploads coverage: it instruments `rag`, `vectorstoreElasticsearch`,
   `vectorstoreRedis`, `memoryPostgres`, `knowledgegraphNeo4j` and `agentCheckpointPostgres` (its `COVERAGE_MODULES`),
   runs the `@Docker` tier, and uploads each module's report under the module's existing Codecov flag, so code reachable

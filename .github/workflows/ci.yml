@@ -1316,7 +1316,8 @@ jobs:
           retention-days: 5
 
   # Binary compatibility (MiMa). Only the frozen modules have a baseline (see `mimaFrozen` in
-  # build.sbt), and none until 0.5.0 is published (#1281), so this checks nothing yet. The build
+  # build.sbt), and none until #1281 sets one (`mimaBaselineVersion`, per module through
+  # `mimaBaselineOverrides`), so this checks nothing yet. The build
   # is Scala 3 only, with no `crossScalaVersions`, so a bare `mimaReportBinaryIssues` covers every
   # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
   mima-check:

@@ -263,7 +263,7 @@ need a maintainer:
 
 ## Release readiness: a MiMa dry run
 
-`mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
+`mimaBaselineVersion` in `build.sbt` is `None` and `mimaBaselineOverrides` is empty, so `sbt mimaReportBinaryIssues` compiles the build and checks
 nothing ([The Baseline](api-stability#the-baseline)). It is set at a pre-1.0 release, version to be decided, once
 the designs are final ([#1281](https://github.com/llm4s/llm4s/issues/1281)); 0.5.0 sets none. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
@@ -277,9 +277,12 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 `~/.ivy2`, `~/.m2` or Central), and then, for each frozen module (read from the `mimaFrozen(...)` call sites in
 `build.sbt`):
 
-- checks that `mimaPreviousArtifacts` names the published artifact, that MiMa resolved `llm4s-<name>_3` and
+- checks that `mimaPreviousArtifacts` names the published artifact at the module's own baseline, that MiMa resolved `llm4s-<name>_3` and
   compared it (it prints the coordinates and the problem counts: a silent empty baseline would pass), and that
   `mimaReportBinaryIssues` finds nothing;
+- handles **per-module baselines**: a module that `mimaBaselineOverrides` gives `Some("X.Y.Z")` is compared
+  with a second throwaway version, at which the build is published a second time; one it gives `None` must
+  have no baseline at all while the others are checked. `--list-frozen` prints each module's baseline;
 - runs a **negative control**: a baseline with two extra classes, one `@Stable` and one `@Experimental`, that
   the code then lacks. MiMa must fail on the `@Stable` one and must not report the `@Experimental` one.
 

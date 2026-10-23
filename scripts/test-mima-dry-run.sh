@@ -6,6 +6,10 @@
 # not excluded, artifacts left in ~/.m2, a failing publish. Every one of them must fail the script with a message
 # that names the problem, and the good case must pass.
 #
+# Per-module baselines (#2355) run against fixture variants whose `mimaBaselineOverrides` gives llm4s-agent a
+# baseline of its own (`Some`) or none (`None`): each must pass, comparing every module with its own baseline, and
+# a build that ignores the override, or an override the script cannot read or that names no frozen module, must not.
+#
 # The script's own run against the real build.sbt is checked at the end: it must find the frozen modules by reading
 # the `mimaFrozen("llm4s-...")` call sites, the same number a plain grep finds.
 #
@@ -27,6 +31,8 @@ FIXTURE="$WORK/fixture"
 mkdir -p "$FIXTURE/modules/core" "$FIXTURE/modules/agent" "$FIXTURE/modules/samples"
 cat > "$FIXTURE/build.sbt" <<'EOF'
 val mimaBaselineVersion: Option[String] = None
+
+val mimaBaselineOverrides: Map[String, Option[String]] = Map.empty
 
 def mimaFrozen(module: String) = Seq()
 
@@ -56,7 +62,16 @@ set -u
 while [ $# -gt 0 ] && case "$1" in -*) true ;; *) false ;; esac; do shift; done
 version="$(sed -n 's/^ThisBuild \/ version *:= *"\(.*\)"$/\1/p' dryrun.sbt)"
 repo="$(sed -n 's|.*file://\([^"]*\)".*|\1|p' dryrun.sbt | head -1)"
-baseline="$(sed -n 's/^val mimaBaselineVersion: Option\[String\] = Some("\(.*\)")$/\1/p' build.sbt)"
+shared="$(sed -n 's/^val mimaBaselineVersion: Option\[String\] = Some("\(.*\)")$/\1/p' build.sbt)"
+baseline_of() { # artifact -> its baseline version, empty for none; FAKE_IGNORE_OVERRIDES=1 is a build that ignores
+  # mimaBaselineOverrides and gives every module the shared baseline
+  if [ "${FAKE_IGNORE_OVERRIDES:-}" != "1" ]; then
+    grep -q "\"$1\" -> None" build.sbt && return 0
+    own="$(sed -n "s/.*\"$1\" -> Some(\"\([^\"]*\)\").*/\1/p" build.sbt)"
+    [ -n "$own" ] && { echo "$own"; return 0; }
+  fi
+  echo "$shared"
+}
 artifact_of() { # project id -> artifact
   awk -v id="$1" '$0 ~ "^lazy val " id " " {f=1} f && /name := "/ {match($0, /name := "[^"]*"/); print substr($0, RSTART+9, RLENGTH-10); exit}' build.sbt
 }
@@ -76,12 +91,15 @@ for cmd in "$@"; do
       publish_artifact "$(artifact_of "${cmd%/publish}")" ;;
     "show "*/mimaPreviousArtifacts)
       id="${cmd#show }"; id="${id%/mimaPreviousArtifacts}"
+      baseline="$(baseline_of "$(artifact_of "$id")")"
       if [ "${FAKE_EMPTY_BASELINE:-}" = "1" ] || [ -z "$baseline" ]; then echo "[info] Set()"
       else echo "[info] Set(org.llm4s:$(artifact_of "$id"):$baseline)"; fi ;;
     "show "*/mimaFindBinaryIssues)
       id="${cmd#show }"; id="${id%/mimaFindBinaryIssues}"
       art="$(artifact_of "$id")"
+      baseline="$(baseline_of "$art")"
       [ "${FAKE_NO_MAP:-}" = "$id" ] && continue
+      [ -z "$baseline" ] && { echo "[info] Map()"; continue; }
       if [ "$baseline" = "0.0.0-mima-probe" ]; then
         case "${FAKE_NEG:-stable}" in
           none) echo "[info] Map(org.llm4s:${art}_3:$baseline -> (List(),List()))" ;;
@@ -98,7 +116,7 @@ for cmd in "$@"; do
     mimaReportBinaryIssues)
       [ "${FAKE_REPORT_FAIL:-}" = "1" ] && { echo "[error] simulated MiMa failure"; status=1; } ;;
     */mimaReportBinaryIssues)
-      if [ "$baseline" = "0.0.0-mima-probe" ] && [ "${FAKE_NEG:-stable}" != "none" ]; then
+      if [ "$(baseline_of "$(artifact_of "${cmd%/mimaReportBinaryIssues}")")" = "0.0.0-mima-probe" ] && [ "${FAKE_NEG:-stable}" != "none" ]; then
         echo "[error] Failed binary compatibility check! Found problems (simulated)"; status=1
       fi ;;
   esac
@@ -118,9 +136,9 @@ run_case() {
   : > "$WORK/calls"
   local status=0
   if [ ${#envs[@]} -gt 0 ]; then
-    env "${envs[@]}" SBT="$WORK/bin/fake-sbt" FAKE_CALLS="$WORK/calls" TMPDIR="$tmp" HOME="$WORK/home" "$SCRIPT" "$@" "$FIXTURE" > "$WORK/out" 2>&1 || status=$?
+    env "${envs[@]}" SBT="$WORK/bin/fake-sbt" FAKE_CALLS="$WORK/calls" TMPDIR="$tmp" HOME="$WORK/home" "$SCRIPT" "$@" "${CASE_ROOT:-$FIXTURE}" > "$WORK/out" 2>&1 || status=$?
   else
-    env SBT="$WORK/bin/fake-sbt" FAKE_CALLS="$WORK/calls" TMPDIR="$tmp" HOME="$WORK/home" "$SCRIPT" "$@" "$FIXTURE" > "$WORK/out" 2>&1 || status=$?
+    env SBT="$WORK/bin/fake-sbt" FAKE_CALLS="$WORK/calls" TMPDIR="$tmp" HOME="$WORK/home" "$SCRIPT" "$@" "${CASE_ROOT:-$FIXTURE}" > "$WORK/out" 2>&1 || status=$?
   fi
   LAST_TMP="$tmp"
   if [ "$status" != "$want_status" ]; then
@@ -177,6 +195,59 @@ run_case "a failure still removes the temporary directory" 1 "FAILED" FAKE_REPOR
 mkdir -p "$WORK/home/.m2/repository/org/llm4s/llm4s-core_3/0.0.0-mima-dryrun"
 run_case "artifacts left in ~/.m2 are reported" 1 "the dry run left artifacts in:" FAKE_NEG=stable
 rm -rf "$WORK/home/.m2"
+
+# ---- per-module baselines (#2355): fixture variants with an override for llm4s-agent
+# variant NAME OVERRIDES: a copy of the fixture whose mimaBaselineOverrides is OVERRIDES (the text after the `=`)
+variant() {
+  local dir="$WORK/variant-$1"
+  cp -R "$FIXTURE" "$dir"
+  OVERRIDES="$2" awk '/^val mimaBaselineOverrides/ { print "val mimaBaselineOverrides: Map[String, Option[String]] = " ENVIRON["OVERRIDES"]; next } { print }' \
+    "$FIXTURE/build.sbt" > "$dir/build.sbt"
+  git -C "$dir" -c user.name=test -c user.email=test@example.com commit -q -am "$1"
+  echo "$dir"
+}
+OWN_ROOT="$(variant own 'Map(
+  "llm4s-agent" -> Some("0.9.0") // a later baseline of its own
+)')"
+NONE_ROOT="$(variant none 'Map("llm4s-agent" -> None)')"
+
+CASE_ROOT="$OWN_ROOT" run_case "a module with a baseline of its own is compared with it" 0 "the MiMa dry run held (2 frozen modules"
+grep -F -q "org.llm4s:llm4s-agent_3:0.0.0-mima-dryrun-alt" "$WORK/out" && grep -F -q "org.llm4s:llm4s-core_3:0.0.0-mima-dryrun " "$WORK/out" \
+  && pass "and each module with its own baseline: llm4s-agent at the second version, llm4s-core at the shared one" \
+  || fail "the modules are not compared with their own baselines"
+[ "$(grep -c '^publish$' "$WORK/calls")" = "2" ] \
+  && pass "and the build is published at both versions" || fail "the build was not published twice: $(grep -c '^publish$' "$WORK/calls")"
+git -C "$OWN_ROOT" diff --quiet && grep -q '"llm4s-agent" -> Some("0.9.0")' "$OWN_ROOT/build.sbt" \
+  && pass "and the repository's own override is not touched" || fail "the repository's override was modified"
+CASE_ROOT="$OWN_ROOT" run_case "--list-frozen shows each module's baseline" 0 "agent llm4s-agent modules/agent 0.9.0" -- --list-frozen
+grep -F -q "core llm4s-core modules/core shared" "$WORK/out" \
+  && pass "and a module without an override shares mimaBaselineVersion" || fail "--list-frozen does not say llm4s-core is shared"
+CASE_ROOT="$OWN_ROOT" run_case "a build that ignores a module's own baseline fails, naming it" 1 \
+  "llm4s-agent: mimaPreviousArtifacts does not name org.llm4s:llm4s-agent:0.0.0-mima-dryrun-alt" FAKE_IGNORE_OVERRIDES=1
+
+CASE_ROOT="$NONE_ROOT" run_case "a module held back with None has no baseline while the others do" 0 \
+  "the MiMa dry run held (2 frozen modules, 1 with no baseline"
+grep -F -q "none (mimaBaselineOverrides: None)" "$WORK/out" && grep -F -q "org.llm4s:llm4s-core_3:0.0.0-mima-dryrun" "$WORK/out" \
+  && pass "and llm4s-agent is reported with no baseline, llm4s-core with the shared one" || fail "the held-back module is not reported"
+[ "$(grep -c '^publish$' "$WORK/calls")" = "1" ] \
+  && pass "and nothing is published at a second version" || fail "a second publish ran with no module baseline of its own"
+CASE_ROOT="$NONE_ROOT" run_case "a build that ignores None and compares the module anyway fails" 1 \
+  "llm4s-agent: mimaBaselineOverrides holds it back with None, but mimaPreviousArtifacts names a baseline" FAKE_IGNORE_OVERRIDES=1
+CASE_ROOT="$(variant core-none 'Map("llm4s-core" -> None)')" run_case "the negative control refuses a core with no baseline" 3 \
+  "llm4s-core has no baseline"
+CASE_ROOT="$WORK/variant-core-none" run_case "and --no-negative-control runs without it" 0 "1 with no baseline" -- --no-negative-control
+
+CASE_ROOT="$(variant stranger 'Map("llm4s-samples" -> Some("0.9.0"))')" run_case "an override for a module that is not frozen is exit 3" 3 \
+  "mimaBaselineOverrides names llm4s-samples, which is not a frozen module"
+CASE_ROOT="$(variant twice 'Map("llm4s-agent" -> None, "llm4s-agent" -> Some("0.9.0"))')" run_case "an override listed twice is exit 3" 3 \
+  "mimaBaselineOverrides lists llm4s-agent twice"
+CASE_ROOT="$(variant unreadable 'Map("llm4s-agent" -> sys.props.get("agent.baseline"))')" run_case "an override the script cannot read is exit 3" 3 \
+  "could not read mimaBaselineOverrides"
+CASE_ROOT="$(variant open 'Map(')" run_case "an override map that is never closed is exit 3" 3 "the map is not closed"
+NO_MAP="$WORK/variant-no-map"; cp -R "$FIXTURE" "$NO_MAP"
+grep -v '^val mimaBaselineOverrides' "$FIXTURE/build.sbt" > "$NO_MAP/build.sbt"
+git -C "$NO_MAP" -c user.name=test -c user.email=test@example.com commit -q -am "no overrides"
+CASE_ROOT="$NO_MAP" run_case "a build.sbt without mimaBaselineOverrides is exit 3, naming it" 3 "build.sbt has no 'val mimaBaselineOverrides"
 
 # ---- the script no longer matching the build is an error of its own (exit 3), not a pass
 BAD="$WORK/bad"; cp -R "$FIXTURE" "$BAD"; mkdir -p "$WORK/tmp-bad"
