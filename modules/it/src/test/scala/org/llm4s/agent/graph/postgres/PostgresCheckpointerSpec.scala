@@ -267,6 +267,7 @@ class PostgresCheckpointerSpec
     reopened.runQueue
       .cancel(None, org.llm4s.agent.service.CancelTarget.Entry(queued.entryId), reason)
       .value
+      .entries
       .map(_.stopRequest) shouldBe Vector(Some(org.llm4s.agent.service.StopRequest.Cancel(reason)))
     reopened.close()
   }
