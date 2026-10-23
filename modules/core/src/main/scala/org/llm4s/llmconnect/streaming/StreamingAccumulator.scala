@@ -197,8 +197,8 @@ final class StreamingAccumulator private () {
   }
 
   /**
-   * Merge a provider's usage report into the accumulated usage, every [[TokenUsage]] field
-   * included, so a streamed [[Completion]] reports what a non-streaming one does.
+   * Merge a provider's usage report into the accumulated usage, every [[org.llm4s.llmconnect.model.TokenUsage]] field
+   * included, so a streamed [[org.llm4s.llmconnect.model.Completion]] reports what a non-streaming one does.
    *
    * Call it once per usage report the stream carries. Each field follows the latest report that
    * states it: `promptTokens` and `completionTokens` when positive, the `Option` fields
