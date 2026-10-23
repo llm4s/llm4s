@@ -6,7 +6,7 @@ import org.llm4s.types.Result
 import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.locks.{ LockSupport, ReentrantLock }
-import scala.annotation.tailrec
+import scala.annotation.{ tailrec, unused }
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Using
 import scala.util.control.Exception.allCatch
@@ -71,6 +71,32 @@ trait RunHandle[O]:
    */
   private[agent] def traceContext: Option[org.llm4s.trace.TraceContext] = None
 
+  /**
+   * Stops the run as a queue's cancel or interrupt does (Stage 5 W3, design 4.57), settling it rather than leaving it
+   * `Running`: once stopped, the run commits - under its own claim, before releasing it - a `Failed` checkpoint over
+   * the last one it committed, with `settlement`'s update to the state and its outcome, so the thread is at rest and
+   * its next `start` runs normally. With `atBoundary` `None` the run is cancelled at once, as [[cancel]] cancels it.
+   * With `Some(cuttable)` it stops at its next superstep boundary: a superstep whose every task's node is `cuttable`
+   * (an agent's model call) is cut as a cancel cuts it, and any other runs to its end and commits before the run
+   * stops, so no task of it is cut off mid-flight and none of a later superstep starts. A later call replaces the
+   * settlement and may cut sooner (a cancel after an interrupt). Like [[cancel]], a no-op once the run has begun
+   * closing: a run already committing its outcome ends with it. A run that cannot commit the settlement - its
+   * claim was lost, or the store refused it - ends as a cancelled run does, its thread left `Running`. The default
+   * cancels, settling nothing.
+   */
+  private[agent] def stopSettling(
+    @unused settlement: StopSettlement,
+    @unused atBoundary: Option[NodeId => Boolean]
+  ): Unit =
+    cancel()
+
+/**
+ * How a run stopped by [[RunHandle.stopSettling]] is settled (Stage 5 W3, design 4.57): its closing `Failed`
+ * checkpoint carries `outcome`, over the state `amend` makes of the last committed one - for an agent, every tool call
+ * of the turn left without a result given a synthetic one ([[org.llm4s.agent.graph.toolloop.SettledTurn]]).
+ */
+final private[agent] case class StopSettlement(outcome: RunOutcome, amend: ThreadState => Result[StateUpdate])
+
 /**
  * Why a run stops, recorded once: the first cause recorded wins. `Cancelled`, `Expired` and
  * `ClaimLost` are recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause
@@ -97,6 +123,18 @@ final private[graph] class StopSignal:
   val cause: AtomicReference[Option[StopCause]] = AtomicReference(None)
   private val lock                              = new ReentrantLock()
   private var acknowledged                      = false
+
+  /** How a stopped run settles ([[RunHandle.stopSettling]]); `None` leaves it `Running`, as a plain cancel does. */
+  val settlement: AtomicReference[Option[StopSettlement]] = AtomicReference(None)
+
+  /** Whether the run is to stop at its next superstep boundary ([[RunHandle.stopSettling]]). */
+  val boundary: AtomicBoolean = new AtomicBoolean(false)
+
+  /**
+   * The nodes of the superstep the run is executing, empty between supersteps: set by the run before it checks
+   * [[boundary]], read by a boundary stop after it sets it, so one of the two always sees the other.
+   */
+  val inFlight: AtomicReference[Vector[NodeId]] = AtomicReference(Vector.empty)
 
   /** Called by the run before it clears its interrupt flag to close; no interrupt follows it. */
   def acknowledge(): Unit = withLock(lock) { acknowledged = true }
@@ -156,7 +194,50 @@ final private[graph] class DefaultRunHandle[O](
         Thread.currentThread().interrupt()
         Left(CancelledError("await", Some(e)))
 
-  def cancel(): Unit = stop(StopCause.Cancelled)
+  /**
+   * A plain cancel, which settles nothing (#2136, Codex rounds 1 and 2). The settlement belongs to the stop that wins:
+   * a settlement a boundary stop recorded, which the run has not yet stopped for, is withdrawn in the same step that
+   * records this cancel as the cause, so the run closes as a cancelled run does - its thread left `Running` - and a
+   * settling stop that comes after this cancel won installs nothing ([[stopSettling]]). A settling stop already
+   * recorded as the cause keeps its settlement, and this cancel then changes nothing.
+   */
+  def cancel(): Unit =
+    val won = withLock(stopping) {
+      val first = signal.cause.compareAndSet(None, Some(StopCause.Cancelled))
+      if first then
+        signal.boundary.set(false)
+        signal.settlement.set(None)
+      first
+    }
+    if won then interrupt()
+
+  /** Makes recording a stop's cause and its settlement one step, for [[cancel]] and [[stopSettling]]. */
+  private val stopping = new ReentrantLock()
+
+  override private[agent] def stopSettling(settlement: StopSettlement, atBoundary: Option[NodeId => Boolean]): Unit =
+    atBoundary match
+      case None =>
+        // the settlement and the cause together, or neither: a stop that lost to another cause - a cancel, or the run's
+        // own Finishing, expiry or lost claim, which it records by compare-and-set outside this lock - settles nothing
+        // and overwrites nothing. The settlement is in place before the cause, which is what the run reads first.
+        val won = withLock(stopping) {
+          val before = signal.settlement.getAndSet(Some(settlement))
+          val first  = signal.cause.compareAndSet(None, Some(StopCause.Cancelled))
+          if !first then signal.settlement.set(before)
+          first
+        }
+        if won then interrupt()
+      case Some(cuttable) =>
+        val pending = withLock(stopping) {
+          val open = signal.cause.get.isEmpty
+          if open then
+            signal.settlement.set(Some(settlement))
+            signal.boundary.set(true)
+          open
+        }
+        // a superstep of nothing but cuttable tasks is cut now; any other ends first, and the run stops after it
+        val running = signal.inFlight.get
+        if pending && running.nonEmpty && running.forall(cuttable) then stop(StopCause.Cancelled)
 
   /** See [[DefaultRunHandle.awaitEnd]]. */
   private[graph] def awaitEnd(timeout: FiniteDuration): Boolean =
@@ -182,10 +263,13 @@ final private[graph] class DefaultRunHandle[O](
   private[graph] def stop(stopCause: StopCause): Unit =
     // the thread is started before the handle is returned, and an interrupt on a started thread
     // that has not yet run sets its flag, which the loop checks before every superstep
-    if signal.cause.compareAndSet(None, Some(stopCause)) then
-      beforeInterrupt()
-      // a stop before the run thread exists records only its cause, which the loop checks before every superstep
-      signal.interruptUnlessAcknowledged(() => if !result.isDone && runThread != null then runThread.interrupt())
+    if withLock(stopping)(signal.cause.compareAndSet(None, Some(stopCause))) then interrupt()
+
+  /** Interrupts a live run that has not acknowledged its stop, once its cause is recorded. */
+  private def interrupt(): Unit =
+    beforeInterrupt()
+    // a stop before the run thread exists records only its cause, which the loop checks before every superstep
+    signal.interruptUnlessAcknowledged(() => if !result.isDone && runThread != null then runThread.interrupt())
 
   /** A test hook run by [[stop]] between recording its cause and interrupting; a no-op by default. */
   @volatile private[graph] var beforeInterrupt: () => Unit = () => ()

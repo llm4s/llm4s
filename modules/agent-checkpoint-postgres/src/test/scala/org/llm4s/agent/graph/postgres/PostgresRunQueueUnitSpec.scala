@@ -49,7 +49,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     expires: OffsetDateTime = null,
     outcome: String = null,
     admitted: Boolean = false,
-    trace: String = null
+    trace: String = null,
+    stop: String = null
   ): Vector[Any] =
     Vector(
       id,
@@ -71,7 +72,8 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       if outcome == null then null else now,
       if outcome == null then null else 4L,
       admitted,
-      trace
+      trace,
+      stop
     )
 
   private def leased(id: Long, token: Long) = Lease(EntryId.unsafe(id), LeaseToken(token), "w", later.toInstant)
@@ -159,6 +161,58 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
     // the close is guarded on the locked row: only while it is still open with no attempt
     Sql.closeUnstartedQueueEntry(t) should endWith("AND state = 'open' AND attempt_count = 0")
     s.madeWith(Sql.insertQueueEntry(t)).map(_(6)) shouldBe Vector(java.lang.Boolean.TRUE)
+  }
+
+  it should "ask the thread's started entries to stop for an Interrupt entry, never one a cancel was asked of (W3)" in {
+    val cancel = ujson.write(StopRequest.toJson(StopRequest.Cancel(CancelReason.Requested(None))))
+    val s = script {
+      case (sql, _) if sql == Sql.nextQueueEntryId(t) => Vector(Vector(9L))
+      case (sql, _) if sql == Sql.openQueueEntries(t) =>
+        Vector(entry(3, attempts = 1), entry(4, attempts = 1, stop = cancel), entry(6))
+    }
+    s.store()
+      .runQueue
+      .submit(Submission(thread, agent, QueuedInput.query("q"), policy = BusyThreadPolicy.Interrupt))
+      .value
+    val asked = s.madeWith(Sql.setQueueStop(t))
+    asked.map(_.last) shouldBe Vector(3L)
+    StopRequest.fromJson(ujson.read(asked.head.head.toString)).value shouldBe StopRequest.Interrupt(EntryId.unsafe(9))
+  }
+
+  it should "refuse a Reject submission to a thread a live claim holds by the database's clock (W3)" in {
+    val s = script {
+      case (sql, Vector("t1", null, null, _)) if sql == Sql.queueThreadClaimed(t) => Vector(Vector(1))
+    }
+    s.store().runQueue.submit(Submission(thread, agent, QueuedInput.query("q"))).left.value shouldBe
+      GraphError.ThreadBusy("t1", None, GraphError.BusyHolder.Unnamed)
+    s.madeWith(Sql.insertQueueEntry(t)) shouldBe empty
+    Sql.queueThreadClaimed(t) should include("claim_expires_at > ?")
+  }
+
+  "PostgresRunQueue.cancel" should "under the thread's lock, close the unstarted entries and ask the started to stop" in {
+    val s = script {
+      case (sql, _) if sql == Sql.openQueueEntries(t)    => Vector(entry(3, attempts = 1), entry(6))
+      case (sql, Vector(3L)) if sql == Sql.queueEntry(t) => Vector(entry(3, attempts = 1))
+      case (sql, Vector(6L)) if sql == Sql.queueEntry(t) => Vector(entry(6))
+    }
+    val reason = CancelReason.Requested(Some("n"))
+    s.store().runQueue.cancel(None, CancelTarget.Thread(thread), reason).value
+    s.madeWith(lockSql) shouldBe Vector(Vector(lockName("thread:t1")))
+    s.madeWith(Sql.closeUnstartedQueueEntry(t)).map(c => (c.head, c.last)) shouldBe Vector(("cancelled", 6L))
+    val asked = s.madeWith(Sql.setQueueStop(t))
+    asked.map(_.last) shouldBe Vector(3L)
+    StopRequest.fromJson(ujson.read(asked.head.head.toString)).value shouldBe StopRequest.Cancel(reason)
+  }
+
+  "PostgresRunQueue.renew" should "answer the stop asked of the entry with the renewed lease (W3)" in {
+    val interrupt = ujson.write(StopRequest.toJson(StopRequest.Interrupt(EntryId.unsafe(8))))
+    val s = script {
+      case (sql, Vector(5L)) if sql == Sql.lockedQueueEntry(t) =>
+        Vector(entry(5, holder = "w", token = 42L, expires = later, attempts = 1, stop = interrupt))
+    }
+    s.store().runQueue.renew(leased(5, 42), 30.seconds).value.stop shouldBe Some(
+      StopRequest.Interrupt(EntryId.unsafe(8))
+    )
   }
 
   it should "lock the key before the thread, and answer a held key's entry or refuse a different submission under it" in {

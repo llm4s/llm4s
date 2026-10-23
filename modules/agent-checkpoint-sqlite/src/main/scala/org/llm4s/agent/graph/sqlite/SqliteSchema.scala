@@ -41,7 +41,8 @@ import scala.util.{ Try, Using }
  *    `(key, value)` for the registry's equality search; `deleteThread` removes a thread's.
  *  - the run queue (version 10, design 4.55, [[addRunQueue]]): `llm4s_checkpoint_queue_entries`, one row per entry,
  *    and `llm4s_checkpoint_queue_attempts`, one per attempt; and `run_id` on every history row, indexed by
- *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`).
+ *    `(thread_id, run_id, position)` for the run-id lookup (`latestOfRuns`); from version 11 an entry's stop request
+ *    (`stop_json`, design 4.57).
  *
  * Opening a store brings the file to [[Current]] in one transaction, applying each step `n -> n + 1` in turn, and
  * refuses a file whose version is newer than this build knows. Version 0 is a file with none of these tables.
@@ -51,23 +52,24 @@ private[sqlite] object SqliteSchema:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** The schema version this build writes. */
-  val Current: Int = 10
+  val Current: Int = 11
 
   /** A migration from the version it is keyed by to the next. */
   type Step = Connection => Unit
 
   /** The steps, keyed by the version each upgrades from. */
   val steps: Map[Int, Step] = Map(
-    0 -> createTables,
-    1 -> addFirstSeq,
-    2 -> addEffects,
-    3 -> addEffectLineages,
-    4 -> addClaimTenants,
-    5 -> addChildThreads,
-    6 -> addCommitTimes,
-    7 -> addThreadRegistry,
-    8 -> addReclamation,
-    9 -> addRunQueue
+    0  -> createTables,
+    1  -> addFirstSeq,
+    2  -> addEffects,
+    3  -> addEffectLineages,
+    4  -> addClaimTenants,
+    5  -> addChildThreads,
+    6  -> addCommitTimes,
+    7  -> addThreadRegistry,
+    8  -> addReclamation,
+    9  -> addRunQueue,
+    10 -> addStopRequests
   )
 
   /**
@@ -122,6 +124,14 @@ private[sqlite] object SqliteSchema:
    * `llm4s_checkpoint_queue_attempts` holds `(entry_id, attempt)` with the attempt's thread, run id, start time and
    * holder, indexed by `(thread_id, run_id)` for `prune`'s evidence.
    */
+  /**
+   * Version 11: stop requests (Stage 5 slice W3, design 4.57). Each queue entry gains `stop_json`, the cancel or
+   * interrupt asked of its running attempt, as `StopRequest.toJson` writes it; `NULL` for none, so every entry of a
+   * version-10 file has none.
+   */
+  private def addStopRequests(connection: Connection): Unit =
+    statements(connection, "ALTER TABLE llm4s_checkpoint_queue_entries ADD COLUMN stop_json TEXT")
+
   private def addRunQueue(connection: Connection): Unit =
     ensureHistory(connection)
     statements(

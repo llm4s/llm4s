@@ -1,13 +1,15 @@
 package org.llm4s.agent.service
 
 import org.llm4s.agent.AgentId
-import org.llm4s.agent.graph.{ Checkpointer, EventRecord, TenantId, ThreadId }
+import org.llm4s.agent.graph.{ Checkpointer, EventRecord, GraphError, GraphRuntime, RunConfig, TenantId, ThreadId }
+import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ValidationError
+import org.llm4s.metrics.MetricsCollector
 import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 
 /**
  * A page of a queued run's events ([[RunSubmitter.follow]]): `events`, those of the entry's attempts among the thread's
@@ -24,14 +26,18 @@ final case class FollowedRun(entry: QueueEntry, events: Vector[EventRecord], nex
  * state, or follow its events, over a store's [[RunQueue]] and the `Checkpointer` of the same store. Every call is
  * tenant-scoped (rule 9): a ticket is answered only to its own tenant.
  *
- * Entries are submitted with `settings.maxAttempts`; the worker side (W2) takes them.
+ * Entries are submitted with `settings.maxAttempts`; the worker side (W2) takes them. The entries this API closes
+ * itself - one a cancel closes before it runs, an earlier unstarted `Interrupt` entry a new one closes - are counted on
+ * `metrics` as the worker counts its closes (`llm4s.agent.queue.closed`, design 4.59; W3).
  */
 @Experimental
 final class RunSubmitter(
   val queue: RunQueue,
   val checkpointer: Checkpointer,
-  val settings: RunQueueSettings = RunQueueSettings.default
+  val settings: RunQueueSettings = RunQueueSettings.default,
+  metrics: MetricsCollector = MetricsCollector.noop
 ):
+  private val meter = new QueueMetrics(metrics)
 
   /**
    * Queues `input` for `threadId`, run by `agentId` for `tenantId`, and answers its ticket - or, with a `submissionKey`
@@ -47,9 +53,86 @@ final class RunSubmitter(
     submissionKey: Option[SubmissionKey] = None,
     traceContext: Option[TraceContext] = None
   ): Result[Ticket] =
+    // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store: counted here, by reading them
+    // before and after (W3); only when anything is recorded
+    val earlier =
+      if meter.enabled && policy == BusyThreadPolicy.Interrupt then
+        queue
+          .openEntries(tenantId, threadId)
+          .toOption
+          .toVector
+          .flatten
+          .filter(e => e.policy == BusyThreadPolicy.Interrupt && e.attempts.isEmpty)
+      else Vector.empty
     Submission
       .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts, traceContext)
       .flatMap(queue.submit)
+      .map { ticket =>
+        if !ticket.existing then countClosed(tenantId, earlier)
+        ticket
+      }
+
+  /**
+   * Cancels `target` - one entry, or every open entry of a thread - for `tenantId`, from any machine (W3, design 4.57),
+   * and answers its entries as they are after: one not yet started is closed `Cancelled(Requested(note))` before it
+   * runs; a running one is stopped by the worker holding it, which learns of the cancel when it next renews the entry's
+   * lease, waits for the run to exit, settles the thread and closes the entry - `Cancelled`, or with the run's own
+   * outcome if it reached rest first. [[await]] its ticket for the close. See [[RunQueue.cancel]].
+   */
+  def cancel(
+    tenantId: Option[TenantId],
+    target: CancelTarget,
+    note: Option[String] = None
+  ): Result[Vector[QueueEntry]] = cancelled(tenantId, target, CancelReason.Requested(note))
+
+  /** [[RunQueue.cancel]], counting the entries it closed before they ran. */
+  private def cancelled(
+    tenantId: Option[TenantId],
+    target: CancelTarget,
+    reason: CancelReason
+  ): Result[Vector[QueueEntry]] =
+    val before =
+      if !meter.enabled then Vector.empty
+      else
+        target match
+          case CancelTarget.Entry(id)      => queue.entry(tenantId, id).toOption.toVector.filter(_.isOpen)
+          case CancelTarget.Thread(thread) => queue.openEntries(tenantId, thread).toOption.toVector.flatten
+    queue.cancel(tenantId, target, reason).map { after =>
+      val wasOpen = before.map(_.id).toSet
+      after.filter(e => wasOpen(e.id)).foreach(e => e.outcome.foreach(meter.closed(e.agentId, _)))
+      after
+    }
+
+  /** Counts each of `entries`, open before, that is closed now. */
+  private def countClosed(tenantId: Option[TenantId], entries: Vector[QueueEntry]): Unit =
+    entries.foreach(e => queue.entry(tenantId, e.id).toOption.flatMap(_.outcome).foreach(meter.closed(e.agentId, _)))
+
+  /**
+   * The service's delete of `threadId` for `tenantId` (W3, Stage 5 rule 4): it closes the thread's queued entries,
+   * cancels its running one - `Cancelled(ThreadDeleted)` - and waits up to `timeout` for every one of them to close,
+   * which the worker running one does only once its run has exited and the thread is settled; then it deletes the
+   * thread through `runtime` (`GraphRuntime.deleteThread`, which claims the thread and deletes its children first). An
+   * entry still open after `timeout` - its run has not exited - leaves the thread undeleted: `GraphError.ThreadBusy`,
+   * and calling again finishes it. An entry submitted meanwhile is marked by the delete itself and closes
+   * `Cancelled(ThreadDeleted)` without running (rule 4). Errors are the queue's, and the runtime's delete's.
+   */
+  def deleteThread(
+    runtime: GraphRuntime,
+    tenantId: Option[TenantId],
+    threadId: ThreadId,
+    timeout: FiniteDuration
+  ): Result[Unit] =
+    val deadline                  = System.nanoTime() + timeout.toNanos
+    def remaining: FiniteDuration = math.max(0L, deadline - System.nanoTime()).nanos
+    cancelled(tenantId, CancelTarget.Thread(threadId), CancelReason.ThreadDeleted).flatMap { cancelled =>
+      val waited = cancelled.filter(_.isOpen).foldLeft[Result[Boolean]](Right(true)) { (done, open) =>
+        done.flatMap(all => queue.awaitClosed(tenantId, open.id, remaining).map(e => all && !e.isOpen))
+      }
+      waited.flatMap { allClosed =>
+        if allClosed then runtime.deleteThread(threadId, RunConfig(tenantId = tenantId))
+        else Left(GraphError.ThreadBusy(threadId.value, None, GraphError.BusyHolder.Unnamed))
+      }
+    }
 
   /** The entry `entryId` of `tenantId`, as it is now. */
   def entry(tenantId: Option[TenantId], entryId: EntryId): Result[QueueEntry] = queue.entry(tenantId, entryId)
