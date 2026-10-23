@@ -50,7 +50,8 @@ class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       None,
       None,
       None,
-      Some(0)
+      Some(0),
+      None
     )
 
   // ---- rule 4: classifying an attempt ----

@@ -295,17 +295,18 @@ class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues w
     val f = Fixture()
     // a queue that keeps the trait's polling wait, over the in-memory one
     val polling = new RunQueue {
-      def submit(submission: Submission)                              = f.queue.submit(submission)
-      def entry(tenantId: Option[TenantId], entryId: EntryId)         = f.queue.entry(tenantId, entryId)
-      def openEntries(tenantId: Option[TenantId], threadId: ThreadId) = f.queue.openEntries(tenantId, threadId)
-      def take(request: TakeRequest)                                  = f.queue.take(request)
-      def renew(lease: Lease, ttl: FiniteDuration)                    = f.queue.renew(lease, ttl)
-      def release(lease: Lease)                                       = f.queue.release(lease)
-      def recordAttempt(lease: Lease, runId: RunId)                   = f.queue.recordAttempt(lease, runId)
-      def close(lease: Lease, outcome: EntryOutcome)                  = f.queue.close(lease, outcome)
-      def reclaim(ticketLifetime: FiniteDuration, limit: Int)         = f.queue.reclaim(ticketLifetime, limit)
-      def openRuns(threads: Vector[ThreadId])                         = f.queue.openRuns(threads)
-      def depth(agents: Set[org.llm4s.agent.AgentId])                 = f.queue.depth(agents)
+      def submit(submission: Submission)                                = f.queue.submit(submission)
+      def entry(tenantId: Option[TenantId], entryId: EntryId)           = f.queue.entry(tenantId, entryId)
+      def openEntries(tenantId: Option[TenantId], threadId: ThreadId)   = f.queue.openEntries(tenantId, threadId)
+      def take(request: TakeRequest)                                    = f.queue.take(request)
+      def renew(lease: Lease, ttl: FiniteDuration)                      = f.queue.renew(lease, ttl)
+      def release(lease: Lease)                                         = f.queue.release(lease)
+      def recordAttempt(lease: Lease, runId: RunId)                     = f.queue.recordAttempt(lease, runId)
+      def close(lease: Lease, outcome: EntryOutcome)                    = f.queue.close(lease, outcome)
+      def reclaim(ticketLifetime: FiniteDuration, limit: Int)           = f.queue.reclaim(ticketLifetime, limit)
+      def openRuns(threads: Vector[ThreadId])                           = f.queue.openRuns(threads)
+      def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason) = f.queue.cancel(t, c, r)
+      def depth(agents: Set[org.llm4s.agent.AgentId])                   = f.queue.depth(agents)
     }
     val id = polling.submit(Submission(thread, agent, QueuedInput.query("q"))).value.entryId
     polling.awaitClosed(None, id, 150.millis).value.isOpen shouldBe true

@@ -71,7 +71,16 @@ final case class SweepReport(examined: Int, tombstones: Int, entries: Int, skipp
  *     to come back when its lease expires, for an attempt that recovers it, until its attempts run out;
  *  1. on `AttemptStart.Exhausted`, settles the thread first if its input was admitted - each tool call left without a
  *     result gets a synthetic one and a `Failed` checkpoint is committed under the thread's claim - and closes the entry
- *     `Failed(AttemptsExhausted)`.
+ *     `Failed(AttemptsExhausted)`;
+ *  1. stops the run when a stop is asked of the entry (W3, design 4.57), which it learns of from its lease renewals: a
+ *     cancel ([[RunQueue.cancel]]) at once, as `AgentRun.cancel` does, an interrupt (a later `Interrupt` entry) at the
+ *     run's next superstep boundary. It waits for the run to exit, and the run settles itself as it stops - a `Failed`
+ *     checkpoint, every tool call left without a result given [[AgentWorker.CancelledResult]] or
+ *     [[AgentWorker.InterruptedResult]], committed under the run's own claim - so the thread is at rest and the next
+ *     entry starts normally. It then closes the entry from how the run ended: `Cancelled` or `Interrupted` if the stop
+ *     ended it, the run's own outcome if it reached rest first. A stop asked of an entry no run is running - its worker
+ *     died - is acted on by the worker that next takes it, recording no attempt: the thread is settled the same way,
+ *     under a claim of its own, if the entry's run is its incomplete latest.
  *
  * A crashed worker's entries come back when their leases expire, by the store's clock, and the worker that takes one
  * recovers its thread, once the crashed run's claim - on the same clock - has expired too.
@@ -284,6 +293,8 @@ final class AgentWorker private (
         queue.renew(slot.lease.get, lease.ttl) match
           case Right(renewed) =>
             slot.lease.set(renewed)
+            // a cancel or an interrupt asked of the entry since the last renewal (W3)
+            renewed.stop.foreach(slot.requestStop)
             beat(sent)
           case Left(error @ (_: QueueError.LeaseLost | _: QueueError.EntryClosed)) =>
             meter.leaseLost(slot.entry.agentId, "refused")
@@ -359,7 +370,11 @@ final class AgentWorker private (
                 case Left(error) =>
                   logger.warn(s"Worker $holder: entry ${entry.id.value}'s thread cannot be read: ${error.message}")
                   Next.Expire
-                case Right(_) => attempt(slot, agent)
+                case Right(_) =>
+                  slot.stop.get match
+                    // a stop asked of an entry no run of ours is running - its worker died: acted on with no attempt
+                    case Some(request) => stopped(entry, agent, request, admitted, latest)
+                    case None          => attempt(slot, agent)
 
   /**
    * Whether a live claim holds `entry`'s thread, by the store's clock: a claim is asked for, as a probe that is given
@@ -470,6 +485,58 @@ final class AgentWorker private (
                 Next.Expire
           case _ => Next.Close(dead)
 
+  /**
+   * `entry`, a stop `request` asked of it (W3), once no run of its is running here - the run exited, or none was
+   * started - closed from how the thread now is, by the run-id lookup `admitted` and the thread's `latest`:
+   *
+   *  - the entry's run settled itself as it stopped (`RunHandle.stopSettling`) - its latest checkpoint is the stop's
+   *    `Failed` one: closed as the request says, `Cancelled` or `Interrupted`;
+   *  - the thread is at rest otherwise - the run reached rest before the stop reached it, or the thread moved on: closed
+   *    with that outcome, as [[AttemptPlan]] gives it;
+   *  - the entry's run is the thread's incomplete latest - its worker died, or the run could not settle itself (its
+   *    claim was lost, or its settling commit failed): settled here under a claim of its own (`Agent.settleQueued`,
+   *    with the same synthetic results and outcome), then closed as the request says; a thread busy with another
+   *    run is given back to try later;
+   *  - the entry's input was never admitted: closed as the request says, the thread untouched.
+   */
+  private def stopped(
+    entry: QueueEntry,
+    agent: QueuedAgent,
+    request: StopRequest,
+    admitted: Option[Checkpoint],
+    latest: Option[Checkpoint],
+    drained: Boolean = false
+  ): Next =
+    settledByStop(entry, admitted, latest, request) match
+      case Some(outcome) => Next.Close(outcome)
+      case None =>
+        AttemptPlan.of(entry, admitted, latest) match
+          case AttemptPlan.Close(outcome) => Next.Close(outcome)
+          // a run the drain cancelled - a plain cancel, which withdrew the stop's settlement and may have cut a tool
+          // call - is given back for recovery, never settled as if the stop had ended it (Codex, round 4)
+          case AttemptPlan.Recover if drained => Next.Release
+          case AttemptPlan.Recover if admitted.isDefined =>
+            val (result, outcome) = settlementOf(request)
+            agent.agent.settleQueued(
+              entry.threadId,
+              entry.runIds,
+              outcome,
+              outcome.message,
+              result,
+              // as the run it settles, so the entry's run-id lookup finds the settlement however the thread moves on
+              entry.attemptConfig(admitted.fold(RunId.random())(a => RunId(a.runId)))
+            ) match
+              case Right(_) => Next.Close(request.outcome)
+              case Left(_: GraphError.ThreadBusy) =>
+                passOver(entry.id, settings.pollInterval)
+                Next.Release
+              case Left(error) =>
+                logger.warn(
+                  s"Worker $holder: settling stopped entry ${entry.id.value}'s thread failed: ${error.message}"
+                )
+                Next.Expire
+          case _ => Next.Close(request.outcome)
+
   /** The attempt `runId` at `entry`, recorded: acts on [[AttemptPlan]], and on how the run it starts ends. */
   private def run(slot: Slot, entry: QueueEntry, agent: QueuedAgent, runId: RunId): Next =
     read(entry) match
@@ -479,10 +546,12 @@ final class AgentWorker private (
         val config = entry.attemptConfig(runId)
         val plan   = AttemptPlan.of(entry, admitted, latest)
         meter.planned(entry.agentId, plan)
-        val begun: Either[EntryOutcome, Result[AgentRun]] = plan match
-          case AttemptPlan.Close(outcome) => Left(outcome)
-          case AttemptPlan.Recover        => Right(agent.agent.startRecover(entry.threadId, config))
-          case AttemptPlan.Start =>
+        val begun: Either[Next, Result[AgentRun]] = (plan, slot.stop.get) match
+          // a stop asked since the take: acted on before a run starts (W3)
+          case (_, Some(request))              => Left(stopped(entry, agent, request, admitted, latest))
+          case (AttemptPlan.Close(outcome), _) => Left(Next.Close(outcome))
+          case (AttemptPlan.Recover, _)        => Right(agent.agent.startRecover(entry.threadId, config))
+          case (AttemptPlan.Start, _) =>
             Right(entry.input match
               case QueuedInput.Start(input) =>
                 agent
@@ -492,7 +561,7 @@ final class AgentWorker private (
               case QueuedInput.Recover         => agent.agent.startRecover(entry.threadId, config)
             )
         begun match
-          case Left(outcome)                         => Next.Close(outcome)
+          case Left(next)                            => next
           case Right(Left(_: GraphError.ThreadBusy)) =>
             // a direct run took the thread between the probe and the admission: try again later
             passOver(entry.id, settings.pollInterval)
@@ -505,19 +574,27 @@ final class AgentWorker private (
           case Right(Right(running)) =>
             slot.running(running)
             val result = running.await()
-            ended(slot, entry, result)
+            ended(slot, entry, agent, result)
 
   /**
-   * After the attempt's run has exited: the entry closes from the thread's state when the run reached rest; a run the
-   * drain cancelled is given back at once; any other is left for its lease to expire, so a later attempt recovers it.
+   * After the attempt's run has exited: a run a stop was asked of closes as [[stopped]] says; otherwise the entry
+   * closes from the thread's state when the run reached rest, a run the drain cancelled is given back at once, and any
+   * other is left for its lease to expire, so a later attempt recovers it.
    */
-  private def ended(slot: Slot, entry: QueueEntry, result: Result[?]): Next =
+  private def ended(slot: Slot, entry: QueueEntry, agent: QueuedAgent, result: Result[?]): Next =
     if slot.leaseLost.get then Next.Leave
     else
-      // read the entry again: its `admitted` mark may have been set by the run's commit and its checkpoint retracted
+      // read the entry again: its `admitted` mark may have been set by the run's commit and its checkpoint retracted,
+      // and a stop may have been asked of it since the last renewal
       val now = queue.entry(entry.tenantId, entry.id).toOption.getOrElse(entry)
+      val stop = (slot.stop.get, now.stopRequest) match
+        case (cancel @ Some(_: StopRequest.Cancel), _) => cancel
+        case (_, Some(asked))                          => Some(asked)
+        case (own, None)                               => own
       read(now) match
         case Left(error) => unread(now, error)
+        case Right((admitted, latest)) if stop.isDefined =>
+          stopped(now, agent, stop.get, admitted, latest, slot.drained.get)
         case Right((admitted, latest)) =>
           AttemptPlan.of(now, admitted, latest) match
             case AttemptPlan.Close(outcome) => Next.Close(outcome)
@@ -592,10 +669,47 @@ final class AgentWorker private (
     val ended: CountDownLatch         = new CountDownLatch(1)
     private val run                   = new AtomicReference[Option[AgentRun]](None)
 
+    /** The stop asked of the entry (W3), from its take and its renewals: a cancel is never replaced by an interrupt. */
+    val stop: AtomicReference[Option[StopRequest]] = new AtomicReference(leased.entry.stopRequest)
+    private val applied                            = new AtomicReference[Option[StopRequest]](None)
+
     /** The attempt's run has started: cancelled at once if the lease was lost or the drain cancelled it meanwhile. */
     def running(r: AgentRun): Unit =
       run.set(Some(r))
       if leaseLost.get || drained.get then r.cancel()
+      else applyStop(r)
+
+    /** A stop asked of the entry: recorded, and applied to its run if one is running. */
+    def requestStop(request: StopRequest): Unit =
+      stop.updateAndGet {
+        case cancel @ Some(_: StopRequest.Cancel) => cancel
+        case _                                    => Some(request)
+      }: Unit
+      run.get.foreach(applyStop)
+
+    /**
+     * Stops `r` as the recorded stop asks, settling it as it stops (`AgentRun.stopSettling`): once per request, and an
+     * interrupt applied before is followed by a cancel, which cuts sooner. One at a time, each reading the request
+     * current then, so a stale request never overwrites a newer one applied concurrently (Codex, round 3).
+     */
+    private def applyStop(r: AgentRun): Unit = withLock(applying) {
+      stop.get.foreach { request =>
+        val before = applied.getAndSet(Some(request))
+        // a cancel is final; an interrupt is replaced by a cancel, which cuts sooner, or by a later interrupt, whose
+        // entry the settlement must name
+        val needed = before match
+          case None                           => true
+          case Some(_: StopRequest.Interrupt) => !before.contains(request)
+          case Some(_)                        => false
+        if needed then
+          logger.info(s"Worker $holder: stopping the run of entry ${entryId.value} (${request.outcome.state})")
+          val (result, outcome) = settlementOf(request)
+          r.stopSettling(result, outcome, atBoundary = request.isInstanceOf[StopRequest.Interrupt])
+      }
+    }
+
+    /** Serialises [[applyStop]]. */
+    private val applying = new java.util.concurrent.locks.ReentrantLock()
 
     /** The lease is gone: the run is cancelled, and nothing more is written under the lease. */
     def lost(why: String): Unit =
@@ -624,6 +738,70 @@ object AgentWorker:
 
   /** The synthetic result a tool call left unanswered gets when an exhausted entry's thread is settled. */
   val ExhaustedResult: String = "cancelled: the run's attempts ran out before this tool call returned a result"
+
+  /** The synthetic result a tool call left unanswered gets when a cancelled entry's run is settled (W3). */
+  val CancelledResult: String = "cancelled: the run was cancelled before this tool call returned a result"
+
+  /** The synthetic result a tool call not yet started gets when an interrupted entry's run is settled (W3). */
+  val InterruptedResult: String = "interrupted: the run was interrupted by a new input before this tool call ran"
+
+  /** The kind of the `RunOutcome.Failed` a cancelled entry's thread is settled with (W3). */
+  val CancelledKind: String = "Cancelled"
+
+  /** The kind of the `RunOutcome.Failed` an interrupted entry's thread is settled with (W3). */
+  val InterruptedKind: String = "Interrupted"
+
+  /** The synthetic tool result and the outcome a run stopped by `request` is settled with. */
+  private def settlementOf(request: StopRequest): (String, RunOutcome.Failed) = request match
+    case StopRequest.Cancel(reason) =>
+      val why = reason match
+        case CancelReason.Requested(note) => note.fold("the run was cancelled")(n => s"the run was cancelled: $n")
+        case CancelReason.ThreadDeleted   => "the run was cancelled: its thread is being deleted"
+      CancelledResult -> RunOutcome.Failed(CancelledKind, why)
+    case StopRequest.Interrupt(by) =>
+      InterruptedResult -> RunOutcome.Failed(InterruptedKind, s"$InterruptedBy${by.value}")
+
+  /**
+   * Whether `latest` is the `Failed` checkpoint a stop settled `entry`'s run with: committed by one of its runs as the run
+   * stopped, or - by the worker's own settle - over the entry's run's checkpoint `admitted`.
+   */
+  private def settledByStop(
+    entry: QueueEntry,
+    admitted: Option[Checkpoint],
+    latest: Option[Checkpoint],
+    request: StopRequest
+  ): Option[EntryOutcome] =
+    // the thread's latest, settled by the run or by the worker's fallback over the run's checkpoint; or the entry's own
+    // newest checkpoint, the run's settlement, once a direct run has taken the thread on past it (Codex, round 4)
+    val ownLatest = latest.filter(c =>
+      entry.runIds.contains(RunId(c.runId)) || (admitted.isDefined && c.parent == admitted.map(_.id))
+    )
+    ownLatest.orElse(admitted).flatMap { c =>
+      if c.status != CheckpointStatus.Failed then None
+      else
+        // the outcome of the stop the checkpoint records, which a later request cannot replace (Codex, round 2): a
+        // cancel is never replaced, so it is the request's; an interrupt names its entry in the outcome
+        c.outcome.collect {
+          case RunOutcome.Failed(CancelledKind, _) =>
+            request match
+              case StopRequest.Cancel(reason) => EntryOutcome.Cancelled(reason)
+              case _                          => EntryOutcome.Cancelled(CancelReason.Requested(None))
+          case RunOutcome.Failed(InterruptedKind, message) =>
+            EntryOutcome.Interrupted(
+              message
+                .stripPrefix(InterruptedBy)
+                .toLongOption
+                .map(EntryId.unsafe)
+                .orElse(request match
+                  case StopRequest.Interrupt(by) => Some(by)
+                  case _                         => None
+                )
+            )
+        }
+    }
+
+  /** How the outcome of a thread an interrupt settled names the interrupting entry, its id following. */
+  private[service] val InterruptedBy = "the run was interrupted by queue entry "
 
   /**
    * A worker that runs `queue`'s entries for `agents` - each an id the entries name, its runtime over `checkpointer`,

@@ -31,7 +31,9 @@ import scala.jdk.CollectionConverters.*
  * trace context included, kept through a reopen and a retried key), ids in
  * submission order, the per-thread run order of rule 5 (an attempted entry first, then `Interrupt` entries, then the
  * rest, each by id; a later `Interrupt` closing an earlier one that has not started), `Reject` refused while the thread
- * has an open entry, and submission keys looked up or inserted per tenant; tenant scoping and the `TicketExpired` /
+ * has an open entry or a live claim, and submission keys looked up or inserted per tenant; cancel and interrupt (W3) -
+ * an entry not started closed at once, a started one asked to stop durably, the request answered with its renewals
+ * and takes, a cancel never replaced by an interrupt, per tenant; tenant scoping and the `TicketExpired` /
  * `TicketNotFound` answers; leases - only a thread's head taken, the oldest head first, one live lease per thread,
  * takeover once a lease expires by the store's clock with a greater token, renewal, release and every call under a
  * replaced lease refused; attempts - recorded with their run ids, a reused run id refused, `maxAttempts` bounding
@@ -285,6 +287,141 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     val interrupt = c.submit(policy = BusyThreadPolicy.Interrupt).value
     c.ids() shouldBe Vector(running.entryId, interrupt.entryId)
     c.entry(interrupt.entryId).position shouldBe Some(1)
+  }
+
+  // ---- the busy-thread policy and cancel (W3) ----
+
+  it should "refuse a Reject submission to a thread a live claim holds, until the claim is released or expires" in {
+    val c     = Case()
+    val busy  = GraphError.ThreadBusy(c.thread.value, None, GraphError.BusyHolder.Unnamed)
+    val claim = c.checkpointer.claim(c.thread, ClaimRequest(RunId(s"direct-${unique()}"), None, ttl)).value
+    c.submit(policy = BusyThreadPolicy.Reject).refused shouldBe busy
+    c.ids() shouldBe empty
+    c.checkpointer.release(c.thread, claim.token).value
+    c.submit(policy = BusyThreadPolicy.Reject).value.position shouldBe Some(0)
+    // a live claim does not refuse the other policies: they wait for it
+    val other = c.newThread()
+    c.checkpointer.claim(other, ClaimRequest(RunId(s"direct-${unique()}"), None, 5.seconds)).value
+    c.submit(on = other, policy = BusyThreadPolicy.Reject).refused shouldBe
+      GraphError.ThreadBusy(other.value, None, GraphError.BusyHolder.Unnamed)
+    c.submit(on = other, policy = BusyThreadPolicy.Interrupt).value.position shouldBe Some(0)
+    val expiring = c.newThread()
+    c.checkpointer.claim(expiring, ClaimRequest(RunId(s"direct-${unique()}"), None, 5.seconds)).value
+    c.submit(on = expiring, policy = BusyThreadPolicy.Reject).refused shouldBe a[GraphError.ThreadBusy]
+    c.advance(6.seconds)
+    c.submit(on = expiring, policy = BusyThreadPolicy.Reject).value.position shouldBe Some(0)
+  }
+
+  it should "close a cancelled entry that has not started at once, so it is never taken, also one that is leased" in {
+    val c      = Case()
+    val reason = CancelReason.Requested(Some("never mind"))
+    val queued = c.submit().value.entryId
+    c.queue.cancel(None, CancelTarget.Entry(queued), reason).value.map(_.outcome) shouldBe
+      Vector(Some(EntryOutcome.Cancelled(reason)))
+    c.take() shouldBe None
+    c.ids() shouldBe empty
+    // a closed entry is answered as it is
+    c.queue.cancel(None, CancelTarget.Entry(queued), CancelReason.ThreadDeleted).value.map(_.outcome) shouldBe
+      Vector(Some(EntryOutcome.Cancelled(reason)))
+    // leased, but no attempt recorded: its worker finds it closed
+    val leased = c.newThread()
+    val id     = c.submit(on = leased).value.entryId
+    val lease  = c.take().value.lease
+    c.queue.cancel(None, CancelTarget.Entry(id), reason).value.head.isOpen shouldBe false
+    c.queue.recordAttempt(lease, RunId(s"run-${unique()}")).refused shouldBe
+      QueueError.EntryClosed(id, EntryOutcome.Cancelled(reason))
+  }
+
+  it should "ask a started entry to stop, durably, answering the request with the entry's renewals and takes" in {
+    val c      = Case()
+    val reason = CancelReason.Requested(Some("stop"))
+    val id     = c.submit().value.entryId
+    val leased = c.take().value
+    leased.lease.stop shouldBe None
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value
+    val asked = c.queue.cancel(None, CancelTarget.Entry(id), reason).value
+    asked.map(e => (e.id, e.isOpen, e.stopRequest)) shouldBe Vector((id, true, Some(StopRequest.Cancel(reason))))
+    c.queue.renew(leased.lease, ttl).value.stop shouldBe Some(StopRequest.Cancel(reason))
+    c.reopened()
+    c.entry(id).stopRequest shouldBe Some(StopRequest.Cancel(reason))
+    // a second cancel keeps the first's reason
+    c.queue.cancel(None, CancelTarget.Entry(id), CancelReason.ThreadDeleted).value.head.stopRequest shouldBe
+      Some(StopRequest.Cancel(reason))
+    // the worker that takes it over once its lease has expired is told at the take
+    c.advance(31.seconds)
+    val taken = c.take("worker-2").value
+    taken.lease.stop shouldBe Some(StopRequest.Cancel(reason))
+    taken.entry.stopRequest shouldBe Some(StopRequest.Cancel(reason))
+    c.queue.close(taken.lease, EntryOutcome.Cancelled(reason)).value.outcome shouldBe
+      Some(EntryOutcome.Cancelled(reason))
+  }
+
+  it should "cancel a thread's open entries for the caller's tenant only: the queued closed, the started asked" in {
+    val c       = Case()
+    val tenant  = Some(TenantId(s"t-${unique()}"))
+    val other   = Some(TenantId(s"o-${unique()}"))
+    val reason  = CancelReason.Requested(None)
+    val running = c.submit(tenant = tenant).value.entryId
+    val leased  = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value
+    val queued  = c.submit(tenant = tenant).value.entryId
+    val foreign = c.submit(tenant = other).value.entryId
+    c.queue.cancel(other, CancelTarget.Entry(running), reason).refused shouldBe QueueError.TicketExpired(running)
+    c.queue.cancel(None, CancelTarget.Thread(c.thread), reason).value shouldBe empty
+    c.queue.cancel(tenant, CancelTarget.Thread(c.newThread()), reason).value shouldBe empty
+    c.queue.cancel(tenant, CancelTarget.Thread(c.thread), reason).value.map(_.id) shouldBe Vector(running, queued)
+    c.entry(queued, tenant).outcome shouldBe Some(EntryOutcome.Cancelled(reason))
+    c.entry(running, tenant).stopRequest shouldBe Some(StopRequest.Cancel(reason))
+    c.entry(running, tenant).isOpen shouldBe true
+    c.entry(foreign, other).isOpen shouldBe true
+    c.entry(foreign, other).stopRequest shouldBe None
+  }
+
+  it should "refuse an attempt at a leased head an Interrupt entry displaced, ending its lease" in {
+    val c         = Case()
+    val queued    = c.submit().value.entryId
+    val leased    = c.take().value
+    val interrupt = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).refused shouldBe
+      QueueError.LeaseLost(queued, leased.lease.token, None)
+    c.entry(queued).attempts shouldBe empty
+    c.entry(queued).leaseHolder shouldBe None
+    c.take("worker-2").value.entry.id shouldBe interrupt
+  }
+
+  it should "let an Interrupt entry reach only its own tenant's entries of the thread" in {
+    val c       = Case()
+    val mine    = Some(TenantId(s"m-${unique()}"))
+    val theirs  = Some(TenantId(s"o-${unique()}"))
+    val running = c.submit(tenant = mine).value.entryId
+    val leased  = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value
+    val queued = c.submit(tenant = mine, policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.submit(tenant = theirs, policy = BusyThreadPolicy.Interrupt).value
+    c.entry(running, mine).stopRequest shouldBe Some(StopRequest.Interrupt(queued))
+    c.entry(queued, mine).isOpen shouldBe true
+  }
+
+  it should "ask a started entry to stop for the latest Interrupt entry, never over a cancel" in {
+    val c       = Case()
+    val reason  = CancelReason.Requested(Some("stop"))
+    val running = c.submit().value.entryId
+    val leased  = c.take().value
+    c.queue.recordAttempt(leased.lease, RunId(s"run-${unique()}")).value
+    val waiting = c.submit().value.entryId
+    val first   = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.entry(running).stopRequest shouldBe Some(StopRequest.Interrupt(first))
+    c.queue.renew(leased.lease, ttl).value.stop shouldBe Some(StopRequest.Interrupt(first))
+    // an entry that has not started is not asked: it has not run
+    c.entry(waiting).stopRequest shouldBe None
+    val second = c.submit(policy = BusyThreadPolicy.Interrupt).value.entryId
+    c.entry(first).outcome shouldBe Some(EntryOutcome.Interrupted(Some(second)))
+    c.entry(running).stopRequest shouldBe Some(StopRequest.Interrupt(second))
+    c.ids() shouldBe Vector(running, second, waiting)
+    c.queue.cancel(None, CancelTarget.Entry(running), reason).value
+    c.entry(running).stopRequest shouldBe Some(StopRequest.Cancel(reason))
+    c.submit(policy = BusyThreadPolicy.Interrupt).value
+    c.entry(running).stopRequest shouldBe Some(StopRequest.Cancel(reason))
   }
 
   // ---- submission keys ----
