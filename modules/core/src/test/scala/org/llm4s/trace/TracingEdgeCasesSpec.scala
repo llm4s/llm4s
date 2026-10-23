@@ -200,7 +200,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer) {
-      case e: TraceEvent.AgentRunEnded => e.copy(messages = Seq.empty)
+      case e: TraceEvent.AgentRunEnded => e.withMessages(Seq.empty)
       case other                       => other
     }
 

@@ -137,8 +137,8 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
-    val empty   = agentRunEnded.copy(messages = Seq.empty)
-    val failed  = agentRunEnded.copy(status = "failed")
+    val empty   = agentRunEnded.withMessages(Seq.empty)
+    val failed  = agentRunEnded.withStatus("failed")
 
     tracing.traceEvent(agentRunEnded) shouldBe Right(())
     tracing.traceEvent(empty) shouldBe Right(())

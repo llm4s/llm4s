@@ -666,58 +666,6 @@ object StabilityTiers {
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.AgentInitialized",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.AgentRunEnded",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.CacheHit",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.CacheMiss",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.CompletionReceived",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.CostRecorded",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.CustomEvent",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.EmbeddingUsageRecorded",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.ErrorOccurred",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.ImageGenerationCompleted",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.RAGOperationCompleted",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.TokenUsageRecorded",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.trace.TraceEvent.ToolExecuted",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
     GrowthExempt(
       "org.llm4s.util.SecretPatterns.SecretMatch",

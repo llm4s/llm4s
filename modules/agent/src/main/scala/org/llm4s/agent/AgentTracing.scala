@@ -79,7 +79,7 @@ final private[agent] class AgentTracing(
       startedAt.compareAndSet(None, Some(record.timestamp)): Unit
       if incarnated.compareAndSet(false, true) then
         runSpan = AgentTraceSpans.run(handle.threadId, handle.runId, Some(record.token), continues)
-      trace(AgentTracing.toTrace(record).copy(span = Some(placement(event, record))))
+      trace(AgentTracing.toTrace(record).withSpan(placement(event, record)))
       event match
         case AgentEvents.ModelCallCompleted(m) =>
           usage.updateAndGet(
@@ -229,7 +229,7 @@ private[agent] object AgentTracing:
     val traced = TracingSubscriber.toTrace(record)
     record.event match
       case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) || SubagentEvents.durable(name) =>
-        traced.copy(name = name)
+        traced.withName(name)
       case _ => traced
 
   private def stateOf(result: RunResult[TurnOutput]): ThreadState = result match

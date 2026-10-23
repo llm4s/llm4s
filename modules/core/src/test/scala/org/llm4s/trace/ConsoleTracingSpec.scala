@@ -105,7 +105,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace an agent run that ended with usage" in {
     val tracing = new ConsoleTracing()
-    val event   = ended("failed", Seq.empty).copy(usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None))
+    val event   = ended("failed", Seq.empty).withUsage(UsageSummary().add("m", TokenUsage(1, 2, 3), None))
 
     noException should be thrownBy tracing.traceEvent(event)
   }

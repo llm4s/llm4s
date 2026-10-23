@@ -19,9 +19,15 @@ import scala.concurrent.duration.FiniteDuration
  * to limit payload size.
  *
  * == Timestamp default ==
- * Every case class defaults `timestamp` to `Instant.now()` at construction
- * time.  Override explicitly when replaying historical events or writing
- * deterministic tests.
+ * Every event's companion `apply` defaults `timestamp` to `Instant.now()` at
+ * construction time.  Override explicitly when replaying historical events or
+ * writing deterministic tests.
+ *
+ * == Growth safety ==
+ * Each event is a `final case class` with a private constructor and `copy`:
+ * build one with its companion `apply` and change a field with its `with*`
+ * setter (an `Option` field's setter takes the value or an `Option`), so a
+ * field can be added later without breaking binary compatibility.
  *
  * @see [[Tracing]] for the interface that consumes these events
  */
@@ -42,11 +48,15 @@ sealed trait TraceEvent {
 
 object TraceEvent {
 
-  case class AgentInitialized(
+  final case class AgentInitialized private (
     query: String,
     tools: Vector[String],
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withQuery(query: String): AgentInitialized          = copy(query = query)
+    def withTools(tools: Vector[String]): AgentInitialized  = copy(tools = tools)
+    def withTimestamp(timestamp: Instant): AgentInitialized = copy(timestamp = timestamp)
+
     def eventType: String = "agent_initialized"
     def toJson: ujson.Value = ujson.Obj(
       "event_type" -> eventType,
@@ -56,13 +66,28 @@ object TraceEvent {
     )
   }
 
-  case class CompletionReceived(
+  object AgentInitialized {
+    def apply(
+      query: String,
+      tools: Vector[String],
+      timestamp: Instant = Instant.now()
+    ): AgentInitialized =
+      new AgentInitialized(query, tools, timestamp)
+  }
+
+  final case class CompletionReceived private (
     id: String,
     model: String,
     toolCalls: Int,
     content: String,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withId(id: String): CompletionReceived                = copy(id = id)
+    def withModel(model: String): CompletionReceived          = copy(model = model)
+    def withToolCalls(toolCalls: Int): CompletionReceived     = copy(toolCalls = toolCalls)
+    def withContent(content: String): CompletionReceived      = copy(content = content)
+    def withTimestamp(timestamp: Instant): CompletionReceived = copy(timestamp = timestamp)
+
     def eventType: String = "completion_received"
     def toJson: ujson.Value = ujson.Obj(
       "event_type"    -> eventType,
@@ -74,14 +99,32 @@ object TraceEvent {
     )
   }
 
-  case class ToolExecuted(
+  object CompletionReceived {
+    def apply(
+      id: String,
+      model: String,
+      toolCalls: Int,
+      content: String,
+      timestamp: Instant = Instant.now()
+    ): CompletionReceived =
+      new CompletionReceived(id, model, toolCalls, content, timestamp)
+  }
+
+  final case class ToolExecuted private (
     name: String,
     input: String,
     output: String,
     duration: FiniteDuration,
     success: Boolean,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withName(name: String): ToolExecuted                 = copy(name = name)
+    def withInput(input: String): ToolExecuted               = copy(input = input)
+    def withOutput(output: String): ToolExecuted             = copy(output = output)
+    def withDuration(duration: FiniteDuration): ToolExecuted = copy(duration = duration)
+    def withSuccess(success: Boolean): ToolExecuted          = copy(success = success)
+    def withTimestamp(timestamp: Instant): ToolExecuted      = copy(timestamp = timestamp)
+
     def eventType: String = "tool_executed"
     def toJson: ujson.Value = ujson.Obj(
       "event_type"  -> eventType,
@@ -94,12 +137,30 @@ object TraceEvent {
     )
   }
 
-  case class ErrorOccurred(
+  object ToolExecuted {
+    def apply(
+      name: String,
+      input: String,
+      output: String,
+      duration: FiniteDuration,
+      success: Boolean,
+      timestamp: Instant = Instant.now()
+    ): ToolExecuted =
+      new ToolExecuted(name, input, output, duration, success, timestamp)
+  }
+
+  final case class ErrorOccurred private (
     error: Throwable,
     context: String,
-    timestamp: Instant = Instant.now(),
-    override val span: Option[TraceSpan] = None
+    timestamp: Instant,
+    override val span: Option[TraceSpan]
   ) extends TraceEvent {
+    def withError(error: Throwable): ErrorOccurred       = copy(error = error)
+    def withContext(context: String): ErrorOccurred      = copy(context = context)
+    def withTimestamp(timestamp: Instant): ErrorOccurred = copy(timestamp = timestamp)
+    def withSpan(span: TraceSpan): ErrorOccurred         = copy(span = Some(span))
+    def withSpan(span: Option[TraceSpan]): ErrorOccurred = copy(span = span)
+
     def eventType: String = "error_occurred"
     def toJson: ujson.Value = TraceSpan.annotate(
       ujson.Obj(
@@ -114,13 +175,30 @@ object TraceEvent {
     )
   }
 
-  case class TokenUsageRecorded(
+  object ErrorOccurred {
+    def apply(
+      error: Throwable,
+      context: String,
+      timestamp: Instant = Instant.now(),
+      span: Option[TraceSpan] = None
+    ): ErrorOccurred =
+      new ErrorOccurred(error, context, timestamp, span)
+  }
+
+  final case class TokenUsageRecorded private (
     usage: TokenUsage,
     model: String,
     operation: String,
-    timestamp: Instant = Instant.now(),
-    override val span: Option[TraceSpan] = None
+    timestamp: Instant,
+    override val span: Option[TraceSpan]
   ) extends TraceEvent {
+    def withUsage(usage: TokenUsage): TokenUsageRecorded      = copy(usage = usage)
+    def withModel(model: String): TokenUsageRecorded          = copy(model = model)
+    def withOperation(operation: String): TokenUsageRecorded  = copy(operation = operation)
+    def withTimestamp(timestamp: Instant): TokenUsageRecorded = copy(timestamp = timestamp)
+    def withSpan(span: TraceSpan): TokenUsageRecorded         = copy(span = Some(span))
+    def withSpan(span: Option[TraceSpan]): TokenUsageRecorded = copy(span = span)
+
     def eventType: String = "token_usage_recorded"
     def toJson: ujson.Value = TraceSpan.annotate(
       ujson.Obj(
@@ -134,6 +212,17 @@ object TraceEvent {
       ),
       span
     )
+  }
+
+  object TokenUsageRecorded {
+    def apply(
+      usage: TokenUsage,
+      model: String,
+      operation: String,
+      timestamp: Instant = Instant.now(),
+      span: Option[TraceSpan] = None
+    ): TokenUsageRecorded =
+      new TokenUsageRecorded(usage, model, operation, timestamp, span)
   }
 
   /**
@@ -158,18 +247,32 @@ object TraceEvent {
    * @param span     the run's own span (design 4.58): its context, its parent - a child run's is the `task` tool call
    *                 that started it, a continued run's the context it continued - and when the run started
    */
-  case class AgentRunEnded(
+  final case class AgentRunEnded private (
     threadId: String,
     runId: String,
     agent: String,
     status: String,
     messages: Seq[Message],
     usage: UsageSummary,
-    timestamp: Instant = Instant.now(),
-    parentThreadId: Option[String] = None,
-    parentRunId: Option[String] = None,
-    override val span: Option[TraceSpan] = None
+    timestamp: Instant,
+    parentThreadId: Option[String],
+    parentRunId: Option[String],
+    override val span: Option[TraceSpan]
   ) extends TraceEvent {
+    def withThreadId(threadId: String): AgentRunEnded                     = copy(threadId = threadId)
+    def withRunId(runId: String): AgentRunEnded                           = copy(runId = runId)
+    def withAgent(agent: String): AgentRunEnded                           = copy(agent = agent)
+    def withStatus(status: String): AgentRunEnded                         = copy(status = status)
+    def withMessages(messages: Seq[Message]): AgentRunEnded               = copy(messages = messages)
+    def withUsage(usage: UsageSummary): AgentRunEnded                     = copy(usage = usage)
+    def withTimestamp(timestamp: Instant): AgentRunEnded                  = copy(timestamp = timestamp)
+    def withParentThreadId(parentThreadId: String): AgentRunEnded         = copy(parentThreadId = Some(parentThreadId))
+    def withParentThreadId(parentThreadId: Option[String]): AgentRunEnded = copy(parentThreadId = parentThreadId)
+    def withParentRunId(parentRunId: String): AgentRunEnded               = copy(parentRunId = Some(parentRunId))
+    def withParentRunId(parentRunId: Option[String]): AgentRunEnded       = copy(parentRunId = parentRunId)
+    def withSpan(span: TraceSpan): AgentRunEnded                          = copy(span = Some(span))
+    def withSpan(span: Option[TraceSpan]): AgentRunEnded                  = copy(span = span)
+
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
       val json = ujson.Obj(
@@ -190,12 +293,34 @@ object TraceEvent {
     }
   }
 
-  case class CustomEvent(
+  object AgentRunEnded {
+    def apply(
+      threadId: String,
+      runId: String,
+      agent: String,
+      status: String,
+      messages: Seq[Message],
+      usage: UsageSummary,
+      timestamp: Instant = Instant.now(),
+      parentThreadId: Option[String] = None,
+      parentRunId: Option[String] = None,
+      span: Option[TraceSpan] = None
+    ): AgentRunEnded =
+      new AgentRunEnded(threadId, runId, agent, status, messages, usage, timestamp, parentThreadId, parentRunId, span)
+  }
+
+  final case class CustomEvent private (
     name: String,
     data: ujson.Value,
-    timestamp: Instant = Instant.now(),
-    override val span: Option[TraceSpan] = None
+    timestamp: Instant,
+    override val span: Option[TraceSpan]
   ) extends TraceEvent {
+    def withName(name: String): CustomEvent            = copy(name = name)
+    def withData(data: ujson.Value): CustomEvent       = copy(data = data)
+    def withTimestamp(timestamp: Instant): CustomEvent = copy(timestamp = timestamp)
+    def withSpan(span: TraceSpan): CustomEvent         = copy(span = Some(span))
+    def withSpan(span: Option[TraceSpan]): CustomEvent = copy(span = span)
+
     def eventType: String = "custom_event"
     def toJson: ujson.Value = TraceSpan.annotate(
       ujson.Obj(
@@ -208,6 +333,16 @@ object TraceEvent {
     )
   }
 
+  object CustomEvent {
+    def apply(
+      name: String,
+      data: ujson.Value,
+      timestamp: Instant = Instant.now(),
+      span: Option[TraceSpan] = None
+    ): CustomEvent =
+      new CustomEvent(name, data, timestamp, span)
+  }
+
   /**
    * Tracks embedding token usage for cost analysis.
    *
@@ -216,13 +351,19 @@ object TraceEvent {
    * @param operation Type of operation: "indexing", "query", "evaluation"
    * @param inputCount Number of texts embedded in this operation
    */
-  case class EmbeddingUsageRecorded(
+  final case class EmbeddingUsageRecorded private (
     usage: EmbeddingUsage,
     model: String,
     operation: String,
     inputCount: Int,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withUsage(usage: EmbeddingUsage): EmbeddingUsageRecorded  = copy(usage = usage)
+    def withModel(model: String): EmbeddingUsageRecorded          = copy(model = model)
+    def withOperation(operation: String): EmbeddingUsageRecorded  = copy(operation = operation)
+    def withInputCount(inputCount: Int): EmbeddingUsageRecorded   = copy(inputCount = inputCount)
+    def withTimestamp(timestamp: Instant): EmbeddingUsageRecorded = copy(timestamp = timestamp)
+
     def eventType: String = "embedding_usage_recorded"
     def toJson: ujson.Value = ujson.Obj(
       "event_type"    -> eventType,
@@ -235,6 +376,17 @@ object TraceEvent {
     )
   }
 
+  object EmbeddingUsageRecorded {
+    def apply(
+      usage: EmbeddingUsage,
+      model: String,
+      operation: String,
+      inputCount: Int,
+      timestamp: Instant = Instant.now()
+    ): EmbeddingUsageRecorded =
+      new EmbeddingUsageRecorded(usage, model, operation, inputCount, timestamp)
+  }
+
   /**
    * Tracks cost in USD for any model operation.
    *
@@ -244,14 +396,21 @@ object TraceEvent {
    * @param tokenCount Total tokens consumed
    * @param costType Category: "embedding", "completion", "total"
    */
-  case class CostRecorded(
+  final case class CostRecorded private (
     costUsd: Double,
     model: String,
     operation: String,
     tokenCount: Int,
     costType: String,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withCostUsd(costUsd: Double): CostRecorded      = copy(costUsd = costUsd)
+    def withModel(model: String): CostRecorded          = copy(model = model)
+    def withOperation(operation: String): CostRecorded  = copy(operation = operation)
+    def withTokenCount(tokenCount: Int): CostRecorded   = copy(tokenCount = tokenCount)
+    def withCostType(costType: String): CostRecorded    = copy(costType = costType)
+    def withTimestamp(timestamp: Instant): CostRecorded = copy(timestamp = timestamp)
+
     def eventType: String = "cost_recorded"
     def toJson: ujson.Value = ujson.Obj(
       "event_type"  -> eventType,
@@ -264,6 +423,18 @@ object TraceEvent {
     )
   }
 
+  object CostRecorded {
+    def apply(
+      costUsd: Double,
+      model: String,
+      operation: String,
+      tokenCount: Int,
+      costType: String,
+      timestamp: Instant = Instant.now()
+    ): CostRecorded =
+      new CostRecorded(costUsd, model, operation, tokenCount, costType, timestamp)
+  }
+
   /**
    * Tracks completion of a RAG operation with full metrics.
    *
@@ -274,15 +445,31 @@ object TraceEvent {
    * @param llmCompletionTokens Optional completion tokens for LLM operations
    * @param totalCostUsd Optional accumulated cost in USD
    */
-  case class RAGOperationCompleted(
+  final case class RAGOperationCompleted private (
     operation: String,
     duration: FiniteDuration,
-    embeddingTokens: Option[Int] = None,
-    llmPromptTokens: Option[Int] = None,
-    llmCompletionTokens: Option[Int] = None,
-    totalCostUsd: Option[Double] = None,
-    timestamp: Instant = Instant.now()
+    embeddingTokens: Option[Int],
+    llmPromptTokens: Option[Int],
+    llmCompletionTokens: Option[Int],
+    totalCostUsd: Option[Double],
+    timestamp: Instant
   ) extends TraceEvent {
+    def withOperation(operation: String): RAGOperationCompleted          = copy(operation = operation)
+    def withDuration(duration: FiniteDuration): RAGOperationCompleted    = copy(duration = duration)
+    def withEmbeddingTokens(embeddingTokens: Int): RAGOperationCompleted = copy(embeddingTokens = Some(embeddingTokens))
+    def withEmbeddingTokens(embeddingTokens: Option[Int]): RAGOperationCompleted =
+      copy(embeddingTokens = embeddingTokens)
+    def withLlmPromptTokens(llmPromptTokens: Int): RAGOperationCompleted = copy(llmPromptTokens = Some(llmPromptTokens))
+    def withLlmPromptTokens(llmPromptTokens: Option[Int]): RAGOperationCompleted =
+      copy(llmPromptTokens = llmPromptTokens)
+    def withLlmCompletionTokens(llmCompletionTokens: Int): RAGOperationCompleted =
+      copy(llmCompletionTokens = Some(llmCompletionTokens))
+    def withLlmCompletionTokens(llmCompletionTokens: Option[Int]): RAGOperationCompleted =
+      copy(llmCompletionTokens = llmCompletionTokens)
+    def withTotalCostUsd(totalCostUsd: Double): RAGOperationCompleted         = copy(totalCostUsd = Some(totalCostUsd))
+    def withTotalCostUsd(totalCostUsd: Option[Double]): RAGOperationCompleted = copy(totalCostUsd = totalCostUsd)
+    def withTimestamp(timestamp: Instant): RAGOperationCompleted              = copy(timestamp = timestamp)
+
     def eventType: String = "rag_operation_completed"
     def toJson: ujson.Value = {
       val base = ujson.Obj(
@@ -299,6 +486,27 @@ object TraceEvent {
     }
   }
 
+  object RAGOperationCompleted {
+    def apply(
+      operation: String,
+      duration: FiniteDuration,
+      embeddingTokens: Option[Int] = None,
+      llmPromptTokens: Option[Int] = None,
+      llmCompletionTokens: Option[Int] = None,
+      totalCostUsd: Option[Double] = None,
+      timestamp: Instant = Instant.now()
+    ): RAGOperationCompleted =
+      new RAGOperationCompleted(
+        operation,
+        duration,
+        embeddingTokens,
+        llmPromptTokens,
+        llmCompletionTokens,
+        totalCostUsd,
+        timestamp
+      )
+  }
+
   /**
    * Tracks completion of an image generation operation.
    *
@@ -313,7 +521,7 @@ object TraceEvent {
    * @param success Whether the operation succeeded
    * @param errorMessage Error message if the operation failed
    */
-  case class ImageGenerationCompleted(
+  final case class ImageGenerationCompleted private (
     model: String,
     provider: String,
     operation: String,
@@ -321,11 +529,25 @@ object TraceEvent {
     size: String,
     quality: String,
     duration: FiniteDuration,
-    costUsd: Option[Double] = None,
-    success: Boolean = true,
-    errorMessage: Option[String] = None,
-    timestamp: Instant = Instant.now()
+    costUsd: Option[Double],
+    success: Boolean,
+    errorMessage: Option[String],
+    timestamp: Instant
   ) extends TraceEvent {
+    def withModel(model: String): ImageGenerationCompleted               = copy(model = model)
+    def withProvider(provider: String): ImageGenerationCompleted         = copy(provider = provider)
+    def withOperation(operation: String): ImageGenerationCompleted       = copy(operation = operation)
+    def withImageCount(imageCount: Int): ImageGenerationCompleted        = copy(imageCount = imageCount)
+    def withSize(size: String): ImageGenerationCompleted                 = copy(size = size)
+    def withQuality(quality: String): ImageGenerationCompleted           = copy(quality = quality)
+    def withDuration(duration: FiniteDuration): ImageGenerationCompleted = copy(duration = duration)
+    def withCostUsd(costUsd: Double): ImageGenerationCompleted           = copy(costUsd = Some(costUsd))
+    def withCostUsd(costUsd: Option[Double]): ImageGenerationCompleted   = copy(costUsd = costUsd)
+    def withSuccess(success: Boolean): ImageGenerationCompleted          = copy(success = success)
+    def withErrorMessage(errorMessage: String): ImageGenerationCompleted = copy(errorMessage = Some(errorMessage))
+    def withErrorMessage(errorMessage: Option[String]): ImageGenerationCompleted = copy(errorMessage = errorMessage)
+    def withTimestamp(timestamp: Instant): ImageGenerationCompleted              = copy(timestamp = timestamp)
+
     def eventType: String = "image_generation_completed"
     def toJson: ujson.Value = {
       val base = ujson.Obj(
@@ -346,14 +568,47 @@ object TraceEvent {
     }
   }
 
+  object ImageGenerationCompleted {
+    def apply(
+      model: String,
+      provider: String,
+      operation: String,
+      imageCount: Int,
+      size: String,
+      quality: String,
+      duration: FiniteDuration,
+      costUsd: Option[Double] = None,
+      success: Boolean = true,
+      errorMessage: Option[String] = None,
+      timestamp: Instant = Instant.now()
+    ): ImageGenerationCompleted =
+      new ImageGenerationCompleted(
+        model,
+        provider,
+        operation,
+        imageCount,
+        size,
+        quality,
+        duration,
+        costUsd,
+        success,
+        errorMessage,
+        timestamp
+      )
+  }
+
   /**
    * Cache hit event for semantic caching
    */
-  case class CacheHit(
+  final case class CacheHit private (
     similarity: Double,
     threshold: Double,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withSimilarity(similarity: Double): CacheHit = copy(similarity = similarity)
+    def withThreshold(threshold: Double): CacheHit   = copy(threshold = threshold)
+    def withTimestamp(timestamp: Instant): CacheHit  = copy(timestamp = timestamp)
+
     def eventType: String = "cache_hit"
     def toJson: ujson.Value = ujson.Obj(
       "event_type" -> eventType,
@@ -361,6 +616,15 @@ object TraceEvent {
       "similarity" -> similarity,
       "threshold"  -> threshold
     )
+  }
+
+  object CacheHit {
+    def apply(
+      similarity: Double,
+      threshold: Double,
+      timestamp: Instant = Instant.now()
+    ): CacheHit =
+      new CacheHit(similarity, threshold, timestamp)
   }
 
   /**
@@ -384,16 +648,27 @@ object TraceEvent {
   /**
    * Cache miss event for semantic caching
    */
-  case class CacheMiss(
+  final case class CacheMiss private (
     reason: CacheMissReason,
-    timestamp: Instant = Instant.now()
+    timestamp: Instant
   ) extends TraceEvent {
+    def withReason(reason: CacheMissReason): CacheMiss = copy(reason = reason)
+    def withTimestamp(timestamp: Instant): CacheMiss   = copy(timestamp = timestamp)
+
     def eventType: String = "cache_miss"
     def toJson: ujson.Value = ujson.Obj(
       "event_type" -> eventType,
       "timestamp"  -> timestamp.toString,
       "reason"     -> reason.value
     )
+  }
+
+  object CacheMiss {
+    def apply(
+      reason: CacheMissReason,
+      timestamp: Instant = Instant.now()
+    ): CacheMiss =
+      new CacheMiss(reason, timestamp)
   }
 
 }

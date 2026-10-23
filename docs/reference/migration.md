@@ -13,8 +13,9 @@ by what you use. The notes below are the per-change detail it links to. From 0.5
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708),
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
-[core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346)
-and [core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356);
+[core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346),
+[core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356)
+and [the `TraceEvent` cases](#traceevent-cases-are-growth-safe-2377);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
 ## Multimodal content parts (#1913)
@@ -497,6 +498,31 @@ private:
   `ModelUsage` are now `final`.
 
 Pattern matching (`case HttpResponse(status, body, headers)`) and the fields are unchanged.
+
+### `TraceEvent` cases are growth-safe (#2377)
+
+The thirteen `TraceEvent` cases - `AgentInitialized`, `CompletionReceived`, `ToolExecuted`, `ErrorOccurred`,
+`TokenUsageRecorded`, `AgentRunEnded`, `CustomEvent`, `EmbeddingUsageRecorded`, `CostRecorded`,
+`RAGOperationCompleted`, `ImageGenerationCompleted`, `CacheHit` and `CacheMiss` (`org.llm4s.trace`) - follow the
+growth-prone pattern ([#2377](https://github.com/llm4s/llm4s/issues/2377)). Each is a `final case class` whose
+constructor and `copy` are private:
+
+- **Construction is unchanged**: `TraceEvent.X(...)` with the same arguments, positional or named, and the same
+  defaults (`timestamp = Instant.now()`, `span = None`, and each optional metric `None`) still compiles. `new X(...)`
+  does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field, named `with<Field>` - `withTimestamp` on every case,
+  `withSpan` on the four that carry one, `withName` on `CustomEvent`, `withStatus`/`withMessages`/`withUsage` on
+  `AgentRunEnded`, and so on. An `Option` field's setter takes the value or an `Option` (`withSpan(span)`,
+  `withSpan(None)`).
+
+  ```scala
+  val renamed = event.withName("prefix_" + event.name)   // was event.copy(name = "prefix_" + event.name)
+  val placed  = event.withSpan(span)                     // was event.copy(span = Some(span))
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` instead of the constructor, and chain the setters.
+- The thirteen cases are now `final`. Pattern matching (`case TraceEvent.CacheHit(similarity, threshold, ts)`), the
+  fields and `toJson` are unchanged.
 
 ### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
 

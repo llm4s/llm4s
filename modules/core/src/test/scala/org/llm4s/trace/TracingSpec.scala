@@ -228,7 +228,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new TestTracing(events)
     val transformed = TracingComposer.transform(tracer) {
-      case e: TraceEvent.CustomEvent => e.copy(name = "transformed_" + e.name)
+      case e: TraceEvent.CustomEvent => e.withName("transformed_" + e.name)
       case other                     => other
     }
 
