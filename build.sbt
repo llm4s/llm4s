@@ -1392,7 +1392,9 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 // A small HTTP service - GET /health and GET /llm-check - for the staged-deployment workflow template
-// (.github/workflows/deploy-staged.yml) and the Kustomize manifests in deploy/ (#846). It is its own
+// (.github/workflows/deploy-staged.yml) and the Kustomize manifests in deploy/ (#846), grown into an example
+// agent service (design 4.60): runs submitted to the store's run queue, an AgentWorker in the same process,
+// events over SSE, readiness from the worker and SIGTERM draining. It is its own
 // module, not part of `samples`, so cask and a pinned main class do not land on the examples' classpath.
 // Unpublished: it is what a downstream project copies, so it depends on the library as a user's service
 // would, and builds its image with the Docker plugin like `workspaceRunner` does.
@@ -1404,6 +1406,12 @@ lazy val deployService = (project in file("modules/deploy-service"))
     anthropic,
     openai,
     openaiCompatible,
+    // the example agent service (design 4.60): the runtime, its run queue and worker, every store kind
+    // `llm4s.agent.checkpointer.kind` can name, and the Prometheus backend behind GET /metrics
+    agent,
+    agentCheckpointSqlite,
+    agentCheckpointPostgres,
+    observabilityPrometheus,
     providerTestkit % Test
   )
   .enablePlugins(JavaAppPackaging, DockerPlugin)
@@ -1422,8 +1430,9 @@ lazy val deployService = (project in file("modules/deploy-service"))
     ),
     appLogging,
     publish / skip := true,
-    // Measured 92.91% statement coverage (`sbt coverage deployService/test deployService/coverageReport`),
-    // by unit tests plus the real routes on a real server on an ephemeral port. The entry point
+    // Measured 94.33% statement coverage (`sbt coverage deployService/test deployService/coverageReport`),
+    // by unit tests plus the real routes on a real server on an ephemeral port, with the example agent service
+    // (design 4.60) over the in-memory store. The entry point
     // (`DeployServiceMain`) is excluded via ThisBuild / coverageExcludedPackages. Floor is the measured
     // value rounded down to the nearest 5. Never lower it.
     coverageFloor(90)
@@ -1949,7 +1958,9 @@ lazy val it = (project in file("modules/it"))
     testkit               % Test,
     agentCheckpointSqlite % Test,
     // the PostgreSQL checkpointer's contract, concurrency and cross-process suites (design 4.50)
-    agentCheckpointPostgres % Test
+    agentCheckpointPostgres % Test,
+    // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
+    deployService % Test
   )
   .settings(
     name := "llm4s-it",

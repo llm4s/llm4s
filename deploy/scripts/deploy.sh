@@ -118,8 +118,28 @@ check() {
     out="$(render "$env" "$image" "acme-$env" 7)"
     grep -q "replicas: 7" <<<"$out" || die "$env: REPLICAS did not override the overlay"
     grep -q "namespace: acme-$env" <<<"$out" || die "$env: NAMESPACE_PREFIX did not override the overlay"
+    grep -q "path: /ready" <<<"$out" || die "$env: the readiness probe is not the worker's /ready"
     echo "ok  $env"
   done
+  check_postgres
+}
+
+# The Postgres overlay (design 4.60) is applied by hand, not by the pipeline: three replicas on one database, its
+# settings from a generated ConfigMap and its credentials from a Secret the operator creates, never inline.
+check_postgres() {
+  local out
+  # shellcheck disable=SC2086  # KUSTOMIZE is a command with arguments
+  out="$($KUSTOMIZE "$ROOT/deploy/overlays/postgres")"
+  grep -q "replicas: 3" <<<"$out" || die "postgres: expected 3 replicas"
+  grep -q "LLM4S_CHECKPOINTER: postgres" <<<"$out" || die "postgres: the store is not postgres"
+  grep -q "LLM4S_CHECKPOINTER_POSTGRES_URL: jdbc:postgresql://" <<<"$out" || die "postgres: no database URL"
+  grep -q "name: llm4s-postgres-credentials" <<<"$out" || die "postgres: the credentials are not read from the Secret"
+  ! grep -qi "kind: Secret" <<<"$out" || die "postgres: a Secret is inlined in the overlay"
+  grep -q "fieldPath: metadata.name" <<<"$out" || die "postgres: the claim label is not the pod name"
+  grep -q "path: /ready" <<<"$out" || die "postgres: the readiness probe is not the worker's /ready"
+  grep -q "kind: PodDisruptionBudget" <<<"$out" || die "postgres: no PodDisruptionBudget"
+  grep -q "runAsNonRoot: true" <<<"$out" || die "postgres: the pod is not marked runAsNonRoot"
+  echo "ok  postgres"
 }
 
 deploy() {

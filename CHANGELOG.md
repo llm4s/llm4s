@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderDiscoveryFailure`, `ProviderIdCollision` and `ProviderRegistryReport` are growth-prone types: build them with
   `X(...)` and change them with `with*`; `new` and `.copy` are private;
   [migration](docs/reference/migration.md#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379).
+- The tool schemas (`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`),
+  `PropertyDefinition`, `SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` are growth-prone types: build
+  them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are
+  `final`. `SafeParameterExtractor`'s Java constructor is now `SafeParameterExtractor.apply(params)`;
+  [migration](docs/reference/migration.md#tool-schemas-and-tool-call-types-are-growth-safe-2381).
 - The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
   `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
   `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are
@@ -139,6 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
 - **Added** run, claim, commit, child-task and run-queue metrics (`org.llm4s.agent.metrics`: `MeteredCheckpointer`, `AgentWorker(metrics = ...)`,
   `RunQueue.depth`), exported by Prometheus and Micrometer through core's new generic `Metric` and `MetricsCollector.increment`/`observe`/`set` ([#2138](https://github.com/llm4s/llm4s/issues/2138), [design 4.59](docs/design/typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md)).
+- **Added** an example agent service in `modules/deploy-service` (unpublished): submit, follow over SSE, cancel and list runs
+  on the store's run queue with an in-process `AgentWorker`, plus a three-replica Postgres overlay in `deploy/` ([#2139](https://github.com/llm4s/llm4s/issues/2139), [design 4.60](docs/design/typed-agent-runtime/4.60-stage-5-slice-p1-example-service-and-a-three-instance-deployment.md)).
 
 ### Agent harness (Phase 3)
 
