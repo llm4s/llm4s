@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are
   `final`. `SafeParameterExtractor`'s Java constructor is now `SafeParameterExtractor.apply(params)`;
   [migration](docs/reference/migration.md#tool-schemas-and-tool-call-types-are-growth-safe-2381).
+- `ToolCallError.UnknownFunction` and `ToolParameterError.MissingParameter` are growth-prone types: build them with
+  `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`. Pattern matching and
+  `ToolCallErrorJson` are unchanged. The other `ToolCallError` and `ToolParameterError` cases stay closed records;
+  [migration](docs/reference/migration.md#toolcallerror-and-toolparametererror-cases-2382).
 - The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
   `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
   `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are

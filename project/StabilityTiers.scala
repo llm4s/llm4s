@@ -516,24 +516,20 @@ object StabilityTiers {
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.ExecutionError",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and the exception it threw"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.HandlerError",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and its handler's error message"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.InvalidArguments",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and its parameter errors, which carry the detail"
     ),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.NullArguments", "an error case holding only the tool name"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.Timeout",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.ToolCallError.UnknownFunction",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and the timeout it exceeded"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
@@ -541,11 +537,7 @@ object StabilityTiers {
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.ToolParameterError.MissingParameter",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming the parameter, its parent path and the parent type found"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.MultipleErrors",
@@ -553,11 +545,11 @@ object StabilityTiers {
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.NullParameter",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming only the null parameter and its expected type"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming only the parameter, its expected type and the type received"
     ),
     GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
     GrowthExempt(

@@ -608,6 +608,31 @@ private:
 
 Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchanged.
 
+### `ToolCallError` and `ToolParameterError` cases (#2382)
+
+`ToolCallError.UnknownFunction` and `ToolParameterError.MissingParameter` (`org.llm4s.toolapi`) follow the growth-prone
+pattern ([#2382](https://github.com/llm4s/llm4s/issues/2382)): each carries a self-correction hint that may gain company
+(suggested names, say), so each is a `final case class` whose constructor and `copy` are private.
+
+- **Construction is unchanged**: `ToolCallError.UnknownFunction("x")`, `UnknownFunction("x", Seq("a", "b"))` and
+  `ToolParameterError.MissingParameter("p", "string")` still compile with the same defaults. `new X(...)` does not; drop
+  the `new`.
+- **Replace `.copy` with a setter**:
+
+  | Type | Setters |
+  |---|---|
+  | `ToolCallError.UnknownFunction` | `withToolName`, `withAvailableTools` |
+  | `ToolParameterError.MissingParameter` | `withParameterName`, `withExpectedType`, `withAvailableParameters` |
+
+  ```scala
+  val hinted = err.withAvailableTools(registry.tools.map(_.name)) // was err.copy(availableTools = ...)
+  ```
+
+Pattern matching (`case UnknownFunction(name, available)`) and the `ToolCallErrorJson` payloads are unchanged. The other
+cases (`ExecutionError`, `HandlerError`, `InvalidArguments`, `Timeout`, `NullArguments`, `Cancelled`, `NullParameter`,
+`TypeMismatch`, `InvalidNesting`, `MultipleErrors`) are closed records whose fields name exactly what went wrong; they
+are unchanged.
+
 ### Context types are growth-safe (#2380)
 
 `CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`, `ConversationWindow`, `TokenUsageInfo`,

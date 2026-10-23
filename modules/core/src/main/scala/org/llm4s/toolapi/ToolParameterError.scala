@@ -23,10 +23,10 @@ object ToolParameterError {
    * @param expectedType the expected type of the parameter
    * @param availableParameters list of parameter names that were provided (hint for self-correction)
    */
-  case class MissingParameter(
+  final case class MissingParameter private (
     parameterName: String,
     expectedType: String,
-    availableParameters: List[String] = Nil
+    availableParameters: List[String]
   ) extends ToolParameterError {
     def getMessage: String = {
       val available = if (availableParameters.nonEmpty) {
@@ -34,6 +34,27 @@ object ToolParameterError {
       } else ""
       s"required parameter '$parameterName' (type: $expectedType) is missing$available"
     }
+
+    /** Replace the name of the missing parameter. */
+    def withParameterName(parameterName: String): MissingParameter = copy(parameterName = parameterName)
+
+    /** Replace the expected type of the missing parameter. */
+    def withExpectedType(expectedType: String): MissingParameter = copy(expectedType = expectedType)
+
+    /** Replace the names of the parameters that were provided (a hint for self-correction). */
+    def withAvailableParameters(availableParameters: List[String]): MissingParameter =
+      copy(availableParameters = availableParameters)
+  }
+
+  object MissingParameter {
+
+    /** Creates a [[MissingParameter]]; `availableParameters` defaults to none. */
+    def apply(
+      parameterName: String,
+      expectedType: String,
+      availableParameters: List[String] = Nil
+    ): MissingParameter =
+      new MissingParameter(parameterName, expectedType, availableParameters)
   }
 
   /**
@@ -134,14 +155,27 @@ object ToolCallError {
   /**
    * Tool function doesn't exist
    */
-  case class UnknownFunction(
+  final case class UnknownFunction private (
     toolName: String,
-    availableTools: Seq[String] = Seq.empty
+    availableTools: Seq[String]
   ) extends ToolCallError {
     def getMessage: String = {
       val toolsInfo = if (availableTools.nonEmpty) s" Available tools: [${availableTools.mkString(", ")}]." else ""
       s"is not a recognized tool.$toolsInfo Check the tool name matches exactly (case-sensitive)."
     }
+
+    /** Replace the name of the tool that was not found. */
+    def withToolName(toolName: String): UnknownFunction = copy(toolName = toolName)
+
+    /** Replace the names of the tools that are registered (a hint for self-correction). */
+    def withAvailableTools(availableTools: Seq[String]): UnknownFunction = copy(availableTools = availableTools)
+  }
+
+  object UnknownFunction {
+
+    /** Creates an [[UnknownFunction]]; `availableTools` defaults to none. */
+    def apply(toolName: String, availableTools: Seq[String] = Seq.empty): UnknownFunction =
+      new UnknownFunction(toolName, availableTools)
   }
 
   /**
