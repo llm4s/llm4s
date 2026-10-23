@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProviderDiscoveryFailure`, `ProviderIdCollision` and `ProviderRegistryReport` are growth-prone types: build them with
   `X(...)` and change them with `with*`; `new` and `.copy` are private;
   [migration](docs/reference/migration.md#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379).
+- The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
+  `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
+  `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are
+  private, and the classes are `final`;
+  [migration](docs/reference/migration.md#context-types-are-growth-safe-2380).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive

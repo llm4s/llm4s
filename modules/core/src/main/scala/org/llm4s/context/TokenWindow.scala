@@ -194,14 +194,38 @@ object TokenWindow {
  * Result of token window processing
  */
 @Stable
-case class ConversationWindow(
+final case class ConversationWindow private (
   conversation: Conversation,
   usage: TokenUsageInfo,
   wasTrimmed: Boolean,
   removedMessageCount: Int
-)
+) {
+
+  /** Sets the conversation after trimming. */
+  def withConversation(conversation: Conversation): ConversationWindow = copy(conversation = conversation)
+
+  /** Sets the token usage of the trimmed conversation. */
+  def withUsage(usage: TokenUsageInfo): ConversationWindow = copy(usage = usage)
+
+  /** Sets whether any messages were removed. */
+  def withWasTrimmed(wasTrimmed: Boolean): ConversationWindow = copy(wasTrimmed = wasTrimmed)
+
+  /** Sets how many messages were removed. */
+  def withRemovedMessageCount(removedMessageCount: Int): ConversationWindow =
+    copy(removedMessageCount = removedMessageCount)
+}
 
 object ConversationWindow {
+
+  /** Creates a [[ConversationWindow]]. */
+  def apply(
+    conversation: Conversation,
+    usage: TokenUsageInfo,
+    wasTrimmed: Boolean,
+    removedMessageCount: Int
+  ): ConversationWindow =
+    new ConversationWindow(conversation, usage, wasTrimmed, removedMessageCount)
+
   def noTrimming(conversation: Conversation, usage: TokenUsageInfo): ConversationWindow =
     ConversationWindow(conversation, usage, wasTrimmed = false, removedMessageCount = 0)
 
@@ -213,7 +237,7 @@ object ConversationWindow {
  * Token usage information for monitoring and debugging
  */
 @Stable
-case class TokenUsageInfo(
+final case class TokenUsageInfo private (
   currentTokens: Int,
   budgetLimit: TokenBudget,
   withinBudget: Boolean,
@@ -221,4 +245,29 @@ case class TokenUsageInfo(
 ) {
   def summary: String =
     f"$currentTokens/$budgetLimit tokens ($utilizationPercentage%%)"
+
+  /** Sets the tokens currently used. */
+  def withCurrentTokens(currentTokens: Int): TokenUsageInfo = copy(currentTokens = currentTokens)
+
+  /** Sets the token budget. */
+  def withBudgetLimit(budgetLimit: TokenBudget): TokenUsageInfo = copy(budgetLimit = budgetLimit)
+
+  /** Sets whether the usage fits the budget. */
+  def withWithinBudget(withinBudget: Boolean): TokenUsageInfo = copy(withinBudget = withinBudget)
+
+  /** Sets the budget utilisation, in percent. */
+  def withUtilizationPercentage(utilizationPercentage: Int): TokenUsageInfo =
+    copy(utilizationPercentage = utilizationPercentage)
+}
+
+object TokenUsageInfo {
+
+  /** Creates a [[TokenUsageInfo]]. */
+  def apply(
+    currentTokens: Int,
+    budgetLimit: TokenBudget,
+    withinBudget: Boolean,
+    utilizationPercentage: Int
+  ): TokenUsageInfo =
+    new TokenUsageInfo(currentTokens, budgetLimit, withinBudget, utilizationPercentage)
 }

@@ -133,12 +133,26 @@ object SemanticBlocks {
  * @param expectingAssistantResponse True if the block is incomplete (awaiting response)
  */
 @Stable
-case class SemanticBlock(
+final case class SemanticBlock private (
   id: SemanticBlockId,
   messages: Seq[Message],
   blockType: SemanticBlockType,
-  expectingAssistantResponse: Boolean = false
+  expectingAssistantResponse: Boolean
 ) {
+
+  /** Sets the block identifier. */
+  def withId(id: SemanticBlockId): SemanticBlock = copy(id = id)
+
+  /** Sets the messages in the block. */
+  def withMessages(messages: Seq[Message]): SemanticBlock = copy(messages = messages)
+
+  /** Sets the block classification. */
+  def withBlockType(blockType: SemanticBlockType): SemanticBlock = copy(blockType = blockType)
+
+  /** Sets whether the block awaits an assistant response. */
+  def withExpectingAssistantResponse(expectingAssistantResponse: Boolean): SemanticBlock =
+    copy(expectingAssistantResponse = expectingAssistantResponse)
+
   def addAssistantMessage(msg: AssistantMessage): SemanticBlock =
     copy(messages = messages :+ msg, expectingAssistantResponse = false)
 
@@ -163,6 +177,16 @@ case class SemanticBlock(
 }
 
 object SemanticBlock {
+
+  /** Creates a [[SemanticBlock]]; `expectingAssistantResponse` defaults to `false`. */
+  def apply(
+    id: SemanticBlockId,
+    messages: Seq[Message],
+    blockType: SemanticBlockType,
+    expectingAssistantResponse: Boolean = false
+  ): SemanticBlock =
+    new SemanticBlock(id, messages, blockType, expectingAssistantResponse)
+
   def startUserBlock(userMsg: UserMessage): SemanticBlock =
     SemanticBlock(
       id = SemanticBlockId.generate(),
