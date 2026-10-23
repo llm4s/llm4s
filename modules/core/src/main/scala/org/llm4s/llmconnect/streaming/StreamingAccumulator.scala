@@ -19,14 +19,17 @@ import scala.collection.mutable
 @Stable
 final class StreamingAccumulator private () {
 
-  private val contentBuilder               = new StringBuilder()
-  private val thinkingBuilder              = new StringBuilder()
-  private val toolCalls                    = mutable.ArrayBuffer[ToolCall]()
-  private var messageId: Option[String]    = None
-  private var finishReason: Option[String] = None
-  private var promptTokens: Int            = 0
-  private var completionTokens: Int        = 0
-  private var thinkingTokens: Int          = 0
+  private val contentBuilder                   = new StringBuilder()
+  private val thinkingBuilder                  = new StringBuilder()
+  private val toolCalls                        = mutable.ArrayBuffer[ToolCall]()
+  private var messageId: Option[String]        = None
+  private var finishReason: Option[String]     = None
+  private var promptTokens: Int                = 0
+  private var completionTokens: Int            = 0
+  private var thinkingTokens: Int              = 0
+  private var cachedTokens: Option[Int]        = None
+  private var cacheCreationTokens: Option[Int] = None
+  private var reportedTotal: Option[Int]       = None
 
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
@@ -143,9 +146,17 @@ final class StreamingAccumulator private () {
     ).withThinking(thinkingBuilder.toString)
 
     val thinkingTokensOpt = if (thinkingTokens > 0) Some(thinkingTokens) else None
-    val usage = if (promptTokens > 0 || completionTokens > 0 || thinkingTokens > 0) {
+    val anyCacheTokens    = cachedTokens.exists(_ > 0) || cacheCreationTokens.exists(_ > 0)
+    val usage = if (promptTokens > 0 || completionTokens > 0 || thinkingTokens > 0 || anyCacheTokens) {
       Some(
-        TokenUsage(promptTokens, completionTokens, promptTokens + completionTokens + thinkingTokens, thinkingTokensOpt)
+        TokenUsage(
+          promptTokens = promptTokens,
+          completionTokens = completionTokens,
+          totalTokens = reportedTotal.getOrElse(promptTokens + completionTokens + thinkingTokens),
+          thinkingTokens = thinkingTokensOpt,
+          cachedTokens = cachedTokens,
+          cacheCreationTokens = cacheCreationTokens
+        )
       )
     } else None
 
@@ -162,20 +173,52 @@ final class StreamingAccumulator private () {
   }
 
   /**
-   * Update token counts
+   * Update the prompt and completion token counts.
+   *
+   * The completion's total becomes their sum plus any thinking tokens; cache counts set by
+   * [[updateUsage]] are kept. Use [[updateUsage]] when the provider reports more than these two.
    */
   def updateTokens(prompt: Int, completion: Int): Unit = {
     promptTokens = prompt
     completionTokens = completion
+    reportedTotal = None
   }
 
   /**
-   * Update token counts including thinking tokens
+   * Update token counts including thinking tokens.
+   *
+   * The completion's total becomes their sum; cache counts set by [[updateUsage]] are kept.
    */
   def updateTokensWithThinking(prompt: Int, completion: Int, thinking: Int): Unit = {
     promptTokens = prompt
     completionTokens = completion
     thinkingTokens = thinking
+    reportedTotal = None
+  }
+
+  /**
+   * Merge a provider's usage report into the accumulated usage, every [[TokenUsage]] field
+   * included, so a streamed [[Completion]] reports what a non-streaming one does.
+   *
+   * Call it once per usage report the stream carries. Each field follows the latest report that
+   * states it: `promptTokens` and `completionTokens` when positive, the `Option` fields
+   * (`thinkingTokens`, `cachedTokens`, `cacheCreationTokens`) when defined, and `totalTokens`
+   * when positive. A field a report leaves at zero or `None` keeps its earlier value, so a
+   * provider that splits its usage across events (input and cache counts first, output last)
+   * can pass each part as it arrives. When no report states a total, the completion's total is
+   * prompt plus completion plus thinking tokens.
+   *
+   * @param usage the usage as the provider reported it, in llm4s's terms: `thinkingTokens` the
+   *              reasoning tokens, `cachedTokens` the prompt tokens read from the provider's
+   *              prompt cache, `cacheCreationTokens` those written to it
+   */
+  def updateUsage(usage: TokenUsage): Unit = {
+    if (usage.promptTokens > 0) promptTokens = usage.promptTokens
+    if (usage.completionTokens > 0) completionTokens = usage.completionTokens
+    usage.thinkingTokens.foreach(t => thinkingTokens = t)
+    usage.cachedTokens.foreach(c => cachedTokens = Some(c))
+    usage.cacheCreationTokens.foreach(c => cacheCreationTokens = Some(c))
+    if (usage.totalTokens > 0) reportedTotal = Some(usage.totalTokens)
   }
 
   /**
@@ -191,6 +234,9 @@ final class StreamingAccumulator private () {
     promptTokens = 0
     completionTokens = 0
     thinkingTokens = 0
+    cachedTokens = None
+    cacheCreationTokens = None
+    reportedTotal = None
   }
 
   /**

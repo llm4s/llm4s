@@ -43,6 +43,11 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
        | "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""".stripMargin
 
+  private val thinkingCachedBody =
+    """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
+       | "usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":40,
+       | "cachedContentTokenCount":64,"totalTokenCount":145}}""".stripMargin
+
   // ============================================================
   // complete() tests
   // ============================================================
@@ -70,6 +75,21 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     usage.promptTokens shouldBe 10
     usage.completionTokens shouldBe 5
     usage.totalTokens shouldBe 15
+  }
+
+  it should "report thinking and cached tokens from usageMetadata (#2348)" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(thinkingCachedBody)))
+
+    mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()).toOption.value.usage shouldBe Some(
+      TokenUsage(
+        promptTokens = 100,
+        completionTokens = 5,
+        totalTokens = 145,
+        thinkingTokens = Some(40),
+        cachedTokens = Some(64)
+      )
+    )
   }
 
   it should "parse a tool call response" in {
@@ -373,6 +393,32 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val usage = result.toOption.get.usage.get
     usage.promptTokens shouldBe 5
     usage.completionTokens shouldBe 2
+  }
+
+  it should "report thinking and cached tokens from the stream's usageMetadata (#2348)" in {
+    // each chunk reports the usage so far; the last report is the stream's usage
+    val sseData =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Do\"}]}}]," +
+        "\"usageMetadata\":{\"promptTokenCount\":100,\"cachedContentTokenCount\":64,\"totalTokenCount\":100}}\n" +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ne\"}]},\"finishReason\":\"STOP\"}]," +
+        "\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":40," +
+        "\"cachedContentTokenCount\":64,\"totalTokenCount\":145}}\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.value
+    completion.content shouldBe "Done"
+    completion.usage shouldBe Some(
+      TokenUsage(
+        promptTokens = 100,
+        completionTokens = 5,
+        totalTokens = 145,
+        thinkingTokens = Some(40),
+        cachedTokens = Some(64)
+      )
+    )
   }
 
   it should "record provider exchanges for streaming responses when logging is enabled" in {

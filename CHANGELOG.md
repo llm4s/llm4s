@@ -161,6 +161,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Retry-After`: `ensureSuccess` reads `x-request-id` / `request-id` / `x-amzn-requestid` / `apim-request-id` and a
   `Retry-After` of delta-seconds or an HTTP-date into the `ServiceError`, and `mapServiceError` keeps both, so the
   model listers' errors carry the provider's correlation id and retry hint [#2266](https://github.com/llm4s/llm4s/issues/2266).
+- **Fixed** streamed `TokenUsage` losing cached and thinking tokens: the provider SPI's `StreamingAccumulator` gains
+  `updateUsage(TokenUsage)`, which merges every field (prompt, completion, thinking, `cachedTokens`,
+  `cacheCreationTokens` and the provider's total) and which `toCompletion` reports; `updateTokens` and
+  `updateTokensWithThinking` are unchanged. The `openai`, `azure` and `requesty` stream uses it. The `gemini` and
+  `vertexai` clients now read `usageMetadata.thoughtsTokenCount` as `thinkingTokens` and `cachedContentTokenCount` as
+  `cachedTokens`, from `complete` and from a stream, so their cost estimates count thinking and cache reads
+  [#2348](https://github.com/llm4s/llm4s/issues/2348).
 
 ### Java & Kotlin APIs
 

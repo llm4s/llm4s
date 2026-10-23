@@ -213,12 +213,8 @@ class GeminiClient(
                           // grounding metadata usually arrives with the last chunk; collect it from any chunk
                           Try(json("candidates").arr.headOption).toOption.flatten
                             .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
-                          // Extract token usage from usageMetadata if present
-                          for {
-                            usage      <- Try(json("usageMetadata")).toOption
-                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                          } accumulator.updateTokens(prompt, completion)
+                          // token usage, thinking and cached tokens included, when this chunk reports it
+                          GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
                             s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
@@ -451,15 +447,7 @@ class GeminiClient(
           val textContent = parsed.text
           val toolCalls   = parsed.calls
 
-          // Extract usage
-          val usageOpt = Try {
-            val usage = json("usageMetadata")
-            TokenUsage(
-              promptTokens = usage("promptTokenCount").num.toInt,
-              completionTokens = usage("candidatesTokenCount").num.toInt,
-              totalTokens = usage("totalTokenCount").num.toInt
-            )
-          }.toOption
+          val usageOpt = GeminiUsage.fromResponse(json)
 
           // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
           val thinking =

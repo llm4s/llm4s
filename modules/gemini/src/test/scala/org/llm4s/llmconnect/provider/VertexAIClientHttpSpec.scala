@@ -102,6 +102,24 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     usage.totalTokens shouldBe 15
   }
 
+  it should "report thinking and cached tokens from usageMetadata (#2348)" in {
+    val body =
+      """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
+         | "usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":40,
+         | "cachedContentTokenCount":64,"totalTokenCount":145}}""".stripMargin
+    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body))
+
+    client.complete(conversation("Hi"), CompletionOptions()).toOption.get.usage shouldBe Some(
+      TokenUsage(
+        promptTokens = 100,
+        completionTokens = 5,
+        totalTokens = 145,
+        thinkingTokens = Some(40),
+        cachedTokens = Some(64)
+      )
+    )
+  }
+
   it should "parse a tool call response" in {
     val toolCallBody =
       """{"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"London"}}}],"role":"model"}}]}"""
@@ -333,6 +351,35 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     val usage = result.toOption.get.usage.get
     usage.promptTokens shouldBe 5
     usage.completionTokens shouldBe 2
+  }
+
+  it should "report thinking and cached tokens from the stream's usageMetadata (#2348)" in {
+    val sseData =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}]," +
+        "\"usageMetadata\":{\"promptTokenCount\":100,\"candidatesTokenCount\":5,\"thoughtsTokenCount\":40," +
+        "\"cachedContentTokenCount\":64,\"totalTokenCount\":145}}\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ()).toOption.get.usage shouldBe Some(
+      TokenUsage(
+        promptTokens = 100,
+        completionTokens = 5,
+        totalTokens = 145,
+        thinkingTokens = Some(40),
+        cachedTokens = Some(64)
+      )
+    )
   }
 
   it should "return an error for non-200 stream status" in {

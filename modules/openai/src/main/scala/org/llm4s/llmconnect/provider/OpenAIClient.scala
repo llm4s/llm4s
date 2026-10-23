@@ -296,13 +296,12 @@ class OpenAIClient private[provider] (
     val accumulator = StreamingAccumulator.create()
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
-    var usage       = Option.empty[TokenUsage]
 
     val attempt = call("native streaming") {
       Using.resource(transport.createChatCompletionStream(params)) { response =>
         response.stream().forEach { chunk =>
           rawStream.append(serialize(chunk)).append('\n')
-          processStreamingChunk(chunk, toolCalls, accumulator, onChunk).foreach(u => usage = Some(u))
+          processStreamingChunk(chunk, toolCalls, accumulator, onChunk)
         }
       }
     }
@@ -311,12 +310,11 @@ class OpenAIClient private[provider] (
       attempt.flatMap(_ =>
         // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
         // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
-        // The usage is the service's own report, which carries the reasoning and cached-token
-        // breakdown and the service's total; the accumulator only knows the two counts.
+        // The accumulator holds the service's own usage report, with its reasoning and cached-token
+        // breakdown and its total (`StreamingAccumulator.updateUsage`).
         accumulator.toCompletion.map { c =>
-          val finalUsage = usage.orElse(c.usage)
-          val cost       = finalUsage.flatMap(u => CostEstimator.estimate(model, u))
-          c.withModel(model).withToolCalls(c.message.toolCalls.toList).withUsage(finalUsage).withEstimatedCost(cost)
+          val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+          c.withModel(model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
         }
       )
     }(
@@ -341,8 +339,8 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, requestBody, failureResponse, Left(error)))
 
   /**
-   * Processes one streamed chunk: emits its content and tool-call deltas, and returns any
-   * token usage it carries. A chunk with no choices (Azure's prompt-filter chunk, or the
+   * Processes one streamed chunk: emits its content and tool-call deltas, and merges any token
+   * usage it carries into the accumulator. A chunk with no choices (Azure's prompt-filter chunk, or the
    * usage-only final chunk that `stream_options.include_usage` asks for) emits nothing.
    */
   private def processStreamingChunk(
@@ -350,7 +348,7 @@ class OpenAIClient private[provider] (
     toolCalls: StreamToolCalls,
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
-  ): Option[TokenUsage] = {
+  ): Unit = {
     known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
       val delta        = known(choice._delta())
       val calls        = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
@@ -361,11 +359,7 @@ class OpenAIClient private[provider] (
       emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
     }
 
-    known(chunk._usage()).map { usage =>
-      val tokens = toTokenUsage(usage)
-      accumulator.updateTokens(tokens.promptTokens, tokens.completionTokens)
-      tokens
-    }
+    known(chunk._usage()).foreach(usage => accumulator.updateUsage(toTokenUsage(usage)))
   }
 
   /**

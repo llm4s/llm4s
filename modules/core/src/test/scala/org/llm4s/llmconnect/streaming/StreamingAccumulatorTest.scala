@@ -297,6 +297,98 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.hasThinking shouldBe false
   }
 
+  test("updateUsage carries every TokenUsage field onto the completion") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
+    accumulator.updateUsage(
+      TokenUsage(
+        promptTokens = 120,
+        completionTokens = 40,
+        totalTokens = 160,
+        thinkingTokens = Some(24),
+        cachedTokens = Some(80),
+        cacheCreationTokens = Some(16)
+      )
+    )
+
+    accumulator.toCompletion(Instant.EPOCH).toOption.get.usage shouldBe Some(
+      TokenUsage(
+        promptTokens = 120,
+        completionTokens = 40,
+        totalTokens = 160,
+        thinkingTokens = Some(24),
+        cachedTokens = Some(80),
+        cacheCreationTokens = Some(16)
+      )
+    )
+  }
+
+  test("updateUsage merges partial reports, each field following the latest report that states it") {
+    val accumulator = StreamingAccumulator.create()
+    // input and cache counts first, output last, as some providers split them
+    accumulator.updateUsage(
+      TokenUsage(promptTokens = 100, completionTokens = 0, totalTokens = 0, cachedTokens = Some(60))
+    )
+    accumulator.updateUsage(TokenUsage(promptTokens = 0, completionTokens = 30, totalTokens = 0))
+    accumulator.updateUsage(
+      TokenUsage(promptTokens = 0, completionTokens = 45, totalTokens = 0, cacheCreationTokens = Some(10))
+    )
+
+    val usage = accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.get
+    usage.promptTokens shouldBe 100
+    usage.completionTokens shouldBe 45
+    usage.cachedTokens shouldBe Some(60)
+    usage.cacheCreationTokens shouldBe Some(10)
+    usage.thinkingTokens shouldBe None
+    usage.totalTokens shouldBe 145 // no report stated a total: prompt + completion + thinking
+  }
+
+  test("updateUsage reports usage that only has cache counts") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.updateUsage(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0, cachedTokens = Some(5)))
+
+    accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.flatMap(_.cachedTokens) shouldBe Some(5)
+  }
+
+  test("updateTokens after updateUsage replaces the counts and the reported total, keeping cache counts") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.updateUsage(
+      TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 999, cachedTokens = Some(40))
+    )
+    accumulator.updateTokens(10, 5)
+
+    val usage = accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.get
+    usage.promptTokens shouldBe 10
+    usage.completionTokens shouldBe 5
+    usage.totalTokens shouldBe 15
+    usage.cachedTokens shouldBe Some(40)
+  }
+
+  test("updateTokensWithThinking after updateUsage recomputes the total") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.updateUsage(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 999))
+    accumulator.updateTokensWithThinking(10, 5, 20)
+
+    accumulator.toCompletion(Instant.EPOCH).toOption.get.usage.map(_.totalTokens) shouldBe Some(35)
+  }
+
+  test("clear resets the usage merged by updateUsage") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.updateUsage(
+      TokenUsage(
+        promptTokens = 100,
+        completionTokens = 50,
+        totalTokens = 150,
+        thinkingTokens = Some(7),
+        cachedTokens = Some(40),
+        cacheCreationTokens = Some(3)
+      )
+    )
+    accumulator.clear()
+
+    accumulator.toCompletion(Instant.EPOCH).toOption.get.usage shouldBe None
+  }
+
   test("should stamp the completion with the given creation time") {
     val accumulator = StreamingAccumulator.create()
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
