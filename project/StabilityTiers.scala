@@ -556,27 +556,7 @@ object StabilityTiers {
       "org.llm4s.model.TransformationResult",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
-    GrowthExempt("org.llm4s.toolapi.ArraySchema", "TODO(#2369): predates the check; convert to a private constructor"),
-    GrowthExempt(
-      "org.llm4s.toolapi.BooleanSchema",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.IntegerSchema",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
-    GrowthExempt("org.llm4s.toolapi.NumberSchema", "TODO(#2369): predates the check; convert to a private constructor"),
-    GrowthExempt("org.llm4s.toolapi.ObjectSchema", "TODO(#2369): predates the check; convert to a private constructor"),
-    GrowthExempt(
-      "org.llm4s.toolapi.PropertyDefinition",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.SafeParameterExtractor",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt("org.llm4s.toolapi.StringSchema", "TODO(#2369): predates the check; convert to a private constructor"),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.ExecutionError",
@@ -600,14 +580,9 @@ object StabilityTiers {
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
     GrowthExempt(
-      "org.llm4s.toolapi.ToolCallRequest",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
       "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
       "a strategy case holding only its concurrency limit"
     ),
-    GrowthExempt("org.llm4s.toolapi.ToolFunction", "TODO(#2369): predates the check; convert to a private constructor"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
       "TODO(#2369): predates the check; convert to a private constructor"

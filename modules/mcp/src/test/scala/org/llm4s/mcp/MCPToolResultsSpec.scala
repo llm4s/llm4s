@@ -144,7 +144,7 @@ class MCPToolResultsSpec extends AnyFlatSpec with Matchers {
     override def close(): Unit                               = closes += 1
   }
 
-  private def probeTool = new ToolFunction[ujson.Value, ujson.Value](
+  private def probeTool = ToolFunction[ujson.Value, ujson.Value](
     "probe",
     "probe",
     org.llm4s.toolapi.ObjectSchema[ujson.Value]("p", Seq.empty, additionalProperties = false),

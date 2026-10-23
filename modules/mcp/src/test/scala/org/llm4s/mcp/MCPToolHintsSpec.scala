@@ -235,7 +235,7 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
   }
 
   private def localTool(name: String): ToolFunction[?, ?] =
-    new ToolFunction[Map[String, Any], String](
+    ToolFunction[Map[String, Any], String](
       name,
       "a local tool",
       ObjectSchema[Map[String, Any]]("no parameters", Seq.empty),

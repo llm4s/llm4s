@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ImageGenerationCompleted`, `CacheHit`, `CacheMiss`) are growth-prone types: build them with `TraceEvent.X(...)` and
   change them with `with*`; `new` and `.copy` are private, and the classes are `final`. Pattern matching and `toJson`
   are unchanged; [migration](docs/reference/migration.md#traceevent-cases-are-growth-safe-2377).
+- The tool schemas (`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`),
+  `PropertyDefinition`, `SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` are growth-prone types: build
+  them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are
+  `final`. `SafeParameterExtractor`'s Java constructor is now `SafeParameterExtractor.apply(params)`;
+  [migration](docs/reference/migration.md#tool-schemas-and-tool-call-types-are-growth-safe-2381).
 - The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
   `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
   `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are

@@ -532,6 +532,39 @@ constructor and `copy` are private:
 - The thirteen cases are now `final`. Pattern matching (`case TraceEvent.CacheHit(similarity, threshold, ts)`), the
   fields and `toJson` are unchanged.
 
+### Tool schemas and tool-call types are growth-safe (#2381)
+
+`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`, `PropertyDefinition`,
+`SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` (`org.llm4s.toolapi`) follow the growth-prone pattern
+([#2381](https://github.com/llm4s/llm4s/issues/2381)). Each is a `final case class` whose constructor and `copy` are
+private:
+
+- **Construction is unchanged**: `Schema.string(...)`, `Schema.property(...)`, `ToolBuilder` and `X(...)` with the same
+  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[T, R](...)`).
+- **Replace `.copy` with a setter**:
+
+  | Type | Setters |
+  |---|---|
+  | `StringSchema` | `withDescription`, `withEnum`, `withMinLength`, `withMaxLength` (the last three also take an `Option`), `withLengthConstraints` |
+  | `NumberSchema`, `IntegerSchema` | `withDescription`, `withMinimum`, `withMaximum`, `withExclusiveMinimum`, `withExclusiveMaximum`, `withMultipleOf` (each also takes an `Option`), `withRange`, `withExclusiveRange`; `NumberSchema` also `withIsInteger` |
+  | `BooleanSchema` | `withDescription` |
+  | `ArraySchema` | `withDescription`, `withItemSchema`, `withMinItems`, `withMaxItems` (the value or an `Option`), `withSizeConstraints`, `withUniqueItems` |
+  | `ObjectSchema` | `withDescription`, `withProperties`, `withProperty`, `withAdditionalProperties` |
+  | `PropertyDefinition` | `withName`, `withSchema`, `withRequired` |
+  | `SafeParameterExtractor` | `withParams`, `withCall` (the call or an `Option`) |
+  | `ToolCallRequest` | `withFunctionName`, `withArguments` |
+  | `ToolFunction` | `withName`, `withDescription`, `withSchema`, `withHandler` |
+
+  ```scala
+  val renamed = tool.withName("search_v2")                       // was tool.copy(name = "search_v2")
+  val open    = schema.withAdditionalProperties(true)            // was schema.copy(additionalProperties = true)
+  ```
+
+- **Java and Kotlin**: `new SafeParameterExtractor(params)` becomes `SafeParameterExtractor.apply(params)`; the other
+  types are built through their companion's `apply` or `Schema`.
+
+Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchanged.
+
 ### Context types are growth-safe (#2380)
 
 `CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`, `ConversationWindow`, `TokenUsageInfo`,

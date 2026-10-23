@@ -24,10 +24,24 @@ import scala.util.control.NonFatal
  *                     correspond to the tool's declared [[Schema]].
  */
 @Stable
-case class ToolCallRequest(
+final case class ToolCallRequest private (
   functionName: String,
   arguments: ujson.Value
-)
+) {
+
+  /** Replace the name of the tool to invoke. */
+  def withFunctionName(functionName: String): ToolCallRequest = copy(functionName = functionName)
+
+  /** Replace the parsed JSON arguments. */
+  def withArguments(arguments: ujson.Value): ToolCallRequest = copy(arguments = arguments)
+}
+
+object ToolCallRequest {
+
+  /** Creates a [[ToolCallRequest]]. */
+  def apply(functionName: String, arguments: ujson.Value): ToolCallRequest =
+    new ToolCallRequest(functionName, arguments)
+}
 
 /**
  * Registry for tool functions with execution capabilities.

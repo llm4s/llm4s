@@ -16,10 +16,16 @@ import scala.annotation.tailrec
  *               id and idempotency key ([[ToolCallInfo]]); plain [[ToolRegistry]] tool calling leaves it `None`.
  */
 @Stable
-case class SafeParameterExtractor(params: ujson.Value, call: Option[ToolCallInfo] = None) {
+final case class SafeParameterExtractor private (params: ujson.Value, call: Option[ToolCallInfo]) {
 
-  /** An extractor with no call, for Java, which does not see Scala's default arguments. */
-  def this(params: ujson.Value) = this(params, None)
+  /** An extractor over other parameters, for the same call. */
+  def withParams(params: ujson.Value): SafeParameterExtractor = copy(params = params)
+
+  /** An extractor for the given call. */
+  def withCall(call: ToolCallInfo): SafeParameterExtractor = copy(call = Some(call))
+
+  /** An extractor for the given call, or for no call. */
+  def withCall(call: Option[ToolCallInfo]): SafeParameterExtractor = copy(call = call)
   // Helper case class to return both the value and available keys from parent
   private case class NavigationResult(value: Option[ujson.Value], availableKeys: List[String])
   // Simple mode - returns string errors for backward compatibility
@@ -350,6 +356,13 @@ case class SafeParameterExtractor(params: ujson.Value, call: Option[ToolCallInfo
 }
 
 object SafeParameterExtractor {
+
+  /** Creates an extractor over `params` for the call `call`, when the caller knows it. */
+  def apply(params: ujson.Value, call: Option[ToolCallInfo]): SafeParameterExtractor =
+    new SafeParameterExtractor(params, call)
+
+  /** Creates an extractor over `params` with no call; Java calls `SafeParameterExtractor.apply(params)`. */
+  def apply(params: ujson.Value): SafeParameterExtractor = new SafeParameterExtractor(params, None)
 
   /** A whole number that fits in an `Int`; `None` for a fraction, NaN, an infinity or a value out of range. */
   private[toolapi] def intOpt(value: ujson.Value): Option[Int] =

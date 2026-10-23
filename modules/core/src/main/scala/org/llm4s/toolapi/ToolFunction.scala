@@ -23,12 +23,25 @@ import upickle.default._
  * @tparam R Return type, must have a uPickle `ReadWriter`
  */
 @Stable
-case class ToolFunction[T, R: ReadWriter](
+final case class ToolFunction[T, R: ReadWriter] private (
   name: String,
   description: String,
   schema: SchemaDefinition[T],
   handler: SafeParameterExtractor => Either[String, R]
 ) {
+
+  /** Replace the tool's name. */
+  def withName(name: String): ToolFunction[T, R] = copy(name = name)
+
+  /** Replace the description shown to the LLM. */
+  def withDescription(description: String): ToolFunction[T, R] = copy(description = description)
+
+  /** Replace the parameter schema. */
+  def withSchema[U](schema: SchemaDefinition[U]): ToolFunction[U, R] =
+    new ToolFunction[U, R](name, description, schema, handler)
+
+  /** Replace the handler. */
+  def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolFunction[T, R] = copy(handler = handler)
 
   /**
    * Converts the tool definition to the format expected by OpenAI's API
@@ -119,6 +132,18 @@ case class ToolFunction[T, R: ReadWriter](
           case Left(errors)  => Left(ToolCallError.InvalidArguments(name, errors))
         }
     }
+}
+
+object ToolFunction {
+
+  /** Creates a [[ToolFunction]]; [[ToolBuilder]] is the usual way in. */
+  def apply[T, R: ReadWriter](
+    name: String,
+    description: String,
+    schema: SchemaDefinition[T],
+    handler: SafeParameterExtractor => Either[String, R]
+  ): ToolFunction[T, R] =
+    new ToolFunction[T, R](name, description, schema, handler)
 }
 
 /**
