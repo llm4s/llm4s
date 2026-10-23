@@ -292,7 +292,8 @@ lazy val itTierCheck = taskKey[Unit](
 // project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`, minus
 // `llm4s-agent`, whose tier waits on the typed graph runtime (#1266, open question in #1281).
 lazy val stabilityTierCheck = taskKey[Unit](
-  "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental"
+  "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental, or a " +
+    "@Stable signature names an @Experimental or deny-listed third-party type"
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama")
 // Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
@@ -2145,6 +2146,9 @@ lazy val javaRag = (project in file("modules/java-rag"))
     // Measured 100.00% statement coverage (`sbt coverage javaRag/test javaRag/coverageReport`); floor is the measured
     // value rounded down to the nearest 5.
     coverageFloor(100),
+    // JavaRagGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
+    // process-wide. Run the suites one at a time, so another suite's output cannot print into it, as java-api does.
+    Test / parallelExecution        := false,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -2164,6 +2168,9 @@ lazy val reactor = (project in file("modules/reactor"))
     // Measured 100.00% statement coverage (`sbt coverage reactor/test reactor/coverageReport`); floor is the measured
     // value rounded down to the nearest 5.
     coverageFloor(100),
+    // ReactorGuideSpec checks what the guide's snippets print by redirecting System.out, which is process-wide. Run
+    // the suites one at a time, so another suite's output cannot print into it, as java-api does.
+    Test / parallelExecution        := false,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
