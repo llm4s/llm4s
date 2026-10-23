@@ -77,9 +77,10 @@ val results = store.search(
   topK = 5
 )
 
-results.foreach { scored =>
+// A Result: Right(hits), or Left(error)
+results.foreach(_.foreach { scored =>
   println(s"${scored.record.id}: ${scored.score}")
-}
+})
 
 // Clean up
 store.close()
@@ -112,13 +113,13 @@ val store = VectorStoreFactory.pgvector().fold(
   identity
 )
 
-// Or with explicit connection settings
+// Or with explicit connection settings (a Result, like every factory method)
 val store2 = VectorStoreFactory.pgvector(
   connectionString = "jdbc:postgresql://localhost:5432/mydb",
   user = "postgres",
   password = "secret",
   tableName = "embeddings"
-).fold(...)
+)
 
 // Create HNSW index for faster search (optional)
 store.asInstanceOf[PgVectorStore].createHnswIndex()
@@ -147,7 +148,7 @@ val cloudStore = VectorStoreFactory.qdrantCloud(
   cloudUrl = "https://your-cluster.qdrant.io",
   apiKey = "your-api-key",
   collectionName = "my_vectors"
-).fold(...)
+)
 
 store.close()
 ```
@@ -170,6 +171,7 @@ import org.llm4s.vectorstore.elasticsearch._
 val local = ElasticsearchVectorStore.local(index = "my-vectors")
 
 // A secured cluster: an API key (its `encoded` value) or a username and password
+val encodedKey = "your-encoded-api-key" // from your secret store
 val config = ElasticsearchConfig("https://es.example.com:9200")
   .withIndex("my-vectors")
   .withAuth(ElasticsearchAuth.ApiKey(encodedKey))
@@ -245,6 +247,7 @@ import org.llm4s.vectorstore.opensearch._
 val local = OpenSearchVectorStore.local(index = "my-vectors")
 
 // A secured cluster: a username and password, or a bearer token (JWT)
+val password = "your-password" // from your secret store
 val config = OpenSearchConfig("https://search.example.com:9200")
   .withIndex("my-vectors")
   .withAuth(OpenSearchAuth.Basic("llm4s", password))
@@ -327,6 +330,7 @@ import org.llm4s.vectorstore.redis._
 val local = RedisVectorStore.local(index = "my-vectors")
 
 // A remote server: TLS, an ACL user and a password
+val password = "your-password" // from your secret store
 val config = RedisConfig("redis.example.com", port = 6380)
   .withTls(true)
   .withUsername("app")
@@ -461,6 +465,10 @@ final case class ScoredRecord(
 
 ### CRUD Operations
 
+The fragments from here to the end of the page use `store`, a `VectorStore` such as the one in the Quick Start,
+`record` and `records` (a `VectorRecord` and a `Seq[VectorRecord]`), `ids` (a `Seq[String]`) and `embeddingVector`,
+a query embedding (an `Array[Float]`).
+
 ```scala
 // Single record operations
 store.upsert(record)           // Insert or replace
@@ -564,9 +572,11 @@ val complex = Equals("type", "doc")
 
 ### Using Filters
 
+With `byType` and `complex` from the filters above:
+
 ```scala
 // In search
-store.search(queryVector, topK = 10, filter = Some(byType))
+store.search(embeddingVector, topK = 10, filter = Some(byType))
 
 // In list
 store.list(filter = Some(complex))
@@ -653,35 +663,38 @@ Hybrid search combines vector similarity (semantic) with BM25 keyword matching f
 ```scala
 import org.llm4s.vectorstore._
 
-// Create stores
-val vectorStore = VectorStoreFactory.inMemory().getOrElse(???)
-val keywordIndex = KeywordIndex.inMemory().getOrElse(???)
-
-// Create hybrid searcher
-val searcher = HybridSearcher(vectorStore, keywordIndex)
-
-// Index documents in both stores
 val embedding = Array(0.1f, 0.2f, 0.3f)
-vectorStore.upsert(VectorRecord("doc-1", embedding, Some("Scala programming language")))
-keywordIndex.index(KeywordDocument("doc-1", "Scala programming language"))
 
-// Search with both vector and keyword
-val results = searcher.search(
-  queryEmbedding = embedding,
-  queryText = "Scala",
-  topK = 10
-)
+val results = for {
+  // Create stores
+  vectorStore  <- VectorStoreFactory.inMemory()
+  keywordIndex <- KeywordIndex.inMemory()
 
-results.foreach { r =>
+  // Create hybrid searcher
+  searcher = HybridSearcher(vectorStore, keywordIndex)
+
+  // Index documents in both stores
+  _ <- vectorStore.upsert(VectorRecord("doc-1", embedding, Some("Scala programming language")))
+  _ <- keywordIndex.index(KeywordDocument("doc-1", "Scala programming language"))
+
+  // Search with both vector and keyword
+  found <- searcher.search(
+    queryEmbedding = embedding,
+    queryText = "Scala",
+    topK = 10
+  )
+  _ = searcher.close()
+} yield found
+
+results.foreach(_.foreach { r =>
   println(s"${r.id}: ${r.score} (vector: ${r.vectorScore}, keyword: ${r.keywordScore})")
-}
-
-searcher.close()
+})
 ```
 
 ### Fusion Strategies
 
-Choose how to combine vector and keyword scores:
+Choose how to combine vector and keyword scores, given a `searcher: HybridSearcher` and a query `embedding` as in
+the Quick Start:
 
 ```scala
 import org.llm4s.vectorstore.FusionStrategy._
@@ -765,41 +778,52 @@ The `KeywordIndex` provides BM25-scored full-text search using SQLite FTS5:
 ```scala
 import org.llm4s.vectorstore._
 
-// Create keyword index
-val index = KeywordIndex.inMemory().getOrElse(???)
+val results = for {
+  // Create keyword index
+  index <- KeywordIndex.inMemory()
 
-// Index documents
-index.index(KeywordDocument("doc-1", "Scala is a programming language"))
-index.index(KeywordDocument("doc-2", "Python is also popular"))
+  // Index documents
+  _ <- index.index(KeywordDocument("doc-1", "Scala is a programming language"))
+  _ <- index.index(KeywordDocument("doc-2", "Python is also popular"))
 
-// Search with highlights
-val results = index.searchWithHighlights("programming", topK = 5)
-results.foreach { r =>
+  // Search with highlights
+  found <- index.searchWithHighlights("programming", topK = 5)
+  _ = index.close()
+} yield found
+
+results.foreach(_.foreach { r =>
   println(s"${r.id}: ${r.score}")
   r.highlights.foreach(h => println(s"  ...${h}..."))
-}
-
-index.close()
+})
 ```
 
 ### Factory Methods
 
+Each returns a `Result[HybridSearcher]`:
+
 ```scala
+import org.llm4s.vectorstore._
+
 // In-memory (development)
-val memSearcher = HybridSearcher.inMemory().getOrElse(???)
+val memSearcher = HybridSearcher.inMemory()
 
 // File-based SQLite
 val fileSearcher = HybridSearcher.sqlite(
   vectorDbPath = "/path/to/vectors.db",
   keywordDbPath = "/path/to/keywords.db"
-).getOrElse(???)
+)
 
 // From configuration
 val config = HybridSearcher.Config()
-  .withVectorStore(VectorStoreFactory.Config.pgvector(...))
+  .withVectorStore(
+    VectorStoreFactory.Config.pgvector(
+      connectionString = "jdbc:postgresql://localhost:5432/mydb",
+      tableName = "vectors"
+    )
+  )
   .withRRF(k = 60)
 
-val configSearcher = HybridSearcher(config).getOrElse(???)
+val configSearcher = HybridSearcher(config)
 ```
 
 ### PostgreSQL Native Hybrid Search
@@ -811,24 +835,26 @@ For production deployments, you can run fully PostgreSQL-based hybrid search usi
 ```scala
 import org.llm4s.vectorstore._
 
-// Create fully PostgreSQL-based hybrid searcher with shared connection pool
-val searcher = HybridSearcher.pgvectorShared(
-  connectionString = "jdbc:postgresql://localhost:5432/mydb",
-  user = "postgres",
-  password = "secret",
-  vectorTableName = "vectors",
-  keywordTableName = "documents"
-).getOrElse(???)
-
-// Index documents (both vector and keyword stores share the same PostgreSQL database)
 val embedding = Array(0.1f, 0.2f, 0.3f)
-searcher.vectorStore.upsert(VectorRecord("doc-1", embedding, Some("Scala programming")))
-searcher.keywordIndex.index(KeywordDocument("doc-1", "Scala programming"))
 
-// Search using both vector similarity and PostgreSQL full-text search
-val results = searcher.search(embedding, "Scala", topK = 10)
+val results = for {
+  // Create fully PostgreSQL-based hybrid searcher with shared connection pool
+  searcher <- HybridSearcher.pgvectorShared(
+    connectionString = "jdbc:postgresql://localhost:5432/mydb",
+    user = "postgres",
+    password = "secret",
+    vectorTableName = "vectors",
+    keywordTableName = "documents"
+  )
 
-searcher.close()
+  // Index documents (both vector and keyword stores share the same PostgreSQL database)
+  _ <- searcher.vectorStore.upsert(VectorRecord("doc-1", embedding, Some("Scala programming")))
+  _ <- searcher.keywordIndex.index(KeywordDocument("doc-1", "Scala programming"))
+
+  // Search using both vector similarity and PostgreSQL full-text search
+  found <- searcher.search(embedding, "Scala", topK = 10)
+  _ = searcher.close()
+} yield found
 ```
 
 **PostgreSQL Keyword Index:**
@@ -843,36 +869,37 @@ The `PgKeywordIndex` uses PostgreSQL native full-text search capabilities:
 ```scala
 import org.llm4s.vectorstore._
 
-// Create standalone PostgreSQL keyword index
-val keywordIndex = KeywordIndex.postgres(
-  connectionString = "jdbc:postgresql://localhost:5432/mydb",
-  user = "postgres",
-  password = "secret",
-  tableName = "documents"  // Creates documents_keyword table
-).getOrElse(???)
+val filtered = for {
+  // Create standalone PostgreSQL keyword index
+  keywordIndex <- KeywordIndex.postgres(
+    connectionString = "jdbc:postgresql://localhost:5432/mydb",
+    user = "postgres",
+    password = "secret",
+    tableName = "documents"  // Creates documents_keyword table
+  )
 
-// Index with metadata
-keywordIndex.index(KeywordDocument(
-  id = "doc-1",
-  content = "PostgreSQL provides powerful full-text search",
-  metadata = Map("lang" -> "en", "type" -> "tutorial")
-))
+  // Index with metadata
+  _ <- keywordIndex.index(KeywordDocument(
+    id = "doc-1",
+    content = "PostgreSQL provides powerful full-text search",
+    metadata = Map("lang" -> "en", "type" -> "tutorial")
+  ))
 
-// Search with highlights
-val results = keywordIndex.searchWithHighlights("full-text search", topK = 5)
-results.foreach { r =>
-  println(s"${r.id}: ${r.score}")
-  r.highlights.foreach(h => println(s"  ${h}"))  // Contains <b>highlighted</b> terms
-}
+  // Search with highlights
+  highlighted <- keywordIndex.searchWithHighlights("full-text search", topK = 5)
+  _ = highlighted.foreach { r =>
+    println(s"${r.id}: ${r.score}")
+    r.highlights.foreach(h => println(s"  ${h}"))  // Contains <b>highlighted</b> terms
+  }
 
-// Filter by metadata
-val filtered = keywordIndex.search(
-  "PostgreSQL",
-  topK = 10,
-  filter = Some(MetadataFilter.Equals("lang", "en"))
-)
-
-keywordIndex.close()
+  // Filter by metadata
+  found <- keywordIndex.search(
+    "PostgreSQL",
+    topK = 10,
+    filter = Some(MetadataFilter.Equals("lang", "en"))
+  )
+  _ = keywordIndex.close()
+} yield found
 ```
 
 **RAG Configuration:**
@@ -880,6 +907,8 @@ keywordIndex.close()
 Use `withPgHybrid()` to configure fully PostgreSQL-based hybrid search in the RAG pipeline:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag._
 
 val config = RAGConfig()
@@ -893,12 +922,16 @@ val config = RAGConfig()
   )
   .withRRF(60)  // Reciprocal Rank Fusion
 
-val rag = RAG.build(config, resolveProvider).getOrElse(???)
+val results = for {
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  // The embedding provider's settings come from llm4s.embeddings
+  rag <- RAG.build(config, _ => Llm4sConfig.embeddings().map(_._2))
 
-// Documents are stored in PostgreSQL for both vector and keyword search
-rag.ingestText("PostgreSQL hybrid search combines vector and full-text.", "doc-1")
-
-val results = rag.query("database search")
+  // Documents are stored in PostgreSQL for both vector and keyword search
+  _     <- rag.ingestText("PostgreSQL hybrid search combines vector and full-text.", "doc-1")
+  found <- rag.query("database search")
+} yield found
 ```
 
 **Benefits of PostgreSQL Native Hybrid:**
@@ -920,22 +953,26 @@ Reranking improves retrieval quality by re-scoring initial search results using 
 import org.llm4s.vectorstore._
 import org.llm4s.reranker._
 
-// Create hybrid searcher and reranker
-val searcher = HybridSearcher.inMemory().getOrElse(???)
-val reranker = RerankerFactory.cohere(apiKey = "your-cohere-api-key")
+val embedding = Array(0.1f, 0.2f, 0.3f) // the query's embedding
+val reranker  = RerankerFactory.cohere(apiKey = "your-cohere-api-key")
 
-// Search with reranking
-val results = searcher.searchWithReranking(
-  queryEmbedding = embedding,
-  queryText = "What is Scala?",
-  topK = 5,           // Final results to return
-  rerankTopK = 50,    // Candidates to rerank
-  reranker = Some(reranker)
-)
+val results = for {
+  // Create hybrid searcher (index documents into it as in Hybrid Search)
+  searcher <- HybridSearcher.inMemory()
 
-results.foreach { r =>
+  // Search with reranking
+  found <- searcher.searchWithReranking(
+    queryEmbedding = embedding,
+    queryText = "What is Scala?",
+    topK = 5,           // Final results to return
+    rerankTopK = 50,    // Candidates to rerank
+    reranker = Some(reranker)
+  )
+} yield found
+
+results.foreach(_.foreach { r =>
   println(s"${r.id}: ${r.score}")
-}
+})
 ```
 
 ### Reranker Options
@@ -993,11 +1030,21 @@ Load the reranker from configuration at the edge of your application with
 `RerankerConfigLoader` (in `llm4s-rag`), and hand it to `RAG.build`:
 
 ```scala
-import org.llm4s.config.RerankerConfigLoader
+import org.llm4s.config.{ Llm4sConfig, RerankerConfigLoader }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.{ RAG, RAGConfig }
+
+val config = RAGConfig().withEmbeddings("openai")
 
 for {
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   reranker <- RerankerConfigLoader.default()   // Option[RerankProviderConfig]; None when disabled
-  rag      <- RAG.build(config, resolveProvider, resolveRerankerConfig = () => Right(reranker))
+  rag <- RAG.build(
+    config,
+    _ => Llm4sConfig.embeddings().map(_._2),
+    resolveRerankerConfig = () => Right(reranker)
+  )
 } yield rag
 ```
 
@@ -1018,7 +1065,7 @@ although `reference.conf` bound it.)
 
 ## Document Chunking
 
-Document chunking splits text into manageable pieces for embedding and retrieval. LLM4S provides multiple chunking strategies optimized for different content types.
+Document chunking splits text into manageable pieces for embedding and retrieval. LLM4S provides multiple chunking strategies optimized for different content types. In the examples, `documentText` is the text to split.
 
 ### Quick Start
 
@@ -1175,51 +1222,56 @@ def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.vectorstore._
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry }
+import org.llm4s.llmconnect.model.{ Completion, Conversation, EmbeddingRequest, InputPurpose, UserMessage }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
+import org.llm4s.vectorstore._
 
-// 1. Create embedding client and vector store
-val embeddingClient = Llm4sConfig
-  .embeddings()
-  .flatMap { case (provider, cfg) => EmbeddingClient.from(provider, cfg) }
-  .fold(_ => ???, identity)
-val vectorStore = VectorStoreFactory.inMemory().getOrElse(???)
-
-// 2. Ingest documents
 val documents = Seq(
   "Scala is a programming language",
   "LLM4S provides LLM integration",
   "Vector stores enable semantic search"
 )
-
-documents.zipWithIndex.foreach { case (doc, idx) =>
-  val embedding = embeddingClient.embed(doc).getOrElse(???)
-  vectorStore.upsert(VectorRecord(
-    id = s"doc-$idx",
-    embedding = embedding,
-    content = Some(doc)
-  ))
-}
-
-// 3. Query with retrieval
 val query = "What is Scala?"
-val queryEmbedding = embeddingClient.embed(query).getOrElse(???)
 
-val relevant = vectorStore.search(queryEmbedding, topK = 3).getOrElse(Seq.empty)
+val response: Result[Completion] = for {
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
 
-// 4. Augment prompt with context
-val context = relevant.map(_.record.content.getOrElse("")).mkString("\n")
-val prompt = s"""Based on the following context:
+  // 1. Create embedding client and vector store
+  settings        <- Llm4sConfig.embeddings()
+  providerId       = settings._1
+  embeddingConfig  = settings._2
+  dimensions      <- ModelDimensionRegistry.getDimension(providerId, embeddingConfig.model)
+  model            = EmbeddingModelConfig(embeddingConfig.model, dimensions)
+  embeddingClient <- EmbeddingClient.from(providerId, embeddingConfig)
+  vectorStore     <- VectorStoreFactory.inMemory()
+
+  // 2. Ingest documents: one request, one vector per document, in order
+  embedded <- embeddingClient.embed(EmbeddingRequest(documents, model))
+  records = documents.zip(embedded.embeddings).zipWithIndex.map { case ((doc, vector), idx) =>
+    VectorRecord(id = s"doc-$idx", embedding = vector.map(_.toFloat).toArray, content = Some(doc))
+  }
+  _ <- vectorStore.upsertBatch(records)
+
+  // 3. Query with retrieval
+  queried  <- embeddingClient.embed(EmbeddingRequest(Seq(query), model, InputPurpose.Query))
+  relevant <- vectorStore.search(queried.embeddings.flatten.map(_.toFloat).toArray, topK = 3)
+
+  // 4. Augment prompt with context
+  context = relevant.map(_.record.content.getOrElse("")).mkString("\n")
+  prompt = s"""Based on the following context:
 $context
 
 Answer this question: $query"""
 
-// 5. Generate response
-val llm = Llm4sConfig
-  .provider()
-  .flatMap(LLMConnect.getClient)
-  .fold(_ => ???, identity)
-val response = llm.complete(prompt)
+  // 5. Generate response
+  providerConfig <- Llm4sConfig.defaultProvider()
+  llm            <- LLMConnect.getClient(providerConfig)
+  completion     <- llm.complete(Conversation(Seq(UserMessage(prompt))))
+} yield completion
 ```
 
 ---
@@ -1231,12 +1283,15 @@ val response = llm.complete(prompt)
 Always close stores when done:
 
 ```scala
-val store = VectorStoreFactory.inMemory().getOrElse(???)
-// Use scala.util.Using for automatic cleanup
-scala.util.Using.resource(new java.io.Closeable {
-  def close(): Unit = store.close()
-}) { _ =>
-  // Use the store
+import org.llm4s.vectorstore._
+
+val count = VectorStoreFactory.inMemory().flatMap { store =>
+  // Use scala.util.Using for automatic cleanup
+  scala.util.Using.resource(new java.io.Closeable {
+    def close(): Unit = store.close()
+  }) { _ =>
+    store.count() // Use the store
+  }
 }
 ```
 
@@ -1257,7 +1312,7 @@ records.foreach(store.upsert)
 All operations return `Result[A]`:
 
 ```scala
-store.search(query, topK = 10) match {
+store.search(embeddingVector, topK = 10) match {
   case Right(results) =>
     results.foreach(r => println(r.score))
   case Left(error) =>
@@ -1266,7 +1321,7 @@ store.search(query, topK = 10) match {
 
 // Or use for-comprehension
 for {
-  results <- store.search(query, topK = 10)
+  results <- store.search(embeddingVector, topK = 10)
   count <- store.count()
 } yield (results, count)
 ```
@@ -1279,7 +1334,7 @@ Design metadata for your filtering needs:
 // Good - filterable metadata
 VectorRecord(
   id = "doc-1",
-  embedding = embedding,
+  embedding = embeddingVector,
   metadata = Map(
     "type" -> "article",
     "source" -> "wikipedia",
@@ -1290,7 +1345,7 @@ VectorRecord(
 
 // Then filter efficiently
 store.search(
-  query,
+  embeddingVector,
   topK = 10,
   filter = Some(Equals("type", "article").and(Equals("lang", "en")))
 )
@@ -1404,21 +1459,24 @@ Once you have a RAG pipeline, use the evaluation framework to measure and improv
 
 ### Quick Evaluation
 
+Given an `LLMClient` to judge with (`client`), an `EmbeddingClient` (`embedder`) and its `EmbeddingModelConfig`
+(`embeddingModel`):
+
 ```scala
 import org.llm4s.rag.evaluation._
 
-val evaluator = new RAGASEvaluator(llmClient)
+val evaluator = new RAGASEvaluator(client, embedder, embeddingModel)
 val sample = EvalSample(
   question = "What is Scala?",
-  answer = generatedAnswer,
-  contexts = retrievedChunks,
+  answer = "Scala is a programming language that runs on the JVM.", // your pipeline's answer
+  contexts = Seq("Scala is a programming language", "Scala runs on the JVM"), // the chunks it retrieved
   groundTruth = Some("Scala is a programming language.")
 )
 
 val metrics = evaluator.evaluate(sample)
 metrics.foreach { m =>
   println(s"RAGAS Score: ${m.ragasScore}")
-  println(s"Faithfulness: ${m.faithfulness}")
+  m.getMetric("faithfulness").foreach(f => println(s"Faithfulness: ${f.score}"))
 }
 ```
 

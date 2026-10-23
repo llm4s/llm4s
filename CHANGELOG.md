@@ -264,6 +264,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
+  (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
+  `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
+  both pages are in `DocSnippets.pages`, so `sbt samples/Test/compile` fails when one of their snippets stops compiling.
+  Fixing them also corrected snippets that had drifted from the API: the complete RAG example now embeds through an
+  `EmbeddingRequest`, the RAGAS example passes the embedding client and model `RAGASEvaluator` takes, and the
+  metrics collectors implement `observeRequest`, `addTokens` and `recordCost` (#2359).
 - **Changed** the embeddings sample to load its own settings: `EmbeddingSampleConfig` in
   `org.llm4s.samples.embeddingsupport` reads `llm4s.samples.embeddings.*`, which the samples' `application.conf` binds to the
   same variables as before (`EMBEDDING_INPUT_PATH(S)`, `EMBEDDING_QUERY`, `CHUNK_*`, the UI knobs,
