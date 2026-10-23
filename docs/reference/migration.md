@@ -15,7 +15,7 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
 [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346)
 and [core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356);
-[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266).
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
 ## Multimodal content parts (#1913)
 
@@ -311,6 +311,27 @@ Public types of frozen modules that would otherwise have been frozen by mistake 
 - The `org.llm4s.assistant` types (`AssistantAgent`, `Command`, `SessionManager`, `SessionState`, `SessionInfo`,
   `SessionSummary`) are `@Experimental`, matching their Beta tier in [1.0 Scope](v1-scope): MiMa does not freeze
   them, and they can change in a minor release with a migration note. Nothing about them changed in this release.
+
+### Console tracing prints no content by default (#2311)
+
+The default tracing mode is still `console`, but `ConsoleTracing` now prints metadata only
+([#2311](https://github.com/llm4s/llm4s/issues/2311)): event types, timestamps, models, ids, tool names, success
+flags, durations, token counts and costs. The query of `AgentInitialized`, the content of `CompletionReceived`, the
+input and output of `ToolExecuted`, the message and context of an error and an image generation's error message print
+as `[withheld: N chars]`, and a `CustomEvent` shows its field names instead of its data. An application that built
+tracing from `Llm4sConfig.tracing()` and never set `TRACING_MODE` no longer sends prompts and answers into whatever
+collects its stdout.
+
+No code has to change. To see content again while developing, opt in:
+
+```hocon
+llm4s.tracing.console.captureContent = true   # or LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT=true
+```
+
+or construct the tracer with `new ConsoleTracing(captureContent = true)`; `new ConsoleTracing()` prints metadata
+only. A `captureContent` value other than `true` or `false` is a `ConfigurationError` from `Tracing.fromSettings`
+(`Tracing.create` logs it and falls back to `NoOpTracing`). A hand-built `TracingSettings(TracingMode.Console)` has
+no extras, so it gets the safe default.
 
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 

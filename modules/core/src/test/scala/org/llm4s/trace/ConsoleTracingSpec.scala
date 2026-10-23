@@ -241,9 +241,9 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
   }
 
-  "What ConsoleTracing prints" should "show the query and tools for AgentInitialized" in {
+  "What ConsoleTracing prints" should "show the query and tools for AgentInitialized, with captureContent" in {
     val output = printed {
-      new ConsoleTracing().traceEvent(
+      new ConsoleTracing(captureContent = true).traceEvent(
         TraceEvent.AgentInitialized("What is 2 + 3?", Vector("calculator", "echo"))
       ) shouldBe
         Right(())
@@ -256,7 +256,8 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "show the tool, its outcome and its duration for ToolExecuted" in {
     val output = printed {
-      new ConsoleTracing().traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42.millis, false))
+      new ConsoleTracing(captureContent = true)
+        .traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42.millis, false))
     }
 
     output should include("--- TOOL EXECUTED ---")
@@ -277,7 +278,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "truncate tool input at 100 characters and completion content at 200" in {
     val output = printed {
-      val tracing = new ConsoleTracing()
+      val tracing = new ConsoleTracing(captureContent = true)
       tracing.traceToolCall("tool", "i" * 150, "o" * 150)
       tracing.traceEvent(TraceEvent.CompletionReceived("c-1", "m", 0, "c" * 250))
     }
@@ -299,7 +300,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.copy(id = "call-2")))
     )
 
-    val output = printed(new ConsoleTracing().traceCompletion(completion, "model-from-caller"))
+    val output = printed(new ConsoleTracing(captureContent = true).traceCompletion(completion, "model-from-caller"))
 
     output should include("COMPLETION RECEIVED")
     output should include("Model: model-from-caller")
@@ -321,11 +322,126 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "show the error's type, message and context for traceError" in {
-    val output = printed(new ConsoleTracing().traceError(new IllegalStateException("boom"), "agent step"))
+    val output =
+      printed(new ConsoleTracing(captureContent = true).traceError(new IllegalStateException("boom"), "agent step"))
 
     output should include("ERROR OCCURRED")
     output should include("Type: IllegalStateException")
     output should include("Message: boom")
     output should include("Context: agent step")
+  }
+
+  // ==========================================================================
+  // Content is withheld by default (#2311)
+  // ==========================================================================
+
+  private def secret = "SECRET-PII-4111"
+
+  "ConsoleTracing by default" should "withhold the query of AgentInitialized but show its tools" in {
+    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.AgentInitialized(secret, Vector("calculator"))))
+
+    output should include("--- AGENT INITIALIZED ---")
+    output should include(s"Query: [withheld: ${secret.length} chars]")
+    output should include("Tools: calculator")
+    (output should not).include(secret)
+  }
+
+  it should "withhold completion content but show the model, id and tool call count" in {
+    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.CompletionReceived("c-1", "m-1", 2, secret)))
+
+    output should include("Model: m-1")
+    output should include("ID: c-1")
+    output should include("Tool Calls: 2")
+    output should include(s"Content: [withheld: ${secret.length} chars]")
+    (output should not).include(secret)
+  }
+
+  it should "withhold tool input and output but show the tool, outcome and duration" in {
+    val output =
+      printed(
+        new ConsoleTracing().traceEvent(TraceEvent.ToolExecuted("echo", s"""{"q":"$secret"}""", secret, 7.millis, true))
+      )
+
+    output should include("Tool: echo")
+    output should include("Success: true")
+    output should include("Duration: 7ms")
+    output should include("Input: [withheld:")
+    output should include(s"Output: [withheld: ${secret.length} chars]")
+    (output should not).include(secret)
+  }
+
+  it should "show a custom event's field names, not its values" in {
+    val data   = ujson.Obj("runId" -> "run-1", "content" -> secret)
+    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.CustomEvent("agent.model_responded", data)))
+
+    output should include("Name: agent.model_responded")
+    output should include("Fields: runId, content")
+    (output should not).include(secret)
+    (output should not).include("run-1")
+  }
+
+  it should "withhold a custom event's data that is not an object" in {
+    val output = printed(new ConsoleTracing().traceEvent(TraceEvent.CustomEvent("note", ujson.Str(secret))))
+
+    output should include("Data: [withheld]")
+    (output should not).include(secret)
+  }
+
+  it should "show a custom event's data with captureContent" in {
+    val output =
+      printed(new ConsoleTracing(captureContent = true).traceEvent(TraceEvent.CustomEvent("note", ujson.Str(secret))))
+
+    output should include(secret)
+  }
+
+  it should "withhold an error's message and context but show its type" in {
+    val output = printed(new ConsoleTracing().traceError(new IllegalStateException(secret), s"step for $secret"))
+
+    output should include("Type: IllegalStateException")
+    output should include(s"Message: [withheld: ${secret.length} chars]")
+    output should include("Context: [withheld:")
+    (output should not).include(secret)
+  }
+
+  it should "withhold an error with no message without failing" in {
+    val output = printed(new ConsoleTracing().traceError(new IllegalStateException(), ""))
+
+    output should include("Message: [withheld: 4 chars]")
+  }
+
+  it should "withhold an image generation error message" in {
+    val event = TraceEvent.ImageGenerationCompleted(
+      model = "img-1",
+      provider = "p",
+      operation = "generate",
+      imageCount = 0,
+      size = "1024x1024",
+      quality = "standard",
+      duration = 5.millis,
+      success = false,
+      errorMessage = Some(secret)
+    )
+    val withheld = printed(new ConsoleTracing().traceEvent(event))
+    withheld should include(s"Error: [withheld: ${secret.length} chars]")
+    (withheld should not).include(secret)
+
+    printed(new ConsoleTracing(captureContent = true).traceEvent(event)) should include(s"Error: $secret")
+  }
+
+  it should "report its setting" in {
+    new ConsoleTracing().captureContent shouldBe false
+    new ConsoleTracing(captureContent = true).captureContent shouldBe true
+  }
+
+  "ConsoleTracing.fromExtras" should "read captureContent from the llm4s.tracing.console block" in {
+    ConsoleTracing.fromExtras(Map.empty).map(_.captureContent) shouldBe Right(false)
+    ConsoleTracing.fromExtras(Map("captureContent" -> "false")).map(_.captureContent) shouldBe Right(false)
+    ConsoleTracing.fromExtras(Map("captureContent" -> " TRUE ")).map(_.captureContent) shouldBe Right(true)
+  }
+
+  it should "reject a value that is not a boolean" in {
+    val error = ConsoleTracing.fromExtras(Map("captureContent" -> "yes")).left.map(_.message)
+    error.isLeft shouldBe true
+    error.left.toOption.get should include("llm4s.tracing.console.captureContent must be true or false")
   }
 }
