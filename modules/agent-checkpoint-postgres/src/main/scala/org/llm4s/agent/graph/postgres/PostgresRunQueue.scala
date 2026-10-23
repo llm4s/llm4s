@@ -75,10 +75,18 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           val tenant = submission.tenantId.map(_.value)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it
           // runs - only while it still has no attempt, which a concurrent recordAttempt may have recorded meanwhile
+          // the entries closed here - the update changed the row - are answered in the ticket: only this submit has
+          // closed them, under the thread's lock
+          val interrupted =
+            if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
+            else
+              queued
+                .filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0)
+                .filter(r =>
+                  closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now, unstarted = true)
+                )
+                .map(_.id)
           if submission.policy == BusyThreadPolicy.Interrupt then
-            queued.filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0).foreach { r =>
-              closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now, unstarted = true)
-            }
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled;
             // decided under the thread's lock, which recording an attempt takes too
             queued.filter(r => r.tenantId == tenant && r.attempts > 0 && !cancelling(r)).foreach { r =>
@@ -101,7 +109,9 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             submission.traceContext.map(_.traceParent)
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
-          Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
+          sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
+            Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
+          }
   }
 
   private def cancelling(row: Raw): Boolean =
@@ -241,7 +251,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
     }
   }
 
-  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Vector[QueueEntry]] =
+  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation] =
     store.writing("queue.cancel") { c =>
       // under the thread's lock, as recording an attempt is: an entry is closed only while it has none
       val thread = target match
@@ -254,13 +264,18 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         case CancelTarget.Thread(th) => Right(openOf(c, th).filter(_.tenantId == tenantId.map(_.value)))
       targeted.flatMap { rows =>
         val now = store.clockNow(c)
-        rows.foreach { row =>
+        // an entry is closed by this call when its update changed the row: decided in the closing transaction
+        val closed = rows.flatMap { row =>
           // never started: closed now, so no worker runs it; started: asked to stop, a cancel replacing an interrupt
           if row.outcome.isEmpty && row.attempts == 0 then
-            closeRow(c, row.id, EntryOutcome.Cancelled(reason), now, unstarted = true)
-          else if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            Option.when(closeRow(c, row.id, EntryOutcome.Cancelled(reason), now, unstarted = true))(
+              EntryId.unsafe(row.id)
+            )
+          else
+            if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            None
         }
-        sequence(rows.map(r => view(c, rowOf(c, r.id).get)))
+        sequence(rows.map(r => view(c, rowOf(c, r.id).get))).map(Cancellation(_, closed.toSet))
       }
     }
 
@@ -301,7 +316,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
             )
           )
         else if row.threadDeleted then
-          closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), store.clockNow(c))
+          closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), store.clockNow(c)): Unit
           view(c, rowOf(c, row.id).get).map(e => Some(AttemptStart.ThreadDeleted(e)))
         else if row.attempts >= row.maxAttempts then view(c, row).map(e => Some(AttemptStart.Exhausted(e)))
         else
@@ -323,21 +338,30 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
 
   def close(lease: Lease, outcome: EntryOutcome): Result[QueueEntry] = store.writing("queue.close") { c =>
     leased(c, lease).flatMap { row =>
-      closeRow(c, row.id, outcome, store.clockNow(c))
+      closeRow(c, row.id, outcome, store.clockNow(c)): Unit
       view(c, rowOf(c, row.id).get)
     }
   }
 
-  /** Closes entry `id`; with `unstarted`, only if it is still open with no attempt (checked on the locked row). */
-  private def closeRow(c: Connection, id: Long, outcome: EntryOutcome, at: Instant, unstarted: Boolean = false): Unit =
-    update(
+  /**
+   * Closes entry `id`; with `unstarted`, only if it is still open with no attempt (checked on the locked row). Answers
+   * whether this update closed it.
+   */
+  private def closeRow(
+    c: Connection,
+    id: Long,
+    outcome: EntryOutcome,
+    at: Instant,
+    unstarted: Boolean = false
+  ): Boolean =
+    updated(
       c,
       if unstarted then Sql.closeUnstartedQueueEntry(t) else Sql.closeQueueEntry(t),
       outcome.state,
       ujson.write(EntryOutcome.toJson(outcome)),
       micros(at),
       id
-    )
+    ) > 0
 
   def depth(agents: Set[AgentId]): Result[Map[AgentId, QueueDepth]] =
     if agents.isEmpty then Right(Map.empty)

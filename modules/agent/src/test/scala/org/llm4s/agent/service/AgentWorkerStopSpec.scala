@@ -1,8 +1,15 @@
 package org.llm4s.agent.service
 
-import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, SpecTools }
+import org.llm4s.agent.{ Agent, AgentId, AgentStatus, CompletionFixture, SpecTools }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.ApprovalMiddleware
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ApprovalMiddleware,
+  MiddlewareId,
+  ModelContext,
+  ModelRequest,
+  ModelResponse
+}
 import org.llm4s.agent.graph.tool.{ AgentTool, LockKey, ToolContent, ToolOutcome }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -15,7 +22,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Millis, Seconds, Span }
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, Semaphore, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -136,7 +143,7 @@ class AgentWorkerStopSpec
     worker.start()
     entered.acquire()
     // from another machine: only the queue is shared
-    val asked = store.runQueue.cancel(None, CancelTarget.Entry(first), requested("changed my mind")).value
+    val asked = store.runQueue.cancel(None, CancelTarget.Entry(first), requested("changed my mind")).value.entries
     asked.map(_.stopRequest) shouldBe Vector(Some(StopRequest.Cancel(requested("changed my mind"))))
     asked.head.isOpen shouldBe true
     closed(store, first).outcome.value shouldBe EntryOutcome.Cancelled(requested("changed my mind"))
@@ -165,7 +172,9 @@ class AgentWorkerStopSpec
     val first  = submit(store, on, "first").value.entryId
     worker.start()
     entered.acquire()
-    store.runQueue.cancel(None, CancelTarget.Thread(on), requested("stop")).value.map(_.id) shouldBe Vector(first)
+    store.runQueue.cancel(None, CancelTarget.Thread(on), requested("stop")).value.entries.map(_.id) shouldBe Vector(
+      first
+    )
     closed(store, first).outcome.value shouldBe EntryOutcome.Cancelled(requested("stop"))
     settledAs(store, on, AgentWorker.CancelledKind)
     val second = submit(store, on, "second").value.entryId
@@ -202,7 +211,7 @@ class AgentWorkerStopSpec
     val client = new FnClient(echoing)
     val on     = thread()
     val id     = submit(store, on).value.entryId
-    val asked  = store.runQueue.cancel(None, CancelTarget.Entry(id), requested("never mind")).value
+    val asked  = store.runQueue.cancel(None, CancelTarget.Entry(id), requested("never mind")).value.entries
     asked.head.outcome shouldBe Some(EntryOutcome.Cancelled(requested("never mind")))
     workerOf(store, agentOver(store, client)).start()
     val next = submit(store, on, "next").value.entryId
@@ -226,7 +235,7 @@ class AgentWorkerStopSpec
     entered.acquire()
     running.cancel()
     running.await().isLeft shouldBe true
-    store.runQueue.cancel(None, CancelTarget.Entry(id), requested("abandoned")).value.head.isOpen shouldBe true
+    store.runQueue.cancel(None, CancelTarget.Entry(id), requested("abandoned")).value.entries.head.isOpen shouldBe true
     workerOf(store, agent).start()
     val entry = closed(store, id)
     entry.outcome.value shouldBe EntryOutcome.Cancelled(requested("abandoned"))
@@ -265,6 +274,52 @@ class AgentWorkerStopSpec
     closed(store, interrupting.entryId).outcome.value shouldBe a[EntryOutcome.Done]
     closed(store, queued).outcome.value shouldBe a[EntryOutcome.Done]
     client.sent.asScala.toVector.drop(1).map(lastUser) shouldBe Vector("interrupting", "queued")
+    store
+      .history(on, None, 100)
+      .value
+      .exists(c =>
+        c.outcome.exists {
+          case RunOutcome.Failed(kind, _) => kind == AgentWorker.InterruptedKind
+          case _                          => false
+        }
+      ) shouldBe true
+  }
+
+  it should "cut a model call resumed through a wrapModelCall middleware question, as it cuts a plain one (#2364)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, c) => if (n == 1) blocked(entered) else echoing(n, c))
+    // asks once before the first model call; the call resumed after the answer runs at the question's node
+    val asked = new AtomicBoolean(false)
+    val gate = new AgentMiddleware.Asking[String, Boolean] {
+      val id: MiddlewareId = MiddlewareId("spend")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        answered(context) match {
+          case Some(_)                                  => next(request)
+          case None if asked.compareAndSet(false, true) => ask("spend tokens?")
+          case None                                     => next(request)
+        }
+    }
+    val agent =
+      Agent.builder("assistant", client).withRuntime(new GraphRuntime(store)).withMiddleware(gate).build().value
+    val on     = thread()
+    val parked = agent.run(on, "running").value
+    val id = parked.status match {
+      case AgentStatus.Suspended(_, _, questions, _, _) => questions.head._1
+      case other                                        => fail(s"expected Suspended, got $other")
+    }
+    client.calls shouldBe 0
+    val worker  = workerOf(store, agent)
+    val resumed = store.runQueue.submit(Submission(on, agentId, QueuedInput.Resume(Map(parked.reply(id, true))))).value
+    worker.start()
+    entered.acquire()
+    val interrupting = submit(store, on, "interrupting", BusyThreadPolicy.Interrupt).value.entryId
+    closed(store, resumed.entryId).outcome.value shouldBe EntryOutcome.Interrupted(Some(interrupting))
+    closed(store, interrupting).outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe
+      Some(CheckpointStatus.Completed)
+    client.sent.asScala.toVector.map(lastUser) shouldBe Vector("running", "interrupting")
     store
       .history(on, None, 100)
       .value
@@ -584,6 +639,63 @@ class AgentWorkerStopSpec
     metrics.series(AgentMetrics.QueueClosed) shouldBe Map(
       Vector("assistant", "interrupted", "none")    -> 1.0,
       Vector("assistant", "cancelled", "requested") -> 1.0
+    )
+  }
+
+  /**
+   * `inner`, but its first `submit` or `cancel` runs `first` before it: another caller's call landing between this one's
+   * start and its store call, as two racing calls do (#2368).
+   */
+  private def interleaved(inner: RunQueue)(first: => Unit): RunQueue = new RunQueue {
+    private val pending                                = new java.util.concurrent.atomic.AtomicBoolean(true)
+    private def before(): Unit                         = if (pending.getAndSet(false)) first
+    def submit(s: Submission)                          = { before(); inner.submit(s) }
+    def entry(t: Option[TenantId], id: EntryId)        = inner.entry(t, id)
+    def openEntries(t: Option[TenantId], th: ThreadId) = inner.openEntries(t, th)
+    def take(r: TakeRequest)                           = inner.take(r)
+    def release(l: Lease)                              = inner.release(l)
+    def recordAttempt(l: Lease, r: RunId)              = inner.recordAttempt(l, r)
+    def close(l: Lease, o: EntryOutcome)               = inner.close(l, o)
+    def reclaim(d: FiniteDuration, n: Int)             = inner.reclaim(d, n)
+    def openRuns(ts: Vector[ThreadId])                 = inner.openRuns(ts)
+    def depth(as: Set[AgentId])                        = inner.depth(as)
+    def renew(l: Lease, ttl: FiniteDuration)           = inner.renew(l, ttl)
+    def cancel(t: Option[TenantId], c: CancelTarget, r: CancelReason) = { before(); inner.cancel(t, c, r) }
+  }
+
+  it should "count an entry two racing cancels close once" in {
+    import org.llm4s.agent.metrics.{ AgentMetrics, RecordingMetrics }
+    val store   = InMemoryCheckpointer()
+    val metrics = new RecordingMetrics
+    val on      = thread()
+    val queued  = submit(store, on).value.entryId
+    val other   = new RunSubmitter(store.runQueue, store, shortLease, metrics)
+    // the other cancel closes the entry after this one has started and before its store call
+    val racing = interleaved(store.runQueue)(other.cancel(None, CancelTarget.Entry(queued)).value: Unit)
+    new RunSubmitter(racing, store, shortLease, metrics).cancel(None, CancelTarget.Entry(queued)).value
+    metrics.series(AgentMetrics.QueueClosed) shouldBe Map(Vector("assistant", "cancelled", "requested") -> 1.0)
+  }
+
+  it should "count each entry two racing Interrupt submissions close once, under its own agent" in {
+    import org.llm4s.agent.metrics.{ AgentMetrics, RecordingMetrics }
+    val store   = InMemoryCheckpointer()
+    val metrics = new RecordingMetrics
+    val on      = thread()
+    val second  = AgentId.of("second").value
+    val other   = new RunSubmitter(store.runQueue, store, shortLease, metrics)
+    store.runQueue.submit(Submission(on, agentId, QueuedInput.query("e"), None, BusyThreadPolicy.Interrupt)).value
+    // the other Interrupt lands first and closes the earlier entry; this one then closes the other's
+    val racing = interleaved(store.runQueue)(
+      other.submit(on, second, QueuedInput.query("b"), policy = BusyThreadPolicy.Interrupt).value: Unit
+    )
+    new RunSubmitter(racing, store, shortLease, metrics)
+      .submit(on, agentId, QueuedInput.query("a"), policy = BusyThreadPolicy.Interrupt)
+      .value
+      .interrupted
+      .map(_.agentId) shouldBe Vector(second)
+    metrics.series(AgentMetrics.QueueClosed) shouldBe Map(
+      Vector("assistant", "interrupted", "none") -> 1.0,
+      Vector("second", "interrupted", "none")    -> 1.0
     )
   }
 

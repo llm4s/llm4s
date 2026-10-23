@@ -448,7 +448,8 @@ final class ToolLoop private (
 
   /**
    * Whether a task of `node` may be cut by a boundary stop (Stage 5 W3, design 4.57): an agent's model call, whose
-   * result is not yet anything the thread keeps. Every other node - a tool call above all - runs to its end.
+   * result is not yet anything the thread keeps - at its model node or at a `wrapModelCall` question node, where a
+   * model call resumed after a middleware question runs. Every other node - a tool call above all - runs to its end.
    */
   private[agent] def cuttable(node: NodeId): Boolean = modelNodes.contains(node)
 
@@ -1258,7 +1259,10 @@ object ToolLoop:
           all.flatMap(_.askedRefs.values.map(_.ref.node.id)).toSet,
           all.map(_.callTool.id).toSet,
           continuations,
-          prepared.map(p => ToolLoop.modelNode(p.agent.id)).toSet
+          // every node that runs a model call: each agent's model node and its `wrapModelCall` question nodes,
+          // where a model call resumed after a middleware question runs
+          prepared.map(p => ToolLoop.modelNode(p.agent.id)).toSet ++
+            all.flatMap(owner => asked(owner, MiddlewareHook.WrapModelCall))
         )
       }
 
