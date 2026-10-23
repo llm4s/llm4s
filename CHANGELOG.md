@@ -382,6 +382,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** `stabilityTierCheck` enforces RFC 0004: it fails for a public member of a `@Stable` type in a frozen module
+  whose signature names a type from fansi, `cats`, pureconfig, `com.typesafe.config`, jtokkit, slf4j, OkHttp, Jackson,
+  `com.openai`, `com.anthropic` or `software.amazon`, written fully qualified or through an imported (or renamed) name.
+  `ThirdPartyAllowed` in `project/StabilityTiers.scala` lists the third-party types that are API on purpose, each with
+  its reason (upickle and ujson; `OpenAIToolHelper`'s openai-java types until
+  [#2360](https://github.com/llm4s/llm4s/issues/2360) decides its tier), and `StabilityTiers.selfTest` has a violating
+  fixture for every deny-listed package [#2357](https://github.com/llm4s/llm4s/issues/2357);
+  [API stability](docs/reference/api-stability.md#tiers-in-the-code).
 - **Added** a per-module MiMa baseline: `mimaBaselineOverrides` in `build.sbt` gives a frozen module its own baseline
   release (`"llm4s-<name>" -> Some("X.Y.Z")`) or none (`-> None`) while the others use `mimaBaselineVersion`, so
   `llm4s-agent` can take a later baseline than the other frozen modules ([RFC 0001](docs/rfcs/0001-agent-baseline.md)).
