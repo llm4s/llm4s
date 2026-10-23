@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ Completion, Conversation, TokenUsage }
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
+import org.llm4s.vectorstore.{ HybridSearcher, MetadataFilter, VectorRecord, VectorStore }
 
 /**
  * The values that fragments in the documentation assume are already in scope ("Assuming `client` is injected").
@@ -29,4 +30,19 @@ trait SnippetEnv {
   protected def question: String                     = ???
   protected def myTools: Seq[ToolFunction[_, _]]     = ???
   protected def tools: ToolRegistry                  = ???
+
+  // reliability-guide.md: the client being wrapped
+  protected def baseClient: LLMClient = ???
+
+  // guide/vector-store.md: a store, records, a query embedding, filters, a hybrid searcher and text to chunk
+  protected def store: VectorStore            = ???
+  protected def record: VectorRecord          = ???
+  protected def records: Seq[VectorRecord]    = ???
+  protected def ids: Seq[String]              = ???
+  protected def embeddingVector: Array[Float] = ???
+  protected def embedding: Array[Float]       = ???
+  protected def byType: MetadataFilter        = ???
+  protected def complex: MetadataFilter       = ???
+  protected def searcher: HybridSearcher      = ???
+  protected def documentText: String          = ???
 }

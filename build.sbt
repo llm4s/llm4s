@@ -1512,7 +1512,10 @@ lazy val samples = (project in file("modules//samples"))
     // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
     // examples' acceptance suites script their model with it.
     testkit      % Test,
-    agentTestkit % Test
+    agentTestkit % Test,
+    // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
+    vectorstoreElasticsearch % Test,
+    vectorstoreRedis         % Test
   )
   .settings(
     name := "llm4s-samples",
