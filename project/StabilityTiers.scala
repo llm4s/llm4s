@@ -433,34 +433,6 @@ object StabilityTiers {
       "a fixed accuracy case holding only its description"
     ),
     GrowthExempt(
-      "org.llm4s.error.AssistantError.CommandParseError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.DisplayError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.EOFError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.FileError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.IOError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.SerializationError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.SessionError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
       "org.llm4s.http.MultipartPart.FilePart",
       "a multipart file part is exactly a name, a path and a filename"
     ),

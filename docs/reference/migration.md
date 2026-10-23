@@ -532,6 +532,28 @@ constructor and `copy` are private:
 - The thirteen cases are now `final`. Pattern matching (`case TraceEvent.CacheHit(similarity, threshold, ts)`), the
   fields and `toJson` are unchanged.
 
+### `AssistantError` cases are growth-safe (#2383)
+
+The seven `AssistantError` cases - `IOError`, `EOFError`, `DisplayError`, `SessionError`, `FileError`,
+`SerializationError` and `CommandParseError` (`org.llm4s.error`) - follow the growth-prone pattern
+([#2383](https://github.com/llm4s/llm4s/issues/2383)), as the `LLMError` cases already did. Each is a
+`final case class` whose constructor and `copy` are private:
+
+- **Construction is unchanged**: `AssistantError.X(...)` with the same arguments, positional or named, and the same
+  defaults (`cause = None`, `llmCause = None`, `EOFError`'s `operation = "read"`) still compiles, as do the smart
+  constructors (`AssistantError.fileReadFailed`, `sessionNotFound`, ...). `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field: `withMessage` and `withCause` on every case that has the field,
+  `withOperation`, `withSessionId`, `withLlmCause`, `withPath`, `withDataType`, `withDisplayType`, `withCommand` and
+  `withParseOperation`. An `Option` field's setter takes the value or an `Option` (`withCause(ex)`, `withCause(None)`).
+
+  ```scala
+  val withLlm = err.withLlmCause(llmError)   // was err.copy(llmCause = Some(llmError))
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` instead of the constructor, and chain the setters.
+- Pattern matching (`case AssistantError.FileError(message, path, operation, cause)`), the fields, `context` and
+  `formatted` are unchanged.
+
 ### Provider SPI, caching, streaming and exchange-sink types are growth-safe (#2379)
 
 `JsonlProviderExchangeSink` (`org.llm4s.llmconnect`), `CacheEntry`, `CacheStats` (`org.llm4s.llmconnect.caching`),

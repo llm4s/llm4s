@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ImageGenerationCompleted`, `CacheHit`, `CacheMiss`) are growth-prone types: build them with `TraceEvent.X(...)` and
   change them with `with*`; `new` and `.copy` are private, and the classes are `final`. Pattern matching and `toJson`
   are unchanged; [migration](docs/reference/migration.md#traceevent-cases-are-growth-safe-2377).
+- The `AssistantError` cases (`IOError`, `EOFError`, `DisplayError`, `SessionError`, `FileError`,
+  `SerializationError`, `CommandParseError`) are growth-prone types: build them with `AssistantError.X(...)` or the
+  smart constructors and change them with `with*`; `new` and `.copy` are private. Pattern matching, `context` and
+  `formatted` are unchanged; [migration](docs/reference/migration.md#assistanterror-cases-are-growth-safe-2383).
 - `JsonlProviderExchangeSink`, `CacheEntry`, `CacheStats`, `OpenAICompatibleClient.Settings`, `SSEParser.SSEEvent`
   and the provider SPI's `EmbeddingProviderSection`, `ProviderConfigKey`, `ProviderModuleReport`,
   `ProviderDiscoveryFailure`, `ProviderIdCollision` and `ProviderRegistryReport` are growth-prone types: build them with
