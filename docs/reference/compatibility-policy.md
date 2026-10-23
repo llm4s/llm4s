@@ -40,7 +40,8 @@ version number:
 | **1.0.0 and later** | Semantic versioning: a breaking change needs a new major version. |
 
 Binary compatibility will be checked by MiMa against a baseline set at a pre-1.0 release, version to be
-decided, once the designs are final; 0.5.0 sets none. Until the baseline is set the check passes without
+decided, once the designs are final; 0.5.0 and 0.5.1 set none. The baseline is per module, so a frozen module can
+take a later one than the others. Until the baseline is set the check passes without
 checking anything; see
 [The Baseline](api-stability#the-baseline).
 

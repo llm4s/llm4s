@@ -35,11 +35,13 @@ its own once the runtime's public API is declared final.
 
 ## Detailed design
 
-1. When `mimaBaselineVersion` is set, `mimaFrozen("llm4s-agent")` is removed from `modules/agent` first, as
-   [API Stability](../reference/api-stability#setting-and-bumping-the-baseline) already allows. The module stays in
+1. When `mimaBaselineVersion` is set, `llm4s-agent` is held back with `"llm4s-agent" -> None` in
+   `mimaBaselineOverrides` ([#2355](https://github.com/llm4s/llm4s/issues/2355)), as
+   [API Stability](../reference/api-stability#setting-and-bumping-the-baseline) already allows. It keeps its
+   `mimaFrozen("llm4s-agent")` call, so the frozen-module checks keep covering it. The module stays in
    the Frozen-at-1.0 tier in [1.0 Scope](../reference/v1-scope) with a note that its baseline is pending.
 2. The runtime's maintainers declare its public API final in #1266. A later release, still before 1.0, then becomes
-   `llm4s-agent`'s baseline: `mimaFrozen("llm4s-agent")` returns with a per-module baseline version, so the other
+   `llm4s-agent`'s baseline: its entry becomes `Some("X.Y.Z")`, a per-module baseline version, so the other
    modules' baseline does not move.
 3. 1.0 still requires every frozen module, `llm4s-agent` included, to have "survived two releases after the
    baseline without a compatibility exception" (#1281). The agent's later baseline can therefore delay 1.0. That is
@@ -68,6 +70,7 @@ None for users. For maintainers: step 1 above, in the pull request that sets `mi
 
 ## Open questions
 
-- Does the build support a per-module baseline version, or does `mimaBaselineVersion` need to become a function
-  of the module? Today it is one `val` for all modules.
+- ~~Does the build support a per-module baseline version?~~ Yes, since
+  [#2355](https://github.com/llm4s/llm4s/issues/2355): `mimaBaselineOverrides` in `build.sbt` gives a module its own
+  baseline (`Some`) or none (`None`), and `scripts/mima-dry-run.sh` checks both.
 - Who declares the runtime's public API final, and what is the signal: a stage of #1266, or a named release?
