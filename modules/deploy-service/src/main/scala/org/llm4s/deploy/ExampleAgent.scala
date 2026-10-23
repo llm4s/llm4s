@@ -7,6 +7,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.*
+import org.llm4s.metrics.{ Metric, MetricsCollector }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.Schema
 import org.llm4s.types.Result
@@ -14,6 +15,7 @@ import upickle.default.ReadWriter
 
 import java.time.Instant
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 
 /**
@@ -64,12 +66,28 @@ object ExampleAgent:
 
   final case class NoArgs() derives ReadWriter
 
-  /** A tool that sleeps `delay`; an interrupt - the run's cancellation - ends it early with an error result. */
-  def pauseTool(delay: FiniteDuration): AgentTool[NoArgs] =
+  /**
+   * How many `pause` calls this process is executing now, as `llm4s_demo_tool_calls_active` on `/metrics`: set when a
+   * call starts and when it ends, so a client - the exit test (design 4.61) - can tell a tool call has actually started
+   * on this instance, which the store records only once it has finished.
+   */
+  val ActiveCalls: Metric.Gauge =
+    Metric.gauge("llm4s.demo.tool.calls.active", "Demo pause tool calls executing in this process now")
+
+  /**
+   * A tool that sleeps `delay`; an interrupt - the run's cancellation - ends it early with an error result. Each call
+   * moves [[ActiveCalls]] on `metrics` up while it runs.
+   */
+  def pauseTool(delay: FiniteDuration, metrics: MetricsCollector = MetricsCollector.noop): AgentTool[NoArgs] =
+    val active               = new AtomicInteger(0)
+    def report(n: Int): Unit = metrics.set(ActiveCalls, Nil, n.toDouble)
     AgentTool(
       AgentToolSpec[NoArgs](PauseTool, "Waits a moment, standing in for real work", Schema.`object`[NoArgs]("pause"))
     ) { (_, _) =>
-      CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(delay.toNanos)) match
+      report(active.incrementAndGet())
+      val slept = CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(delay.toNanos))
+      report(active.decrementAndGet())
+      slept match
         case Right(_) => ToolOutcome.Success(ToolContent.Json(ujson.Obj("paused" -> delay.toMillis.toDouble)))
         case Left(_) =>
           Thread.currentThread().interrupt()
@@ -90,13 +108,22 @@ object ExampleAgent:
           }
         yield client
 
-  /** The agent `id` over `runtime`, calling `client`, with the `pause` tool when the model is the demo one. */
-  def build(id: AgentId, client: LLMClient, runtime: GraphRuntime, config: AgentServiceConfig): Result[Agent] =
+  /**
+   * The agent `id` over `runtime`, calling `client`, with the `pause` tool when the model is the demo one, reporting
+   * its calls in progress on `metrics`.
+   */
+  def build(
+    id: AgentId,
+    client: LLMClient,
+    runtime: GraphRuntime,
+    config: AgentServiceConfig,
+    metrics: MetricsCollector = MetricsCollector.noop
+  ): Result[Agent] =
     val builder = Agent
       .builder(id.value, client)
       .withRuntime(runtime)
       .withSystemPrompt("You are the llm4s example agent service's assistant.")
     val tools = config.model match
-      case AgentModel.Demo     => ToolSet.of(pauseTool(config.toolDelay))
+      case AgentModel.Demo     => ToolSet.of(pauseTool(config.toolDelay, metrics))
       case AgentModel.Provider => Right(ToolSet.empty)
     tools.flatMap(set => builder.withTools(set).build())

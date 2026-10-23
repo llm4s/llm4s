@@ -45,8 +45,8 @@ import scala.util.{ Try, Using }
  * one. "Instance A" of the criteria is the instance executing the run.
  *
  * Determinism: the demo model's tool call takes [[ToolDelay]] (`LLM4S_SERVICE_TOOL_DELAY`), and the test acts only once
- * the store shows that call started (the model call that asked for it is committed and its result is not), so the
- * kill, interrupt and cancel land inside the call. Claims and queue leases last [[Ttl]] (`-D`), so recovery after the
+ * the executing instance's tool reports the call in progress (`llm4s_demo_tool_calls_active` on its `/metrics`) and the
+ * store holds no result for it yet, so the kill, interrupt and cancel land inside the call. Claims and queue leases last [[Ttl]] (`-D`), so recovery after the
  * kill takes seconds. Every wait polls a condition with a deadline; nothing sleeps a fixed time.
  *
  * The test JVM also opens the schema itself, as an operator's tool would: to read entries' attempts (the lease holder
@@ -258,19 +258,31 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     case _                                   => None
   }
 
-  /**
-   * Whether a run of entry `id` is inside its tool call now: the model call that asked for a tool is committed and no
-   * tool result has been since.
-   */
-  private def inToolCall(thread: String, id: String): Boolean = {
-    val runs   = entry(id).runIds.map(_.value)
-    val events = log(thread).filter(r => runs(r.runId))
-    val asked  = events.lastIndexWhere(r => custom(r, "agent.model_call_completed").exists(_("toolCalls").num > 0))
-    asked >= 0 && !events.drop(asked).exists(r => custom(r, "agent.tool_executed").isDefined)
-  }
+  /** The demo tool calls `via` is executing now (`llm4s_demo_tool_calls_active`, set inside the tool itself). */
+  private def activeToolCalls(via: Instance): Double =
+    via
+      .get("/metrics")
+      .flatMap(_.body().linesIterator.find(_.startsWith("llm4s_demo_tool_calls_active ")))
+      .flatMap(_.split(' ').lastOption.flatMap(_.toDoubleOption))
+      .getOrElse(0.0)
 
-  private def awaitToolCall(thread: String, id: String): Unit =
-    await(s"entry $id's tool call to start")(Option.when(inToolCall(thread, id))(()))
+  /**
+   * Waits until entry `id`'s run is inside its tool call on the instance executing it, and answers that instance. The
+   * tool itself reports that it has started (on its instance's `/metrics`): the store records a tool call only once it
+   * has finished, and a committed model call asking for one says only that the tool is next - the run may still stop
+   * at the boundary before it. Each test has one run executing at a time, so a call in progress on the executing
+   * instance is this run's; the store must show no result yet for the call the model asked for.
+   */
+  private def awaitToolCall(thread: String, id: String): Instance =
+    await(s"entry $id's tool call to start") {
+      val runs     = entry(id).runIds.map(_.value)
+      val events   = log(thread).filter(r => runs(r.runId))
+      val asked    = events.lastIndexWhere(r => custom(r, "agent.model_call_completed").exists(_("toolCalls").num > 0))
+      val finished = events.drop(math.max(asked, 0)).exists(r => custom(r, "agent.tool_executed").isDefined)
+      entry(id).attempts.lastOption
+        .flatMap(a => instances.find(_.owns(a.holder)))
+        .filter(i => asked >= 0 && !finished && activeToolCalls(i) >= 1)
+    }
 
   /** The thread as `via` shows it. */
   private def threadView(via: Instance, id: String): ujson.Value = {
@@ -404,7 +416,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       val others               = instances.filterNot(_ == executing)
       val (streamer, replayer) = (others.head, others.last)
       val follower             = new Follower(streamer, id)
-      awaitToolCall(thread, id)
+      awaitToolCall(thread, id) shouldBe executing
       await(s"$streamer to stream entry $id live")(Option.when(follower.events.nonEmpty)(()))
       val beforeKill = follower.events.size
 
@@ -476,7 +488,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     ensureRunning()
     val thread = "exit-enqueue"
     val first  = submit(machineA, thread, "first")
-    awaitToolCall(thread, first)
+    awaitToolCall(thread, first): Unit
 
     val busy = machineB.post(s"/threads/$thread/runs", """{"query": "rejected"}""")
     withClue(busy.body())(busy.statusCode() shouldBe 409) // Reject, the default, refuses a busy thread
@@ -505,7 +517,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     ensureRunning()
     val thread = "exit-interrupt"
     val first  = submit(machineA, thread, "first")
-    awaitToolCall(thread, first)
+    awaitToolCall(thread, first): Unit
 
     val second = submit(machineC, thread, "second", "interrupt")
 
@@ -536,7 +548,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     val thread    = "exit-cancel"
     val id        = submit(machineA, thread, "never answered")
     val executing = executorOf(id)
-    awaitToolCall(thread, id)
+    awaitToolCall(thread, id) shouldBe executing
     val via = instances.filterNot(_ == executing).last
     info(s"executed by $executing, cancelled through $via")
 
