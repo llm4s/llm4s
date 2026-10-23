@@ -932,6 +932,7 @@ also set in `application.conf` or with `-D`.
 | `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
 | `LLM4S_CHECKPOINTER` | `llm4s.agent.checkpointer.kind` (`memory` - the default, built in - `sqlite`, `postgres`, or the kind of any other `CheckpointerBackend` on the classpath) | `llm4s-agent` |
 | `LLM4S_RUNTIME_LABEL` | `llm4s.agent.runtime.claims.label` (names the runtime holding a thread's claim in the logs) | `llm4s-agent` |
+| `LLM4S_WORKER_LABEL` | `llm4s.agent.worker.label` (names an `AgentWorker` in its queue leases and logs) | `llm4s-agent` |
 | `LLM4S_CHECKPOINTER_SQLITE_PATH` | `llm4s.agent.checkpointer.sqlite.path` | `llm4s-agent-checkpoint-sqlite` |
 | `LLM4S_CHECKPOINTER_POSTGRES_URL`, `LLM4S_CHECKPOINTER_POSTGRES_USER`, `LLM4S_CHECKPOINTER_POSTGRES_PASSWORD` | `llm4s.agent.checkpointer.postgres.url`, `.user`, `.password` | `llm4s-agent-checkpoint-postgres` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
@@ -952,6 +953,10 @@ The embeddings sample's variables - `EMBEDDING_INPUT_PATH`, `EMBEDDING_INPUT_PAT
 `TABLE_WIDTH`, `ENABLE_EXPERIMENTAL_STUBS` and `LLM4S_EMBEDDINGS_LOCAL_{IMAGE,AUDIO,VIDEO}_MODEL` - are bound by the
 samples' own `application.conf` under `llm4s.samples.embeddings`, not by a library module
 ([#2265](https://github.com/llm4s/llm4s/issues/2265)).
+
+The example agent service's variables - `PORT`, `LLM4S_SERVICE_MODEL`, `LLM4S_SERVICE_TOOL_DELAY` and
+`LLM4S_SERVICE_METRICS` - are bound by `modules/deploy-service`'s own `reference.conf` (unpublished) under
+`llm4s.deploy-service`; see [`deploy/README.md`](https://github.com/llm4s/llm4s/blob/main/deploy/README.md).
 
 ---
 

@@ -273,7 +273,7 @@ object HistoryCompressor {
  * @param outcomes Result and conclusion statements
  */
 @Stable
-case class StructuredInfo(
+final case class StructuredInfo private (
   identifiers: Seq[String],
   urls: Seq[String],
   constraints: Seq[String],
@@ -282,7 +282,48 @@ case class StructuredInfo(
   decisions: Seq[String],
   toolUsage: Seq[String],
   outcomes: Seq[String]
-)
+) {
+
+  /** Sets the IDs, UUIDs and keys. */
+  def withIdentifiers(identifiers: Seq[String]): StructuredInfo = copy(identifiers = identifiers)
+
+  /** Sets the HTTP/HTTPS URLs. */
+  def withUrls(urls: Seq[String]): StructuredInfo = copy(urls = urls)
+
+  /** Sets the requirement statements. */
+  def withConstraints(constraints: Seq[String]): StructuredInfo = copy(constraints = constraints)
+
+  /** Sets the status and error codes. */
+  def withStatusCodes(statusCodes: Seq[String]): StructuredInfo = copy(statusCodes = statusCodes)
+
+  /** Sets the error messages. */
+  def withErrors(errors: Seq[String]): StructuredInfo = copy(errors = errors)
+
+  /** Sets the decision statements. */
+  def withDecisions(decisions: Seq[String]): StructuredInfo = copy(decisions = decisions)
+
+  /** Sets the tool, function and API call mentions. */
+  def withToolUsage(toolUsage: Seq[String]): StructuredInfo = copy(toolUsage = toolUsage)
+
+  /** Sets the result and conclusion statements. */
+  def withOutcomes(outcomes: Seq[String]): StructuredInfo = copy(outcomes = outcomes)
+}
+
+object StructuredInfo {
+
+  /** Creates a [[StructuredInfo]]. */
+  def apply(
+    identifiers: Seq[String],
+    urls: Seq[String],
+    constraints: Seq[String],
+    statusCodes: Seq[String],
+    errors: Seq[String],
+    decisions: Seq[String],
+    toolUsage: Seq[String],
+    outcomes: Seq[String]
+  ): StructuredInfo =
+    new StructuredInfo(identifiers, urls, constraints, statusCodes, errors, decisions, toolUsage, outcomes)
+}
 
 /**
  * Compressed digest representation of a history block.
@@ -295,9 +336,29 @@ case class StructuredInfo(
  * @param originalTokens Estimated token count of original content
  */
 @Stable
-case class HistoryDigest(
+final case class HistoryDigest private (
   blockId: String,
   blockType: String,
   content: String,
   originalTokens: Int
-)
+) {
+
+  /** Sets the original semantic block ID. */
+  def withBlockId(blockId: String): HistoryDigest = copy(blockId = blockId)
+
+  /** Sets the type of the original block. */
+  def withBlockType(blockType: String): HistoryDigest = copy(blockType = blockType)
+
+  /** Sets the formatted digest text. */
+  def withContent(content: String): HistoryDigest = copy(content = content)
+
+  /** Sets the estimated token count of the original content. */
+  def withOriginalTokens(originalTokens: Int): HistoryDigest = copy(originalTokens = originalTokens)
+}
+
+object HistoryDigest {
+
+  /** Creates a [[HistoryDigest]]. */
+  def apply(blockId: String, blockType: String, content: String, originalTokens: Int): HistoryDigest =
+    new HistoryDigest(blockId, blockType, content, originalTokens)
+}

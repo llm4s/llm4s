@@ -22,6 +22,9 @@ spec:
         app.kubernetes.io/name: llm4s-deploy-service
         app.kubernetes.io/part-of: llm4s
     spec:
+      # On SIGTERM the service drains its worker (llm4s.agent.worker.drain: 30 s for running runs to finish, then 10 s
+      # for cancelled ones to exit) before it stops; give it that long and a margin before the kubelet kills it.
+      terminationGracePeriodSeconds: 60
       securityContext:
         runAsNonRoot: true
         seccompProfile:
@@ -35,13 +38,25 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          env:
+            # The pod's name labels its claims and its worker's leases, so the logs and the store say which pod holds
+            # a thread or a queue entry.
+            - name: LLM4S_RUNTIME_LABEL
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LLM4S_WORKER_LABEL
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
-          # The service listens on PORT (default 8080). /health is the process; /llm-check is NOT a probe,
-          # so a missing provider key does not take the pods out of rotation.
+          # The service listens on PORT (default 8080). /health is the process; /ready is the agent worker's health
+          # (running, its loop alive, the store answering), so a pod whose store is unreachable, or that is draining,
+          # takes no traffic. /llm-check is NOT a probe, so a missing provider key does not take the pods out of rotation.
           livenessProbe:
             httpGet:
               path: /health
@@ -50,7 +65,7 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5

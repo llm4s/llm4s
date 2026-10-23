@@ -539,6 +539,40 @@ private:
 
 Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchanged.
 
+### Context types are growth-safe (#2380)
+
+`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`, `ConversationWindow`, `TokenUsageInfo`,
+`StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo` and `SemanticBlock` (`org.llm4s.context`)
+follow the growth-prone pattern ([#2380](https://github.com/llm4s/llm4s/issues/2380)). Each is a `final case class`
+whose constructor and `copy` are private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, still compiles;
+  `SemanticBlock(...)` keeps `expectingAssistantResponse = false` as its default. `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field, named `with<Field>`:
+
+  | Type | Setters |
+  |---|---|
+  | `CompressionRule` | `withName`, `withApply` |
+  | `ContextStep` | `withName`, `withConversation`, `withTokensBefore`, `withTokensAfter`, `withApplied` |
+  | `PipelineStep` | `withName`, `withMessages`, `withTokensBefore`, `withTokensAfter`, `withApplied` |
+  | `ManagedConversation` | `withConversation`, `withOriginalTokens`, `withFinalTokens`, `withSteps` |
+  | `ConversationWindow` | `withConversation`, `withUsage`, `withWasTrimmed`, `withRemovedMessageCount` |
+  | `TokenUsageInfo` | `withCurrentTokens`, `withBudgetLimit`, `withWithinBudget`, `withUtilizationPercentage` |
+  | `StructuredInfo` | `withIdentifiers`, `withUrls`, `withConstraints`, `withStatusCodes`, `withErrors`, `withDecisions`, `withToolUsage`, `withOutcomes` |
+  | `HistoryDigest` | `withBlockId`, `withBlockType`, `withContent`, `withOriginalTokens` |
+  | `TokenBreakdown` | `withTotalTokens`, `withMessages`, `withOverhead` |
+  | `MessageTokenInfo` | `withRole`, `withTokens`, `withPreview` |
+  | `SemanticBlock` | `withId`, `withMessages`, `withBlockType`, `withExpectingAssistantResponse` |
+
+  ```scala
+  val over = usage.withWithinBudget(false) // was usage.copy(withinBudget = false)
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` (`TokenUsageInfo.apply(850, 1000, true, 85)`) instead of the
+  constructor, and chain the setters.
+
+Pattern matching (`case ContextStep(name, conversation, before, after, applied)`) and the fields are unchanged.
+
 ### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
 
 `GeminiConfig`, `VertexAIConfig` (`llm4s-gemini`) and `AzureConfig` (`llm4s-openai`) follow the growth-prone pattern,

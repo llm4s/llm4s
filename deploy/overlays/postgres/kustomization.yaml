@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Three replicas of the example agent service sharing threads through one PostgreSQL database (design 4.60): any pod
+# accepts a run, whichever worker takes it runs it, any pod streams or cancels it, and a run whose pod dies is
+# recovered by another once its claim expires. An example to copy, not a product: see deploy/README.md.
+#
+# The database is yours (a managed Postgres, or one you run): set its URL in `database.env`, and create the
+# credentials Secret before applying, as deploy/README.md shows. The image is set like the other overlays'.
+namespace: llm4s-postgres
+resources:
+  - ../../base
+  - pdb.yaml
+replicas:
+  - name: llm4s-deploy-service
+    count: 3
+configMapGenerator:
+  # The non-secret database settings, read by llm4s-agent-checkpoint-postgres's reference.conf bindings.
+  - name: llm4s-agent-store
+    envs:
+      - database.env
+patches:
+  - path: deployment-postgres.yaml

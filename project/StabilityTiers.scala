@@ -419,44 +419,6 @@ object StabilityTiers {
       "org.llm4s.config.ProvidersConfigModel.ProvidersConfig",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
-    GrowthExempt(
-      "org.llm4s.context.CompressionRule",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt("org.llm4s.context.ContextStep", "TODO(#2369): predates the check; convert to a private constructor"),
-    GrowthExempt(
-      "org.llm4s.context.ConversationWindow",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.HistoryDigest",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.ManagedConversation",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.MessageTokenInfo",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt("org.llm4s.context.PipelineStep", "TODO(#2369): predates the check; convert to a private constructor"),
-    GrowthExempt(
-      "org.llm4s.context.SemanticBlock",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.StructuredInfo",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.TokenBreakdown",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.context.TokenUsageInfo",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
       "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
