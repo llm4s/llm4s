@@ -99,7 +99,7 @@ object ServiceRuntime:
       runtime        <- RuntimeConfigLoader.runtime(checkpointer)
       client         <- ExampleAgent.client(config)
       built = for
-        agent  <- ExampleAgent.build(config.agentId, client, runtime, config)
+        agent  <- ExampleAgent.build(config.agentId, client, runtime, config, metrics)
         worker <- AgentWorker(queue, checkpointer, Seq(QueuedAgent(agent)), workerSettings, queueSettings, metrics)
       yield worker
       _ = built.left.foreach(_ => Try(client.close()))
