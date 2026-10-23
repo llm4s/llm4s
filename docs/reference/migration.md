@@ -175,6 +175,14 @@ Runs can be submitted to a durable queue that workers on any machine take ([desi
 - **A new abstract `Checkpointer` method.** `latestOfRuns(threadId, runIds): Result[Option[Checkpoint]]` answers the newest checkpoint any of a set of runs committed on a thread, by an index on the run. A custom store implements it (a forwarding wrapper forwards it) and passes `CheckpointerContract`'s new cases; a store that also offers a `RunQueue` keeps, through `prune`, the newest checkpoint of every run an open entry recorded, and passes `RunQueueContract`.
 - **Schemas move on, with no way back.** SQLite schema 10 and PostgreSQL schema 4, the step after store-wide retention's, add `run_id` to every history row (backfilled from its JSON when the store opens, and indexed by thread, run and position) and the queue's two tables. An older build refuses the new schema, so upgrade every process sharing a file or database together.
 
+### Cancel and the busy-thread policy (#2136)
+
+A queued run can be cancelled from any machine, and a submission's `BusyThreadPolicy` is acted on in full ([design 4.57](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.57-stage-5-slice-w3-cancel-from-any-machine-and-the-busy-thread-policy.md)). A direct `start`, `resume` or `recover` on a busy thread is still refused with `ThreadBusy`, and `AgentRun.cancel` of a direct run still leaves its thread `Running` for `recover`. These change:
+
+- **`Reject` also refuses a thread a direct run holds.** A `Reject` submission (the default) is refused with `GraphError.ThreadBusy` while a live claim holds the thread, not only while it has an open queue entry. Submit with `Enqueue` to wait behind the direct run instead.
+- **A new abstract `RunQueue` method.** `cancel(tenantId, target, reason)` closes an unstarted entry at once and asks a started one to stop; a custom queue implements it, answers the request with every lease it grants or renews (`Lease.stop`) and on `QueueEntry.stopRequest`, and passes `RunQueueContract`'s new cases.
+- **Schemas move on again.** SQLite schema 11 and PostgreSQL schema 5 add each queue entry's stop request. An older build refuses the new schema, so upgrade every process sharing a file or database together.
+
 ## Workspace command confinement (#1983)
 
 Not in a release yet. On Linux, the workspace runner now starts every `execute` command under Landlock and, unless the network is allowed, a seccomp filter ([#1983](https://github.com/llm4s/llm4s/issues/1983), [design 4.39](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md)). Behaviour breaks, with no opt-out; off Linux (macOS, Windows) nothing changes:

@@ -3378,7 +3378,7 @@ final class GraphRuntime(
           else if execution.paused || execution.isQuiescent then end(execution, checkpointId)
           else if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps then
             fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
-          else if Thread.currentThread().isInterrupted || overdue() then cancelled()
+          else if Thread.currentThread().isInterrupted || overdue() || atBoundary(execution) then cancelled()
           else
             val outcomes = graph
               .executorFor(config.budgets)
@@ -3391,6 +3391,7 @@ final class GraphRuntime(
                     Right(Settled(task, TaskResult.Held, CompiledGraph.HeldDigest))
                   case None => runTask(task, execution, checkpointId)
               })
+            signal.inFlight.set(Vector.empty)
             // a cancelled task cancels the run, even if an earlier task failed
             if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
             else
@@ -3415,6 +3416,16 @@ final class GraphRuntime(
                       ) match
                         case Left(error) => fail(execution, error)
                         case Right(id)   => loop(next, id, Map.empty)
+
+    /**
+     * Whether a boundary stop ([[RunHandle.stopSettling]]) was asked for, checked just before `execution`'s superstep
+     * starts: the superstep's nodes are published first, so a stop asked for after this check sees them and cuts the
+     * superstep itself if every task of it may be cut, and otherwise lets it end - the run then stops here, at the next
+     * superstep's start, once this one has committed.
+     */
+    private def atBoundary(execution: Execution): Boolean =
+      signal.inFlight.set(execution.frontier.map(_.node))
+      signal.boundary.get
 
     /** Whether a cancel, expiry or lost claim has been recorded, and so may have interrupted a commit. */
     private def stopRecorded: Boolean =
@@ -3697,6 +3708,8 @@ final class GraphRuntime(
       val result = cause.get.getOrElse(StopCause.Cancelled) match
         case StopCause.ClaimLost => lostClaim(execution, None)
         // `Finishing` here means an interrupt from inside the run reached the outcome's commit
+        case StopCause.Cancelled if signal.settlement.get.isDefined =>
+          closeSettled(execution, checkpointId, signal.settlement.get.get)
         case StopCause.Cancelled | StopCause.Finishing =>
           closeStopped(
             execution,
@@ -3711,6 +3724,33 @@ final class GraphRuntime(
           )
       Thread.currentThread().interrupt()
       result
+
+    /**
+     * Closes a run stopped to be settled ([[RunHandle.stopSettling]], Stage 5 W3): over its last durable checkpoint
+     * `parent`, a `Failed` checkpoint with `settlement`'s update to the state and its outcome, and the run's
+     * [[RunEvent.RunCancelled]], committed under the run's claim before it is released - so the thread is at rest, and
+     * its next `start` runs normally. A settlement that cannot be built (its update fails, or the state does not
+     * snapshot) closes the run as a plain cancel does, its thread left `Running`; a commit the store refuses fails the
+     * run as any closing commit does. Fails with [[GraphError.Cancelled]] naming the settled checkpoint.
+     */
+    private def closeSettled(execution: Execution, parent: String, settlement: StopSettlement): RunResult[O] =
+      val built = amended(execution, settlement.amend).flatMap { settled =>
+        newCheckpoint(settled, Some(parent), CheckpointStatus.Failed, Some(settlement.outcome)).map(settled -> _)
+      }
+      built match
+        case Left(problem) =>
+          GraphRuntime.logger.warn(
+            s"Run ${named(runId)} on thread '${threadId.value}' could not be settled as it stopped: ${problem.message}"
+          )
+          closeStopped(
+            execution,
+            RunEvent.RunCancelled(lostUsage, failedSteps.get),
+            GraphError.Cancelled(Some(threadId.value), Some(parent))
+          )
+        case Right((settled, saved)) =>
+          committer.forgetInterruptedFailure()
+          submit(saved, RunEvent.RunCancelled(lostUsage, failedSteps.get))
+          stop(settled, GraphError.Cancelled(Some(threadId.value), Some(saved.id)))
 
     /** Commits a stopped run's closing `event`, against its last durable checkpoint, and fails it with `error`. */
     private def closeStopped(execution: Execution, event: RunEvent, error: LLMError): RunResult[O] =

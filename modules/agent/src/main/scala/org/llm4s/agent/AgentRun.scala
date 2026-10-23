@@ -46,6 +46,19 @@ final class AgentRun private[agent] (
   def cancel(): Unit = handle.cancel()
 
   /**
+   * Stops a queued turn and settles it (Stage 5 W3, design 4.57): with `atBoundary`, at its next superstep boundary - an
+   * in-flight model call is cut, tool calls already started finish and keep their results, and no later superstep
+   * starts - else at once, as [[cancel]] does. The turn then commits, under its claim, a `Failed` checkpoint with
+   * `outcome`, every tool call of the turn left without a result given `result` ([[toolloop.SettledTurn]]), so the
+   * thread is at rest for the queue's next entry. A turn already committing its outcome ends with it. See
+   * [[org.llm4s.agent.graph.RunHandle.stopSettling]].
+   */
+  private[agent] def stopSettling(result: String, outcome: RunOutcome, atBoundary: Boolean): Unit =
+    val settlement =
+      StopSettlement(outcome, state => toolloop.SettledTurn.closing(state, s"${runId.value}/settled", result))
+    handle.stopSettling(settlement, Option.when(atBoundary)(loop.cuttable))
+
+  /**
    * Cancels the turn and waits, within `within` and whatever interrupts the waiting thread, for it to
    * end, so the thread is free for `recover` when this returns. A turn still running then - its
    * provider ignored the interrupt - is logged at WARN and left to end on its own, and the thread is
