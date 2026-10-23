@@ -45,6 +45,10 @@ object Versions {
   val catsEffect = "3.5.7"
   val fs2        = "3.11.0"
 
+  // doobie, Test scope in the unpublished samples only, for the compiled doobie snippet of docs/guide/vector-store.md
+  // (#2300). 1.0.0-RC5 is the last release built on the cats-effect above and on HikariCP 5.1.0 (RC8 takes HikariCP 6).
+  val doobie = "1.0.0-RC5"
+
   // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
   // cats-effect and fs2 versions above.
   val http4s = "0.23.30"
@@ -148,6 +152,9 @@ object Deps {
   // cats-effect + fs2
   val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
   val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
+
+  // doobie (unpublished samples' Test scope only; see Versions)
+  val doobieHikari = "org.tpolecat" %% "doobie-hikari" % Versions.doobie
 
   // http4s (unpublished modules/examples-http only; see Versions)
   val http4sEmberServer = "org.http4s" %% "http4s-ember-server" % Versions.http4s

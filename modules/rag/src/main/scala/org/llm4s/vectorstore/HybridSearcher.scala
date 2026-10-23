@@ -5,6 +5,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.reranker.{ RerankRequest, Reranker }
 import org.llm4s.types.Result
 
+import javax.sql.DataSource
 import scala.util.Try
 
 /**
@@ -404,7 +405,8 @@ object HybridSearcher {
    * - pgvector extension for vector similarity search
    * - PostgreSQL native full-text search (tsvector/tsquery) for keyword search
    *
-   * Both stores share a connection pool for efficiency.
+   * Both stores share a connection pool for efficiency. The searcher creates the pool and closes it on
+   * [[HybridSearcher.close]]; to share the application's own pool instead, pass a `javax.sql.DataSource`.
    *
    * Requires PostgreSQL 16+ with pgvector extension installed.
    * Recommended: PostgreSQL 18+ for best performance.
@@ -441,11 +443,55 @@ object HybridSearcher {
     }.toEither.left
       .map(e => ProcessingError("hybrid-searcher", s"Failed to create connection pool: ${e.getMessage}"))
       .flatMap { dataSource =>
-        for {
-          vectorStore  <- PgVectorStore(dataSource, vectorTableName)
-          keywordIndex <- PgKeywordIndex(dataSource, keywordTableName)
-        } yield new HybridSearcher(vectorStore, keywordIndex, defaultStrategy)
+        // The vector store owns the pool, so closing the searcher closes it; the keyword index borrows it.
+        PgVectorStore.create(dataSource, vectorTableName, ownsDataSource = true) match {
+          case Left(error) =>
+            dataSource.close()
+            Left(error)
+          case Right(vectorStore) =>
+            PgKeywordIndex(dataSource, keywordTableName) match {
+              case Left(error) =>
+                vectorStore.close()
+                Left(error)
+              case Right(keywordIndex) => Right(new HybridSearcher(vectorStore, keywordIndex, defaultStrategy))
+            }
+        }
       }
+
+  /**
+   * Create a hybrid searcher with PostgreSQL backends over a connection pool the caller owns - a doobie
+   * `HikariTransactor`'s `kernel`, a Play or Slick pool, or pgjdbc's `PGSimpleDataSource`.
+   *
+   * [[HybridSearcher.close]] leaves `dataSource` open; its owner closes it. Searches are blocking JDBC; run them on a
+   * blocking pool from effectful code.
+   *
+   * @param dataSource a `javax.sql.DataSource` the caller owns and closes
+   * @param vectorTableName Table name for vectors
+   * @param keywordTableName Base table name for keywords (creates {tableName}_keyword table)
+   * @param defaultStrategy Default fusion strategy
+   * @return Hybrid searcher or error
+   */
+  def pgvectorShared(
+    dataSource: DataSource,
+    vectorTableName: String,
+    keywordTableName: String,
+    defaultStrategy: FusionStrategy
+  ): Result[HybridSearcher] =
+    for {
+      vectorStore  <- PgVectorStore(dataSource, vectorTableName)
+      keywordIndex <- PgKeywordIndex(dataSource, keywordTableName)
+    } yield new HybridSearcher(vectorStore, keywordIndex, defaultStrategy)
+
+  /**
+   * The four-argument `pgvectorShared` over a caller-owned `DataSource`,
+   * with the default fusion strategy (RRF with k=60).
+   */
+  def pgvectorShared(
+    dataSource: DataSource,
+    vectorTableName: String,
+    keywordTableName: String
+  ): Result[HybridSearcher] =
+    pgvectorShared(dataSource, vectorTableName, keywordTableName, FusionStrategy.default)
 
   /**
    * Create a hybrid searcher with PostgreSQL backends using separate connection pools.

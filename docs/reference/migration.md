@@ -266,6 +266,28 @@ which binds them itself; no llm4s library module reads them any more. Their defa
 value that is set but cannot be read (`CHUNK_SIZE=abc`) is now a `ConfigurationError` instead of silently falling back to
 the default.
 
+### Postgres stores take a `javax.sql.DataSource` (#2300)
+
+The Postgres stores accept a connection pool the application already has, of any kind
+([#2300](https://github.com/llm4s/llm4s/issues/2300)), so the parameters that took HikariCP's concrete pool are widened
+to `javax.sql.DataSource`:
+
+| Before | Now |
+|---|---|
+| `PgVectorStore.create(dataSource: HikariDataSource, tableName, ownsDataSource)` | `PgVectorStore.create(dataSource: DataSource, tableName, ownsDataSource)` |
+| `PgVectorStore(dataSource: HikariDataSource, tableName)` | `PgVectorStore(dataSource: DataSource, tableName)` |
+| `PgKeywordIndex(dataSource: HikariDataSource, tableName[, language])` | `PgKeywordIndex(dataSource: DataSource, tableName[, language])` |
+| - | `HybridSearcher.pgvectorShared(dataSource, vectorTableName, keywordTableName[, defaultStrategy])` |
+| - | `PgSearchIndex.fromDataSource(dataSource, vectorTableName)` |
+| - | `PostgresMemoryStore.fromDataSource(dataSource, tableName, embeddingService)` |
+
+A `HikariDataSource` is a `DataSource`, so code that passes one compiles unchanged; code compiled against 0.5.x must be
+recompiled. A store built over a `DataSource` never closes it unless `PgVectorStore.create` is given
+`ownsDataSource = true`, and then only if the `DataSource` is `AutoCloseable`. `PgSearchIndex.close()` used to close
+its pool unconditionally; it now closes only a pool it created from a `PgConfig`. A store over `PGSimpleDataSource` or
+another non-pooling `DataSource` opens a connection per call. See
+[Sharing your application's connection pool](../guide/vector-store.html#sharing-your-applications-connection-pool).
+
 ### `Completion.created` is an `Instant` (#2262)
 
 A point in time in the public API is a `java.time.Instant` ([#2262](https://github.com/llm4s/llm4s/issues/2262)), and

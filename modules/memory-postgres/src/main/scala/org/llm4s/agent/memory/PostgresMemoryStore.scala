@@ -7,16 +7,22 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, Timestamp }
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
 import scala.util.{ Try, Using }
 
 /**
  * PostgreSQL implementation of MemoryStore.
  * Persists agent memories to a Postgres table using JDBC.
+ *
+ * Built either by [[PostgresMemoryStore.apply]], which creates a connection pool and closes it on [[close]], or by
+ * [[PostgresMemoryStore.fromDataSource]], over a `javax.sql.DataSource` the caller owns and keeps open.
  */
 final class PostgresMemoryStore private[memory] (
-  private val dataSource: HikariDataSource,
+  private val dataSource: DataSource,
   val tableName: String,
-  private val embeddingService: Option[EmbeddingService]
+  private val embeddingService: Option[EmbeddingService],
+  private[memory] val ownsDataSource: Boolean = true
 ) extends TransactionalMemoryStore
     with AutoCloseable {
 
@@ -558,8 +564,14 @@ final class PostgresMemoryStore private[memory] (
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] =
     recall(filter, limit)
 
+  private val closed = new AtomicBoolean(false)
+
+  /** Closes the connection pool if this store created it; a caller-owned `DataSource` is left open. */
   override def close(): Unit =
-    if (!dataSource.isClosed) dataSource.close()
+    if (ownsDataSource && closed.compareAndSet(false, true)) dataSource match {
+      case closeable: AutoCloseable => closeable.close()
+      case _                        => ()
+    }
 
   private case class VersionedMemory(memory: Memory, version: Long)
 
@@ -676,6 +688,7 @@ object PostgresMemoryStore {
       if (committed || Try(conn.rollback()).isSuccess) Try(conn.setAutoCommit(true)): Unit
   }
 
+  /** A store over a connection pool it creates from `config`, and closes on [[PostgresMemoryStore.close]]. */
   def apply(
     config: Config,
     embeddingService: Option[EmbeddingService] = None
@@ -687,14 +700,49 @@ object PostgresMemoryStore {
       hikariConfig.setPassword(config.password)
       hikariConfig.setMaximumPoolSize(config.maxPoolSize)
       hikariConfig.setMinimumIdle(1)
+      new HikariDataSource(hikariConfig)
+    }.toEither.left
+      .map(initFailure)
+      .flatMap { dataSource =>
+        val store = new PostgresMemoryStore(dataSource, config.tableName, embeddingService, ownsDataSource = true)
+        initialized(store).left.map { e =>
+          store.close()
+          e
+        }
+      }
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      val store      = new PostgresMemoryStore(dataSource, config.tableName, embeddingService)
-      store.initializeSchema()
-      store
-    }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}", cause = Some(e))
-    )
+  private def initFailure(e: Throwable): LLMError =
+    ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}", cause = Some(e))
+
+  private def initialized(store: PostgresMemoryStore): Result[PostgresMemoryStore] =
+    Try(store.initializeSchema()).toEither.left.map(initFailure).map(_ => store)
+
+  /**
+   * A store over `dataSource`, a pool the caller already has - a doobie `HikariTransactor`'s `kernel`, a Play or Slick
+   * pool, or a platform-provided `DataSource`. The store creates its tables if absent, and never closes `dataSource`:
+   * [[PostgresMemoryStore.close]] leaves it open for its owner. Store calls are blocking JDBC; run them on a blocking
+   * pool (`IO.blocking`, `Sync[F].blocking`) from effectful code.
+   *
+   * @param dataSource a `javax.sql.DataSource` the caller owns and closes
+   * @param tableName the memory table; at most 55 characters matching `[a-zA-Z_][a-zA-Z0-9_]*`
+   * @param embeddingService the service embedding memories, if any
+   */
+  def fromDataSource(
+    dataSource: DataSource,
+    tableName: String = "agent_memories",
+    embeddingService: Option[EmbeddingService] = None
+  ): Result[PostgresMemoryStore] =
+    if (dataSource == null)
+      Left(ProcessingError("postgres-memory-store", "dataSource must not be null"))
+    else if (tableName == null || !ValidIdentifierPattern.matches(tableName))
+      Left(
+        ProcessingError(
+          "postgres-memory-store",
+          s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,54}"
+        )
+      )
+    else
+      initialized(new PostgresMemoryStore(dataSource, tableName, embeddingService, ownsDataSource = false))
 
   private[memory] def filterToSql(filter: MemoryFilter): Result[(String, Seq[SqlParam])] = filter match {
     case MemoryFilter.All =>

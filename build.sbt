@@ -1541,7 +1541,9 @@ lazy val samples = (project in file("modules//samples"))
       Deps.circeCore  % Test,
       Deps.ujsonCirce % Test,
       Deps.playJson   % Test,
-      Deps.zioJson    % Test
+      Deps.zioJson    % Test,
+      // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
+      Deps.doobieHikari % Test
     ),
     appLogging,
     // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer

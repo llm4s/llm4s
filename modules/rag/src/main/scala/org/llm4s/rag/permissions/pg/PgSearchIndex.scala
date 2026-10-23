@@ -5,12 +5,14 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
 import org.llm4s.util.SqlIdentifier
-import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, ScoredRecord, VectorRecord }
+import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, PgDataSources, ScoredRecord, VectorRecord }
 import org.llm4s.util.RateLimitedLogger
 
 import org.slf4j.LoggerFactory
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
@@ -18,8 +20,8 @@ import scala.util.{ Try, Using }
 /**
  * PostgreSQL implementation of SearchIndex with permission-based filtering.
  *
- * Uses HikariCP for connection pooling and pgvector for efficient
- * vector similarity search.
+ * Uses a JDBC connection pool - one it creates with HikariCP, or a caller-owned `javax.sql.DataSource` (see
+ * [[PgSearchIndex.fromDataSource]]) - and pgvector for efficient vector similarity search.
  *
  * The implementation:
  * 1. Extends the vectors table with collection_id and readable_by columns
@@ -33,20 +35,23 @@ import scala.util.{ Try, Using }
  * - Queries continue successfully and return topK valid results
  * - No silent data corruption - failures are observable via logs
  *
- * @param dataSource HikariCP data source for connection pooling
+ * @param dataSource JDBC connection pool
  * @param vectorTableName Name of the vectors table
+ * @param _pgConfig the configuration the index's pool was built from, if it built one
+ * @param ownsDataSource whether [[close]] closes `dataSource`
  */
 final class PgSearchIndex private (
-  private val dataSource: HikariDataSource,
+  private val dataSource: DataSource,
   private val vectorTableName: String,
-  private val _pgConfig: SearchIndex.PgConfig
+  private val _pgConfig: Option[SearchIndex.PgConfig],
+  private val ownsDataSource: Boolean
 ) extends SearchIndex {
 
   private val logger            = LoggerFactory.getLogger(getClass)
   private val rateLimitedLogger = RateLimitedLogger(logger, throttle = 60.seconds, throttleCount = 100)
 
   /** Expose PostgreSQL configuration for automatic RAG integration */
-  override def pgConfig: Option[SearchIndex.PgConfig] = Some(_pgConfig)
+  override def pgConfig: Option[SearchIndex.PgConfig] = _pgConfig
 
   private val _principals  = new PgPrincipalStore(() => dataSource.getConnection)
   private val _collections = new PgCollectionStore(() => dataSource.getConnection, vectorTableName)
@@ -313,8 +318,11 @@ final class PgSearchIndex private (
   override def dropSchema(): Result[Unit] =
     withConnection(conn => PgSchemaManager.dropSchema(conn, vectorTableName))
 
+  private val closed = new AtomicBoolean(false)
+
+  /** Closes the connection pool only if this index created it; a caller-owned `DataSource` is left open. */
   override def close(): Unit =
-    dataSource.close()
+    if (ownsDataSource && closed.compareAndSet(false, true)) PgDataSources.closeOwned(dataSource)
 
   // Helper methods
 
@@ -445,9 +453,29 @@ object PgSearchIndex {
         hikariConfig.setMaxLifetime(HikariDefaults.MaxLifetime.toMillis)
 
         val dataSource = new HikariDataSource(hikariConfig)
-        new PgSearchIndex(dataSource, config.vectorTableName, config)
+        new PgSearchIndex(dataSource, config.vectorTableName, Some(config), ownsDataSource = true)
       }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
     }
+
+  /**
+   * A search index over `dataSource`, a pool the caller already has - a doobie `HikariTransactor`'s `kernel`, a Play
+   * or Slick pool, or pgjdbc's `PGSimpleDataSource`. [[PgSearchIndex.close]] leaves `dataSource` open for its owner.
+   * Call `initializeSchema()` before first use, as with [[PgSearchIndex.apply]]. Store calls are blocking JDBC; run
+   * them on a blocking pool from effectful code.
+   *
+   * The index has no connection settings to share, so its `pgConfig` is `None`: `RAGConfig.withSearchIndex` does not
+   * point the RAG pipeline's own vector store at the same database.
+   *
+   * @param dataSource a `javax.sql.DataSource` the caller owns and closes
+   * @param vectorTableName Name of the vectors table
+   * @return The search index, or error
+   */
+  def fromDataSource(dataSource: DataSource, vectorTableName: String = "vectors"): Result[PgSearchIndex] =
+    if (dataSource == null) Left(ProcessingError("pg-search-index-create", "dataSource must not be null"))
+    else
+      SqlIdentifier
+        .validate(vectorTableName, "pg-search-index-create")
+        .map(_ => new PgSearchIndex(dataSource, vectorTableName, None, ownsDataSource = false))
 
   /**
    * Create a PgSearchIndex from a JDBC URL.

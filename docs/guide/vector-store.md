@@ -132,6 +132,69 @@ store.close()
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
+### Sharing your application's connection pool
+
+The factories above create a HikariCP pool and close it with the store. An application that already has a pool - a
+doobie `HikariTransactor`, a Play or Slick pool, or a `javax.sql.DataSource` a platform team hands out with credential
+rotation, metrics and TLS configured - can pass it instead. Every Postgres store and index takes a plain
+`javax.sql.DataSource` that it **does not own**: closing the store leaves the pool open, and the pool's owner closes it.
+
+| Store | Over a caller-owned `DataSource` |
+| ----- | -------------------------------- |
+| `PgVectorStore` | `PgVectorStore.create(dataSource, tableName)` or `PgVectorStore(dataSource, tableName)` |
+| `PgKeywordIndex` | `PgKeywordIndex(dataSource, tableName)` or `PgKeywordIndex(dataSource, tableName, language)` |
+| `HybridSearcher` | `HybridSearcher.pgvectorShared(dataSource, vectorTableName, keywordTableName)` (optionally a `FusionStrategy`) |
+| `PgSearchIndex` | `PgSearchIndex.fromDataSource(dataSource, vectorTableName)` |
+| `PostgresMemoryStore` | `PostgresMemoryStore.fromDataSource(dataSource, tableName, embeddingService)` |
+
+With doobie, the transactor's `kernel` is the `HikariDataSource` behind it. Build the store inside the transactor's
+`Resource`, so the pool outlives every store that borrows it:
+
+```scala
+import cats.effect.{ IO, Resource }
+import doobie.hikari.HikariTransactor
+import doobie.util.ExecutionContexts
+import org.llm4s.vectorstore.{ PgVectorStore, VectorRecord }
+
+// The application's pool. Its Resource closes it - no LLM4S store does.
+val transactor: Resource[IO, HikariTransactor[IO]] =
+  for {
+    connectEc <- ExecutionContexts.fixedThreadPool[IO](16)
+    xa <- HikariTransactor.newHikariTransactor[IO](
+      "org.postgresql.Driver",
+      "jdbc:postgresql://localhost:5432/mydb",
+      "postgres",
+      "secret",
+      connectEc
+    )
+  } yield xa
+
+// The store borrows `xa.kernel`; closing the store leaves the pool open.
+val vectorStore: Resource[IO, PgVectorStore] =
+  transactor.flatMap { xa =>
+    Resource.make(
+      IO.blocking(PgVectorStore.create(xa.kernel, "embeddings"))
+        .flatMap(result => IO.fromEither(result.left.map(e => new RuntimeException(e.formatted))))
+    )(store => IO.blocking(store.close()))
+  }
+
+// Store calls are blocking JDBC: run them on the blocking pool.
+val program: IO[Long] =
+  vectorStore.use { store =>
+    IO.blocking {
+      for {
+        _     <- store.upsert(VectorRecord("doc-1", Array(0.1f, 0.2f, 0.3f), Some("Scala programming")))
+        count <- store.count()
+      } yield count
+    }.flatMap(result => IO.fromEither(result.left.map(e => new RuntimeException(e.formatted))))
+  }
+```
+
+Every store call is blocking JDBC. From cats-effect code run it with `IO.blocking` (or `Sync[F].blocking`), from ZIO
+with `ZIO.attemptBlocking`, so it never occupies a compute thread. Any `DataSource` works, not only HikariCP's: pgjdbc's
+`PGSimpleDataSource` opens a connection per call, which is fine for tests and scripts. Hikari stays an implementation
+detail of the config-based factories, and no public signature names it.
+
 ### Qdrant
 
 ```scala

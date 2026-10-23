@@ -86,6 +86,29 @@ val storeResult = PostgresMemoryStore(config)
 | `tableName`   | `"agent_memories"` | Table used for memory storage |
 | `maxPoolSize` | `10`               | Maximum HikariCP pool size    |
 
+### Sharing your application's connection pool
+
+`PostgresMemoryStore(config)` creates a HikariCP pool and closes it on `close()`. To reuse a pool the application
+already has - a doobie `HikariTransactor`'s `kernel`, a Play or Slick pool, or any `javax.sql.DataSource` - use
+`fromDataSource`. The store creates its tables if they are absent and **never closes the `DataSource`**: its owner does.
+
+```scala
+import javax.sql.DataSource
+import org.llm4s.agent.memory.{ MockEmbeddingService, PostgresMemoryStore }
+
+def memories(pool: DataSource) =
+  PostgresMemoryStore.fromDataSource(
+    dataSource = pool,
+    tableName = "agent_memories",
+    embeddingService = Some(MockEmbeddingService.default)
+  ) // Result[PostgresMemoryStore]; store.close() leaves `pool` open
+```
+
+Store calls are blocking JDBC; from effectful code run them on the blocking pool (`IO.blocking`, `Sync[F].blocking`,
+`ZIO.attemptBlocking`). The vector-store guide's
+[Sharing your application's connection pool](../guide/vector-store.html#sharing-your-applications-connection-pool)
+section has a complete doobie example inside a cats-effect `Resource`.
+
 ## Security & Validation
 
 ### Table Name Validation

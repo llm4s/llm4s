@@ -6,6 +6,8 @@ import org.llm4s.util.SqlIdentifier
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import java.sql.{ Connection, PreparedStatement, ResultSet }
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
 
@@ -32,13 +34,13 @@ import scala.util.{ Try, Using }
  * - "-hello" - exclude documents with hello
  * - "\"hello world\"" - exact phrase match
  *
- * @param dataSource HikariCP data source for connection pooling
+ * @param dataSource JDBC connection pool: one the index created (HikariCP), or a caller-owned `javax.sql.DataSource`
  * @param tableName Base table name (creates {tableName}_keyword table)
  * @param language PostgreSQL text search configuration (default: "english")
  * @param ownsDataSource Whether to close dataSource on close()
  */
 final class PgKeywordIndex private (
-  private val dataSource: HikariDataSource,
+  private val dataSource: DataSource,
   val tableName: String,
   val language: String,
   val ownsDataSource: Boolean
@@ -285,10 +287,11 @@ final class PgKeywordIndex private (
       }
     }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Clear failed: ${e.getMessage}"))
 
+  private val closed = new AtomicBoolean(false)
+
+  /** Closes the connection pool only if this index owns it; a caller-owned `DataSource` is left open. */
   override def close(): Unit =
-    if (ownsDataSource && !dataSource.isClosed) {
-      dataSource.close()
-    }
+    if (ownsDataSource && closed.compareAndSet(false, true)) PgDataSources.closeOwned(dataSource)
 
   override def stats(): Result[KeywordIndexStats] =
     Try {
@@ -553,47 +556,61 @@ object PgKeywordIndex {
           hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
           hikariConfig.setIdleTimeout(HikariDefaults.IdleTimeout.toMillis)
           hikariConfig.setMaxLifetime(HikariDefaults.MaxLifetime.toMillis)
-
-          val dataSource = new HikariDataSource(hikariConfig)
-          new PgKeywordIndex(dataSource, config.tableName, validatedLanguage, ownsDataSource = true)
-        }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+          new HikariDataSource(hikariConfig)
+        }.toEither.left
+          .map(createFailure)
+          .flatMap { dataSource =>
+            Try(
+              new PgKeywordIndex(dataSource, config.tableName, validatedLanguage, ownsDataSource = true)
+            ).toEither.left
+              .map { e =>
+                dataSource.close()
+                createFailure(e)
+              }
+          }
       }
     }
 
+  private def createFailure(e: Throwable): LLMError =
+    ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}")
+
   /**
-   * Create a PgKeywordIndex with an existing HikariDataSource.
+   * Create a PgKeywordIndex with an existing `javax.sql.DataSource`.
    *
-   * Useful for sharing a connection pool with PgVectorStore.
+   * Useful for sharing a connection pool with PgVectorStore, or the application's own pool (a doobie
+   * `HikariTransactor`'s `kernel`, a Play or Slick pool, pgjdbc's `PGSimpleDataSource`).
    *
-   * @param dataSource Existing HikariDataSource
+   * Note: The provided dataSource will NOT be closed when the index is closed.
+   *
+   * @param dataSource Existing `javax.sql.DataSource`, owned by the caller
    * @param tableName Base table name
    * @param language PostgreSQL text search configuration
    * @return The keyword index or error
    */
-  def apply(dataSource: HikariDataSource, tableName: String, language: String): Result[PgKeywordIndex] =
+  def apply(dataSource: DataSource, tableName: String, language: String): Result[PgKeywordIndex] =
     SqlIdentifier.validate(tableName, "pg-keyword-index").flatMap { _ =>
       validateLanguage(language, "pg-keyword-index").flatMap { validatedLanguage =>
         Try {
           new PgKeywordIndex(dataSource, tableName, validatedLanguage, ownsDataSource = false)
-        }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+        }.toEither.left.map(createFailure)
       }
     }
 
   /**
-   * Create a PgKeywordIndex with an existing HikariDataSource using default language.
+   * Create a PgKeywordIndex with an existing `javax.sql.DataSource` using default language.
    *
    * Note: The provided dataSource will NOT be closed when the index is closed.
    * The caller is responsible for managing the dataSource lifecycle.
    *
-   * @param dataSource Existing HikariDataSource
+   * @param dataSource Existing `javax.sql.DataSource`, owned by the caller
    * @param tableName Base table name
    * @return The keyword index or error
    */
-  def apply(dataSource: HikariDataSource, tableName: String): Result[PgKeywordIndex] =
+  def apply(dataSource: DataSource, tableName: String): Result[PgKeywordIndex] =
     SqlIdentifier.validate(tableName, "pg-keyword-index").flatMap { _ =>
       Try {
         new PgKeywordIndex(dataSource, tableName, language = "english", ownsDataSource = false)
-      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+      }.toEither.left.map(createFailure)
     }
 
   /**

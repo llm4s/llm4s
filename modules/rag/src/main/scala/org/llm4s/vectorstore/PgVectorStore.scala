@@ -5,6 +5,8 @@ import org.llm4s.error.{ ProcessingError, LLMError }
 import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
@@ -34,14 +36,14 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
  * - PostgreSQL 16+ with pgvector extension (18+ recommended)
  * - Run: CREATE EXTENSION IF NOT EXISTS vector;
  *
- * @param dataSource HikariCP connection pool
+ * @param dataSource JDBC connection pool: one the store created (HikariCP), or a caller-owned `javax.sql.DataSource`
  * @param tableName  Name of the vectors table
- * @param ownsDataSource Whether to close dataSource on close() (default: true)
+ * @param ownsDataSource Whether to close dataSource on close()
  */
 final class PgVectorStore private (
-  private val dataSource: HikariDataSource,
+  private val dataSource: DataSource,
   val tableName: String,
-  private val ownsDataSource: Boolean = true
+  private val ownsDataSource: Boolean
 ) extends VectorStore {
 
   // Initialize schema on creation
@@ -423,10 +425,11 @@ final class PgVectorStore private (
       }
     }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to get stats: ${e.getMessage}"))
 
+  private val closed = new AtomicBoolean(false)
+
+  /** Closes the connection pool only if this store owns it; a caller-owned `DataSource` is left open. */
   override def close(): Unit =
-    if (ownsDataSource && !dataSource.isClosed) {
-      dataSource.close()
-    }
+    if (ownsDataSource && closed.compareAndSet(false, true)) PgDataSources.closeOwned(dataSource)
 
   // ============================================================
   // Helper Methods
@@ -515,15 +518,19 @@ object PgVectorStore {
     SqlIdentifier.validate(name, "pgvector-store")
 
   /**
-   * Create a PgVectorStore from an existing HikariDataSource after validating the table name.
+   * Create a PgVectorStore from an existing `javax.sql.DataSource` after validating the table name.
    * Validation is performed before any side-effects (like opening connections) occur.
    *
    * By default, the dataSource is NOT owned (ownsDataSource = false), meaning the caller remains
    * responsible for managing the dataSource lifecycle. Pass ownsDataSource = true if you want
    * the PgVectorStore to close the dataSource on close(). This is safe for exclusive-use pools
-   * but dangerous for shared pools across multiple stores.
+   * but dangerous for shared pools across multiple stores. An owned `dataSource` is closed only if it is
+   * `AutoCloseable`, as HikariCP's is.
+   *
+   * Any `DataSource` works: a doobie `HikariTransactor`'s `kernel`, a Play or Slick pool, or pgjdbc's
+   * `PGSimpleDataSource`. Store calls are blocking JDBC; run them on a blocking pool from effectful code.
    */
-  def create(dataSource: HikariDataSource, tableName: String, ownsDataSource: Boolean = false): Result[PgVectorStore] =
+  def create(dataSource: DataSource, tableName: String, ownsDataSource: Boolean = false): Result[PgVectorStore] =
     validateTableName(tableName).flatMap { _ =>
       Try {
         new PgVectorStore(dataSource, tableName, ownsDataSource)
@@ -571,10 +578,10 @@ object PgVectorStore {
         hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
         hikariConfig.setIdleTimeout(HikariDefaults.IdleTimeout.toMillis)
         hikariConfig.setMaxLifetime(HikariDefaults.MaxLifetime.toMillis)
-
-        val dataSource = new HikariDataSource(hikariConfig)
-        new PgVectorStore(dataSource, config.tableName)
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        hikariConfig
+      }.toEither.left
+        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        .flatMap(ownedStore(_, config.tableName))
     }
 
   /**
@@ -600,11 +607,22 @@ object PgVectorStore {
         hikariConfig.setPassword(password)
         hikariConfig.setMaximumPoolSize(10)
         hikariConfig.setMinimumIdle(1)
-
-        val dataSource = new HikariDataSource(hikariConfig)
-        new PgVectorStore(dataSource, tableName)
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        hikariConfig
+      }.toEither.left
+        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        .flatMap(ownedStore(_, tableName))
     }
+
+  /** A store over a pool it creates from `hikariConfig` and owns; the pool is closed if the schema cannot be set up. */
+  private def ownedStore(hikariConfig: HikariConfig, tableName: String): Result[PgVectorStore] =
+    Try(new HikariDataSource(hikariConfig)).toEither.left
+      .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+      .flatMap(dataSource =>
+        create(dataSource, tableName, ownsDataSource = true).left.map { e =>
+          dataSource.close()
+          e
+        }
+      )
 
   /**
    * Create a PgVectorStore with default local settings.
@@ -618,7 +636,7 @@ object PgVectorStore {
     apply(Config(tableName = tableName))
 
   /**
-   * Create a PgVectorStore with an existing HikariDataSource.
+   * Create a PgVectorStore with an existing `javax.sql.DataSource`.
    *
    * Useful for sharing a connection pool with other PostgreSQL stores
    * (e.g., PgKeywordIndex for hybrid search).
@@ -626,10 +644,10 @@ object PgVectorStore {
    * Note: The provided dataSource will NOT be closed when the store is closed.
    * The caller is responsible for managing the dataSource lifecycle.
    *
-   * @param dataSource Existing HikariDataSource
+   * @param dataSource Existing `javax.sql.DataSource`, owned by the caller
    * @param tableName Table name for vectors
    * @return The vector store or error
    */
-  def apply(dataSource: HikariDataSource, tableName: String): Result[PgVectorStore] =
+  def apply(dataSource: DataSource, tableName: String): Result[PgVectorStore] =
     create(dataSource, tableName, ownsDataSource = false)
 }
