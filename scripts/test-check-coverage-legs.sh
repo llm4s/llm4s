@@ -26,7 +26,8 @@ fresh() {
 }
 
 # mutate <<'RB' ... RB : run Ruby with `wf` (ci.yml), `job` (its coverage-leg job), `legs` (its matrix rows),
-# `model` and `codecov` loaded; each is written back afterwards.
+# `uploads` (the leg job's upload steps), `it_job` (the integration-tests job), `it_run` (its step with
+# COVERAGE_MODULES), `it_uploads` (its upload steps), `model` and `codecov` loaded; each is written back afterwards.
 mutate() {
   ruby -ryaml -rjson - "$WORK/case" "$(cat)" <<'RUBY'
 dir, code = ARGV
@@ -36,6 +37,9 @@ legs = job['strategy']['matrix']['include']
 model = JSON.parse(File.read("#{dir}/model.json"))
 codecov = YAML.load_file("#{dir}/codecov.yml")
 uploads = job['steps'].select { |s| s['uses'].to_s.start_with?('codecov/') }
+it_job = wf['jobs']['integration-tests']
+it_run = it_job['steps'].find { |s| (s['env'] || {}).key?('COVERAGE_MODULES') }
+it_uploads = it_job['steps'].select { |s| s['uses'].to_s.start_with?('codecov/') }
 eval(code) # rubocop:disable Security/Eval -- the cases below are this file's own code
 File.write("#{dir}/ci.yml", wf.to_yaml)
 File.write("#{dir}/model.json", JSON.generate(model))
@@ -173,6 +177,81 @@ mutate <<'RB'
 job['strategy']['matrix'].delete('include')
 RB
 expect_fail "a coverage job without legs fails" "has no strategy.matrix.include legs"
+
+# The integration-tests job (#2349): the second uploader of the flags in its COVERAGE_MODULES, and of no other.
+fresh
+mutate <<'RB'
+it_job['steps'].delete(it_run)
+it_job['steps'].reject! { |s| it_uploads.include?(s) }
+RB
+expect_pass "an integration job that measures nothing passes"
+
+fresh
+mutate <<'RB'
+m = legs.flat_map { |l| l['modules'] }.find { |id| !it_run['env']['COVERAGE_MODULES'].split.include?(id) }
+p = model['projects'].find { |x| x['id'] == m }
+step = Marshal.load(Marshal.dump(it_uploads.first))
+step['name'] = "Upload #{m} integration coverage to Codecov"
+step['with']['files'] = "#{p['base']}/target/scala-#{p['scalaVersion']}/scoverage-report/scoverage.xml"
+step['with']['flags'] = job['steps'].find { |s| s['if'] == "contains(matrix.modules, '#{m}')" }['with']['flags']
+it_job['steps'] << step
+it_run['env']['COVERAGE_MODULES'] += " #{m}"
+RB
+expect_pass "a leg's module added to the integration job with its upload passes"
+
+fresh
+mutate <<'RB'
+it_run['env']['COVERAGE_MODULES'] = it_run['env']['COVERAGE_MODULES'].split.drop(1).join(' ')
+RB
+expect_fail "an integration upload of a module not in COVERAGE_MODULES fails" "which is not the report of a module in its COVERAGE_MODULES"
+
+fresh
+mutate <<'RB'
+it_job['steps'].delete(it_uploads.first)
+RB
+expect_fail "a module in COVERAGE_MODULES with no upload step fails" "is in integration-tests's COVERAGE_MODULES but has 0 Codecov upload steps"
+
+fresh
+mutate <<'RB'
+it_job['steps'] << Marshal.load(Marshal.dump(it_uploads.first))
+RB
+expect_fail "a module in COVERAGE_MODULES with two upload steps fails" "but has 2 Codecov upload steps there"
+
+fresh
+mutate <<'RB'
+it_uploads.first['with']['flags'] = it_uploads.last['with']['flags']
+RB
+expect_fail "an integration upload under another module's flag fails" "has paths .* expected"
+
+fresh
+mutate <<'RB'
+it_run['run'] = it_run['run'].gsub('coverageFailOnMinimum := false', 'coverageEnabled := true')
+RB
+expect_fail "an integration run that enforces floors fails" "does not set coverageFailOnMinimum := false"
+
+fresh
+mutate <<'RB'
+it_run['env']['COVERAGE_MODULES'] += ' ' + model['projects'].find { |p| p['coverageFloor'].nil? }['id']
+RB
+expect_fail "a module without a floor in COVERAGE_MODULES fails" "has no coverage floor \\(coverage is disabled\\)"
+
+fresh
+mutate <<'RB'
+it_run['env']['COVERAGE_MODULES'] += ' noSuchModule'
+RB
+expect_fail "an unknown module in COVERAGE_MODULES fails" "noSuchModule, in integration-tests's COVERAGE_MODULES, is not a project"
+
+fresh
+mutate <<'RB'
+it_run['env']['COVERAGE_MODULES'] += ' ' + it_run['env']['COVERAGE_MODULES'].split.first
+RB
+expect_fail "a module listed twice in COVERAGE_MODULES fails" "COVERAGE_MODULES lists .* 2 times"
+
+fresh
+mutate <<'RB'
+it_job['steps'].delete(it_run)
+RB
+expect_fail "integration uploads without COVERAGE_MODULES fail" "needs exactly one step with env COVERAGE_MODULES"
 
 echo
 echo "$PASSED passed, $FAILED failed"

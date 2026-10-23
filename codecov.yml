@@ -28,6 +28,8 @@ coverage:
 # `carryforward: true` keeps the last known coverage for a flag when a CI run does not
 # upload that module (CI runs coverage for the modules listed in the legs of ci.yml's coverage-leg job; each
 # leg uploads the flags of its own modules, and scripts/check-coverage-legs.sh checks each flag's `paths` here).
+# The integration-tests job uploads a second report for the flags of the modules its Docker-tier suites measure
+# (its COVERAGE_MODULES); Codecov merges the uploads of a flag on one commit (#2349).
 flags:
   core:
     paths:

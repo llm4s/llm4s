@@ -337,6 +337,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Changed** the Integration Tests job uploads coverage: it instruments `rag`, `vectorstoreElasticsearch`,
+  `vectorstoreRedis`, `memoryPostgres`, `knowledgegraphNeo4j` and `agentCheckpointPostgres` (its `COVERAGE_MODULES`),
+  runs the `@Docker` tier, and uploads each module's report under the module's existing Codecov flag, so code reachable
+  only against Postgres, Qdrant, Elasticsearch, OpenSearch, Redis, Valkey or Neo4j counts as covered. Floors are not
+  enforced from these partial reports; the coverage legs still enforce them. `scripts/check-coverage-legs.sh` allows
+  this second upload of a flag for exactly those modules and checks its steps [#2349](https://github.com/llm4s/llm4s/issues/2349).
 - **Changed** the release's `publish` job checks the Scaladoc log before `sbt ci-release`, as CI's ScalaDoc job does, so
   a release cannot package a new Scaladoc warning; and `scripts/check-scaladoc-warnings.sh` now fails on a third-party
   warning (a doc comment inherited from ScalaTest or cats-effect that Scaladoc cannot resolve) unless

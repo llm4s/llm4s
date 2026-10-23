@@ -12,7 +12,11 @@
 #   - every module in a leg has exactly one Codecov upload step in that job, gated on its leg
 #     (`if: contains(matrix.modules, '<module>')`), uploading `<base>/target/scala-<version>/scoverage-report/scoverage.xml`
 #     under the codecov.yml flag whose path is `<base>/src/main/scala`, and no upload step names a module in no leg;
-#     so each flag is uploaded once, from the leg that owns the module.
+#     so each flag is uploaded once, from the leg that owns the module;
+#   - the `integration-tests` job (#2349) is the one deliberate second uploader: the modules in its test step's
+#     COVERAGE_MODULES env (the explicit allow-list) are instrumented there, its test step switches their floors off
+#     (`coverageFailOnMinimum := false`, since those reports measure only the integration suites), and each has
+#     exactly one upload step in that job, of its own report under its own flag. Any other upload there fails.
 #
 # No network, no sbt when given a model. Needs ruby (on GitHub's runners).
 #
@@ -48,9 +52,12 @@ model_file, workflow_file, codecov_file = ARGV
 EXEMPT = {
   'benchmarks'          => 'JMH benchmarks; benchmarks.yml runs them, and codecov.yml ignores modules/benchmarks',
   'knowledgegraphNeo4j' => 'not in the coverage job before the legs either (docs/reference/test-coverage.md); ' \
-                           'its store is exercised against Neo4j by the modules/it Docker tier',
+                           'its store is exercised against Neo4j by the modules/it Docker tier, which uploads its ' \
+                           'coverage from the integration-tests job without enforcing the floor',
 }
 JOB = 'coverage-leg'
+IT_JOB = 'integration-tests'
+IT_LIST = 'COVERAGE_MODULES'
 
 errors = []
 model = JSON.parse(File.read(model_file))
@@ -104,6 +111,23 @@ end
 codecov = YAML.load_file(codecov_file) || {}
 flag_paths = (codecov['flags'] || {}).to_h { |name, f| [name, Array((f || {})['paths'])] }
 
+report_of = ->(p) { "#{p['base']}/target/scala-#{p['scalaVersion']}/scoverage-report/scoverage.xml" }
+# An upload step for module m (project p) must upload m's report under the one flag whose path is m's sources.
+check_upload = lambda do |s, m, p|
+  w = s['with'] || {}
+  want = report_of.(p)
+  errors << "upload step '#{s['name']}' for #{m} uploads #{w['files'].inspect}, expected #{want}" if w['files'] != want
+  flag = w['flags'].to_s
+  if flag.empty? || flag.include?(',')
+    errors << "upload step '#{s['name']}' for #{m} must carry exactly one flag, has #{w['flags'].inspect}"
+  elsif !flag_paths.key?(flag)
+    errors << "upload step '#{s['name']}' for #{m} uses flag '#{flag}', which #{File.basename(codecov_file)} does not define"
+  elsif flag_paths[flag] != ["#{p['base']}/src/main/scala"]
+    errors << "flag '#{flag}' (uploaded for #{m}) has paths #{flag_paths[flag].inspect} in " \
+              "#{File.basename(codecov_file)}, expected [\"#{p['base']}/src/main/scala\"]"
+  end
+end
+
 uploads = Array(job['steps']).select { |s| s['uses'].to_s.start_with?('codecov/codecov-action') }
 by_module = {} # module => its upload steps
 uploads.each do |s|
@@ -128,29 +152,67 @@ owner.each_key do |m|
   end
   errors << "#{m} has #{steps.size} Codecov upload steps; it needs exactly one" if steps.size > 1
   p = projects[m] or next
-  want = "#{p['base']}/target/scala-#{p['scalaVersion']}/scoverage-report/scoverage.xml"
-  steps.each do |s|
-    w = s['with'] || {}
-    errors << "upload step '#{s['name']}' for #{m} uploads #{w['files'].inspect}, expected #{want}" if w['files'] != want
-    flag = w['flags'].to_s
-    if flag.empty? || flag.include?(',')
-      errors << "upload step '#{s['name']}' for #{m} must carry exactly one flag, has #{w['flags'].inspect}"
-    elsif !flag_paths.key?(flag)
-      errors << "upload step '#{s['name']}' for #{m} uses flag '#{flag}', which #{File.basename(codecov_file)} does not define"
-    elsif flag_paths[flag] != ["#{p['base']}/src/main/scala"]
-      errors << "flag '#{flag}' (uploaded for #{m}) has paths #{flag_paths[flag].inspect} in " \
-                "#{File.basename(codecov_file)}, expected [\"#{p['base']}/src/main/scala\"]"
-    end
-  end
+  steps.each { |s| check_upload.(s, m, p) }
 end
 uploads.map { |s| (s['with'] || {})['flags'] }.compact.group_by(&:itself).transform_values(&:size).each do |flag, n|
   errors << "flag '#{flag}' is uploaded by #{n} steps; each flag is uploaded once" if n > 1
+end
+
+# The integration job (#2349): its suites run against real services with coverage on for the modules named in its
+# test step's COVERAGE_MODULES, and each of those uploads its report under the flag its leg uploads too. That second
+# upload of a flag is allowed for exactly these modules, the explicit list; any other upload in the job fails.
+it_job = (wf['jobs'] || {})[IT_JOB]
+abort "#{workflow_file} has no job '#{IT_JOB}'" unless it_job
+it_steps = Array(it_job['steps'])
+it_runs = it_steps.select { |s| (s['env'] || {}).key?(IT_LIST) }
+it_uploads = it_steps.select { |s| s['uses'].to_s.start_with?('codecov/codecov-action') }
+measured = []
+if it_runs.size != 1
+  errors << "#{IT_JOB} needs exactly one step with env #{IT_LIST} (the modules its suites measure), has #{it_runs.size}" \
+    unless it_runs.empty? && it_uploads.empty?
+else
+  run_step = it_runs.first
+  measured = run_step['env'][IT_LIST].to_s.split
+  errors << "#{IT_JOB}'s #{IT_LIST} is empty: drop it, or name the modules its suites measure" if measured.empty?
+  measured.group_by(&:itself).transform_values(&:size).each do |m, n|
+    errors << "#{IT_JOB}'s #{IT_LIST} lists #{m} #{n} times" if n > 1
+  end
+  unless run_step['run'].to_s.include?('coverageFailOnMinimum := false')
+    errors << "#{IT_JOB}'s test step does not set coverageFailOnMinimum := false for #{IT_LIST}: its reports measure " \
+              "only the integration suites, so a module's floor must not be judged on them (its leg enforces it)"
+  end
+  measured.uniq.each do |m|
+    if !projects.key?(m)
+      errors << "#{m}, in #{IT_JOB}'s #{IT_LIST}, is not a project of this build"
+    elsif !projects[m]['coverageFloor']
+      errors << "#{m}, in #{IT_JOB}'s #{IT_LIST}, has no coverage floor (coverage is disabled), so it is not measured"
+    end
+  end
+end
+it_by_module = {} # module => its upload steps in the integration job
+it_uploads.each do |s|
+  files = (s['with'] || {})['files']
+  m = measured.uniq.find { |id| projects.key?(id) && files == report_of.(projects[id]) }
+  if m.nil?
+    errors << "upload step '#{s['name'] || s['uses']}' in #{IT_JOB} uploads #{files.inspect}, which is not the report " \
+              "of a module in its #{IT_LIST}"
+  else
+    (it_by_module[m] ||= []) << s
+  end
+end
+measured.uniq.select { |m| projects.key?(m) && projects[m]['coverageFloor'] }.each do |m|
+  steps = it_by_module.fetch(m, [])
+  if steps.size != 1
+    errors << "#{m} is in #{IT_JOB}'s #{IT_LIST} but has #{steps.size} Codecov upload steps there; it needs exactly one"
+  end
+  steps.each { |s| check_upload.(s, m, projects[m]) }
 end
 
 if errors.empty?
   puts "Coverage legs: #{legs.map { |l, ms| "#{l} (#{ms.size})" }.join(', ')}"
   puts "OK: each of the #{floors.size - EXEMPT.size} modules with a coverage floor is in exactly one leg with " \
        "one upload step; exempt: #{EXEMPT.keys.join(', ')}"
+  puts "Also uploaded by #{IT_JOB}: #{measured.empty? ? 'none' : measured.join(', ')}"
 else
   errors.each { |e| puts "FAIL: #{e}" }
   exit 1

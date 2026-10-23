@@ -349,9 +349,10 @@ jobs:
   # by dependency cluster, each leg is a few minutes of tests plus one instrumented compile of core. `sbt test`'s
   # exclusion of `PerformanceTest` (commonSettings) applies here too, because the legs run `<module>/test`.
   #
-  # Every module with a coverage floor is in exactly one leg, and uploads its Codecov flag from that leg and nowhere
-  # else; `scripts/check-coverage-legs.sh` (in Quick Checks) fails when a floor is in no leg, in two, or has no
-  # upload step, so a new module cannot drop out of measurement. A new module joins the leg holding its dependencies
+  # Every module with a coverage floor is in exactly one leg, and uploads its Codecov flag from that leg once; the
+  # only other uploads are the `integration-tests` job's, for the modules in its COVERAGE_MODULES (#2349), which
+  # Codecov merges with the leg's. `scripts/check-coverage-legs.sh` (in Quick Checks) fails when a floor is in no leg,
+  # in two, or has no upload step, so a new module cannot drop out of measurement. A new module joins the leg holding its dependencies
   # (the order inside a leg matters: a new module goes after the modules it depends on).
   #
   # The legs are summarised by the `Code Coverage` job below, which `All Tests Pass` needs.
@@ -424,7 +425,8 @@ jobs:
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes a file to a flag whose
       # `paths` contain it, so a module uploaded under someone else's flag is worse than not uploaded. Flags are
-      # defined in codecov.yml. Each step runs only in the leg that owns its module, so each flag is uploaded once.
+      # defined in codecov.yml. Each step runs only in the leg that owns its module, so each flag is uploaded once per
+  # leg run (the integration-tests job adds a second upload for the modules its suites measure).
       # Leg `core`
       - name: Upload core coverage to Codecov
         if: contains(matrix.modules, 'core')
@@ -1198,8 +1200,19 @@ jobs:
           wait_for Elasticsearch "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
           wait_for OpenSearch "http://localhost:9201/_cluster/health?wait_for_status=yellow&timeout=5s"
 
+      # The suites run with coverage instrumentation on the modules whose code only they reach against real services
+      # (#2349): the pgvector, Qdrant and permission-index stores in rag, the Elasticsearch/OpenSearch and
+      # Redis/Valkey stores, memory-postgres, the Neo4j graph store, and the Postgres checkpointer and run queue.
+      # Each module's report is uploaded below under the flag its coverage leg uploads, and Codecov merges the two
+      # uploads of a flag on a commit, so the integration hits count towards patch and project coverage.
+      #
+      # Only COVERAGE_MODULES are instrumented (not `sbt coverage`, which would instrument every dependency of
+      # modules/it and slow the compile), and their floors are switched off for this run: a report here measures only
+      # the integration suites, and each floor is enforced by the module's coverage leg on its own tests.
+      # scripts/check-coverage-legs.sh checks this list against the upload steps below.
       - name: Run containerised integration tests
         env:
+          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
@@ -1220,7 +1233,78 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
-        run: sbt testIntegration
+        run: |
+          settings=()
+          reports=()
+          for m in $COVERAGE_MODULES; do
+            settings+=("set $m / coverageEnabled := true" "set $m / coverageFailOnMinimum := false"
+                       "set $m / coverageMinimumStmtTotal := 0")
+            reports+=("$m/coverageReport")
+          done
+          echo "sbt ${settings[*]} testIntegration ${reports[*]}"
+          sbt "${settings[@]}" testIntegration "${reports[@]}"
+
+      # One upload per module in COVERAGE_MODULES, under the same flag as that module's coverage-leg upload.
+      - name: Upload rag integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: rag
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload vectorstore-elasticsearch integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/vectorstore-elasticsearch/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: vectorstore-elasticsearch
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload vectorstore-redis integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/vectorstore-redis/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: vectorstore-redis
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload memory-postgres integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/memory-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: memory-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      # knowledgegraph-neo4j is in no coverage leg (scripts/check-coverage-legs.sh, EXEMPT), so this is its only upload.
+      - name: Upload knowledgegraph-neo4j integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/knowledgegraph-neo4j/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: knowledgegraph-neo4j
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-checkpoint-postgres integration coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-checkpoint-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
 
       - name: Upload test reports
         if: failure()

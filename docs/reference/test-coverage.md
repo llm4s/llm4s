@@ -60,10 +60,25 @@ only, because a build-wide average is not a meaningful gate.
 `knowledgegraphNeo4j` and `benchmarks` declare floors but are in no leg, so CI does not currently enforce their
 floors. The benchmark workflow runs tests without coverage.
 
+The `Integration Tests` job adds the `modules/it` Docker tier's hits (#2349). Some code is reachable only against a
+real service: the pgvector, Qdrant and permission-index stores in `rag`, the Elasticsearch/OpenSearch and Redis/Valkey
+stores, `memoryPostgres`, `knowledgegraphNeo4j`, and the Postgres checkpointer and run queue in
+`agentCheckpointPostgres`. The job instruments just those modules (its test step's `COVERAGE_MODULES`), runs
+`sbt testIntegration`, writes each module's `coverageReport` with its floor switched off, and uploads each report under
+the module's own flag. Codecov merges the two uploads of a flag on a commit, so the integration hits count towards
+patch and project coverage; the floors stay with the legs, because a report from the integration suites alone is not
+what a floor measures. `knowledgegraphNeo4j`, in no leg, is uploaded only from this job. To run it locally against
+the services, as CI does: `sbt "set rag / coverageEnabled := true" "set rag / coverageFailOnMinimum := false"
+"set rag / coverageMinimumStmtTotal := 0" testIntegration rag/coverageReport` (those three settings and one report
+per module).
+
 A new module with a floor has to join a leg, normally the one holding its dependencies, after them, with an upload step for
 its flag, in the same change that adds it. `scripts/check-coverage-legs.sh`, run in Quick Checks against the build sbt
 loaded, fails until it does: it checks that every module with a floor is in exactly one leg (or in the script's
 short, reasoned exemption list) and has exactly one upload step, under the `codecov.yml` flag for its directory.
+The integration job's uploads are the one allowed second upload of a flag: the script checks that each module in its
+`COVERAGE_MODULES` has exactly one upload there, of its own report under its own flag, that the job switches those
+floors off, and that the job uploads nothing else.
 
 To run one leg locally as CI does, list its modules' commands after `coverage`, for example
 `sbt coverage core/test core/coverageReport memory/test memory/coverageReport`.
