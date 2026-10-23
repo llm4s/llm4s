@@ -513,6 +513,8 @@ up to `busyTimeout`; prune regularly, or off-peak, rather than once after months
 
 `PostgresCheckpointer`, in `llm4s-agent-checkpoint-postgres` (`org.llm4s.agent.graph.postgres`), keeps threads in a
 PostgreSQL schema that runtimes on any number of machines share: the store for one agent service on several machines.
+[Running agents on several machines](multiple-machines) puts it together with the run queue, workers, cancel,
+tracing, metrics and retention into one service.
 
 ```scala
 import org.llm4s.agent.graph.GraphRuntime
@@ -564,6 +566,8 @@ yield store.close()
 A release that changes neither the store's schema nor the checkpoint format can replace instances one at a time. A
 release that changes either needs every instance stopped before the first new one starts: an old instance that meets
 the newer schema refuses to open with `GraphError.UnsupportedStoreSchema`, and writes nothing.
+[Running agents on several machines](multiple-machines#upgrades) covers the rest of a rolling upgrade: draining,
+and runs in flight at an older graph version.
 
 ## Choosing the store in application.conf
 
@@ -941,6 +945,8 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 
 ## See also
 
+- [Running agents on several machines](multiple-machines): one agent service on several instances over the
+  PostgreSQL store - the run queue, workers, cancel, busy-thread policy, tracing, metrics, retention and upgrades.
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
 - `docs/design/typed-agent-runtime/`: §4.16 (`4.16-stage-2-slice-1-the-durable-checkpointer-contract.md`), the
   design of claims and fencing; §4.19 (`4.19-stage-2-slice-3-checkpoint-history-fork-and-retention.md`), history,

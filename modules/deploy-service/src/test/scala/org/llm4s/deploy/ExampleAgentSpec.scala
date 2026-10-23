@@ -49,6 +49,24 @@ class ExampleAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     Thread.interrupted() shouldBe true
   }
 
+  it should "report its calls in progress while they run" in {
+    val seen = new java.util.concurrent.ConcurrentLinkedQueue[Double]()
+    val metrics = new org.llm4s.metrics.MetricsCollector {
+      override def observeRequest(
+        provider: String,
+        model: String,
+        outcome: org.llm4s.metrics.Outcome,
+        duration: FiniteDuration
+      ): Unit = ()
+      override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
+      override def set(metric: org.llm4s.metrics.Metric.Gauge, labelValues: Seq[String], value: Double): Unit =
+        if (metric == ExampleAgent.ActiveCalls) seen.add(value): Unit
+    }
+    ExampleAgent.pauseTool(1.millis, metrics).execute(ExampleAgent.NoArgs(), null) shouldBe a[ToolOutcome.Success]
+    seen.toArray.toVector shouldBe Vector(1.0, 0.0)
+  }
+
   "client" should "build the demo model, and load the default provider for the provider model" in {
     ExampleAgent.client(AgentServiceConfig.default).map(_.getClass) shouldBe Right(classOf[DemoModel])
     // whether a default provider is configured here or not, the answer is a Result, never a throw
