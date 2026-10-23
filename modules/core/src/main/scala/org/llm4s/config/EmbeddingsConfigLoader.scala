@@ -161,7 +161,7 @@ private[config] object EmbeddingsConfigLoader {
       // The timeouts block is read once, for every provider, as a chat section's is.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
-      id -> config.copy(timeouts = section.timeouts)
+      id -> config.withTimeouts(section.timeouts)
     }
 
   private val UnifiedModelPath   = "llm4s.embeddings.model"

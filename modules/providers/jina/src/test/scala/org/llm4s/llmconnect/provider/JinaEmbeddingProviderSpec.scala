@@ -109,7 +109,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockHttp = new MockHttpClient(httpOk(embeddingBody(Seq(Seq(0.1)))))
 
     JinaEmbeddingProvider
-      .forTest(cfg.copy(baseUrl = "https://api.jina.ai/v1/"), mockHttp)
+      .forTest(cfg.withBaseUrl("https://api.jina.ai/v1/"), mockHttp)
       .embed(EmbeddingRequest(Seq("test"), modelCfg))
 
     mockHttp.lastUrl.get shouldBe "https://api.jina.ai/v1/embeddings"

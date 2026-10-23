@@ -96,4 +96,28 @@ class ToolExecutionConfigSpec extends AnyFlatSpec with Matchers {
     ToolRegistry.retryDelay(retryable, attempt = 1, policy, noDraw) shouldBe None
     ToolRegistry.retryDelay(Right(ujson.Null), attempt = 0, policy, noDraw) shouldBe None
   }
+
+  // Growth-prone construction (#2346)
+
+  "ToolExecutionConfig" should "default to no timeout and no retry" in {
+    ToolExecutionConfig.default shouldBe ToolExecutionConfig()
+    ToolExecutionConfig.default.timeout shouldBe None
+    ToolExecutionConfig.default.retryPolicy shouldBe None
+  }
+
+  it should "change one field per setter, taking the value or an Option" in {
+    val policy = ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis)
+    val config = ToolExecutionConfig.default.withTimeout(5.seconds).withRetryPolicy(policy)
+
+    config shouldBe ToolExecutionConfig(timeout = Some(5.seconds), retryPolicy = Some(policy))
+    config.withTimeout(Some(1.second)).timeout shouldBe Some(1.second)
+    config.withTimeout(None) shouldBe ToolExecutionConfig(retryPolicy = Some(policy))
+    config.withRetryPolicy(None) shouldBe ToolExecutionConfig(timeout = Some(5.seconds))
+    config.withRetryPolicy(Some(policy.withMaxAttempts(5))).retryPolicy.map(_.maxAttempts) shouldBe Some(5)
+  }
+
+  it should "keep its constructor and copy private" in {
+    assertTypeError("new ToolExecutionConfig(None, None)")
+    assertTypeError("ToolExecutionConfig.default.copy(timeout = None)")
+  }
 }

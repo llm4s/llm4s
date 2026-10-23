@@ -26,12 +26,29 @@ import org.llm4s.trace.TracingMode
  * @param extras every value under `llm4s.tracing.<mode>` for the selected mode, as a string,
  *               keyed by its path within that block (`publicKey`, `headers.Authorization`); a
  *               list or object value is rendered as HOCON. Empty when the block is absent.
+ *
+ * Build one with [[TracingSettings.apply]] and change it with the `with*` setters; the
+ * constructor and `copy` are private, so a new field never breaks callers.
  */
 @Stable
-case class TracingSettings(
+final case class TracingSettings private (
   mode: TracingMode,
-  extras: Map[String, String] = Map.empty
+  extras: Map[String, String]
 ) {
+
+  /** Sets the tracing backend. */
+  def withMode(mode: TracingMode): TracingSettings = copy(mode = mode)
+
+  /** Replaces the selected backend's settings (the flattened `llm4s.tracing.<mode>` block). */
+  def withExtras(extras: Map[String, String]): TracingSettings = copy(extras = extras)
+
   override def toString: String =
     s"TracingSettings($mode,${extras.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
+}
+
+object TracingSettings {
+
+  /** Creates [[TracingSettings]] for `mode`; `extras` defaults to empty. */
+  def apply(mode: TracingMode, extras: Map[String, String] = Map.empty): TracingSettings =
+    new TracingSettings(mode, extras)
 }

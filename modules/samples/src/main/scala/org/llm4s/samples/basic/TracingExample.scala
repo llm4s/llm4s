@@ -16,7 +16,7 @@ object TracingExample {
       settings <- Llm4sConfig.tracing()
       _ = {
         logger.info("1. Basic Enhanced Tracing")
-        val basicTracer = Tracing.create(settings.copy(mode = TracingMode.Console))
+        val basicTracer = Tracing.create(settings.withMode(TracingMode.Console))
 
         val agentEvent = TraceEvent.AgentInitialized(
           query = "What's the weather like?",
@@ -50,8 +50,8 @@ object TracingExample {
   private def example2(settings: TracingSettings, agentEvent: TraceEvent.AgentInitialized) = {
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
-    val consoleTracer  = Tracing.create(settings.copy(mode = TracingMode.Console))
-    val noOpTracer     = Tracing.create(settings.copy(mode = TracingMode.NoOp))
+    val consoleTracer  = Tracing.create(settings.withMode(TracingMode.Console))
+    val noOpTracer     = Tracing.create(settings.withMode(TracingMode.NoOp))
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
 
     composedTracer.traceEvent(agentEvent)
@@ -135,7 +135,7 @@ object TracingExample {
     // Langfuse is a Named mode served by llm4s-observability; without keys it falls back to NoOp.
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
-      val tracer = Tracing.create(settings.copy(mode = mode))
+      val tracer = Tracing.create(settings.withMode(mode))
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
   }
@@ -146,7 +146,7 @@ object TracingExample {
     val envTracer = Llm4sConfig
       .tracing()
       .map(Tracing.create)
-      .fold(_ => Tracing.create(settings.copy(mode = TracingMode.NoOp)), identity)
+      .fold(_ => Tracing.create(settings.withMode(TracingMode.NoOp)), identity)
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
 
     logger.info("Enhanced Tracing Example Complete!")

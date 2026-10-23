@@ -271,7 +271,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def executeAsync(request: ToolCallRequest)(implicit
     ec: ExecutionContext
   ): Future[Either[ToolCallError, ujson.Value]] =
-    executeAsync(request, ToolExecutionConfig())
+    executeAsync(request, ToolExecutionConfig.default)
 
   /**
    * Execute a tool call asynchronously with optional timeout and retry.
@@ -382,7 +382,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def executeAll(
     requests: Seq[ToolCallRequest],
     strategy: ToolExecutionStrategy = ToolExecutionStrategy.default,
-    config: ToolExecutionConfig = ToolExecutionConfig()
+    config: ToolExecutionConfig = ToolExecutionConfig.default
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
     strategy match {
       case ToolExecutionStrategy.Sequential =>

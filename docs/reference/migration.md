@@ -12,7 +12,8 @@ by what you use. The notes below are the per-change detail it links to. From 0.5
 [Multimodal content parts](#multimodal-content-parts-1913) and
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708)
-and [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263);
+[`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263)
+and [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266).
 
 ## Multimodal content parts (#1913)
@@ -313,6 +314,41 @@ val config = MemoryManagerConfig.default.withContextTokenBudget(500) // was .cop
 ```
 
 `toString` is now the case-class form, `MemoryManagerConfig(false,0.5,2000,ConsolidationConfig(50,false))`.
+
+### Core config types are growth-safe (#2346)
+
+`ToolExecutionConfig`, `LlmClientOptions`, `EmbeddingProviderConfig`, `EmbeddingModelConfig`, `LocalEmbeddingModels`,
+`ModelRegistryConfig` and `TracingSettings` (`llm4s-core`) follow the growth-prone pattern
+([#2346](https://github.com/llm4s/llm4s/issues/2346)), so a new field - `ToolExecutionConfig` has an obvious next one -
+no longer breaks Java and Kotlin callers or compiled code. Each is a `final case class` whose constructor and `copy`
+are private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, and the same defaults, still
+  compiles. `new X(...)` does not; drop the `new`. `ToolExecutionConfig.default` is new, beside
+  `LlmClientOptions.default` and `ModelRegistryConfig.default`.
+- **Replace `.copy` with a setter**, one per field:
+
+  | Type | Setters |
+  |---|---|
+  | `ToolExecutionConfig` | `withTimeout`, `withRetryPolicy` (the value or an `Option`) |
+  | `LlmClientOptions` | `withMetrics`, `withExchangeLogging` |
+  | `EmbeddingProviderConfig` | `withBaseUrl`, `withModel`, `withApiKey`, `withTimeouts` |
+  | `EmbeddingModelConfig` | `withName`, `withDimensions` |
+  | `LocalEmbeddingModels` | `withImageModel`, `withAudioModel`, `withVideoModel` |
+  | `ModelRegistryConfig` | `withResourcePath`, `withFilePath`, `withUrl` (the value or an `Option`) |
+  | `TracingSettings` | `withMode`, `withExtras` |
+
+  ```scala
+  val cfg  = embeddingConfig.withModel("text-embedding-3-large")   // was .copy(model = ...)
+  val exec = ToolExecutionConfig.default.withTimeout(5.seconds)    // was .copy(timeout = Some(5.seconds))
+  val tr   = settings.withMode(TracingMode.NoOp)                    // was settings.copy(mode = TracingMode.NoOp)
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` (`EmbeddingModelConfig.apply("m", 1536)`) instead of the
+  constructor, and chain the setters.
+- `ToolExecutionConfig`, `EmbeddingModelConfig` and `TracingSettings` are now `final`.
+
+Pattern matching (`case EmbeddingModelConfig(name, dims)`) and the fields are unchanged.
 
 ### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
 

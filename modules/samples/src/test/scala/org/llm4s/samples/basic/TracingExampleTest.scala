@@ -13,7 +13,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   private val baseSettings = TracingSettings(TracingMode.Console)
 
   test("should create basic enhanced tracing with console mode") {
-    val basicTracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val basicTracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
     basicTracer shouldBe a[Tracing]
 
     val agentEvent = TraceEvent.AgentInitialized(
@@ -26,8 +26,8 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should compose multiple tracers") {
-    val consoleTracer  = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
-    val noOpTracer     = Tracing.create(baseSettings.copy(mode = TracingMode.NoOp))
+    val consoleTracer  = Tracing.create(baseSettings.withMode(TracingMode.Console))
+    val noOpTracer     = Tracing.create(baseSettings.withMode(TracingMode.NoOp))
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
 
     composedTracer shouldBe a[Tracing]
@@ -42,7 +42,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should filter tracing to only error events") {
-    val consoleTracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val consoleTracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
     val errorOnlyTracer = TracingComposer.filter(consoleTracer) { event =>
       event.isInstanceOf[TraceEvent.ErrorOccurred]
     }
@@ -67,7 +67,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should transform tracing events with metadata") {
-    val consoleTracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val consoleTracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
     val transformedTracer = TracingComposer.transform(consoleTracer) { event =>
       event match {
         case e: TraceEvent.CustomEvent =>
@@ -87,13 +87,13 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   test("should create tracers for all tracing modes") {
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
-      val tracer = Tracing.create(baseSettings.copy(mode = mode))
+      val tracer = Tracing.create(baseSettings.withMode(mode))
       tracer shouldBe a[Tracing]
     }
   }
 
   test("should trace completion events") {
-    val tracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val tracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
 
     val completion = org.llm4s.llmconnect.model.Completion(
       id = "test-id",
@@ -112,7 +112,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should trace agent run ended") {
-    val tracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val tracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
 
     val messages = Seq(
       org.llm4s.llmconnect.model.SystemMessage("You are a helpful assistant"),
@@ -132,8 +132,8 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should handle complex composition of tracers") {
-    val consoleTracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
-    val noOpTracer    = Tracing.create(baseSettings.copy(mode = TracingMode.NoOp))
+    val consoleTracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
+    val noOpTracer    = Tracing.create(baseSettings.withMode(TracingMode.NoOp))
 
     val complexTracer = TracingComposer.combine(
       consoleTracer,
@@ -160,7 +160,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should validate that all event types are properly handled") {
-    val tracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
+    val tracer = Tracing.create(baseSettings.withMode(TracingMode.Console))
 
     // Test all event types
     val events = Seq(
@@ -181,9 +181,9 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
 
   test("should test tracing mode factory methods") {
     // Test typed factory via settings
-    val consoleTracer1  = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
-    val noOpTracer1     = Tracing.create(baseSettings.copy(mode = TracingMode.NoOp))
-    val langfuseTracer1 = Tracing.create(baseSettings.copy(mode = TracingMode.Named("langfuse")))
+    val consoleTracer1  = Tracing.create(baseSettings.withMode(TracingMode.Console))
+    val noOpTracer1     = Tracing.create(baseSettings.withMode(TracingMode.NoOp))
+    val langfuseTracer1 = Tracing.create(baseSettings.withMode(TracingMode.Named("langfuse")))
     val defaultTracer   = Tracing.create(baseSettings) // Console
 
     Seq(consoleTracer1, noOpTracer1, langfuseTracer1, defaultTracer).foreach(tracer => tracer shouldBe a[Tracing])

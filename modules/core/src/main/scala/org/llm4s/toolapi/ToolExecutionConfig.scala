@@ -10,7 +10,10 @@ import scala.concurrent.duration.DurationLong
  * [[ToolRegistry]].
  *
  * A default configuration applies no timeout and no retry, preserving the
- * original single-attempt execution behaviour. Pass a configuration to
+ * original single-attempt execution behaviour. Build one with
+ * [[ToolExecutionConfig.apply]] (or start from [[ToolExecutionConfig.default]])
+ * and change it with the `with*` setters; the constructor and `copy` are private,
+ * so a new field never breaks callers. Pass a configuration to
  * [[ToolRegistry.execute]], [[ToolRegistry.executeAsync]], or
  * [[ToolRegistry.executeAll]] when a tool call should fail after a bounded
  * duration or retry transient failures before returning an error.
@@ -26,10 +29,9 @@ import scala.concurrent.duration.DurationLong
  * import scala.concurrent.ExecutionContext.Implicits.global
  * import scala.concurrent.duration._
  *
- * val config = ToolExecutionConfig(
- *   timeout = Some(5.seconds),
- *   retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis))
- * )
+ * val config = ToolExecutionConfig.default
+ *   .withTimeout(5.seconds)
+ *   .withRetryPolicy(ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis))
  *
  * val registry = new ToolRegistry(Seq(myTool))
  * registry.execute(request, config)
@@ -37,10 +39,41 @@ import scala.concurrent.duration.DurationLong
  * }}}
  */
 @Stable
-case class ToolExecutionConfig(
-  timeout: Option[FiniteDuration] = None,
-  retryPolicy: Option[ToolRetryPolicy] = None
-)
+final case class ToolExecutionConfig private (
+  timeout: Option[FiniteDuration],
+  retryPolicy: Option[ToolRetryPolicy]
+) {
+
+  /** Sets the maximum duration to wait for each individual tool call. */
+  def withTimeout(timeout: FiniteDuration): ToolExecutionConfig = copy(timeout = Some(timeout))
+
+  /** Sets, or with `None` removes, the maximum duration to wait for each individual tool call. */
+  def withTimeout(timeout: Option[FiniteDuration]): ToolExecutionConfig = copy(timeout = timeout)
+
+  /** Sets the retry policy for retryable tool errors. */
+  def withRetryPolicy(retryPolicy: ToolRetryPolicy): ToolExecutionConfig = copy(retryPolicy = Some(retryPolicy))
+
+  /** Sets, or with `None` removes, the retry policy for retryable tool errors. */
+  def withRetryPolicy(retryPolicy: Option[ToolRetryPolicy]): ToolExecutionConfig = copy(retryPolicy = retryPolicy)
+}
+
+object ToolExecutionConfig {
+
+  /**
+   * Creates a [[ToolExecutionConfig]]; with no arguments, no timeout and no retry.
+   *
+   * @param timeout     optional maximum duration to wait for each individual tool call
+   * @param retryPolicy optional retry policy for retryable tool errors
+   */
+  def apply(
+    timeout: Option[FiniteDuration] = None,
+    retryPolicy: Option[ToolRetryPolicy] = None
+  ): ToolExecutionConfig =
+    new ToolExecutionConfig(timeout, retryPolicy)
+
+  /** No timeout and no retry: a single attempt, as [[ToolRegistry]] behaves without a configuration. */
+  val default: ToolExecutionConfig = apply()
+}
 
 /**
  * Simple retry policy with exponential backoff and optional jitter.

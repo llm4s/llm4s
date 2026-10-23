@@ -1628,7 +1628,7 @@ object RAG {
           for {
             providerConfig <- resolveEmbeddingProvider(id.asString)
             model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
-            provider       <- descriptor.build(providerConfig.copy(model = model))
+            provider       <- descriptor.build(providerConfig.withModel(model))
           } yield (new EmbeddingClient(provider), model)
       }
       (client, model) = clientAndModel

@@ -473,7 +473,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         .loadProvider(ConfigSource.string(hocon))
         .value
         ._2
-        .copy(model = "fixture-embed-large"))
+        .withModel("fixture-embed-large"))
     }
 
     "refuse a model that is not provider/model" in {

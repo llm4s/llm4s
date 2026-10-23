@@ -422,11 +422,11 @@ object RAGPipeline {
     resolveEmbeddingProvider(config.provider).flatMap { baseConfig =>
       val providerConfig = config match {
         case EmbeddingConfig.OpenAI(model, _) =>
-          baseConfig.copy(model = model)
+          baseConfig.withModel(model)
         case EmbeddingConfig.Voyage(model, _) =>
-          baseConfig.copy(model = model)
+          baseConfig.withModel(model)
         case EmbeddingConfig.Ollama(model, _, baseUrl) =>
-          baseConfig.copy(model = model, baseUrl = baseUrl)
+          baseConfig.withModel(model).withBaseUrl(baseUrl)
       }
 
       EmbeddingClient.from(config.provider, providerConfig)

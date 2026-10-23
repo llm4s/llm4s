@@ -54,7 +54,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"data":[{"embedding":[0.1]}]}""")))
 
-    val provider = VoyageAIEmbeddingProvider.forTest(cfg.copy(baseUrl = "https://api.voyageai.com/v1"), mockHttp)
+    val provider = VoyageAIEmbeddingProvider.forTest(cfg.withBaseUrl("https://api.voyageai.com/v1"), mockHttp)
     provider.embed(req)
 
     (mockHttp.post _).verify("https://api.voyageai.com/v1/embeddings", *, *, *).once()

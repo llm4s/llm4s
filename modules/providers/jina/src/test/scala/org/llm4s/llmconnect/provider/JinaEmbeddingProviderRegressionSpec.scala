@@ -43,7 +43,7 @@ class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
     val secret = "jina-SECRET-key-123"
     val http   = new MockHttpClient(HttpResponse(401, s"""{"detail":"invalid key Bearer $secret"}""", Map.empty))
     val err = JinaEmbeddingProvider
-      .forTest(cfg.copy(apiKey = secret), http)
+      .forTest(cfg.withApiKey(secret), http)
       .embed(EmbeddingRequest(Seq("a"), modelCfg))
       .left
       .toOption

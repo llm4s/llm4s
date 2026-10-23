@@ -84,4 +84,34 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
     exchange.correlationId shouldBe Some("corr-1")
   }
 
+  // ---- growth-prone construction (#2346) ----
+
+  test("LlmClientOptions.default has no metrics and no exchange logging") {
+    LlmClientOptions.default shouldBe LlmClientOptions()
+    LlmClientOptions.default.metrics shouldBe org.llm4s.metrics.MetricsCollector.noop
+  }
+
+  test("LlmClientOptions' setters each change one field") {
+    val logging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
+    val metrics = new org.llm4s.metrics.MetricsCollector {
+      override def observeRequest(
+        provider: String,
+        model: String,
+        outcome: org.llm4s.metrics.Outcome,
+        duration: FiniteDuration
+      ): Unit = ()
+      override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
+    }
+
+    val adjusted = LlmClientOptions.default.withMetrics(metrics).withExchangeLogging(logging)
+
+    adjusted shouldBe LlmClientOptions(metrics = metrics, exchangeLogging = logging)
+    adjusted.withExchangeLogging(ProviderExchangeLogging.Disabled) shouldBe LlmClientOptions(metrics = metrics)
+  }
+
+  test("LlmClientOptions keeps its constructor and copy private") {
+    assertTypeError("new LlmClientOptions(org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled)")
+    assertTypeError("LlmClientOptions.default.copy(exchangeLogging = ProviderExchangeLogging.Disabled)")
+  }
 }
