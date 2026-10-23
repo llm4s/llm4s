@@ -44,8 +44,10 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
         val queued = openOf(c, submission.threadId)
-        // Reject: busy with an open entry, or with a live claim - a direct run (W3) - by the store's clock
-        if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed(c, submission.threadId)) then
+        // Reject: busy with an open entry, or with a live claim of the submitter's tenant - a direct run (W3) - by the
+        // store's clock; another tenant's claim is never reported (rule 9)
+        val busy = claimed(c, submission.threadId, submission.tenantId)
+        if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || busy) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
         else
           val now = epochNanos(clock.instant())
@@ -84,14 +86,19 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
   }
 
-  /** Whether a live claim holds `threadId`, by the store's clock. */
-  private def claimed(c: Connection, threadId: ThreadId): Boolean =
+  /**
+   * Whether a live claim of `tenantId` holds `threadId`, by the store's clock: one that recorded its tenant, and it is
+   * this one (a claim recorded no tenant only before claims carried one, and is not counted).
+   */
+  private def claimed(c: Connection, threadId: ThreadId, tenantId: Option[TenantId]): Boolean =
     val now = clock.instant()
     query(
       c,
       """SELECT 1 FROM llm4s_checkpoint_threads WHERE thread_id = ? AND claim_token IS NOT NULL
+        |  AND claim_tenant_token = claim_token AND claim_tenant IS ?
         |  AND (claim_expires_second > ? OR (claim_expires_second = ? AND claim_expires_nano > ?))""".stripMargin,
       threadId.value,
+      tenantId.map(_.value),
       now.getEpochSecond,
       now.getEpochSecond,
       now.getNano.toLong

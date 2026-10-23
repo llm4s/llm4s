@@ -312,6 +312,19 @@ trait RunQueueContract extends AnyFlatSpecLike with Matchers with EitherValues w
     c.submit(on = expiring, policy = BusyThreadPolicy.Reject).value.position shouldBe Some(0)
   }
 
+  it should "never tell another tenant's direct run to a Reject submission: it is queued, naming nothing" in {
+    val c      = Case()
+    val mine   = Some(TenantId(s"m-${unique()}"))
+    val theirs = Some(TenantId(s"o-${unique()}"))
+    c.checkpointer.claim(c.thread, ClaimRequest(RunId(s"direct-${unique()}"), mine, ttl)).value
+    // the claim's own tenant is refused; another tenant learns nothing of it, and its entry is queued
+    c.submit(tenant = mine, policy = BusyThreadPolicy.Reject).refused shouldBe
+      GraphError.ThreadBusy(c.thread.value, None, GraphError.BusyHolder.Unnamed)
+    val queued = c.submit(tenant = theirs, policy = BusyThreadPolicy.Reject).value
+    queued.position shouldBe Some(0)
+    c.entry(queued.entryId, theirs).isOpen shouldBe true
+  }
+
   it should "close a cancelled entry that has not started at once, so it is never taken, also one that is leased" in {
     val c      = Case()
     val reason = CancelReason.Requested(Some("never mind"))

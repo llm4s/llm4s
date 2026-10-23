@@ -181,7 +181,7 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
 
   it should "refuse a Reject submission to a thread a live claim holds by the database's clock (W3)" in {
     val s = script {
-      case (sql, Vector("t1", _)) if sql == Sql.queueThreadClaimed(t) => Vector(Vector(1))
+      case (sql, Vector("t1", null, null, _)) if sql == Sql.queueThreadClaimed(t) => Vector(Vector(1))
     }
     s.store().runQueue.submit(Submission(thread, agent, QueuedInput.query("q"))).left.value shouldBe
       GraphError.ThreadBusy("t1", None, GraphError.BusyHolder.Unnamed)

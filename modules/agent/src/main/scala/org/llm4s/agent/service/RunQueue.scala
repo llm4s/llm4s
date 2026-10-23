@@ -23,7 +23,8 @@ import scala.concurrent.duration.*
  *  - '''submit''' an entry atomically: look up its [[SubmissionKey]], if any, among the tenant's entries and insert
  *    only if there is none, so a retried submit gets the first one's ticket ([[Ticket.existing]]) and a different
  *    submission under a held key is refused ([[QueueError.SubmissionKeyReused]]); refuse a `Reject` submission to a
- *    thread with an open entry, or one a live claim holds by the store's clock (a direct run, W3), with
+ *    thread with an open entry, or one a live claim of the submitter's tenant holds by the store's clock (a direct
+ *    run, W3; another tenant's claim is never reported, rule 9), with
  *    `GraphError.ThreadBusy` naming no holder; when an `Interrupt` entry is submitted, close every queued `Interrupt`
  *    entry of the thread that has recorded no attempt `Interrupted(by = the new entry)` and ask every open entry of
  *    the thread that has recorded one to stop for it ([[StopRequest.Interrupt]]) unless a cancel was asked of it; and

@@ -25,7 +25,7 @@ final class InMemoryRunQueue private[agent] (
   lock: ReentrantLock,
   runCommitted: (ThreadId, RunId) => Boolean,
   lastEvent: ThreadId => Long,
-  liveClaim: ThreadId => Boolean
+  liveClaim: (ThreadId, Option[String]) => Boolean
 ) extends RunQueue:
 
   final private case class Held(holder: String, token: Long, expiresAt: Instant)
@@ -118,8 +118,10 @@ final class InMemoryRunQueue private[agent] (
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
         val queued = queueOf(submission.threadId)
-        // Reject: busy with an open entry, or with a live claim - a direct run (W3)
-        if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || liveClaim(submission.threadId)) then
+        // Reject: busy with an open entry, or with a live claim of the submitter's tenant - a direct run (W3); another
+        // tenant's claim is never reported (rule 9): its submission is queued, and the worker refuses it as TenantMismatch
+        val claimed = liveClaim(submission.threadId, submission.tenantId.map(_.value))
+        if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
         else
           lastId += 1

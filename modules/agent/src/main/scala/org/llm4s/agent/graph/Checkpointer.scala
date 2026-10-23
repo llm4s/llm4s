@@ -490,7 +490,10 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
       lock,
       (threadId, runId) => withLock(lock)(record(threadId).runs.contains(runId.value)),
       threadId => withLock(lock)(record(threadId).nextSeq - 1),
-      threadId => withLock(lock)(record(threadId).claim.exists(c => clock.instant().isBefore(c.expiresAt)))
+      (threadId, tenant) =>
+        withLock(lock)(
+          record(threadId).claim.exists(c => c.tenantId == tenant && clock.instant().isBefore(c.expiresAt))
+        )
     )
 
   private def record(threadId: ThreadId): ThreadRecord =

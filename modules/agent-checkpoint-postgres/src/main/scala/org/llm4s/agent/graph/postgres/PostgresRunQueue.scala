@@ -57,8 +57,15 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       case None =>
         val queued = openOf(c, submission.threadId)
         // Reject: busy with an open entry, or with a live claim - a direct run (W3) - by the database's clock
-        def claimed =
-          query(c, Sql.queueThreadClaimed(t), submission.threadId.value, store.clockNow(c))(_ => ()).nonEmpty
+        // another tenant's claim is never reported (rule 9): its submission is queued, and the worker refuses it
+        def claimed = query(
+          c,
+          Sql.queueThreadClaimed(t),
+          submission.threadId.value,
+          submission.tenantId.map(_.value),
+          submission.tenantId.map(_.value),
+          store.clockNow(c)
+        )(_ => ()).nonEmpty
         if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
         else

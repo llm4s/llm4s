@@ -365,9 +365,13 @@ private[postgres] object Sql:
   /** Records the stop asked of entry `?` (its JSON bound first, schema 5, design 4.57). */
   def setQueueStop(t: Tables): String = s"UPDATE ${t.queueEntries} SET stop_json = ? WHERE entry_id = ?"
 
-  /** Whether a live claim holds thread `?` at the time bound: what a `Reject` submission refuses (W3). */
+  /**
+   * Whether a live claim of a tenant holds thread `?` at the time bound (the thread, the tenant twice, then the time): what a
+   * `Reject` submission refuses (W3); another tenant's claim is never reported (rule 9).
+   */
   def queueThreadClaimed(t: Tables): String =
-    s"SELECT 1 FROM ${t.threads} WHERE thread_id = ? AND claim_token IS NOT NULL AND $LiveClaim"
+    s"""SELECT 1 FROM ${t.threads} WHERE thread_id = ? AND claim_token IS NOT NULL
+       |  AND (claim_tenant = CAST(? AS text) OR (claim_tenant IS NULL AND CAST(? AS text) IS NULL)) AND $LiveClaim""".stripMargin
 
   def releaseLease(t: Tables): String =
     s"UPDATE ${t.queueEntries} SET lease_holder = NULL, lease_token = NULL, lease_expires_at = NULL WHERE entry_id = ?"
