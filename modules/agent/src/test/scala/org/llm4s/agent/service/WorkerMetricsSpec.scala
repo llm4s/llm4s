@@ -143,6 +143,24 @@ class WorkerMetricsSpec
       Map(Vector("finished") -> 0.0, Vector("cancelled") -> 0.0, Vector("abandoned") -> 0.0)
   }
 
+  "QueueMetrics" should "label plans, lapses, lost leases and failed sweeps, and record nothing with the no-op collector" in {
+    val metrics = new RecordingMetrics
+    val meter   = new QueueMetrics(metrics)
+    meter.planned(agentId, AttemptPlan.Recover)
+    meter.planned(agentId, AttemptPlan.Close(EntryOutcome.Done(None, None)))
+    meter.lapsed(agentId)
+    meter.leaseLost(agentId, "unrenewed")
+    meter.swept(Left("store down"))
+    meter.depths(Set(agentId), Map.empty)
+    metrics.series(QueuePlans) shouldBe Map(Vector("assistant", "recover") -> 1.0, Vector("assistant", "close") -> 1.0)
+    metrics.count(QueueLapses, "assistant") shouldBe 1.0
+    metrics.count(QueueLeaseLosses, "assistant", "unrenewed") shouldBe 1.0
+    metrics.count(SweepPasses, "failed") shouldBe 1.0
+    metrics.gauge(QueueOpenEntries, "assistant", "waiting") shouldBe Some(0.0)
+    metrics.gauge(QueueOldest, "assistant") shouldBe Some(0.0)
+    new QueueMetrics(org.llm4s.metrics.MetricsCollector.noop).enabled shouldBe false
+  }
+
   "QueueMetrics.closed" should "label each outcome and reason, for W3's cancels and interrupts too" in {
     val metrics = new RecordingMetrics
     val meter   = new QueueMetrics(metrics)

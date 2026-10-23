@@ -236,6 +236,30 @@ class MeteredCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValue
     (declared -- methods(classOf[MeteredCheckpointer])) shouldBe empty
   }
 
+  it should "answer every read and store-wide call as the store it wraps" in {
+    val f     = new Fixture
+    val on    = thread()
+    val claim = f.metered.claim(on, ClaimRequest(RunId("a"), None, 30.seconds)).value
+    val first = checkpoint(on, "a", claim.token)
+    f.metered
+      .commit(on, Commit(claim.token, Some(first), events = Vector(event("a", start, RunEvent.RunStarted(None, None)))))
+      .value
+    f.metered.latest(on).value shouldBe f.store.latest(on).value
+    f.metered.history(on, None, 10).value shouldBe f.store.history(on, None, 10).value
+    f.metered.checkpoint(on, first.id).value shouldBe Some(first)
+    f.metered.eventsAfter(on, 0L, 10).value shouldBe f.store.eventsAfter(on, 0L, 10).value
+    f.metered.awaitEventsAfter(on, 0L, 10, 10.millis).value shouldBe f.store.eventsAfter(on, 0L, 10).value
+    f.metered.latestOfRuns(on, Set(RunId("a"))).value shouldBe Some(first)
+    f.metered.children(on, None, 10).value shouldBe empty
+    f.metered.threads(ThreadQuery(None)).value shouldBe f.store.threads(ThreadQuery(None)).value
+    f.metered.incompleteThreads(None, None, 10).value shouldBe f.store.incompleteThreads(None, None, 10).value
+    f.metered.sweep(SweepPolicy.keepAll, None, SweepGuard.none).value.examined should be >= 1
+    f.metered.prune(on, RetentionPolicy.keepAll).value
+    f.metered.compactEvents(on, 0L).value
+    f.metered.deleteThread(on, claim.token, None).value
+    f.metered.latest(on).value shouldBe None
+  }
+
   "MeteredCheckpointer.taskStatus" should "name a blocked task by its kind only" in {
     MeteredCheckpointer.taskStatus("blocked:pii") shouldBe "blocked"
     MeteredCheckpointer.taskStatus("completed") shouldBe "completed"
