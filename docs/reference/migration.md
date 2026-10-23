@@ -11,9 +11,10 @@ Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
-growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708)
-[`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263)
-and [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346);
+growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708),
+[`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
+[core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346)
+and [core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266).
 
 ## Multimodal content parts (#1913)
@@ -395,6 +396,49 @@ are private:
 - `ToolExecutionConfig`, `EmbeddingModelConfig` and `TracingSettings` are now `final`.
 
 Pattern matching (`case EmbeddingModelConfig(name, dims)`) and the fields are unchanged.
+
+### Core data types are growth-safe (#2356)
+
+`HttpResponse`, `HttpRawResponse`, `StreamingHttpResponse`, `JsonHttpResponse` (`org.llm4s.http`), `EmbeddingResponse`,
+`EmbeddingUsage`, `UsageSummary`, `ModelUsage` (`org.llm4s.llmconnect.model`), `ModelPricing` (`org.llm4s.model`),
+`ProviderExchange` (`org.llm4s.llmconnect`) and `DiscoveredModel` (`org.llm4s.config`) follow the growth-prone pattern
+([#2356](https://github.com/llm4s/llm4s/issues/2356)). Each is a `final case class` whose constructor and `copy` are
+private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, and the same defaults, still
+  compiles - `HttpResponse(200, body)` included. `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field:
+
+  | Type | Setters |
+  |---|---|
+  | `HttpResponse`, `HttpRawResponse`, `StreamingHttpResponse`, `JsonHttpResponse` | `withStatusCode`, `withBody`, `withHeaders` |
+  | `EmbeddingResponse` | `withEmbeddings`, `withMetadata`, `withModality`, `withDim`, `withUsage` (the last three take the value or an `Option`) |
+  | `EmbeddingUsage` | `withPromptTokens`, `withTotalTokens` |
+  | `ModelPricing` | `with<Field>` for each price, e.g. `withInputCostPerToken` (the value or an `Option`) |
+  | `UsageSummary` | `withRequestCount`, `withInputTokens`, `withOutputTokens`, `withThinkingTokens`, `withTotalCost`, `withByModel` |
+  | `ModelUsage` | `withRequestCount`, `withInputTokens`, `withOutputTokens`, `withThinkingTokens`, `withTotalCost` |
+  | `ProviderExchange` | `with<Field>` for each field, e.g. `withOutcome`; an `Option` field's setter takes the value or an `Option` |
+  | `DiscoveredModel` | `withName`, `withProvider`, `withMetadata` |
+
+  ```scala
+  val throttled = response.withStatusCode(429)                    // was response.copy(statusCode = 429)
+  val sized     = embeddings.withDim(1536)                        // was .copy(dim = Some(1536))
+  val priced    = pricing.withInputCostPerToken(2.5e-6)           // was .copy(inputCostPerToken = Some(2.5e-6))
+  ```
+
+- **JSON is unchanged.** `ModelPricing`, `UsageSummary` and `ModelUsage` keep their `ReadWriter`s and their
+  constructor defaults, so they write the same bytes and a document that omits a field still reads.
+- **`UsageSummary.bigDecimalRw` is private.** It was a public implicit `ReadWriter[BigDecimal]` that
+  `import UsageSummary._` (or `.*`) pulled into scope, changing how every `BigDecimal` in that file serialised.
+  `UsageSummary.rw` still uses it, so `UsageSummary` JSON is the same; code that relied on the import for its own
+  `BigDecimal` fields gets upickle's default codec, which also writes a string. Define your own given if you need
+  `UsageSummary`'s lenient reading (a number, a string, anything else as zero).
+- **Java and Kotlin**: call the companion's `apply` (`HttpResponse.apply(200, "ok", headers)`) instead of the
+  constructor, and chain the setters.
+- `HttpResponse`, `HttpRawResponse`, `StreamingHttpResponse`, `EmbeddingUsage`, `ModelPricing`, `UsageSummary` and
+  `ModelUsage` are now `final`.
+
+Pattern matching (`case HttpResponse(status, body, headers)`) and the fields are unchanged.
 
 ### `GeminiConfig`, `VertexAIConfig` and `AzureConfig` are growth-safe (#2263)
 

@@ -143,7 +143,7 @@ class EmbeddingSampleConfigSpec extends AnyWordSpec with Matchers with EitherVal
     "default each missing model name" in {
       val source = src("""llm4s.samples.embeddings.localModels.imageModel = "clip"""")
       EmbeddingSampleConfig.localModels(source).value shouldBe
-        EmbeddingSampleConfig.DefaultLocalModels.copy(imageModel = "clip")
+        EmbeddingSampleConfig.DefaultLocalModels.withImageModel("clip")
     }
 
     "use the defaults when the section is missing" in {

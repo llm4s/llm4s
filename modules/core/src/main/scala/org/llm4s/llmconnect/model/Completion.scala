@@ -172,12 +172,34 @@ object TokenUsage {
  *
  * @param promptTokens Number of tokens in the input text(s).
  * @param totalTokens Total tokens used (same as promptTokens for embeddings).
+ *
+ * Build one with [[EmbeddingUsage.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a new field never breaks callers.
  */
 @Stable
-case class EmbeddingUsage(
+final case class EmbeddingUsage private (
   promptTokens: Int,
   totalTokens: Int
-)
+) {
+
+  /** Sets the number of input tokens. */
+  def withPromptTokens(promptTokens: Int): EmbeddingUsage = copy(promptTokens = promptTokens)
+
+  /** Sets the total tokens used. */
+  def withTotalTokens(totalTokens: Int): EmbeddingUsage = copy(totalTokens = totalTokens)
+}
+
+object EmbeddingUsage {
+
+  /**
+   * Creates an [[EmbeddingUsage]].
+   *
+   * @param promptTokens number of input tokens
+   * @param totalTokens  total tokens used
+   */
+  def apply(promptTokens: Int, totalTokens: Int): EmbeddingUsage =
+    new EmbeddingUsage(promptTokens, totalTokens)
+}
 
 /**
  * Represents a streamed chunk of completion data.
