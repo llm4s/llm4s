@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MultimediaEmbeddingRequest`, `ImageInput`, `AudioInput`, `VideoInput` and `RawMediaInput` are growth-prone types:
   build them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`.
   JSON is unchanged; [migration](docs/reference/migration.md#llmconnectmodel-types-are-growth-safe-2378).
+- The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
+  `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
+  `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are
+  private, and the classes are `final`;
+  [migration](docs/reference/migration.md#context-types-are-growth-safe-2380).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
@@ -133,6 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
 - **Added** run, claim, commit, child-task and run-queue metrics (`org.llm4s.agent.metrics`: `MeteredCheckpointer`, `AgentWorker(metrics = ...)`,
   `RunQueue.depth`), exported by Prometheus and Micrometer through core's new generic `Metric` and `MetricsCollector.increment`/`observe`/`set` ([#2138](https://github.com/llm4s/llm4s/issues/2138), [design 4.59](docs/design/typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md)).
+- **Added** an example agent service in `modules/deploy-service` (unpublished): submit, follow over SSE, cancel and list runs
+  on the store's run queue with an in-process `AgentWorker`, plus a three-replica Postgres overlay in `deploy/` ([#2139](https://github.com/llm4s/llm4s/issues/2139), [design 4.60](docs/design/typed-agent-runtime/4.60-stage-5-slice-p1-example-service-and-a-three-instance-deployment.md)).
 
 ### Agent harness (Phase 3)
 

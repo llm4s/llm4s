@@ -27,7 +27,7 @@ object DeployServiceDocker {
     dockerLabels ++= Map(
       "org.opencontainers.image.title"  -> "llm4s deploy-service",
       "org.opencontainers.image.source" -> "https://github.com/llm4s/llm4s",
-      "org.opencontainers.image.description" -> "A small llm4s HTTP service: /health and /llm-check, for staged-deployment pipelines"
+      "org.opencontainers.image.description" -> "A small llm4s HTTP service: /health, /llm-check and an example agent service, for staged-deployment pipelines"
     )
   )
 }
