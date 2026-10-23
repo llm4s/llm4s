@@ -1321,7 +1321,7 @@ object ToolLoop:
             messages,
             MessageUpdate.EditToolCall(request.assistantMessageId, request.call.id, arguments)
           )
-          pipeline.approved(task, request.call.copy(arguments = arguments), state, context, request.answered) match
+          pipeline.approved(task, request.call.withArguments(arguments), state, context, request.answered) match
             case NodeResult.Continue(command) =>
               NodeResult.Continue(command.copy(update = edit.combine(command.update)))
             case NodeResult.Suspend(update, q, resume) => NodeResult.Suspend(edit.combine(update), q, resume)
@@ -2122,9 +2122,7 @@ object ToolLoop:
     def locksCovered(call: ToolCall, edited: ujson.Value, schedule: LockSchedule): Boolean =
       tools.get(call.name).forall { tool =>
         val proposed = schedule.locksOf(call.id)
-        locksOf(tool, call.copy(arguments = edited)).forall(k =>
-          proposed.exists(p => k.segments.startsWith(p.segments))
-        )
+        locksOf(tool, call.withArguments(edited)).forall(k => proposed.exists(p => k.segments.startsWith(p.segments)))
       }
 
     /**

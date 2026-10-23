@@ -387,11 +387,18 @@ object UserMessage {
  * @param content Content of the system message.
  */
 @Stable
-final case class SystemMessage(content: String) extends Message {
+final case class SystemMessage private (content: String) extends Message {
   val role: MessageRole = MessageRole.System
+
+  /** Sets the content. */
+  def withContent(content: String): SystemMessage = copy(content = content)
 }
 
 object SystemMessage {
+
+  /** Creates a [[SystemMessage]] of `content`. */
+  def apply(content: String): SystemMessage = new SystemMessage(content)
+
   implicit val rw: RW[SystemMessage] = macroRW
 }
 
@@ -695,14 +702,27 @@ object ToolMessage {
  * @param arguments Parsed JSON arguments; the schema is defined by the tool's [[org.llm4s.toolapi.Schema]].
  */
 @Stable
-case class ToolCall(
+final case class ToolCall private (
   id: String,
   name: String,
   arguments: ujson.Value
 ) {
   override def toString: String = s"ToolCall($id, $name, $arguments)"
+
+  /** Sets the identifier. */
+  def withId(id: String): ToolCall = copy(id = id)
+
+  /** Sets the tool name. */
+  def withName(name: String): ToolCall = copy(name = name)
+
+  /** Sets the parsed arguments. */
+  def withArguments(arguments: ujson.Value): ToolCall = copy(arguments = arguments)
 }
 
 object ToolCall {
+
+  /** Creates a [[ToolCall]] of tool `name` with `arguments`, correlated by `id`. */
+  def apply(id: String, name: String, arguments: ujson.Value): ToolCall = new ToolCall(id, name, arguments)
+
   implicit val rw: RW[ToolCall] = macroRW
 }

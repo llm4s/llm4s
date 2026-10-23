@@ -516,47 +516,7 @@ object StabilityTiers {
       "org.llm4s.llmconnect.caching.CacheStats",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.AudioInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.Conversation",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.EmbeddingVector",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ImageInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.MultimediaEmbeddingRequest",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.RawMediaInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ResponseFormat.JsonSchema",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.SystemMessage",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ToolCall",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.VideoInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt(
       "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Settings",
       "TODO(#2369): predates the check; convert to a private constructor"

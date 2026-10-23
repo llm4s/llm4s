@@ -231,7 +231,7 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
       IdempotencyKey.ofCall(ThreadId("t"), at("b").taskKey, issued)
     IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued) should not be
-      IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued.copy(arguments = ujson.Obj("x" -> 2)))
+      IdempotencyKey.ofCall(ThreadId("t"), at("a").taskKey, issued.withArguments(ujson.Obj("x" -> 2)))
     // a tool's effects follow the call's key, which already carries the lineage
     ToolContext(at("a"), ToolCallId("c"), call, state).effectKey("op") shouldBe
       ToolContext(at("b"), ToolCallId("c"), call, state).effectKey("op")

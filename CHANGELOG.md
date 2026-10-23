@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`. JSON is
   unchanged. `UsageSummary.bigDecimalRw` is private;
   [migration](docs/reference/migration.md#core-data-types-are-growth-safe-2356).
+- `Conversation`, `SystemMessage`, `ToolCall`, `ResponseFormat.JsonSchema`, `EmbeddingVector`,
+  `MultimediaEmbeddingRequest`, `ImageInput`, `AudioInput`, `VideoInput` and `RawMediaInput` are growth-prone types:
+  build them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`.
+  JSON is unchanged; [migration](docs/reference/migration.md#llmconnectmodel-types-are-growth-safe-2378).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive

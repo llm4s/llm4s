@@ -11,10 +11,17 @@ import upickle.default.{ macroRW, ReadWriter => RW }
  *  If the conversation is ongoing, the next message will be a user message, or if the previous AssistantMessage requested
  *  one or more tool calls it will be followed by ToolMessages in response to each requested tool.
  *
+ * Build one with [[Conversation.apply]] or a factory such as [[Conversation.fromPrompts]], and change it with
+ * `withMessages`, `addMessage` and `addMessages`; the constructor and `copy` are private, so a new field never breaks
+ * callers.
+ *
  * @param messages Sequence of messages in the conversation.
  */
 @Stable
-case class Conversation(messages: Seq[Message]) {
+final case class Conversation private (messages: Seq[Message]) {
+
+  /** Replaces the messages. */
+  def withMessages(messages: Seq[Message]): Conversation = copy(messages = messages)
 
   /**
    * Add a message and return a new Conversation.
@@ -61,6 +68,9 @@ case class Conversation(messages: Seq[Message]) {
 }
 
 object Conversation {
+
+  /** Creates a [[Conversation]] of `messages`, unvalidated; [[Conversation.create]] validates them. */
+  def apply(messages: Seq[Message]): Conversation = new Conversation(messages)
 
   implicit val rw: RW[Conversation] = macroRW
 

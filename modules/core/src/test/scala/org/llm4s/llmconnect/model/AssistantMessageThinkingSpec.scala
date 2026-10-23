@@ -82,7 +82,7 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be unsealed by changed tool calls" in {
-    val edited = signed.withToolCalls(Seq(call.copy(arguments = ujson.Obj("city" -> "Lyon"))))
+    val edited = signed.withToolCalls(Seq(call.withArguments(ujson.Obj("city" -> "Lyon"))))
     edited.thinking shouldBe unsealed
     signed.withToolCalls(Seq.empty).thinking shouldBe unsealed
   }

@@ -111,7 +111,7 @@ class GeminiClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
         val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
@@ -161,7 +161,7 @@ class GeminiClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
         val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
