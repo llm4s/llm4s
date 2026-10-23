@@ -184,7 +184,7 @@ trait Tracing {
  *
  * {{{
  * val enriched = TracingComposer.transform(tracer) {
- *   case e: TraceEvent.CustomEvent => e.copy(name = "prefix_" + e.name)
+ *   case e: TraceEvent.CustomEvent => e.withName("prefix_" + e.name)
  *   case other => other
  * }
  * }}}

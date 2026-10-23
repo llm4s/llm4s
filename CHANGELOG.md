@@ -69,6 +69,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MultimediaEmbeddingRequest`, `ImageInput`, `AudioInput`, `VideoInput` and `RawMediaInput` are growth-prone types:
   build them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`.
   JSON is unchanged; [migration](docs/reference/migration.md#llmconnectmodel-types-are-growth-safe-2378).
+- The `TraceEvent` cases (`AgentInitialized`, `CompletionReceived`, `ToolExecuted`, `ErrorOccurred`, `TokenUsageRecorded`,
+  `AgentRunEnded`, `CustomEvent`, `EmbeddingUsageRecorded`, `CostRecorded`, `RAGOperationCompleted`,
+  `ImageGenerationCompleted`, `CacheHit`, `CacheMiss`) are growth-prone types: build them with `TraceEvent.X(...)` and
+  change them with `with*`; `new` and `.copy` are private, and the classes are `final`. Pattern matching and `toJson`
+  are unchanged; [migration](docs/reference/migration.md#traceevent-cases-are-growth-safe-2377).
+- `JsonlProviderExchangeSink`, `CacheEntry`, `CacheStats`, `OpenAICompatibleClient.Settings`, `SSEParser.SSEEvent`
+  and the provider SPI's `EmbeddingProviderSection`, `ProviderConfigKey`, `ProviderModuleReport`,
+  `ProviderDiscoveryFailure`, `ProviderIdCollision` and `ProviderRegistryReport` are growth-prone types: build them with
+  `X(...)` and change them with `with*`; `new` and `.copy` are private;
+  [migration](docs/reference/migration.md#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379).
+- The tool schemas (`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`),
+  `PropertyDefinition`, `SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` are growth-prone types: build
+  them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are
+  `final`. `SafeParameterExtractor`'s Java constructor is now `SafeParameterExtractor.apply(params)`;
+  [migration](docs/reference/migration.md#tool-schemas-and-tool-call-types-are-growth-safe-2381).
 - The `org.llm4s.context` result types (`CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`,
   `ConversationWindow`, `TokenUsageInfo`, `StructuredInfo`, `HistoryDigest`, `TokenBreakdown`, `MessageTokenInfo`,
   `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are
@@ -140,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RunQueue.depth`), exported by Prometheus and Micrometer through core's new generic `Metric` and `MetricsCollector.increment`/`observe`/`set` ([#2138](https://github.com/llm4s/llm4s/issues/2138), [design 4.59](docs/design/typed-agent-runtime/4.59-stage-5-slice-o2-run-claim-queue-and-child-task-metrics.md)).
 - **Added** an example agent service in `modules/deploy-service` (unpublished): submit, follow over SSE, cancel and list runs
   on the store's run queue with an in-process `AgentWorker`, plus a three-replica Postgres overlay in `deploy/` ([#2139](https://github.com/llm4s/llm4s/issues/2139), [design 4.60](docs/design/typed-agent-runtime/4.60-stage-5-slice-p1-example-service-and-a-three-instance-deployment.md)).
+- **Added** the Stage 5 exit test (`MultiMachineExitSpec`, three service processes on one Postgres), the [several machines guide](docs/guide/agents/multiple-machines.md)
+  and the [platform parity matrix](docs/reference/agent-platform-parity.md) ([#2140](https://github.com/llm4s/llm4s/issues/2140), [design 4.61](docs/design/typed-agent-runtime/4.61-stage-5-slice-p2-exit-test-guide-and-parity-matrix.md)).
 
 ### Agent harness (Phase 3)
 

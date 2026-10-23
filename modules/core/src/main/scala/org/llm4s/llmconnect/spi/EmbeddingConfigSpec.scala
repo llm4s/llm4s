@@ -26,12 +26,31 @@ import scala.jdk.CollectionConverters._
  *                 does not stream. Absent means the provider's own default.
  */
 @Stable
-final case class EmbeddingProviderSection(
-  apiKey: Option[String] = None,
-  baseUrl: Option[String] = None,
-  model: Option[String] = None,
-  timeouts: ProviderTimeouts = ProviderTimeouts.default
-)
+final case class EmbeddingProviderSection private (
+  apiKey: Option[String],
+  baseUrl: Option[String],
+  model: Option[String],
+  timeouts: ProviderTimeouts
+) {
+  def withApiKey(apiKey: String): EmbeddingProviderSection               = copy(apiKey = Some(apiKey))
+  def withApiKey(apiKey: Option[String]): EmbeddingProviderSection       = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): EmbeddingProviderSection             = copy(baseUrl = Some(baseUrl))
+  def withBaseUrl(baseUrl: Option[String]): EmbeddingProviderSection     = copy(baseUrl = baseUrl)
+  def withModel(model: String): EmbeddingProviderSection                 = copy(model = Some(model))
+  def withModel(model: Option[String]): EmbeddingProviderSection         = copy(model = model)
+  def withTimeouts(timeouts: ProviderTimeouts): EmbeddingProviderSection = copy(timeouts = timeouts)
+}
+
+object EmbeddingProviderSection:
+
+  /** Creates an [[EmbeddingProviderSection]]. Named arguments are the supported way to construct one. */
+  def apply(
+    apiKey: Option[String] = None,
+    baseUrl: Option[String] = None,
+    model: Option[String] = None,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): EmbeddingProviderSection =
+    new EmbeddingProviderSection(apiKey, baseUrl, model, timeouts)
 
 /**
  * What an embedding provider needs from its section, and what to use when the

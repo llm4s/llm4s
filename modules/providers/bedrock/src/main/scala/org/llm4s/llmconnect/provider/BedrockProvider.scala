@@ -42,16 +42,16 @@ object BedrockProvider extends ProviderDescriptor:
       ),
       ProviderConfigKey
         .optional(PROFILE_KEY, "the AWS shared-config profile to authenticate with")
-        .copy(env = Some(AWS_PROFILE)),
+        .withEnv(AWS_PROFILE),
       ProviderConfigKey
         .optional(ACCESS_KEY_ID_KEY, "an explicit AWS access key id (needs secretAccessKey)")
-        .copy(env = Some(AWS_ACCESS_KEY_ID)),
+        .withEnv(AWS_ACCESS_KEY_ID),
       ProviderConfigKey
         .optional(SECRET_ACCESS_KEY_KEY, "the AWS secret access key that goes with accessKeyId")
-        .copy(env = Some(AWS_SECRET_ACCESS_KEY)),
+        .withEnv(AWS_SECRET_ACCESS_KEY),
       ProviderConfigKey
         .optional(SESSION_TOKEN_KEY, "the session token for temporary AWS credentials")
-        .copy(env = Some(AWS_SESSION_TOKEN))
+        .withEnv(AWS_SESSION_TOKEN)
     )
   )
 

@@ -10,13 +10,26 @@ import org.llm4s.annotation.Stable
  * @param hitRatePercent Percentage of requests served from cache (0.0 to 100.0).
  */
 @Stable
-case class CacheStats(
+final case class CacheStats private (
   size: Int,
   hits: Long,
   misses: Long,
   totalRequests: Long,
   hitRatePercent: Double
-)
+) {
+  def withSize(size: Int): CacheStats                        = copy(size = size)
+  def withHits(hits: Long): CacheStats                       = copy(hits = hits)
+  def withMisses(misses: Long): CacheStats                   = copy(misses = misses)
+  def withTotalRequests(totalRequests: Long): CacheStats     = copy(totalRequests = totalRequests)
+  def withHitRatePercent(hitRatePercent: Double): CacheStats = copy(hitRatePercent = hitRatePercent)
+}
+
+object CacheStats {
+
+  /** Creates a [[CacheStats]]. */
+  def apply(size: Int, hits: Long, misses: Long, totalRequests: Long, hitRatePercent: Double): CacheStats =
+    new CacheStats(size, hits, misses, totalRequests, hitRatePercent)
+}
 
 /**
  * Generic trait for embedding storage backends.

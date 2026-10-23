@@ -13,8 +13,9 @@ by what you use. The notes below are the per-change detail it links to. From 0.5
 [Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708),
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
-[core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346)
-and [core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356);
+[core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346),
+[core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356)
+and [the `TraceEvent` cases](#traceevent-cases-are-growth-safe-2377);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
 ## Multimodal content parts (#1913)
@@ -543,6 +544,107 @@ Each is a `final case class` whose constructor and `copy` are private:
 - `Conversation`, `ToolCall` and `ResponseFormat.JsonSchema` are now `final`.
 
 Pattern matching (`case ToolCall(id, name, args)`) and the fields are unchanged.
+
+### `TraceEvent` cases are growth-safe (#2377)
+
+The thirteen `TraceEvent` cases - `AgentInitialized`, `CompletionReceived`, `ToolExecuted`, `ErrorOccurred`,
+`TokenUsageRecorded`, `AgentRunEnded`, `CustomEvent`, `EmbeddingUsageRecorded`, `CostRecorded`,
+`RAGOperationCompleted`, `ImageGenerationCompleted`, `CacheHit` and `CacheMiss` (`org.llm4s.trace`) - follow the
+growth-prone pattern ([#2377](https://github.com/llm4s/llm4s/issues/2377)). Each is a `final case class` whose
+constructor and `copy` are private:
+
+- **Construction is unchanged**: `TraceEvent.X(...)` with the same arguments, positional or named, and the same
+  defaults (`timestamp = Instant.now()`, `span = None`, and each optional metric `None`) still compiles. `new X(...)`
+  does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field, named `with<Field>` - `withTimestamp` on every case,
+  `withSpan` on the four that carry one, `withName` on `CustomEvent`, `withStatus`/`withMessages`/`withUsage` on
+  `AgentRunEnded`, and so on. An `Option` field's setter takes the value or an `Option` (`withSpan(span)`,
+  `withSpan(None)`).
+
+  ```scala
+  val renamed = event.withName("prefix_" + event.name)   // was event.copy(name = "prefix_" + event.name)
+  val placed  = event.withSpan(span)                     // was event.copy(span = Some(span))
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` instead of the constructor, and chain the setters.
+- The thirteen cases are now `final`. Pattern matching (`case TraceEvent.CacheHit(similarity, threshold, ts)`), the
+  fields and `toJson` are unchanged.
+
+### Provider SPI, caching, streaming and exchange-sink types are growth-safe (#2379)
+
+`JsonlProviderExchangeSink` (`org.llm4s.llmconnect`), `CacheEntry`, `CacheStats` (`org.llm4s.llmconnect.caching`),
+`OpenAICompatibleClient.Settings` (`llm4s-openai-compatible`), `SSEParser.SSEEvent` (`org.llm4s.llmconnect.streaming`)
+and `EmbeddingProviderSection`, `ProviderConfigKey`, `ProviderModuleReport`, `ProviderDiscoveryFailure`,
+`ProviderIdCollision` and `ProviderRegistryReport` (`org.llm4s.llmconnect.spi`) follow the growth-prone pattern
+([#2379](https://github.com/llm4s/llm4s/issues/2379)). Each is a `final case class` whose constructor and `copy` are
+private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, and the same defaults, still
+  compiles. `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field (an `Option` field's setter takes the value or an `Option`):
+
+  | Type | Setters |
+  |---|---|
+  | `JsonlProviderExchangeSink` | `withPath` |
+  | `CacheEntry` | `withEmbedding`, `withResponse`, `withTimestamp`, `withOptions` |
+  | `CacheStats` | `withSize`, `withHits`, `withMisses`, `withTotalRequests`, `withHitRatePercent` |
+  | `OpenAICompatibleClient.Settings` | `withProviderName`, `withDisplayName`, `withModel`, `withBaseUrl`, `withCredential`, `withContextWindow`, `withReserveCompletion`, `withTimeouts` |
+  | `SSEEvent` | `withData`, `withEvent`, `withId`, `withRetry` |
+  | `EmbeddingProviderSection` | `withApiKey`, `withBaseUrl`, `withModel`, `withTimeouts` |
+  | `ProviderConfigKey` | `withName`, `withDescription`, `withRequired`, `withDefault`, `withEnv`, `withDeprecatedAliases` |
+  | `ProviderModuleReport` | `withModuleClass`, `withProviderIds`, `withSource`, `withEmbeddingProviderIds` |
+  | `ProviderDiscoveryFailure` | `withDetail`, `withFailure` |
+  | `ProviderIdCollision` | `withKind`, `withId`, `withKeptModule`, `withDroppedModule` |
+  | `ProviderRegistryReport` | `withDiscovered`, `withModules`, `withFailures`, `withCollisions` |
+
+  ```scala
+  // was ProviderConfigKey.optional(...).copy(env = Some("AWS_PROFILE"))
+  val key = ProviderConfigKey.optional("profile", "the AWS profile").withEnv("AWS_PROFILE")
+  // was section.copy(apiKey = resolvedKey)
+  val keyed = section.withApiKey(resolvedKey)
+  // was settings.copy(baseUrl = "https://eu.acme.example/v1")
+  val moved = settings.withBaseUrl("https://eu.acme.example/v1")
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` (`CacheStats.apply(size, hits, misses, total, rate)`) instead of
+  the constructor, and chain the setters.
+- `CacheEntry`, `CacheStats` and `SSEEvent` are now `final`.
+
+Pattern matching (`case ProviderConfigKey(name, description, required, default, env, aliases)`) and the fields are
+unchanged.
+
+### Tool schemas and tool-call types are growth-safe (#2381)
+
+`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`, `PropertyDefinition`,
+`SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` (`org.llm4s.toolapi`) follow the growth-prone pattern
+([#2381](https://github.com/llm4s/llm4s/issues/2381)). Each is a `final case class` whose constructor and `copy` are
+private:
+
+- **Construction is unchanged**: `Schema.string(...)`, `Schema.property(...)`, `ToolBuilder` and `X(...)` with the same
+  arguments and defaults still compile. `new X(...)` does not; drop the `new` (`ToolFunction[T, R](...)`).
+- **Replace `.copy` with a setter**:
+
+  | Type | Setters |
+  |---|---|
+  | `StringSchema` | `withDescription`, `withEnum`, `withMinLength`, `withMaxLength` (the last three also take an `Option`), `withLengthConstraints` |
+  | `NumberSchema`, `IntegerSchema` | `withDescription`, `withMinimum`, `withMaximum`, `withExclusiveMinimum`, `withExclusiveMaximum`, `withMultipleOf` (each also takes an `Option`), `withRange`, `withExclusiveRange`; `NumberSchema` also `withIsInteger` |
+  | `BooleanSchema` | `withDescription` |
+  | `ArraySchema` | `withDescription`, `withItemSchema`, `withMinItems`, `withMaxItems` (the value or an `Option`), `withSizeConstraints`, `withUniqueItems` |
+  | `ObjectSchema` | `withDescription`, `withProperties`, `withProperty`, `withAdditionalProperties` |
+  | `PropertyDefinition` | `withName`, `withSchema`, `withRequired` |
+  | `SafeParameterExtractor` | `withParams`, `withCall` (the call or an `Option`) |
+  | `ToolCallRequest` | `withFunctionName`, `withArguments` |
+  | `ToolFunction` | `withName`, `withDescription`, `withSchema`, `withHandler` |
+
+  ```scala
+  val renamed = tool.withName("search_v2")                       // was tool.copy(name = "search_v2")
+  val open    = schema.withAdditionalProperties(true)            // was schema.copy(additionalProperties = true)
+  ```
+
+- **Java and Kotlin**: `new SafeParameterExtractor(params)` becomes `SafeParameterExtractor.apply(params)`; the other
+  types are built through their companion's `apply` or `Schema`.
+
+Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchanged.
 
 ### Context types are growth-safe (#2380)
 
