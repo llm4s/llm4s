@@ -1,0 +1,26 @@
+# The Postgres store for every pod: the database settings from the generated ConfigMap, and the role and password from
+# a Secret you create (deploy/README.md). The Secret is not optional: a pod without it does not start, rather than
+# start on the in-memory store and keep threads no other pod can see.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm4s-deploy-service
+spec:
+  template:
+    spec:
+      containers:
+        - name: service
+          envFrom:
+            - configMapRef:
+                name: llm4s-agent-store
+          env:
+            - name: LLM4S_CHECKPOINTER_POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: llm4s-postgres-credentials
+                  key: username
+            - name: LLM4S_CHECKPOINTER_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: llm4s-postgres-credentials
+                  key: password

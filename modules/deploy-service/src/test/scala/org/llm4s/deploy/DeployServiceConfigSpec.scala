@@ -64,7 +64,7 @@ class DeployServiceConfigSpec extends AnyFlatSpec with Matchers {
 
   it should "load this process's configuration, whose defaults are valid" in {
     // `PORT` in the environment may override the default port, so assert only what is always true.
-    DeployServiceConfig.load() match {
+    DeployServiceConfig.load(ConfigSource.default) match {
       case Right(config) =>
         config.host shouldBe "0.0.0.0"
         config.port should ((be >= 1).and(be <= 65535))
