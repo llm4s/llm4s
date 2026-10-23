@@ -17,8 +17,8 @@ import scala.util.Try
 final case class Reply(status: Int, body: ujson.Value)
 
 /**
- * The example service's operations (design 4.60), over a store's [[org.llm4s.agent.service.RunSubmitter
- * RunSubmitter]] and `Checkpointer`, independent of the web stack so they are tested without a server. Each answers a
+ * The example service's operations (design 4.60), over a store's `RunSubmitter` and
+ * `Checkpointer`, independent of the web stack so they are tested without a server. Each answers a
  * [[Reply]]; [[AgentRoutes]] puts them on cask.
  *
  * Every call is scoped to `tenant` (Stage 5 rule 9), which the routes read from the `X-Tenant-Id` header. That header
