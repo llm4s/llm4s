@@ -55,10 +55,15 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
           // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
           val tenant = submission.tenantId.map(_.value)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it runs
+          // the entries closed here are answered in the ticket, in this transaction, so only this submit reports them
+          val interrupted =
+            if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
+            else
+              queued.filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0).map { r =>
+                closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now)
+                r.id
+              }
           if submission.policy == BusyThreadPolicy.Interrupt then
-            queued.filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0).foreach { r =>
-              closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now)
-            }
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled
             queued.filter(r => r.tenantId == tenant && r.attempts > 0 && !cancelling(r)).foreach { r =>
               setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
@@ -83,7 +88,9 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
             submission.traceContext.map(_.traceParent)
           )
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
-          Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
+          sequence(interrupted.map(i => view(c, rowOf(c, i).get))).map { closed =>
+            Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false, closed)
+          }
   }
 
   /**
@@ -246,19 +253,23 @@ final private[sqlite] class SqliteRunQueue(store: SqliteCheckpointer, clock: Clo
     }
   }
 
-  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Vector[QueueEntry]] =
+  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation] =
     store.writing("queue.cancel") { c =>
       val targeted: Result[Vector[Raw]] = target match
         case CancelTarget.Entry(id) => found(c, tenantId, id).map(_ => rowOf(c, id.value).toVector)
         case CancelTarget.Thread(t) => Right(openOf(c, t).filter(_.tenantId == tenantId.map(_.value)))
       targeted.flatMap { rows =>
-        rows.foreach { row =>
+        // the rows are read in this write transaction, so the entries closed here are closed by this call only
+        val closed = rows.flatMap { row =>
           // never started: closed now, so no worker runs it; started: asked to stop, a cancel replacing an interrupt
           if row.outcome.isEmpty && row.attempts == 0 then
             closeRow(c, row.id, EntryOutcome.Cancelled(reason), epochNanos(clock.instant()))
-          else if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            Some(EntryId.unsafe(row.id))
+          else
+            if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+            None
         }
-        sequence(rows.map(r => view(c, rowOf(c, r.id).get)))
+        sequence(rows.map(r => view(c, rowOf(c, r.id).get))).map(Cancellation(_, closed.toSet))
       }
     }
 

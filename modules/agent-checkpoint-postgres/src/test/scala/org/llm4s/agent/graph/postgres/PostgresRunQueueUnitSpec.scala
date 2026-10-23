@@ -147,11 +147,15 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       case (sql, _) if sql == Sql.nextQueueEntryId(t) => Vector(Vector(9L))
       case (sql, _) if sql == Sql.openQueueEntries(t) =>
         Vector(entry(3, policy = "Interrupt", attempts = 1), entry(5, policy = "Interrupt"), entry(6))
+      case (sql, Vector(5L)) if sql == Sql.queueEntry(t) => Vector(entry(5, policy = "Interrupt"))
     }
-    s.store()
+    val ticket = s
+      .store()
       .runQueue
       .submit(Submission(thread, agent, QueuedInput.query("q"), policy = BusyThreadPolicy.Interrupt))
       .value
+    // the entry this submit's update closed is answered in its ticket (#2368)
+    ticket.interrupted.map(_.id) shouldBe Vector(EntryId.unsafe(5))
     val closed = s.madeWith(Sql.closeUnstartedQueueEntry(t))
     closed.map(_.last) shouldBe Vector(5L)
     closed.head.take(1) shouldBe Vector("interrupted")
@@ -196,7 +200,7 @@ class PostgresRunQueueUnitSpec extends AnyFlatSpec with Matchers with EitherValu
       case (sql, Vector(6L)) if sql == Sql.queueEntry(t) => Vector(entry(6))
     }
     val reason = CancelReason.Requested(Some("n"))
-    s.store().runQueue.cancel(None, CancelTarget.Thread(thread), reason).value
+    s.store().runQueue.cancel(None, CancelTarget.Thread(thread), reason).value.closed shouldBe Set(EntryId.unsafe(6))
     s.madeWith(lockSql) shouldBe Vector(Vector(lockName("thread:t1")))
     s.madeWith(Sql.closeUnstartedQueueEntry(t)).map(c => (c.head, c.last)) shouldBe Vector(("cancelled", 6L))
     val asked = s.madeWith(Sql.setQueueStop(t))

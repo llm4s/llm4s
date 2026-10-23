@@ -110,6 +110,19 @@ enum CancelTarget:
   case Thread(threadId: ThreadId)
 
 /**
+ * What [[RunQueue.cancel]] answers (Stage 5 W3, design 4.57): the targeted `entries` as they are after the cancel, and
+ * the ids of those this call `closed` - the ones it found open with no attempt and closed `Cancelled` itself, decided in
+ * the store's closing transaction (or under its lock). An entry another cancel closed first, one already closed and
+ * one asked to stop are in `entries` but not in `closed`, so of two cancels racing for one entry exactly one reports
+ * it: what [[RunSubmitter]] counts as `llm4s.agent.queue.closed` (design 4.59, #2368).
+ */
+@Experimental
+final case class Cancellation(entries: Vector[QueueEntry], closed: Set[EntryId]):
+
+  /** The entries this call closed, in `entries`' order. */
+  def closedEntries: Vector[QueueEntry] = entries.filter(e => closed(e.id))
+
+/**
  * How an entry closed: its terminal state (design 4.55).
  *
  *  - `Done`: the entry's run reached rest - completed or suspended - or the thread had moved on past the entry's
