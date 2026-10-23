@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.testkit.Fixtures
@@ -18,7 +20,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 
-class LLMClientIOSpec extends AnyFlatSpec with Matchers {
+class LLMClientIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val testCompletion = Completion(
     id = "test-id",

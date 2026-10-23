@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.Text
 import org.llm4s.agent.graph._
@@ -38,7 +40,7 @@ import scala.jdk.CollectionConverters._
  * The suite also checks idempotency keys: one per call, the same in every run of the call, and a
  * new one for a call of another model request even when the provider reuses its id.
  */
-class AgentToolResultContractSpec extends AnyFlatSpec with Matchers {
+class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)

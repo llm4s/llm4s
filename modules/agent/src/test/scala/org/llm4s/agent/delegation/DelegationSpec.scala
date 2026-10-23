@@ -1,5 +1,7 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentBuilder, CompletionFixture }
 import org.llm4s.agent.graph.{
   GraphError,
@@ -28,7 +30,13 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 /** `TypedAgent`, the `task` tools and parallel bounded children (#2048, design 4.44), through a parent agent's runs. */
-class DelegationSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
+class DelegationSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with OptionValues
+    with LoneElement {
   import DelegationSpec.*
 
   "a typed subagent" should "take its typed input and give back a typed report the parent reads as its tool result" in {

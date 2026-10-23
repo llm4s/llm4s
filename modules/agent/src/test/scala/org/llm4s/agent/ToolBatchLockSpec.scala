@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, RunBudgets, RunConfig, StateKey, StateUpdate, ThreadId }
@@ -27,7 +29,7 @@ import scala.jdk.CollectionConverters._
  * Batch locks (#1903): calls of one model message whose locks conflict run in successive supersteps, in
  * call order, each seeing the state the earlier one committed; the others run concurrently, as before.
  */
-class ToolBatchLockSpec extends AnyFlatSpec with Matchers {
+class ToolBatchLockSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val counter: StateKey[Int, Int] = StateKey.replace[Int]("counter", 0)
 

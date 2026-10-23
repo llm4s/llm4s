@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.error.NetworkError
@@ -25,7 +27,7 @@ import scala.jdk.CollectionConverters.*
 import java.time.Instant
 
 /** Run-scoped event delivery: `Agent.stream*` and a late `AgentRun.subscribe`. */
-class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
+class AgentRunSubscribeSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually:
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))

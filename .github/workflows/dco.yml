@@ -15,6 +15,7 @@ jobs:
   check_dco:
     name: Check DCO sign-off
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Run dco-check

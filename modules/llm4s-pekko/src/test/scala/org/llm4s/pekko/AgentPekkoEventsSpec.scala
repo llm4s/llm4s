@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters.*
 import scala.concurrent.duration.*
 import scala.util.Try
 
-class AgentPekkoEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class AgentPekkoEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val system: ActorSystem = ActorSystem("agent-pekko-events-spec")
 

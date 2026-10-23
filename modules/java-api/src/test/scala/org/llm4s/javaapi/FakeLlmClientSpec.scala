@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -8,7 +10,7 @@ import java.util.concurrent.{ Callable, Executors, TimeUnit }
 import scala.jdk.CollectionConverters.*
 
 /** `FakeLlmClient` (#1497): a scripted fake model for testing Java code that calls llm4s. */
-class FakeLlmClientSpec extends AnyFlatSpec with Matchers {
+class FakeLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   "FakeLlmClient.replying" should "answer each call with the next reply, and record each prompt" in {
     val fake = FakeLlmClient.replying("one", "two")

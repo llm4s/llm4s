@@ -224,6 +224,22 @@ outside those modules in `scripts/platform-sensitive-sources.txt`; `scripts/chec
 fails in Quick Checks otherwise. Details in the
 [Testing Guide](docs/reference/testing-guide.md#platform-tests-sbt-testplatform).
 
+### CI time limits
+
+Every job in the workflows that run on pull requests (`ci.yml`, `dco.yml`, `secret-scan.yml`,
+`dependency-scan.yml`, `claude.yml`, `claude-external-pr-comment.yml`) sets `timeout-minutes` to
+about twice its usual duration on `main` - the `Test` matrix 40, the coverage legs 30, most others
+10-20 - so a hung job fails in minutes instead of holding a runner and the merge queue for GitHub's
+default six hours. If a job's healthy runs grow towards its limit, raise the number on that job in
+the same PR, and say in the PR body how long recent runs took.
+
+A hung test should fail before its job does, under its own name. Specs that wait on futures,
+actors or threads mix in `TestTimeLimit` (`org.llm4s.testutil` in core's tests; `llm4s-pekko` and
+`workspaceRunner` keep their own copy), a two-minute per-test limit that interrupts the test's
+thread and fails it with `TestFailedDueToTimeoutException`. ZIO specs use
+`@@ TestAspect.timeout(...)`. Mix it into a new spec of that kind; a spec that legitimately needs
+longer overrides `timeLimit`.
+
 ### Tests that need a real service
 
 Suites needing a database, a container, a local model server or an API key go in

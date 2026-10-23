@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ IdentitySource, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -11,7 +13,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * The Java facade builds clients through `LLMConnect.getClient`, so a workload-identity config the
  * provider's rules refuse fails there, before the client exists - no exchange, no request.
  */
-class JavaApiWorkloadIdentitySpec extends AnyWordSpec with Matchers {
+class JavaApiWorkloadIdentitySpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   private def exchanging(fake: FakeTokenExchangeServer, baseUrl: String): OpenAICompatibleConfig =
     OpenAICompatibleConfig("m", baseUrl).withTokenExchange(

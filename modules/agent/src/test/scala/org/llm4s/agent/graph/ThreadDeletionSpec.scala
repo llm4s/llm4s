@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -20,7 +22,13 @@ import scala.jdk.CollectionConverters.*
  * thread's subscriptions end with [[DisconnectReason.ThreadDeleted]], so none of them reads a new
  * thread of the same id as if it continued the old one. The store side is `CheckpointerContract`.
  */
-class ThreadDeletionSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with Eventually:
+class ThreadDeletionSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with OptionValues
+    with Eventually:
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(10, Seconds))
 
   private val start = Instant.parse("2026-10-09T12:00:00Z")

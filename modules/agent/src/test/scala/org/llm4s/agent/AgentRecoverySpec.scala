@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, ThreadId }
@@ -15,7 +17,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.concurrent.duration._
 
 /** A failed or interrupted turn leaves its thread for `recover`, which re-runs only the unfinished work. */
-class AgentRecoverySpec extends AnyFlatSpec with Matchers {
+class AgentRecoverySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val thread = ThreadId("recovery")
 

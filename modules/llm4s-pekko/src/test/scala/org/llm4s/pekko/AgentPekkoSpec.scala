@@ -41,7 +41,7 @@ import scala.util.Using
 import scala.util.Using.Releasable
 import java.time.Instant
 
-class AgentPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class AgentPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val system: ActorSystem  = ActorSystem("agent-pekko-spec")
   implicit private val ec: ExecutionContext = ExecutionContext.global

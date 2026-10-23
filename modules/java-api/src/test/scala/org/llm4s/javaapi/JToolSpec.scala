@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.ToolCallInfo
@@ -13,7 +15,7 @@ import scala.jdk.CollectionConverters.*
 import java.time.Instant
 
 /** Agent tools defined from Java (#1484): `JTool.builder`, `JTool.fromAnnotated`, `Llm4s.createAgentWithTools`. */
-class JToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class JToolSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterEach {
 
   override def beforeEach(): Unit = ToolsCheck.CALLS.clear()
 

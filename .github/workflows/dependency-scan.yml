@@ -41,6 +41,7 @@ jobs:
   osv-scanner:
     name: OSV-Scanner
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       OSV_SCANNER: ${{ github.workspace }}/../osv-scanner
       # Pull requests: a scanner outage is a warning. Weekly and manual runs: it fails.

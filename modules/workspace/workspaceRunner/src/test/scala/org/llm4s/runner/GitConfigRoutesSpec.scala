@@ -20,7 +20,7 @@ import scala.util.{ Try, Using }
  * is not vacuous - and then shown not to run it through the runner, for every allowed command it applies to. The
  * marker is a script outside the workspace that appends to a file outside it.
  */
-class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
+class GitConfigRoutesSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   import GitConfigRoutesSpec._
 
   private def inRepo[A](f: Repo => A): A = {
@@ -647,7 +647,7 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
 }
 
 /** The parts of [[GitSandbox]] and the `.git` name rule that need no git, on every host (Windows included). */
-class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
+class GitSandboxUnitSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val emptyDir = Files.createTempDirectory("git-empty-unit")
 

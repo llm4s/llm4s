@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.effect.cats.AgentIO
@@ -23,7 +25,7 @@ import upickle.default._
  * test, `TestingWithTestkitGuideSpec` in `modules/samples`, fails if a block of the page is not found here or in the
  * other specs it reads. Change the page and this spec together.
  */
-class ScriptedAgentIOSpec extends AnyFlatSpec with Matchers with EitherValues {
+class ScriptedAgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues {
   import ScriptedAgentIOSpec.*
 
   "AgentIO with a ScriptedLLMClient" should "run a tool call and then the final answer" in {

@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.Optional
 import org.llm4s.agent.AgentResult
 import org.llm4s.agent.events.AgentEvents
@@ -28,7 +30,7 @@ private object EchoResult {
   implicit val rw: ReadWriter[EchoResult] = macroRW
 }
 
-class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
+class JAgentStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))

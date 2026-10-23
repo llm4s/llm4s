@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.types.Result
 import zio.{ Chunk, Ref, ZIO }
+import zio.durationInt
 import zio.test.*
 import java.time.Instant
 
@@ -157,5 +158,5 @@ object LLMClientZSpec extends ZIOSpecDefault {
             .orDie
         } yield assertTrue(taken.map(_.id) == Chunk("c1")) && assertTrue(ok) && assertTrue(sawInterrupt.get())
       }
-    )
+    ) @@ TestAspect.timeout(120.seconds)
 }

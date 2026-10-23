@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,7 +15,7 @@ import scala.jdk.CollectionConverters.*
  * The event hub's end-of-run barrier, at the dispatcher: lagging, and a barrier given during replay;
  * and the queue's bound when dropped live events and durable commits alternate.
  */
-class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
+class EventHubBarrierSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private val thread = ThreadId("t")
   private val run    = RunId("r1")

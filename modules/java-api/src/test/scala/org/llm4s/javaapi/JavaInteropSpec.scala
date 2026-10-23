@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -15,7 +17,7 @@ import java.time.Instant
  * guards the shape of the Java-visible signatures, so a Scala type leaking into the Java surface
  * is a test failure rather than a surprise for the first Java user.
  */
-class JavaInteropSpec extends AnyFlatSpec with Matchers {
+class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // Scala `private[javaapi]` is public in bytecode, so these are knowingly Java-visible. They are
   // internal (documented as such) and allowlisted by declaring class and name, so any NEW Scala type

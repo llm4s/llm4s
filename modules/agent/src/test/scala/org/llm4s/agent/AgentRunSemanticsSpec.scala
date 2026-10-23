@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
@@ -24,7 +26,7 @@ import java.time.Instant
  * These are the behaviours issue #1315 described for the loop the runtime replaced; each test says
  * which finding it answers.
  */
-class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
+class AgentRunSemanticsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   /** Answers call N with `respond(N)`, counting calls. */
   final private class ByIndex(respond: Int => Result[Completion]) extends LLMClient:

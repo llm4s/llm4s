@@ -10,6 +10,7 @@ import org.llm4s.types.Result
 import upickle.default._
 import org.llm4s.zio.AgentZ
 import zio.ZIO
+import zio.durationInt
 import zio.test.*
 
 /**
@@ -76,5 +77,5 @@ object ScriptedAgentZSpec extends ZIOSpecDefault {
         client.callCount == 2
       )
     }
-  )
+  ) @@ TestAspect.timeout(120.seconds)
 }

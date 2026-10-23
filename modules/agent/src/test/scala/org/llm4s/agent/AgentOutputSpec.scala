@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.events.{ AgentEvents, ModelCallCompleted }
@@ -35,7 +37,7 @@ import upickle.default.ReadWriter
 import java.util.concurrent.atomic.AtomicInteger
 
 /** The response format of an agent's answer (#1912, design 4.26): `withOutput`, validation, the retry, `decodeOutput`. */
-class AgentOutputSpec extends AnyFlatSpec with Matchers {
+class AgentOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   import AgentOutputSpec._
 
   private def answers(texts: String*): ScriptedLLMClient = ScriptedLLMClient.of(texts.map(CompletionFixture.simple)*)

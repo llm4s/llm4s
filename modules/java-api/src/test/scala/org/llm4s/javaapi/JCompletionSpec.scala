@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ CancelledError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -16,7 +18,7 @@ import java.time.Instant
  * `JLlmClient.completion` and the [[JCompletion]] it returns (#1487): the model, usage, cost and tool calls of a reply
  * reach Java, read with Java types, from a fake client that records what it was sent.
  */
-class JCompletionSpec extends AnyFlatSpec with Matchers {
+class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val toolCall = ToolCall("call-1", "weather", ujson.Obj("city" -> "Paris"))
 

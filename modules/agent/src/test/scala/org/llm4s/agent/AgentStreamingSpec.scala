@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
@@ -16,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 import java.time.Instant
 
-class AgentStreamingSpec extends AnyFlatSpec with Matchers:
+class AgentStreamingSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private val usage = Some(TokenUsage(promptTokens = 5, completionTokens = 3, totalTokens = 8))
 

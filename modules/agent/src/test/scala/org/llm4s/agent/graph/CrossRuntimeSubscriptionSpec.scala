@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
@@ -22,7 +24,12 @@ import scala.jdk.CollectionConverters.*
  * order, without gap or duplicate - and the same lag and failure behaviour. The cases that hold for
  * every store are in `CheckpointerContract`; these are the runtime's own.
  */
-class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with EitherValues with Eventually:
+class CrossRuntimeSubscriptionSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with Eventually:
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(10, Seconds))
 
   private val threadIds             = new AtomicInteger()

@@ -1,5 +1,7 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentStatus, CompletionFixture, ScriptedLLMClient }
 import org.llm4s.agent.AgentFixture.{ built, value }
 import org.llm4s.agent.graph.*
@@ -22,7 +24,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import scala.concurrent.duration.*
 
 /** Stage 3 slice P1 (#1915, design §4.37): `HarnessProfile` and `AgentBuilder.withHarness`. */
-class HarnessProfileSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class HarnessProfileSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private def call(name: String, args: ujson.Obj, id: String = "c1"): Completion =
     CompletionFixture.withMessage(AssistantMessage(None, Seq(ToolCall(id, name, args))))

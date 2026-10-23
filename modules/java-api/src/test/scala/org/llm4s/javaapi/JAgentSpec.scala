@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.Optional
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ APIError, LLMError }
@@ -13,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
 import scala.jdk.CollectionConverters.*
 import java.time.Instant
 
-class JAgentSpec extends AnyFlatSpec with Matchers {
+class JAgentSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def completingClient(answer: String): LLMClient = new LLMClient {
     override def complete(

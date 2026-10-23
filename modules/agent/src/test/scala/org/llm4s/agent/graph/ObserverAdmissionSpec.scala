@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -7,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters.*
 
-class ObserverAdmissionSpec extends AnyFlatSpec with Matchers:
+class ObserverAdmissionSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private val Tick = EventType[Int]("test.tick", 1)
 

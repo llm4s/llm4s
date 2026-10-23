@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.javaapi.StructuredRecords.*
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -12,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.time.Instant
 
 /** `JLlmClient.complete(prompt, Record.class)` (#1486): a Java record's schema out, the record back. */
-class JStructuredOutputSpec extends AnyFlatSpec with Matchers {
+class JStructuredOutputSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A client answering `reply`, keeping the options it was called with. */
   final private class Replying(reply: String) extends LLMClient {

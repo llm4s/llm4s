@@ -4,6 +4,7 @@ import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.{ EventHandlers, ThreadId }
 import org.llm4s.agent.testkit.NestedFixtures
 import zio.ZIO
+import zio.durationInt
 import zio.test.*
 
 import java.util.concurrent.CountDownLatch
@@ -47,5 +48,5 @@ object AgentZNestedEventsSpec extends ZIOSpecDefault {
         _    <- ZIO.attemptBlocking(run.await()).orDie
       } yield assertTrue(seen.isEmpty)
     }
-  )
+  ) @@ TestAspect.timeout(120.seconds)
 }

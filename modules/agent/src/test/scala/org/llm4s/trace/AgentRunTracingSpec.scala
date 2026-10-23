@@ -1,5 +1,7 @@
 package org.llm4s.trace
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{
   Checkpointer,
@@ -33,7 +35,7 @@ import java.time.Instant
  * `withTracing` traces each run's durable events as `graph.*`/`agent.*` custom events, its model
  * calls' usage as `TokenUsageRecorded`, and ends each run with one `AgentRunEnded`.
  */
-class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
+class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))

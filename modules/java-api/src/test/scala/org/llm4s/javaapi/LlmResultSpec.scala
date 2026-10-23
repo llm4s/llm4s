@@ -1,12 +1,14 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.Optional
 
-class LlmResultSpec extends AnyFlatSpec with Matchers {
+class LlmResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val error: LLMError = ValidationError("test error", "field")
 

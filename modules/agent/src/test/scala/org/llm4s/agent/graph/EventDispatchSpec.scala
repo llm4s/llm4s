@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -13,7 +15,7 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.jdk.CollectionConverters.*
 
-class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
+class EventDispatchSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues {
 
   private val thread = ThreadId("dispatch")
 

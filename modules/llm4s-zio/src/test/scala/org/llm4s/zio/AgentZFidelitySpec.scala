@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
+import zio.durationInt
 import zio.test.*
 import java.time.Instant
 
@@ -248,5 +249,5 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
       test("agent(id) fails with the LLMError of a builder that does not build") {
         LLMClientZ(new Recording(_ => text("x"))).agent("not a valid id!")().either.map(r => assertTrue(r.isLeft))
       }
-    ) @@ TestAspect.sequential
+    ) @@ TestAspect.sequential @@ TestAspect.timeout(120.seconds)
 }

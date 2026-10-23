@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -19,7 +21,7 @@ import GraphTestSupport.*
  * can run again - across a late `Async` commit, a suspension, `updateState` - and released by the commit that
  * ends that, by a Block, or with the thread; a fork's re-run is a new effect.
  */
-class EffectReplayRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class EffectReplayRuntimeSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val thread = ThreadId("t")
   private val other  = ThreadId("fork")

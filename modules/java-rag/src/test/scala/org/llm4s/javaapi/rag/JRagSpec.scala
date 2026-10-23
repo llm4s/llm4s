@@ -1,5 +1,7 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.javaapi.{ LlmErrorKind, LlmResult }
 import org.llm4s.llmconnect.model.{ EmbeddingError, InputPurpose, UserMessage }
@@ -14,7 +16,7 @@ import scala.jdk.CollectionConverters.*
  * `JRag` (#1491), driven through `JRagCheck`'s Java source, over a word-count embedding provider and a model that
  * answers with the first chunk it is given: no network, and every answer and source predictable.
  */
-class JRagSpec extends AnyFlatSpec with Matchers {
+class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   import RagFakes.*
 

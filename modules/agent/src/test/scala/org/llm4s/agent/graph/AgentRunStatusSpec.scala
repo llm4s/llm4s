@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentId, AgentRun, AgentStatus, AgentTracing }
 import org.llm4s.agent.graph.toolloop.{ Messages, StoredMessage, TurnOutcome, TurnOutput }
 import org.llm4s.error.{ NetworkError, ValidationError }
@@ -13,7 +15,7 @@ import org.scalatest.matchers.should.Matchers
  * `AgentRun.status` is the one derivation of a turn's status: `await` and tracing both map from it,
  * so tracing reports a turn `await` refuses as `failed`, never `completed`.
  */
-class AgentRunStatusSpec extends AnyFlatSpec with Matchers:
+class AgentRunStatusSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private object Unused extends LLMClient:
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

@@ -327,5 +327,5 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         assertTrue(failed.isLeft, doneOk, durableEvents(items).last == RunEvent.RunCompleted)
       }
     }
-  )
+  ) @@ TestAspect.timeout(120.seconds)
 }

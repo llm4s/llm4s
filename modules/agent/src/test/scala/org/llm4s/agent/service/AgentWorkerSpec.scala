@@ -1,5 +1,7 @@
 package org.llm4s.agent.service
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, SpecTools }
 import org.llm4s.agent.delegation.{ TaskRequest, TypedAgent }
 import org.llm4s.agent.graph.*
@@ -23,6 +25,7 @@ import scala.jdk.CollectionConverters.*
 /** [[AgentWorker]] over the in-memory store, with real agents (Stage 5 W2, design 4.56). */
 class AgentWorkerSpec
     extends AnyFlatSpec
+    with TestTimeLimit
     with Matchers
     with EitherValues
     with OptionValues

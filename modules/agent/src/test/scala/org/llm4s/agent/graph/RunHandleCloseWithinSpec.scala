@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -14,7 +16,7 @@ import scala.concurrent.duration.*
  * watchdog makes is over at once and nothing here waits for real time to pass. The watchdog gives the wait up only
  * when the same commit has been in flight for the whole bound, never while commits keep returning.
  */
-class RunHandleCloseWithinSpec extends AnyFlatSpec with Matchers {
+class RunHandleCloseWithinSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val bound = 1_000_000_000L
   private val state = ThreadState.empty(Map.empty)

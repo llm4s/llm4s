@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.ToolOutcome
@@ -16,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 /** Typed handlers ([[EventHandlers]]) over an agent's runs: a tool's own events, a slow handler, recovery. */
-class TypedStreamSpec extends AnyFlatSpec with Matchers with Eventually:
+class TypedStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually:
   import AgentFixture.*
 
   implicit override val patienceConfig: PatienceConfig =

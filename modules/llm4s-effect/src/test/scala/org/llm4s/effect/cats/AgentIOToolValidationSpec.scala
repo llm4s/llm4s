@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -23,7 +25,7 @@ import java.time.Instant
  * reports a failure to the model as a structured tool result; it does not fail the run. The wrapper
  * must neither swallow that result nor hang on it, and a run that never recovers must end at the step limit.
  */
-class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
+class AgentIOToolValidationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   final case class EchoResult(value: String)
   object EchoResult { implicit val rw: ReadWriter[EchoResult] = macroRW }

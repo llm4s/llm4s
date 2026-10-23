@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
@@ -64,7 +66,7 @@ object ToolLoopFixtures {
     }
 }
 
-class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class ToolLoopSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
   import ToolLoopFixtures.*
 
   private val thread = ThreadId("conversation-1")

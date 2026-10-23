@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
@@ -17,7 +19,7 @@ import scala.concurrent.duration.*
  * a child driven only through its parent (rule 19), cascade delete, child retention (rule 12), and the outcome a
  * terminal checkpoint records.
  */
-class ChildThreadSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class ChildThreadSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val log     = StateKey.appending[String]("log")
   private val worker  = AgentId.unsafe("worker")

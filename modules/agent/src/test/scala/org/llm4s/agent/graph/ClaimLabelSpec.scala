@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
@@ -20,7 +22,7 @@ import scala.jdk.CollectionConverters.*
  * logged with the run id when a claim is granted and when a renewal fails or the claim is lost, and goes
  * nowhere else - not to the store, and not into the [[GraphError.ThreadBusy]] another caller gets.
  */
-class ClaimLabelSpec extends AnyFlatSpec with Matchers with EitherValues with BeforeAndAfterEach {
+class ClaimLabelSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with BeforeAndAfterEach {
 
   private val thread = ThreadId("t")
 

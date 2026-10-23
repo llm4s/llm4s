@@ -1,5 +1,7 @@
 package org.llm4s.javaapi.rag
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.RateLimitError
 import org.llm4s.javaapi.GuideDocs
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +17,7 @@ import scala.jdk.CollectionConverters.*
  * this module's public API, and this spec checks that each block of the guide is in it and runs them over
  * `RagFakes`' word-count embeddings and echoing model.
  */
-class JavaRagGuideSpec extends AnyWordSpec with Matchers {
+class JavaRagGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   import GuideDocs.*
   import RagFakes.*

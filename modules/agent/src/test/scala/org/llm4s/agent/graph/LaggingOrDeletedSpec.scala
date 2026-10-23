@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,6 +21,7 @@ import scala.jdk.CollectionConverters.*
  */
 abstract class LaggingOrDeletedCases
     extends AnyFlatSpec
+    with TestTimeLimit
     with Matchers
     with EitherValues
     with OptionValues

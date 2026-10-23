@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.Optional
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, InterruptId }
@@ -20,7 +22,7 @@ import SuspensionFixtures.{ call, calling, scripted }
  * [[JAgent.pending]], [[JAgent.resume]] and [[JAgent.recover]] over the real agent runtime: only the
  * model is scripted; see [[SuspensionFixtures]] for the tools.
  */
-class JAgentPendingSpec extends AnyFlatSpec with Matchers {
+class JAgentPendingSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val ran = new CopyOnWriteArrayList[String]()
 

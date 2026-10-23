@@ -390,6 +390,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#2360](https://github.com/llm4s/llm4s/issues/2360) decides its tier), and `StabilityTiers.selfTest` has a violating
   fixture for every deny-listed package [#2357](https://github.com/llm4s/llm4s/issues/2357);
   [API stability](docs/reference/api-stability.md#tiers-in-the-code).
+- **Added** CI time limits: every job of the workflows that run on pull requests has a `timeout-minutes` of about twice
+  its usual duration, instead of GitHub's six-hour default, and the specs that wait on futures, actors or threads (agent
+  runtime, effect bridges, `java-api`, `java-rag`, workspace runner) fail a test that hangs under its own name after two
+  minutes (`TestTimeLimit`, ZIO's `TestAspect.timeout`); [how to raise one](CONTRIBUTING.md#ci-time-limits)
+  [#2370](https://github.com/llm4s/llm4s/issues/2370).
 - **Added** a per-module MiMa baseline: `mimaBaselineOverrides` in `build.sbt` gives a frozen module its own baseline
   release (`"llm4s-<name>" -> Some("X.Y.Z")`) or none (`-> None`) while the others use `mimaBaselineVersion`, so
   `llm4s-agent` can take a later baseline than the other frozen modules ([RFC 0001](docs/rfcs/0001-agent-baseline.md)).

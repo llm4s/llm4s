@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.concurrent.TimeUnit
 
 import cats.effect.{ Deferred, IO }
@@ -26,7 +28,7 @@ import java.time.Instant
  * to enumerate, so leak detection here relies on the Counting/ParksAfterFirst fixtures' thread-exit
  * signals, already asserted by the backpressure and early-termination tests below.
  */
-class LLMClientIOConcurrencySpec extends AnyFlatSpec with Matchers {
+class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   import Fixtures.*
 
   private val Safety = 60.seconds

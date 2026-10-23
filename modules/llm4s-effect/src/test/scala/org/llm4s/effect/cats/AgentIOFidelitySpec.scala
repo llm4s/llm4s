@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -21,7 +23,7 @@ import upickle.default.*
 import java.time.Instant
 
 /** Proves that what `AgentIO` is given reaches the underlying `Agent` unchanged, and what the agent reports comes back. */
-class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
+class AgentIOFidelitySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   final case class EchoResult(value: String)
   object EchoResult { implicit val rw: ReadWriter[EchoResult] = macroRW }

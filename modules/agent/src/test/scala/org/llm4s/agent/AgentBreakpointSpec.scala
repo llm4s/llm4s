@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.middleware.{ ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.AgentMiddlewareQuestionSpec.{ Info, Need, Review }
@@ -25,7 +27,7 @@ import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters._
 
 /** Static breakpoints on an agent's nodes (#1704): `withInterruptBefore`/`withInterruptAfter` and a run's `RunConfig`. */
-class AgentBreakpointSpec extends AnyFlatSpec with Matchers {
+class AgentBreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val ran = new CopyOnWriteArrayList[String]()
 

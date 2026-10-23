@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.scalatest.{ EitherValues, OptionValues }
@@ -10,7 +12,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
 
-class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class TenantSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val thread = ThreadId("t")
   private val log    = StateKey.appending[String]("log")

@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ GraphError, GraphRuntime, RunConfig, TenantId, ThreadId }
 import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, GuardrailMiddleware }
@@ -12,7 +14,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /** Conversations as threads: continuing, multi-turn runs, imported history and the runtime's refusals. */
-class AgentConversationSpec extends AnyFlatSpec with Matchers {
+class AgentConversationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def answers(texts: String*): ScriptedLLMClient = ScriptedLLMClient.of(texts.map(CompletionFixture.simple)*)
 

@@ -17,7 +17,7 @@ import scala.util.Try
  * and holds its gate permit, so no file operation runs, until then. Each case uses a process that survives its kill
  * until the test lets it exit.
  */
-class ProcessRegistrySpec extends AnyFlatSpec with Matchers {
+class ProcessRegistrySpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   implicit private val ec: ExecutionContext = ExecutionContext.global
 

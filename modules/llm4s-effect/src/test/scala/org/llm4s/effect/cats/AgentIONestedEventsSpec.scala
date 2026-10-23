@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
@@ -12,7 +14,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.CountDownLatch
 
 /** `AgentIO.nestedEvents`: a delegating run's children's events, through `EventHandlers.onChild` (design 4.47). */
-class AgentIONestedEventsSpec extends AnyFlatSpec with Matchers {
+class AgentIONestedEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
 

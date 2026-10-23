@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.middleware.{ BoundaryResult, ModelContext, ModelResponse }
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ Checkpoint, GraphError, GraphRuntime }
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Block, returned as `Left`, the thread usable. Ports the behaviour of the former
  * `AgentGuardrailsIntegrationSpec`.
  */
-class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
+class AgentGuardrailSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def guarded(
     client: ScriptedLLMClient,

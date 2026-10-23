@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.AgentRun
@@ -17,7 +19,7 @@ import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters.*
 
-class AgentIOEventsSpec extends AnyFlatSpec with Matchers {
+class AgentIOEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
 

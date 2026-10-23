@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.scalatest.{ EitherValues, OptionValues }
@@ -9,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 /** The thread registry's types, and its metadata through a runtime (design 4.52); the stores' part is the contract's. */
-class ThreadRegistrySpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class ThreadRegistrySpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val log = StateKey.appending[String]("log")
 

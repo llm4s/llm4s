@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.Result
@@ -12,7 +14,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReferen
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
 
-class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
+class RunBudgetsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues {
 
   private val thread = ThreadId("t")
 

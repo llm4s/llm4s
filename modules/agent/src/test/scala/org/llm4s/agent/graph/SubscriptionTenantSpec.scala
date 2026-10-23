@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
@@ -18,7 +20,7 @@ import scala.concurrent.duration.*
  * caller of another tenant is refused before it joins, and a subscription made before the thread
  * exists never delivers a thread another tenant then creates.
  */
-class SubscriptionTenantSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class SubscriptionTenantSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val threadIds             = new AtomicInteger()
   private def newThread(): ThreadId = ThreadId(s"sub-tenant-${threadIds.incrementAndGet()}")

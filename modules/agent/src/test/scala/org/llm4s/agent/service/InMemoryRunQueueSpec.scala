@@ -1,5 +1,7 @@
 package org.llm4s.agent.service
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.error.{ CancelledError, ValidationError }
@@ -17,7 +19,7 @@ import scala.concurrent.duration.*
  * `llm4s-agent-testkit` runs against it too, and this suite pins its bookkeeping - keys, leases, the deletion fence and
  * the admission mark through reclamation - and the queue's small types, alongside `RunQueueSpec`.
  */
-class InMemoryRunQueueSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class InMemoryRunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val start  = Instant.parse("2026-10-21T12:00:00Z")
   private val agent  = AgentId.of("assistant").value

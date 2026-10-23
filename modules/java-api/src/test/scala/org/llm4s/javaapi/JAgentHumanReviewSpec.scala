@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ AgentNode, AgentStatus }
 import org.llm4s.agent.graph.{ BreakpointPhase => GraphPhase, IdempotencyKey, InterruptId, NodeId }
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, BoundaryResult, MiddlewareId, ModelContext, ToolCallRequest }
@@ -27,7 +29,7 @@ import StreamFixtures.*
 import SuspensionFixtures.{ call, calling, scripted }
 
 /** Breakpoints and middleware questions (#1704) through the Java facade: `PendingInterrupt` and `Answer.proceed`. */
-class JAgentHumanReviewSpec extends AnyFlatSpec with Matchers {
+class JAgentHumanReviewSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   import JAgentHumanReviewSpec.*
 
   private val ran = new CopyOnWriteArrayList[String]()

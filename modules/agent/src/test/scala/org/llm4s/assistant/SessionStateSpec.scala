@@ -1,5 +1,7 @@
 package org.llm4s.assistant
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.types.{ SessionId, DirectoryPath }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -8,7 +10,7 @@ import java.time.LocalDateTime
 /**
  * Tests for SessionState, SessionInfo, and SessionSummary
  */
-class SessionStateSpec extends AnyFlatSpec with Matchers {
+class SessionStateSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // ============ SessionState ============
 
