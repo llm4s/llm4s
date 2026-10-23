@@ -716,13 +716,15 @@ sbt -Dllm4s.embeddings.provider=ollama \
 TRACING_MODE=console
 ```
 
-Output appears in stdout:
+Console tracing is the default. It prints each event to stdout as metadata only - event type, model, ids, tool
+names, durations, token counts and costs - and withholds queries, model output, tool input/output, custom event data
+and error messages (`Query: [withheld: 42 chars]`). To print those too, while developing:
 
+```bash
+LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT=true   # llm4s.tracing.console.captureContent = true
 ```
-[TRACE] Completion request: UserMessage(What is Scala?)
-[TRACE] Token usage: 150 tokens
-[TRACE] Response time: 1.2s
-```
+
+Keep it off wherever stdout is collected into logs; see [Data protection](../guide/data-protection).
 
 ### Langfuse (Production)
 
@@ -906,6 +908,7 @@ also set in `application.conf` or with `-D`.
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
+| `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |

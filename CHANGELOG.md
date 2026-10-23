@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- The default console tracer prints metadata only: queries, completion content, tool input/output, custom event data
+  and error messages are withheld unless `llm4s.tracing.console.captureContent = true`
+  (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT`) or `new ConsoleTracing(captureContent = true)`; see the new
+  [data protection guide](docs/guide/data-protection.md);
+  [migration](docs/reference/migration.md#console-tracing-prints-no-content-by-default-2311).
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
