@@ -18,7 +18,7 @@ class AgentServiceConfigSpec extends AnyFlatSpec with Matchers {
     ConfigSource.string(s"llm4s.deploy-service { $defaults\n$overrides }")
 
   "AgentServiceConfig" should "read reference.conf's defaults" in {
-    AgentServiceConfig.load() shouldBe Right(AgentServiceConfig.default)
+    AgentServiceConfig.load(ConfigSource.default) shouldBe Right(AgentServiceConfig.default)
     AgentServiceConfig.load(source()) shouldBe Right(AgentServiceConfig.default)
   }
 

@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.deploy
 
 import org.llm4s.error.ConfigurationError
@@ -22,9 +21,6 @@ object DeployServiceConfig {
 
   implicit private val reader: PureConfigReader[DeployServiceConfig] =
     PureConfigReader.forProduct2("host", "port")(DeployServiceConfig.apply)
-
-  /** The configuration of this process: `application.conf`, system properties, then `reference.conf`. */
-  def load(): Result[DeployServiceConfig] = load(ConfigSource.default)
 
   /** Load from `source`, which must contain an `llm4s.deploy-service` block. */
   def load(source: ConfigSource): Result[DeployServiceConfig] =

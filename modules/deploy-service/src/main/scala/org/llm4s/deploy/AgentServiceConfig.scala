@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.deploy
 
 import org.llm4s.agent.AgentId
@@ -54,10 +53,10 @@ object AgentServiceConfig:
   val default: AgentServiceConfig =
     AgentServiceConfig(AgentId.of("assistant").toOption.get, AgentModel.Demo, 2.seconds, 15.seconds, 100, true)
 
-  /** The configuration of this process: system properties, `application.conf`, then `reference.conf`. */
-  def load(): Result[AgentServiceConfig] = load(ConfigSource.default)
-
-  /** Load from `source`, which must contain an `llm4s.deploy-service` block. */
+  /**
+   * Load from `source`, which must contain an `llm4s.deploy-service` block. `DeployServiceMain`, the application's
+   * edge, passes the process's configuration.
+   */
   def load(source: ConfigSource): Result[AgentServiceConfig] =
     source.at(Path).load[Config].left.map(f => invalid(Path, f.prettyPrint())).flatMap { c =>
       def field[A](name: String)(read: => A): Result[A] =
