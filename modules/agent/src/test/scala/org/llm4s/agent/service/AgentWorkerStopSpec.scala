@@ -1,8 +1,15 @@
 package org.llm4s.agent.service
 
-import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, SpecTools }
+import org.llm4s.agent.{ Agent, AgentId, AgentStatus, CompletionFixture, SpecTools }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.ApprovalMiddleware
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ApprovalMiddleware,
+  MiddlewareId,
+  ModelContext,
+  ModelRequest,
+  ModelResponse
+}
 import org.llm4s.agent.graph.tool.{ AgentTool, LockKey, ToolContent, ToolOutcome }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -15,7 +22,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Millis, Seconds, Span }
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, Semaphore, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -265,6 +272,52 @@ class AgentWorkerStopSpec
     closed(store, interrupting.entryId).outcome.value shouldBe a[EntryOutcome.Done]
     closed(store, queued).outcome.value shouldBe a[EntryOutcome.Done]
     client.sent.asScala.toVector.drop(1).map(lastUser) shouldBe Vector("interrupting", "queued")
+    store
+      .history(on, None, 100)
+      .value
+      .exists(c =>
+        c.outcome.exists {
+          case RunOutcome.Failed(kind, _) => kind == AgentWorker.InterruptedKind
+          case _                          => false
+        }
+      ) shouldBe true
+  }
+
+  it should "cut a model call resumed through a wrapModelCall middleware question, as it cuts a plain one (#2364)" in {
+    val store   = InMemoryCheckpointer()
+    val entered = new Semaphore(0)
+    val client  = new FnClient((n, c) => if (n == 1) blocked(entered) else echoing(n, c))
+    // asks once before the first model call; the call resumed after the answer runs at the question's node
+    val asked = new AtomicBoolean(false)
+    val gate = new AgentMiddleware.Asking[String, Boolean] {
+      val id: MiddlewareId = MiddlewareId("spend")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] =
+        answered(context) match {
+          case Some(_)                                  => next(request)
+          case None if asked.compareAndSet(false, true) => ask("spend tokens?")
+          case None                                     => next(request)
+        }
+    }
+    val agent =
+      Agent.builder("assistant", client).withRuntime(new GraphRuntime(store)).withMiddleware(gate).build().value
+    val on     = thread()
+    val parked = agent.run(on, "running").value
+    val id = parked.status match {
+      case AgentStatus.Suspended(_, _, questions, _, _) => questions.head._1
+      case other                                        => fail(s"expected Suspended, got $other")
+    }
+    client.calls shouldBe 0
+    val worker  = workerOf(store, agent)
+    val resumed = store.runQueue.submit(Submission(on, agentId, QueuedInput.Resume(Map(parked.reply(id, true))))).value
+    worker.start()
+    entered.acquire()
+    val interrupting = submit(store, on, "interrupting", BusyThreadPolicy.Interrupt).value.entryId
+    closed(store, resumed.entryId).outcome.value shouldBe EntryOutcome.Interrupted(Some(interrupting))
+    closed(store, interrupting).outcome.value.asInstanceOf[EntryOutcome.Done].status shouldBe
+      Some(CheckpointStatus.Completed)
+    client.sent.asScala.toVector.map(lastUser) shouldBe Vector("running", "interrupting")
     store
       .history(on, None, 100)
       .value
