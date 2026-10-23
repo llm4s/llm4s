@@ -289,7 +289,8 @@ jobs:
         run: sbt --client it/itTierCheck
 
       # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
-      # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md.
+      # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md; and when a @Stable
+      # signature names an @Experimental type or a deny-listed third-party type (RFC 0004).
       - name: Check every frozen type declares a stability tier
         run: sbt --client stabilityTierCheck
 

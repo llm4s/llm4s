@@ -61,6 +61,20 @@ replacing its execution model and its tier is an open question in
 [#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
 when that is settled.
 
+The same check enforces [RFC 0004](../rfcs/#index): a public member of a `@Stable` type must not expose a
+third-party type, because freezing the signature would freeze the library behind it
+([#2357](https://github.com/llm4s/llm4s/issues/2357)). It fails for a signature that names a type from
+fansi, `cats`, pureconfig, `com.typesafe.config`, jtokkit, slf4j, OkHttp, Jackson, or the OpenAI, Anthropic or
+AWS SDKs (`com.openai`, `com.anthropic`, `software.amazon`), written fully qualified or through a name the file
+imports (including a renaming import such as `import com.typesafe.config.{Config => TsConfig}`). Use an llm4s or
+Scala type instead, or keep the member out of the Stable surface. A third-party type that is API on purpose
+goes on the allow-list, `ThirdPartyAllowed` in `project/StabilityTiers.scala`, with its reason: today upickle
+and ujson (the API's JSON values and codecs), and `OpenAIToolHelper`'s openai-java types, pending
+[#2360](https://github.com/llm4s/llm4s/issues/2360). Being a source scanner, it does not resolve a name that
+arrives through a wildcard import or an `export`, expand a type alias declared elsewhere, or see an inferred
+result type; the limits are listed in the scanner's Scaladoc. Its fixtures include one violating signature per
+deny-listed package, so dropping one from the check fails the build.
+
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
 are the frozen set, and every other place that states it must agree. See the script's header for the exact
