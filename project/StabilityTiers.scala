@@ -40,6 +40,12 @@ import scala.util.Using
  *  - an inferred result type (a public `val` or `def` with no type ascription) is not seen;
  *  - inherited members, and parents written on a line after the type's header, are not read.
  * MiMa and code review cover what this misses.
+ *
+ * Finally it fails for a growth-unsafe case class (RFC 0002, #2369): a `case class` in a `@Stable` (or untiered)
+ * public type, top-level or nested, whose primary constructor is not `private` / `private[x]` and has fields, and a
+ * public `copy` defined in one. Adding a field to either would break binary compatibility after the baseline.
+ * `GrowthExempted` lists the deliberately closed types; an entry that matches nothing is itself reported. The
+ * cases of a `@Stable` `enum` are not checked.
  */
 object StabilityTiers {
 
@@ -138,22 +144,43 @@ object StabilityTiers {
   }
 
   /**
-   * The visible signature of each public member of the file's `@Stable` types (and of their companions), as the
-   * (line, text) pieces `signature` returns. A member that is `private`, `protected` or `@Experimental` is left out
-   * with everything nested under it, and so are the bodies of `def`s, `val`s, `var`s and `given`s.
+   * A public member of a `@Stable` type: its keyword (`def`, `class`, ...), its modifiers, the name it declares,
+   * the types enclosing it as (name, keyword, is a case class) from the outermost, its visible signature (the
+   * (line, text) pieces `signature` returns) and its whole header.
    */
-  private[this] def stableMembers(lines: Vector[String]): Seq[Seq[(Int, String)]] = {
-    val decls   = topLevel(lines)
-    val stableT = decls.collect { case (i, k, n) if k != "object" && annotated(lines, i, StableAnn) => n }.toSet
+  final private case class Found(
+    keyword: String,
+    modifiers: String,
+    name: String,
+    owners: List[(String, String, Boolean)],
+    visible: Seq[(Int, String)],
+    header: Seq[(Int, String)]
+  )
+
+  private val DeclaredAfterKeyword = "^\\s+([A-Za-z_]\\w*)".r
+
+  /**
+   * Each public member of the file's `@Stable` types (and of their companions). A member that is `private`,
+   * `protected` or `@Experimental` is left out with everything nested under it, and so are the bodies of `def`s,
+   * `val`s, `var`s and `given`s. With `untiered`, a public top-level type with neither annotation counts as
+   * `@Stable` too (the tier check reports it separately).
+   */
+  private[this] def stableMembers(lines: Vector[String], untiered: Boolean = false): Seq[Found] = {
+    val decls            = topLevel(lines)
+    def tierless(i: Int) = untiered && !annotated(lines, i, StableAnn) && !annotated(lines, i, ExperimentalAnn)
+    val stableT = decls.collect {
+      case (i, k, n) if k != "object" && (annotated(lines, i, StableAnn) || tierless(i)) => n
+    }.toSet
     val extents = decls.zip(decls.drop(1).map(_._1) :+ lines.length)
     extents.flatMap { case ((start, kind, name), end) =>
       val stable =
         NonPublic.findFirstIn(lines(start)).isEmpty && !annotated(lines, start, ExperimentalAnn) &&
-          (annotated(lines, start, StableAnn) || (kind == "object" && stableT.contains(name)))
+          (annotated(lines, start, StableAnn) || tierless(start) || (kind == "object" && stableT.contains(name)))
       if (!stable) Nil
       else {
-        val found      = Seq.newBuilder[Seq[(Int, String)]]
+        val found      = Seq.newBuilder[Found]
         var skipIndent = -1
+        var owners     = List.empty[(Int, (String, String, Boolean))] // innermost first, with its indent
         var i          = start
         while (i < end) {
           val line = lines(i)
@@ -161,16 +188,19 @@ object StabilityTiers {
           else if (skipIndent >= 0 && indent(line) > skipIndent) i += 1
           else {
             skipIndent = -1
+            owners = owners.dropWhile(_._1 >= indent(line))
             Member.findFirstMatchIn(line) match {
               case Some(m) if !(m.group(3) == "case" && code(line).contains("=>")) =>
                 val keyword        = m.group(3)
                 val valueLike      = Set("def", "val", "var", "given")(keyword)
                 val hidden         = Hidden.findFirstIn(m.group(2)).nonEmpty
                 val (pieces, last) = signature(lines, i, valueLike)
+                val declared       = DeclaredAfterKeyword.findFirstMatchIn(line.drop(m.end)).fold("")(_.group(1))
                 // A class whose constructor is private: its plain parameters are not members, so only the
                 // header before them counts. A case class's parameters are public accessors whatever its
                 // constructor.
-                val privateCtor = keyword == "class" && !m.group(2).contains("case") &&
+                val isCase = "\\bcase\\b".r.findFirstIn(m.group(2)).nonEmpty
+                val privateCtor = keyword == "class" && !isCase &&
                   "\\bclass\\s+\\w+(?:\\[[^\\]]*\\])?\\s+(?:private|protected)\\b".r
                     .findFirstIn(pieces.map(_._2).mkString(" "))
                     .nonEmpty
@@ -179,8 +209,10 @@ object StabilityTiers {
                   else pieces.headOption.map { case (l, t) => (l, t.takeWhile(_ != '(')) }.toSeq
                 if (hidden || annotated(lines, i, ExperimentalAnn)) skipIndent = indent(line)
                 else {
-                  found += visible
+                  found += Found(keyword, m.group(2), declared, owners.reverse.map(_._2), visible, pieces)
                   if (valueLike) skipIndent = indent(line)
+                  else if (Set("class", "trait", "object", "enum")(keyword))
+                    owners = (indent(line), (declared, keyword, keyword == "class" && isCase)) :: owners
                 }
                 i = last + 1
               case _ => i += 1
@@ -203,7 +235,7 @@ object StabilityTiers {
     else {
       val names = ("\\b(" + experimental.toSeq.sorted.map(java.util.regex.Pattern.quote).mkString("|") + ")\\b").r
       stableMembers(lines).flatMap { member =>
-        member.iterator.flatMap { case (l, t) => names.findFirstMatchIn(t).map(n => (l, n.group(1))) }.take(1)
+        member.visible.iterator.flatMap { case (l, t) => names.findFirstMatchIn(t).map(n => (l, n.group(1))) }.take(1)
       }
     }
 
@@ -350,7 +382,7 @@ object StabilityTiers {
       if (allowed.exists(a => under(full, a.prefix) && a.paths.forall(_.findFirstIn(file.getPath).nonEmpty))) None
       else denied.find(d => under(full, d.pkg)).map(_.pkg)
     stableMembers(lines).flatMap { member =>
-      member.iterator
+      member.visible.iterator
         .flatMap { case (l, t) =>
           PathRef.findAllMatchIn(DeclaredName.replaceAllIn(t, " ")).flatMap { m =>
             val path  = m.group(1)
@@ -362,6 +394,404 @@ object StabilityTiers {
           }
         }
         .take(1)
+    }
+  }
+
+  // ---- growth safety of @Stable case classes (RFC 0002, #2369) ----
+
+  /** A `@Stable` case class (by fully qualified name) that may keep a public constructor and `copy`, and why. */
+  final case class GrowthExempt(name: String, reason: String)
+
+  /**
+   * `@Stable` case classes that keep a public constructor. RFC 0002 makes a growth-prone data type
+   * `final case class X private (...)` with a companion `apply` and `with*` setters, because adding a field to a
+   * public constructor or `copy` breaks binary compatibility once the MiMa baseline exists. An entry here is a type
+   * that is deliberately closed (a single-value wrapper, a fixed record); one marked `TODO(#2369)` predates the check
+   * and should be converted before the baseline, then removed from this list. An entry that matches no failing type
+   * fails the check, so a converted type cannot leave its entry behind.
+   */
+  val GrowthExempted: Seq[GrowthExempt] = Seq(
+    GrowthExempt(
+      "org.llm4s.config.Llm4sConfig.TextEmbeddingModelSettings",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.config.ProvidersConfigModel.ProvidersConfig",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.CompressionRule",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.context.ContextStep", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt(
+      "org.llm4s.context.ConversationWindow",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.HistoryDigest",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.ManagedConversation",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.MessageTokenInfo",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.context.PipelineStep", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt(
+      "org.llm4s.context.SemanticBlock",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.StructuredInfo",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.TokenBreakdown",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.TokenUsageInfo",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
+    GrowthExempt(
+      "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
+      "a fixed accuracy case: a description and an accuracy"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.tokens.TokenizerAccuracy.Exact",
+      "a fixed accuracy case holding only its description"
+    ),
+    GrowthExempt(
+      "org.llm4s.context.tokens.TokenizerAccuracy.Unknown",
+      "a fixed accuracy case holding only its description"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.CommandParseError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.DisplayError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.EOFError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.FileError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.IOError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.SerializationError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.error.AssistantError.SessionError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.http.MultipartPart.FilePart",
+      "a multipart file part is exactly a name, a path and a filename"
+    ),
+    GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
+    GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.JsonlProviderExchangeSink",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.caching.CacheEntry",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.caching.CacheStats",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.AudioInput",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.Conversation",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.EmbeddingVector",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ImageInput",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.MultimediaEmbeddingRequest",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.RawMediaInput",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ResponseFormat.JsonSchema",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.SystemMessage",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.ToolCall",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.model.VideoInput",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Settings",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.EmbeddingProviderSection",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.ProviderConfigKey",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.ProviderDiscoveryFailure",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.ProviderIdCollision",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.ProviderModuleReport",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.spi.ProviderRegistryReport",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.llmconnect.streaming.SSEParser.SSEEvent",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),
+    GrowthExempt(
+      "org.llm4s.model.TransformationResult",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.toolapi.ArraySchema", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt(
+      "org.llm4s.toolapi.BooleanSchema",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.IntegerSchema",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
+    GrowthExempt("org.llm4s.toolapi.NumberSchema", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt("org.llm4s.toolapi.ObjectSchema", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt(
+      "org.llm4s.toolapi.PropertyDefinition",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.SafeParameterExtractor",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.toolapi.StringSchema", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallError.ExecutionError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallError.HandlerError",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallError.InvalidArguments",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.toolapi.ToolCallError.NullArguments", "an error case holding only the tool name"),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallError.Timeout",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallError.UnknownFunction",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolCallRequest",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
+      "a strategy case holding only its concurrency limit"
+    ),
+    GrowthExempt("org.llm4s.toolapi.ToolFunction", "TODO(#2369): predates the check; convert to a private constructor"),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolParameterError.MissingParameter",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolParameterError.MultipleErrors",
+      "an error case holding only the errors it aggregates"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolParameterError.NullParameter",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.AgentInitialized",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.AgentRunEnded",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.CacheHit",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.CacheMiss",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.CompletionReceived",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.CostRecorded",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.CustomEvent",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.EmbeddingUsageRecorded",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.ErrorOccurred",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.ImageGenerationCompleted",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.RAGOperationCompleted",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.TokenUsageRecorded",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt(
+      "org.llm4s.trace.TraceEvent.ToolExecuted",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    ),
+    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
+    GrowthExempt(
+      "org.llm4s.util.SecretPatterns.SecretMatch",
+      "TODO(#2369): predates the check; convert to a private constructor"
+    )
+  )
+
+  private val PackageLine = "^package\\s+([\\w.]+)$".r
+  private val CaseMod     = "\\bcase\\b".r
+
+  /** The file's package, joining chained `package a` / `package b` clauses. */
+  private def packageOf(lines: Vector[String]): String =
+    lines.map(l => code(l).trim.stripSuffix(";").trim).collect { case PackageLine(p) => p }.mkString(".")
+
+  /** From `at`, the index just past the bracketed group that starts there (`(...)` or `[...]`), nesting aware. */
+  private def closeOf(text: String, at: Int): Int = {
+    var depth = 0
+    var j     = at
+    var done  = false
+    while (!done && j < text.length) {
+      val c = text.charAt(j)
+      if (c == '(' || c == '[') depth += 1
+      else if (c == ')' || c == ']') { depth -= 1; if (depth == 0) done = true }
+      j += 1
+    }
+    j
+  }
+
+  /**
+   * A case class header's primary constructor: whether it is `private` / `private[x]`, and the text of its first
+   * parameter list (empty for `case class X()`).
+   */
+  private def constructor(header: String, name: String): (Boolean, String) =
+    ("\\bclass\\s+" + java.util.regex.Pattern.quote(name) + "\\b").r.findFirstMatchIn(header) match {
+      case None => (false, "")
+      case Some(m) =>
+        def ws(j: Int): Int = { var k = j; while (k < header.length && header.charAt(k).isWhitespace) k += 1; k }
+        var j               = ws(m.end)
+        if (j < header.length && header.charAt(j) == '[') j = ws(closeOf(header, j))
+        val isPrivate = "^private\\b".r.findFirstIn(header.drop(j)).nonEmpty
+        if (isPrivate) {
+          j = ws(j + "private".length)
+          if (j < header.length && header.charAt(j) == '[') j = ws(closeOf(header, j))
+        }
+        val params =
+          if (j < header.length && header.charAt(j) == '(') header.substring(j + 1, closeOf(header, j) - 1) else ""
+        (isPrivate, params)
+    }
+
+  /**
+   * Case classes of the file's `@Stable` (or untiered) public types, nested ones included, whose constructor is not
+   * private and whose first parameter list is not empty, and public `copy` methods defined in such a type's case
+   * classes, as (zero-based line, fully qualified type name, problem).
+   */
+  private[this] def growthUnsafe(lines: Vector[String]): Seq[(Int, String, String)] = {
+    val pkg                           = packageOf(lines)
+    def qualified(names: Seq[String]) = (pkg +: names).filter(_.nonEmpty).mkString(".")
+    stableMembers(lines, untiered = true).flatMap { f =>
+      if (f.keyword == "class" && CaseMod.findFirstIn(f.modifiers).nonEmpty && f.header.nonEmpty) {
+        val (isPrivate, params) = constructor(f.header.map(_._2).mkString(" "), f.name)
+        if (isPrivate || params.trim.isEmpty) None
+        else
+          Some(
+            (
+              f.header.head._1,
+              qualified(f.owners.map(_._1) :+ f.name),
+              "is a @Stable case class whose constructor is public, so a field cannot be added after the baseline"
+            )
+          )
+      } else if (f.keyword == "def" && f.name == "copy" && f.owners.lastOption.exists(_._3))
+        f.header.headOption.map { case (l, _) =>
+          (l, qualified(f.owners.map(_._1)), "is a public copy on a @Stable case class; make it private")
+        }
+      else None
     }
   }
 
@@ -380,14 +810,20 @@ object StabilityTiers {
    * @param experimentalIn  regexes over a file's path: its types must be `@Experimental`
    * @param denied          packages a `@Stable` public signature must not name
    * @param allowed         third-party references that are deliberately API, checked before `denied`
+   * @param growthExempt    `@Stable` case classes that may keep a public constructor; an entry that matches nothing
+   *                        is reported, against `stableTiersFile`
    */
   def violations(
     modules: Seq[File],
     experimentalIn: Seq[scala.util.matching.Regex],
     denied: Seq[Denied] = ThirdPartyDenied,
-    allowed: Seq[Allowed] = ThirdPartyAllowed
+    allowed: Seq[Allowed] = ThirdPartyAllowed,
+    growthExempt: Seq[GrowthExempt] = GrowthExempted,
+    stableTiersFile: File = file("project") / "StabilityTiers.scala"
   ): (Seq[Violation], Map[String, (Int, Int)]) = {
     val experimental = experimentalNames(modules)
+    val exempt       = growthExempt.map(_.name).toSet
+    val exemptUsed   = scala.collection.mutable.Set.empty[String]
     val perModule = modules.map { module =>
       val results = sources(module / "src" / "main" / "scala").flatMap { file =>
         val lines              = read(file)
@@ -431,16 +867,29 @@ object StabilityTiers {
             false
           )
         }
-        tiers ++ leaked ++ foreign
+        val growth = growthUnsafe(lines).flatMap { case (i, name, problem) =>
+          if (exempt(name)) { exemptUsed += name; None }
+          else Some((Some(Violation(file, i + 1, lines(i).trim, s"$name $problem")), false, false))
+        }
+        tiers ++ leaked ++ foreign ++ growth
       }
       module.getName -> ((results.count(_._2), results.count(_._3), results.flatMap(_._1)))
     }
-    (perModule.flatMap(_._2._3), perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
+    val stale = growthExempt.filterNot(e => exemptUsed(e.name)).map { e =>
+      Violation(
+        stableTiersFile,
+        0,
+        s"GrowthExempt(${e.name})",
+        "is a GrowthExempted entry that matches no @Stable case class with a public constructor or copy; remove it"
+      )
+    }
+    (perModule.flatMap(_._2._3) ++ stale, perModule.map { case (m, (s, e, _)) => m -> (s -> e) }.toMap)
   }
 
   /**
    * Runs the check against fixtures with known answers and returns what it got wrong: each fixture line marked
-   * `// leak` must be reported, and no other line. Empty when the check works.
+   * `// leak`, `// third-party` or `// growth` must be reported as that, and no other line; of the growth allow-list,
+   * only the entry that matches nothing must be reported as stale. Empty when the check works.
    */
   def selfTest(): Seq[String] = IO.withTemporaryDirectory { dir =>
     val module = dir / "fixture"
@@ -599,25 +1048,125 @@ object StabilityTiers {
         |  def a: cats.Show[Int] = ???
         |""".stripMargin
     )
+    IO.write(
+      pkg / "Growth.scala",
+      """package fixture
+        |
+        |import org.llm4s.annotation.{ Experimental, Stable }
+        |
+        |@Stable
+        |final case class Safe private (a: String, b: Int):
+        |  def withA(a: String): Safe = copy(a = a)
+        |  private def copy(a: String = a, b: Int = b): Safe = new Safe(a, b)
+        |
+        |object Safe:
+        |  def apply(a: String, b: Int = 0): Safe = new Safe(a, b)
+        |  final case class Inner private[fixture] (x: Int)
+        |  final case class Open(x: Int) // growth
+        |  private[fixture] final case class Hidden(x: Int)
+        |
+        |@Stable
+        |final case class Scoped[F[_], A: Ordering] private[fixture] (a: A)
+        |
+        |@Stable
+        |final case class Public(a: String, b: Int) // growth
+        |
+        |@Stable
+        |case class Generic[F[_], A]( // growth
+        |  a: F[A],
+        |  b: String = "(x)"
+        |) extends Serializable
+        |
+        |@Stable
+        |final case class Copyable private (a: String):
+        |  def copy(a: String = a): Copyable = new Copyable(a) // growth
+        |
+        |@Stable
+        |final case class Empty()
+        |
+        |@Stable
+        |final case class Closed(value: String)
+        |
+        |@Experimental
+        |final case class Free(a: String)
+        |
+        |@Stable
+        |final class NotCase(a: String)
+        |
+        |@Stable
+        |sealed trait Shape
+        |
+        |object Shape:
+        |  final case class Circle(r: Double) extends Shape // growth
+        |  case object Dot extends Shape
+        |
+        |@Stable
+        |object Holder {
+        |  case class Deep(x: Int) // growth
+        |  object Nested {
+        |    final case class Deeper(x: Int) // growth
+        |    final case class Allowed(x: Int)
+        |  }
+        |  @Experimental case class Exp(x: Int)
+        |  def make(x: Int): Deep = Deep(x)
+        |}
+        |""".stripMargin
+    )
+    IO.write(
+      pkg / "Untiered.scala",
+      """package fixture.untiered
+        |
+        |final case class Bare(a: Int) // growth
+        |""".stripMargin
+    )
     def marked(file: String, marker: String): Set[Int] =
       read(pkg / file).zipWithIndex.collect { case (l, i) if l.contains(marker) => i + 1 }.toSet
     val fixtureAllowed = ThirdPartyAllowed ++ Seq(
       Allowed("org.slf4j.event.Level", "fixture: an exception to the deny-list", Some("ThirdParty\\.scala$".r)),
       Allowed("fansi.Color", "fixture: limited to another file, so it does not apply", Some("Elsewhere\\.scala$".r))
     )
-    val (found, _)              = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed)
-    def isLeak(v: Violation)    = v.problem.contains("signature names")
-    def isForeign(v: Violation) = v.problem.contains("signature exposes third-party")
+    val fixtureExempt = Seq(
+      GrowthExempt("fixture.Closed", "fixture: a deliberately closed wrapper"),
+      GrowthExempt("fixture.Holder.Nested.Allowed", "fixture: a nested exemption"),
+      GrowthExempt("fixture.Factory.Nested", "fixture: Api.scala's leak fixture, not under test here"),
+      GrowthExempt("fixture.Settings", "fixture: ThirdParty.scala's fixture, not under test here"),
+      GrowthExempt("fixture.Gone", "fixture: matches nothing, so it is reported as stale")
+    )
+    val (found, _)               = violations(Seq(module), Nil, ThirdPartyDenied, fixtureAllowed, fixtureExempt)
+    def isStale(v: Violation)    = v.problem.contains("GrowthExempted entry")
+    def isGrowth(v: Violation)   = v.problem.contains("@Stable case class") && !isStale(v)
+    def isUntiered(v: Violation) = v.file.getName == "Untiered.scala" && v.problem.contains("carries neither")
+    def isLeak(v: Violation)     = v.problem.contains("signature names")
+    def isForeign(v: Violation)  = v.problem.contains("signature exposes third-party")
     def compare(file: String, expected: Set[Int], reported: Set[Int]): Seq[String] =
-      (expected -- reported).toSeq.sorted.map(l => s"$file:$l is a leak the check did not report") ++
-        (reported -- expected).toSeq.sorted.map(l => s"$file:$l is not a leak but the check reported it")
+      (expected -- reported).toSeq.sorted.map(l => s"$file:$l is a violation the check did not report") ++
+        (reported -- expected).toSeq.sorted.map(l => s"$file:$l is not a violation but the check reported it")
     val foreign     = found.filter(isForeign)
     val unexercised = ThirdPartyDenied.map(_.pkg).filterNot(p => foreign.exists(_.problem.contains(s"($p is deny")))
     compare("Api.scala", marked("Api.scala", "// leak"), found.filter(isLeak).map(_.line).toSet) ++
       compare("ThirdParty.scala", marked("ThirdParty.scala", "// third-party"), foreign.map(_.line).toSet) ++
       unexercised.map(p => s"deny-listed $p has no fixture in ThirdParty.scala that the check reports") ++
+      compare(
+        "Growth.scala",
+        marked("Growth.scala", "// growth"),
+        found.filter(isGrowth).filter(_.file.getName == "Growth.scala").map(_.line).toSet
+      ) ++
+      compare(
+        "Untiered.scala",
+        marked("Untiered.scala", "// growth"),
+        found.filter(isGrowth).filter(_.file.getName == "Untiered.scala").map(_.line).toSet
+      ) ++
       found
-        .filterNot(v => isLeak(v) || isForeign(v))
+        .filter(isGrowth)
+        .filterNot(v => Set("Growth.scala", "Untiered.scala")(v.file.getName))
+        .map(v => s"${v.file.getName}:${v.line} unexpected growth violation: ${v.problem}") ++
+      (if (found.filter(isStale).map(_.text) == Seq("GrowthExempt(fixture.Gone)")) Nil
+       else
+         Seq(
+           s"stale GrowthExempt entries reported: ${found.filter(isStale).map(_.text)}, expected fixture.Gone only"
+         )) ++
+      found
+        .filterNot(v => isLeak(v) || isForeign(v) || isGrowth(v) || isStale(v) || isUntiered(v))
         .map(v => s"${v.file.getName}:${v.line} unexpected tier violation: ${v.problem}")
   }
 
@@ -629,7 +1178,11 @@ object StabilityTiers {
            |${broken.map("  " + _).mkString("\n")}
            |See StabilityTiers.selfTest in project/StabilityTiers.scala.""".stripMargin
       )
-    val (bad, counts) = violations(moduleNames.map(n => root / "modules" / n), experimentalIn)
+    val (bad, counts) = violations(
+      moduleNames.map(n => root / "modules" / n),
+      experimentalIn,
+      stableTiersFile = root / "project" / "StabilityTiers.scala"
+    )
     log.info("Stability tier per frozen module (top-level public types):")
     counts.toSeq.sortBy(_._1).foreach { case (m, (s, e)) => log.info(f"  $m%-20s $s%4d @Stable  $e%3d @Experimental") }
     if (bad.nonEmpty) {
@@ -647,7 +1200,10 @@ object StabilityTiers {
            |nested type holding it) @Experimental. Nor may it expose a deny-listed third-party type
            |(RFC 0004): use an llm4s or Scala type instead, make the member private[llm4s], or, if the
            |type is deliberately API, add a ThirdPartyAllowed entry with its reason in
-           |project/StabilityTiers.scala. See docs/reference/api-stability.md.""".stripMargin
+           |project/StabilityTiers.scala. A @Stable case class with fields needs a private constructor
+           |(RFC 0002): `final case class X private (...)` with a companion `apply` and `with*` setters, and
+           |no public `copy`; a type that is deliberately closed goes in GrowthExempted with its reason.
+           |See docs/reference/api-stability.md.""".stripMargin
       )
     }
   }

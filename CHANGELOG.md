@@ -387,6 +387,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
+  frozen module (top-level or nested) whose constructor is not `private` / `private[x]`, and for a public `copy` on
+  one, naming the file, line and type. Case classes with no fields are exempt; `GrowthExempted` in
+  `project/StabilityTiers.scala` lists the deliberately closed types with a reason, and the 75 types that predate the
+  check with `TODO(#2369)` to be converted before the baseline. A stale entry fails the check, and
+  `StabilityTiers.selfTest` covers a passing type, a public constructor, a public `copy` and an allow-listed type
+  [#2369](https://github.com/llm4s/llm4s/issues/2369); [API stability](docs/reference/api-stability.md#tiers-in-the-code).
 - **Added** `stabilityTierCheck` enforces RFC 0004: it fails for a public member of a `@Stable` type in a frozen module
   whose signature names a type from fansi, `cats`, pureconfig, `com.typesafe.config`, jtokkit, slf4j, OkHttp, Jackson,
   `com.openai`, `com.anthropic` or `software.amazon`, written fully qualified or through an imported (or renamed) name.
