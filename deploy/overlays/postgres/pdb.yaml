@@ -1,0 +1,14 @@
+# A voluntary disruption (a node drain, an upgrade) takes at most one pod at a time: the other two keep serving, and
+# the drained pod's runs finish, or are recovered by the others, as its worker drains.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: llm4s-deploy-service
+  labels:
+    app.kubernetes.io/name: llm4s-deploy-service
+    app.kubernetes.io/part-of: llm4s
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm4s-deploy-service

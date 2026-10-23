@@ -121,7 +121,7 @@ llm4s/
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
-│   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
+│   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
