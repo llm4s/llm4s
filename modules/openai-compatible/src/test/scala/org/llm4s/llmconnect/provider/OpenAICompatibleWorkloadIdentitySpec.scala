@@ -532,7 +532,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         for credential <- credentials do
           val error = intercept[IllegalArgumentException](
             new OpenAICompatibleClient(
-              exchange.copy(baseUrl = insecureBaseUrl(fake), credential = credential),
+              exchange.withBaseUrl(insecureBaseUrl(fake)).withCredential(credential),
               OpenAICompatibleDialect.standard(Nil)
             )
           )
@@ -546,14 +546,14 @@ class OpenAICompatibleWorkloadIdentitySpec
         )
         an[IllegalArgumentException] should be thrownBy
           new OpenAICompatibleClient(
-            exchange.copy(credential = insecureTokenUrl),
+            exchange.withCredential(insecureTokenUrl),
             OpenAICompatibleDialect.standard(Nil)
           )
         fetched.get shouldBe 0
         fake.exchanges shouldBe empty
         // A static key is the caller's own, as before: a plain-http base URL is still accepted with one.
         new OpenAICompatibleClient(
-          exchange.copy(baseUrl = insecureBaseUrl(fake), credential = OpenAICompatibleClient.Credential.Static("k")),
+          exchange.withBaseUrl(insecureBaseUrl(fake)).withCredential(OpenAICompatibleClient.Credential.Static("k")),
           OpenAICompatibleDialect.standard(Nil)
         ).close()
       }

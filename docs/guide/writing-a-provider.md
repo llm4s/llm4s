@@ -223,7 +223,8 @@ ProviderConfigKey.optional("region", "the Acme region serving the model", defaul
 ```
 
 `ProviderConfigKey` also takes `env` (a variable to suggest in the missing-key message) and
-`deprecatedAliases` (old names, accepted with a warning). Undeclared keys in a section are
+`deprecatedAliases` (old names, accepted with a warning), as named arguments or afterwards with
+`withEnv` / `withDeprecatedAliases`. Undeclared keys in a section are
 reported as unknown and not passed on. Values are strings; parse numbers or booleans in
 `buildConfig` and return a `ConfigurationError` for a malformed one.
 

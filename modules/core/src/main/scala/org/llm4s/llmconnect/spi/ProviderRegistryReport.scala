@@ -13,12 +13,18 @@ import org.llm4s.annotation.Stable
  *                             which is normal under some class loaders.
  */
 @Stable
-final case class ProviderModuleReport(
+final case class ProviderModuleReport private (
   moduleClass: String,
   providerIds: Seq[String],
   source: Option[String],
-  embeddingProviderIds: Seq[String] = Nil
+  embeddingProviderIds: Seq[String]
 ):
+
+  def withModuleClass(moduleClass: String): ProviderModuleReport       = copy(moduleClass = moduleClass)
+  def withProviderIds(providerIds: Seq[String]): ProviderModuleReport  = copy(providerIds = providerIds)
+  def withSource(source: String): ProviderModuleReport                 = copy(source = Some(source))
+  def withSource(source: Option[String]): ProviderModuleReport         = copy(source = source)
+  def withEmbeddingProviderIds(ids: Seq[String]): ProviderModuleReport = copy(embeddingProviderIds = ids)
 
   /** How this module's contribution reads in [[ProviderRegistryReport.describe]]. */
   def contribution: String =
@@ -26,6 +32,17 @@ final case class ProviderModuleReport(
     val embedding =
       if embeddingProviderIds.isEmpty then Nil else Seq(s"embeddings: ${embeddingProviderIds.mkString(", ")}")
     if chat.isEmpty && embedding.isEmpty then "no providers" else (chat ++ embedding).mkString("; ")
+
+object ProviderModuleReport:
+
+  /** Creates a [[ProviderModuleReport]]. */
+  def apply(
+    moduleClass: String,
+    providerIds: Seq[String],
+    source: Option[String],
+    embeddingProviderIds: Seq[String] = Nil
+  ): ProviderModuleReport =
+    new ProviderModuleReport(moduleClass, providerIds, source, embeddingProviderIds)
 
 /**
  * A service entry that discovery could not use.
@@ -39,10 +56,20 @@ final case class ProviderModuleReport(
  * @param failure the throwable, kept for logging rather than for control flow.
  */
 @Stable
-final case class ProviderDiscoveryFailure(
+final case class ProviderDiscoveryFailure private (
   detail: String,
-  failure: Option[Throwable] = None
-)
+  failure: Option[Throwable]
+):
+
+  def withDetail(detail: String): ProviderDiscoveryFailure              = copy(detail = detail)
+  def withFailure(failure: Throwable): ProviderDiscoveryFailure         = copy(failure = Some(failure))
+  def withFailure(failure: Option[Throwable]): ProviderDiscoveryFailure = copy(failure = failure)
+
+object ProviderDiscoveryFailure:
+
+  /** Creates a [[ProviderDiscoveryFailure]]. */
+  def apply(detail: String, failure: Option[Throwable] = None): ProviderDiscoveryFailure =
+    new ProviderDiscoveryFailure(detail, failure)
 
 /**
  * A chat or embedding provider id two descriptors both registered; the later
@@ -59,12 +86,24 @@ final case class ProviderDiscoveryFailure(
  * @param droppedModule the module that lost, when discovery can name it.
  */
 @Stable
-final case class ProviderIdCollision(
+final case class ProviderIdCollision private (
   kind: String,
   id: String,
   keptModule: String,
   droppedModule: Option[String]
-)
+):
+
+  def withKind(kind: String): ProviderIdCollision                           = copy(kind = kind)
+  def withId(id: String): ProviderIdCollision                               = copy(id = id)
+  def withKeptModule(keptModule: String): ProviderIdCollision               = copy(keptModule = keptModule)
+  def withDroppedModule(droppedModule: String): ProviderIdCollision         = copy(droppedModule = Some(droppedModule))
+  def withDroppedModule(droppedModule: Option[String]): ProviderIdCollision = copy(droppedModule = droppedModule)
+
+object ProviderIdCollision:
+
+  /** Creates a [[ProviderIdCollision]]. */
+  def apply(kind: String, id: String, keptModule: String, droppedModule: Option[String]): ProviderIdCollision =
+    new ProviderIdCollision(kind, id, keptModule, droppedModule)
 
 /**
  * How a [[ProviderRegistry]] came to hold what it holds.
@@ -82,12 +121,17 @@ final case class ProviderIdCollision(
  * @param collisions the ids two descriptors both registered.
  */
 @Stable
-final case class ProviderRegistryReport(
+final case class ProviderRegistryReport private (
   discovered: Boolean,
-  modules: Seq[ProviderModuleReport] = Nil,
-  failures: Seq[ProviderDiscoveryFailure] = Nil,
-  collisions: Seq[ProviderIdCollision] = Nil
+  modules: Seq[ProviderModuleReport],
+  failures: Seq[ProviderDiscoveryFailure],
+  collisions: Seq[ProviderIdCollision]
 ):
+
+  def withDiscovered(discovered: Boolean): ProviderRegistryReport                   = copy(discovered = discovered)
+  def withModules(modules: Seq[ProviderModuleReport]): ProviderRegistryReport       = copy(modules = modules)
+  def withFailures(failures: Seq[ProviderDiscoveryFailure]): ProviderRegistryReport = copy(failures = failures)
+  def withCollisions(collisions: Seq[ProviderIdCollision]): ProviderRegistryReport  = copy(collisions = collisions)
 
   /** True when any service entry failed to load. */
   def hasFailures: Boolean = failures.nonEmpty
@@ -131,6 +175,15 @@ final case class ProviderRegistryReport(
     (header +: (moduleLines ++ failureLines ++ collisionLines)).mkString("\n")
 
 object ProviderRegistryReport:
+
+  /** Creates a [[ProviderRegistryReport]]. */
+  def apply(
+    discovered: Boolean,
+    modules: Seq[ProviderModuleReport] = Nil,
+    failures: Seq[ProviderDiscoveryFailure] = Nil,
+    collisions: Seq[ProviderIdCollision] = Nil
+  ): ProviderRegistryReport =
+    new ProviderRegistryReport(discovered, modules, failures, collisions)
 
   /** The report for a registry that was built explicitly rather than discovered. */
   val explicit: ProviderRegistryReport = ProviderRegistryReport(discovered = false)

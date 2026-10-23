@@ -70,6 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ImageGenerationCompleted`, `CacheHit`, `CacheMiss`) are growth-prone types: build them with `TraceEvent.X(...)` and
   change them with `with*`; `new` and `.copy` are private, and the classes are `final`. Pattern matching and `toJson`
   are unchanged; [migration](docs/reference/migration.md#traceevent-cases-are-growth-safe-2377).
+- `JsonlProviderExchangeSink`, `CacheEntry`, `CacheStats`, `OpenAICompatibleClient.Settings`, `SSEParser.SSEEvent`
+  and the provider SPI's `EmbeddingProviderSection`, `ProviderConfigKey`, `ProviderModuleReport`,
+  `ProviderDiscoveryFailure`, `ProviderIdCollision` and `ProviderRegistryReport` are growth-prone types: build them with
+  `X(...)` and change them with `with*`; `new` and `.copy` are private;
+  [migration](docs/reference/migration.md#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379).
 - The tool schemas (`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`),
   `PropertyDefinition`, `SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` are growth-prone types: build
   them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are

@@ -224,7 +224,7 @@ object ProviderRegistry:
     build(
       dedupedChat,
       dedupedEmbeddings,
-      if collisions.isEmpty then report else report.copy(collisions = report.collisions ++ collisions)
+      if collisions.isEmpty then report else report.withCollisions(report.collisions ++ collisions)
     )
 
   private def build(

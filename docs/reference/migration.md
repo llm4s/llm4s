@@ -532,6 +532,49 @@ constructor and `copy` are private:
 - The thirteen cases are now `final`. Pattern matching (`case TraceEvent.CacheHit(similarity, threshold, ts)`), the
   fields and `toJson` are unchanged.
 
+### Provider SPI, caching, streaming and exchange-sink types are growth-safe (#2379)
+
+`JsonlProviderExchangeSink` (`org.llm4s.llmconnect`), `CacheEntry`, `CacheStats` (`org.llm4s.llmconnect.caching`),
+`OpenAICompatibleClient.Settings` (`llm4s-openai-compatible`), `SSEParser.SSEEvent` (`org.llm4s.llmconnect.streaming`)
+and `EmbeddingProviderSection`, `ProviderConfigKey`, `ProviderModuleReport`, `ProviderDiscoveryFailure`,
+`ProviderIdCollision` and `ProviderRegistryReport` (`org.llm4s.llmconnect.spi`) follow the growth-prone pattern
+([#2379](https://github.com/llm4s/llm4s/issues/2379)). Each is a `final case class` whose constructor and `copy` are
+private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, and the same defaults, still
+  compiles. `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field (an `Option` field's setter takes the value or an `Option`):
+
+  | Type | Setters |
+  |---|---|
+  | `JsonlProviderExchangeSink` | `withPath` |
+  | `CacheEntry` | `withEmbedding`, `withResponse`, `withTimestamp`, `withOptions` |
+  | `CacheStats` | `withSize`, `withHits`, `withMisses`, `withTotalRequests`, `withHitRatePercent` |
+  | `OpenAICompatibleClient.Settings` | `withProviderName`, `withDisplayName`, `withModel`, `withBaseUrl`, `withCredential`, `withContextWindow`, `withReserveCompletion`, `withTimeouts` |
+  | `SSEEvent` | `withData`, `withEvent`, `withId`, `withRetry` |
+  | `EmbeddingProviderSection` | `withApiKey`, `withBaseUrl`, `withModel`, `withTimeouts` |
+  | `ProviderConfigKey` | `withName`, `withDescription`, `withRequired`, `withDefault`, `withEnv`, `withDeprecatedAliases` |
+  | `ProviderModuleReport` | `withModuleClass`, `withProviderIds`, `withSource`, `withEmbeddingProviderIds` |
+  | `ProviderDiscoveryFailure` | `withDetail`, `withFailure` |
+  | `ProviderIdCollision` | `withKind`, `withId`, `withKeptModule`, `withDroppedModule` |
+  | `ProviderRegistryReport` | `withDiscovered`, `withModules`, `withFailures`, `withCollisions` |
+
+  ```scala
+  // was ProviderConfigKey.optional(...).copy(env = Some("AWS_PROFILE"))
+  val key = ProviderConfigKey.optional("profile", "the AWS profile").withEnv("AWS_PROFILE")
+  // was section.copy(apiKey = resolvedKey)
+  val keyed = section.withApiKey(resolvedKey)
+  // was settings.copy(baseUrl = "https://eu.acme.example/v1")
+  val moved = settings.withBaseUrl("https://eu.acme.example/v1")
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` (`CacheStats.apply(size, hits, misses, total, rate)`) instead of
+  the constructor, and chain the setters.
+- `CacheEntry`, `CacheStats` and `SSEEvent` are now `final`.
+
+Pattern matching (`case ProviderConfigKey(name, description, required, default, env, aliases)`) and the fields are
+unchanged.
+
 ### Tool schemas and tool-call types are growth-safe (#2381)
 
 `StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`, `PropertyDefinition`,
