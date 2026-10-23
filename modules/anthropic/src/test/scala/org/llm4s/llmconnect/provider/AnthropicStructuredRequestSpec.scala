@@ -156,7 +156,7 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "ignore the schema name and strict flag (only the schema body is sent)" in {
-    val named = schemaFmt.copy(name = "my_name", strict = false)
+    val named = schemaFmt.withName("my_name").withStrict(false)
     val s     = systemText(body(Conversation(Seq(UserMessage("hi"))), CompletionOptions().withResponseFormat(named)))
     (s should not).include("my_name")
     s should include(schemaText)

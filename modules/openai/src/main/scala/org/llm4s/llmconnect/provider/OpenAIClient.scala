@@ -189,7 +189,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      transformedConversation = conversation.copy(messages = transformed.messages)
+      transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
         transformed.options,
@@ -228,7 +228,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
           transformedConversation,

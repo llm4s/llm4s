@@ -196,7 +196,7 @@ class AnthropicClient(
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Create message parameters builder
         val paramsBuilder = MessageCreateParams
@@ -289,7 +289,7 @@ curl https://api.anthropic.com/v1/messages \
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Build parameters
         val paramsBuilder = MessageCreateParams

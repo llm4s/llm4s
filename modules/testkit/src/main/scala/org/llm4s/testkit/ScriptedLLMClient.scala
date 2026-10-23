@@ -110,7 +110,7 @@ final class ScriptedLLMClient private (
 
   private def completionOf(index: Int, reply: Reply): Completion = {
     val calls = reply.toolCalls.zipWithIndex.map { case (call, position) =>
-      if (call.id.isEmpty) call.copy(id = s"call-${index + 1}-${position + 1}") else call
+      if (call.id.isEmpty) call.withId(s"call-${index + 1}-${position + 1}") else call
     }
     Completion(
       id = s"scripted-${index + 1}",
