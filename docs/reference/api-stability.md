@@ -75,6 +75,31 @@ arrives through a wildcard import or an `export`, expand a type alias declared e
 result type; the limits are listed in the scanner's Scaladoc. Its fixtures include one violating signature per
 deny-listed package, so dropping one from the check fails the build.
 
+And it enforces [RFC 0002](../rfcs/#index), growth safety ([#2369](https://github.com/llm4s/llm4s/issues/2369)):
+it fails for a `case class` in a `@Stable` type (top-level or nested in a `@Stable` type or its companion, and also
+for an untiered public one) whose primary constructor is not `private` or `private[x]`, naming the file, line and
+type, and for a public `copy` defined in one. Adding a field to a public constructor or `copy` changes its
+signature, which MiMa reports as a break once the baseline exists, so a growth-prone type is written so that a
+field can be added later:
+
+```scala
+@Stable
+final case class Limits private (maxTokens: Int, timeout: FiniteDuration):
+  def withMaxTokens(n: Int): Limits = copy(maxTokens = n) // copy is private, as the constructor is
+  def withTimeout(t: FiniteDuration): Limits = copy(timeout = t)
+
+object Limits:
+  def apply(maxTokens: Int = 1024, timeout: FiniteDuration = 30.seconds): Limits = new Limits(maxTokens, timeout)
+```
+
+To add a field after the baseline, add it to the constructor and, with a default, to `apply`; keep the previous
+`apply` as an overload without defaults that forwards to the new one; and add a `withX` setter. Never re-expose
+`copy`. A case class with no fields is exempt. A type that is deliberately closed (a single-value wrapper, a fixed
+record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
+one-line reason; the entries marked `TODO(#2369)` predate the check and are to be converted before the baseline.
+An entry that no longer matches a failing type fails the check, so a converted type cannot leave its entry behind.
+The scanner does not look at the cases of a `@Stable` `enum`.
+
 `scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
 [1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
 are the frozen set, and every other place that states it must agree. See the script's header for the exact
