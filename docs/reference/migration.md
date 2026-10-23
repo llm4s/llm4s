@@ -297,6 +297,21 @@ baseline ([#2345](https://github.com/llm4s/llm4s/issues/2345)), rather than froz
 - `org.llm4s.llmconnect.model.CompletionChunk` and `ChunkDelta`: no client ever produced them. Streaming delivers
   `StreamedChunk` (`content`, `toolCall`, `finishReason`, `thinkingDelta`) to `streamComplete`'s `onChunk`.
 
+### Tier hygiene before the baseline (#2358)
+
+Public types of frozen modules that would otherwise have been frozen by mistake at the MiMa baseline
+([#2358](https://github.com/llm4s/llm4s/issues/2358)) are now marked or placed to match their tier:
+
+- `org.llm4s.trace.AnsiColors` is `private[llm4s]`: only `ConsoleTracing` and a sample used it. Define the escape codes
+  you need yourself (`"\u001b[32m"` is green, `"\u001b[0m"` resets), or use a library such as fansi.
+- `org.llm4s.core.safety.UsingOps` moved from `llm4s-core` to `llm4s-agent-tools`, its only consumer, and
+  `org.llm4s.llmconnect.utils.ModelSelector` from `llm4s-core` to `llm4s-rag`. Packages are unchanged, so imports stay
+  as they are; add the dependency if you used one without it. `scala.util.Using.resource` does what `UsingOps.using`
+  does without either.
+- The `org.llm4s.assistant` types (`AssistantAgent`, `Command`, `SessionManager`, `SessionState`, `SessionInfo`,
+  `SessionSummary`) are `@Experimental`, matching their Beta tier in [1.0 Scope](v1-scope): MiMa does not freeze
+  them, and they can change in a minor release with a migration note. Nothing about them changed in this release.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last

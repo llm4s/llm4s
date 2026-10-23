@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.AgentResult
 import org.llm4s.agent.graph.ThreadId
 import org.llm4s.llmconnect.model.Message
@@ -22,6 +23,7 @@ import upickle.default.{ ReadWriter => RW, macroRW, ReadWriter, readwriter }
  * @param created Timestamp when the session was created
  * @param history Messages loaded from a saved session, imported by the next turn
  */
+@Experimental
 case class SessionState(
   threadId: Option[ThreadId],
   last: Option[AgentResult],
@@ -49,6 +51,7 @@ case class SessionState(
     )
 }
 
+@Experimental
 object SessionState {
   // Custom ReadWriter for LocalDateTime
   implicit private[assistant] val localDateTimeRW: ReadWriter[LocalDateTime] =
@@ -70,6 +73,7 @@ object SessionState {
  * @param messageCount Number of messages in the conversation
  * @param fileSize Size of the session file in bytes
  */
+@Experimental
 case class SessionInfo(
   id: SessionId,
   title: String,
@@ -79,6 +83,7 @@ case class SessionInfo(
   fileSize: Long
 )
 
+@Experimental
 object SessionInfo {
   import SessionState.localDateTimeRW // Import the LocalDateTime ReadWriter
   implicit val rw: RW[SessionInfo] = macroRW
@@ -95,6 +100,7 @@ object SessionInfo {
  * @param filename Base filename of the session file
  * @param created Timestamp when the session was created
  */
+@Experimental
 case class SessionSummary(
   id: SessionId,
   title: String,
@@ -102,6 +108,7 @@ case class SessionSummary(
   created: LocalDateTime
 )
 
+@Experimental
 object SessionSummary {
   import SessionState.localDateTimeRW // Import the LocalDateTime ReadWriter
   implicit val rw: RW[SessionSummary] = macroRW
