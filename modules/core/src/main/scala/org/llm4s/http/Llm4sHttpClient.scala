@@ -94,30 +94,84 @@ object HttpHeaders {
  * @param statusCode HTTP status code (e.g. 200, 404)
  * @param body       Response body as a string
  * @param headers    Response headers as a multi-valued map (lowercase keys)
+ *
+ * Build one with [[HttpResponse.apply]] and change it with the `with*` setters; the constructor and
+ * `copy` are private, so a new field never breaks callers.
  */
 @Stable
-case class HttpResponse(
+final case class HttpResponse private (
   statusCode: Int,
   body: String,
-  headers: Map[String, Seq[String]] = Map.empty
+  headers: Map[String, Seq[String]]
 ) {
+
+  /** Sets the HTTP status code. */
+  def withStatusCode(statusCode: Int): HttpResponse = copy(statusCode = statusCode)
+
+  /** Sets the response body. */
+  def withBody(body: String): HttpResponse = copy(body = body)
+
+  /** Sets the response headers (a multi-valued map with lowercase keys). */
+  def withHeaders(headers: Map[String, Seq[String]]): HttpResponse = copy(headers = headers)
 
   /** First value of header `name`, matched case-insensitively. */
   def header(name: String): Option[String] = HttpHeaders.first(headers, name)
 }
 
+/**
+ * An HTTP response whose body has been parsed as JSON (see `HttpResponse.toJson`).
+ *
+ * @param statusCode HTTP status code
+ * @param body       Response body parsed as JSON
+ * @param headers    Response headers as a multi-valued map (lowercase keys)
+ *
+ * Build one with [[JsonHttpResponse.apply]] and change it with the `with*` setters; the constructor and
+ * `copy` are private, so a new field never breaks callers.
+ */
 @Stable
-final case class JsonHttpResponse(
+final case class JsonHttpResponse private (
   statusCode: Int,
   body: ujson.Value,
-  headers: Map[String, Seq[String]] = Map.empty
+  headers: Map[String, Seq[String]]
 ) {
+
+  /** Sets the HTTP status code. */
+  def withStatusCode(statusCode: Int): JsonHttpResponse = copy(statusCode = statusCode)
+
+  /** Sets the response body, parsed as JSON. */
+  def withBody(body: ujson.Value): JsonHttpResponse = copy(body = body)
+
+  /** Sets the response headers (a multi-valued map with lowercase keys). */
+  def withHeaders(headers: Map[String, Seq[String]]): JsonHttpResponse = copy(headers = headers)
 
   /** First value of header `name`, matched case-insensitively. */
   def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
+
+object JsonHttpResponse {
+
+  /**
+   * Creates a [[JsonHttpResponse]].
+   *
+   * @param statusCode HTTP status code
+   * @param body       response body, parsed as JSON
+   * @param headers    response headers (a multi-valued map with lowercase keys)
+   */
+  def apply(statusCode: Int, body: ujson.Value, headers: Map[String, Seq[String]] = Map.empty): JsonHttpResponse =
+    new JsonHttpResponse(statusCode, body, headers)
 }
 
 object HttpResponse:
+
+  /**
+   * Creates an [[HttpResponse]].
+   *
+   * @param statusCode HTTP status code
+   * @param body       response body
+   * @param headers    response headers (a multi-valued map with lowercase keys)
+   */
+  def apply(statusCode: Int, body: String, headers: Map[String, Seq[String]] = Map.empty): HttpResponse =
+    new HttpResponse(statusCode, body, headers)
 
   /**
    * A `ServiceError` for a non-2xx `response`, carrying its status, the request id from the first of
@@ -172,16 +226,41 @@ object HttpResponse:
  * @param statusCode HTTP status code
  * @param body       Raw response bytes — exact wire representation, no charset conversion
  * @param headers    Response headers as a multi-valued map (lowercase keys)
+ *
+ * Build one with [[HttpRawResponse.apply]] and change it with the `with*` setters; the constructor and
+ * `copy` are private, so a new field never breaks callers.
  */
 @Stable
-case class HttpRawResponse(
+final case class HttpRawResponse private (
   statusCode: Int,
   body: Array[Byte],
-  headers: Map[String, Seq[String]] = Map.empty
+  headers: Map[String, Seq[String]]
 ) {
+
+  /** Sets the HTTP status code. */
+  def withStatusCode(statusCode: Int): HttpRawResponse = copy(statusCode = statusCode)
+
+  /** Sets the raw response bytes. */
+  def withBody(body: Array[Byte]): HttpRawResponse = copy(body = body)
+
+  /** Sets the response headers (a multi-valued map with lowercase keys). */
+  def withHeaders(headers: Map[String, Seq[String]]): HttpRawResponse = copy(headers = headers)
 
   /** First value of header `name`, matched case-insensitively. */
   def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
+
+object HttpRawResponse {
+
+  /**
+   * Creates an [[HttpRawResponse]].
+   *
+   * @param statusCode HTTP status code
+   * @param body       raw response bytes
+   * @param headers    response headers (a multi-valued map with lowercase keys)
+   */
+  def apply(statusCode: Int, body: Array[Byte], headers: Map[String, Seq[String]] = Map.empty): HttpRawResponse =
+    new HttpRawResponse(statusCode, body, headers)
 }
 
 /**
@@ -194,16 +273,45 @@ case class HttpRawResponse(
  * @param body       Response body as an InputStream — caller is responsible for closing it,
  *                   on error statuses too
  * @param headers    Response headers as a multi-valued map (lowercase keys)
+ *
+ * Build one with [[StreamingHttpResponse.apply]] and change it with the `with*` setters; the constructor and
+ * `copy` are private, so a new field never breaks callers.
  */
 @Stable
-case class StreamingHttpResponse(
+final case class StreamingHttpResponse private (
   statusCode: Int,
   body: java.io.InputStream,
-  headers: Map[String, Seq[String]] = Map.empty
+  headers: Map[String, Seq[String]]
 ) {
+
+  /** Sets the HTTP status code. */
+  def withStatusCode(statusCode: Int): StreamingHttpResponse = copy(statusCode = statusCode)
+
+  /** Sets the response body stream; the caller closes it. */
+  def withBody(body: java.io.InputStream): StreamingHttpResponse = copy(body = body)
+
+  /** Sets the response headers (a multi-valued map with lowercase keys). */
+  def withHeaders(headers: Map[String, Seq[String]]): StreamingHttpResponse = copy(headers = headers)
 
   /** First value of header `name`, matched case-insensitively. */
   def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
+
+object StreamingHttpResponse {
+
+  /**
+   * Creates an [[StreamingHttpResponse]].
+   *
+   * @param statusCode HTTP status code
+   * @param body       response body stream; the caller closes it
+   * @param headers    response headers (a multi-valued map with lowercase keys)
+   */
+  def apply(
+    statusCode: Int,
+    body: java.io.InputStream,
+    headers: Map[String, Seq[String]] = Map.empty
+  ): StreamingHttpResponse =
+    new StreamingHttpResponse(statusCode, body, headers)
 }
 
 /**

@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ModelRegistryConfig` and `TracingSettings` are growth-prone types: build them with `X(...)` and change them with
   `with*`; `new` and `.copy` are private, and the classes are `final`;
   [migration](docs/reference/migration.md#core-config-types-are-growth-safe-2346).
+- `HttpResponse`, `HttpRawResponse`, `StreamingHttpResponse`, `JsonHttpResponse`, `EmbeddingResponse`, `EmbeddingUsage`,
+  `ModelPricing`, `UsageSummary`, `ModelUsage`, `ProviderExchange` and `DiscoveredModel` are growth-prone types: build
+  them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`. JSON is
+  unchanged. `UsageSummary.bigDecimalRw` is private;
+  [migration](docs/reference/migration.md#core-data-types-are-growth-safe-2356).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
@@ -385,6 +390,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#2360](https://github.com/llm4s/llm4s/issues/2360) decides its tier), and `StabilityTiers.selfTest` has a violating
   fixture for every deny-listed package [#2357](https://github.com/llm4s/llm4s/issues/2357);
   [API stability](docs/reference/api-stability.md#tiers-in-the-code).
+- **Added** a per-module MiMa baseline: `mimaBaselineOverrides` in `build.sbt` gives a frozen module its own baseline
+  release (`"llm4s-<name>" -> Some("X.Y.Z")`) or none (`-> None`) while the others use `mimaBaselineVersion`, so
+  `llm4s-agent` can take a later baseline than the other frozen modules ([RFC 0001](docs/rfcs/0001-agent-baseline.md)).
+  No baseline is chosen: the map is empty and `mimaBaselineVersion` stays `None`, so nothing changes yet.
+  `scripts/mima-dry-run.sh` compares each module with its own baseline, publishing at a second throwaway version when one
+  has its own, checks that a held-back module is compared with nothing, prints each module's baseline with `--list-frozen`,
+  and refuses an entry it cannot read or that names no frozen module; `scripts/test-mima-dry-run.sh` covers each case.
+  API Stability no longer calls 0.4.1 the last release [#2355](https://github.com/llm4s/llm4s/issues/2355).
 - **Changed** the Integration Tests job uploads coverage: it instruments `rag`, `vectorstoreElasticsearch`,
   `vectorstoreRedis`, `memoryPostgres`, `knowledgegraphNeo4j` and `agentCheckpointPostgres` (its `COVERAGE_MODULES`),
   runs the `@Docker` tier, and uploads each module's report under the module's existing Codecov flag, so code reachable

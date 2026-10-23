@@ -130,25 +130,40 @@ declares it or reaches it transitively. The list, and where each group belongs i
 
 ## The Baseline
 
-`mimaBaselineVersion` in `build.sbt` names the release each frozen module is compared with. It is
-`None` for now, so `sbt mimaReportBinaryIssues` checks nothing and CI passes.
+The baseline is per module. `mimaBaselineVersion` in `build.sbt` names the release the frozen modules
+are compared with, and `mimaBaselineOverrides` gives a module a different one: `"llm4s-<name>" -> Some("X.Y.Z")`
+compares it with its own release, `"llm4s-<name>" -> None` holds it back with no baseline while the others
+have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `None` and the
+map is empty, so no frozen module has a baseline, `sbt mimaReportBinaryIssues` checks nothing and CI passes.
 
-The last release, 0.4.1, is a single `llm4s-core` of the pre-modularisation code, so it is not a usable
-baseline for the split modules: against `llm4s-core` 0.4.1 MiMa reports thousands of problems, and
-`llm4s-agent` and the provider modules do not exist at 0.4.1, so their artifacts do not resolve.
-0.5.0, the first release with the split coordinates, sets no baseline either. The baseline is set at a
-pre-1.0 release, version to be decided, once the designs are final
+No release so far has set one. 0.5.0 and 0.5.1 are the first releases with the split coordinates, and were
+published without a baseline. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
+they are not usable baselines for the split modules: the packages they hold have since moved to other
+artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is set at a pre-1.0
+release, version to be decided, once the designs are final
 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); until then nothing is frozen.
+[RFC 0001](../rfcs/0001-agent-baseline) proposes that `llm4s-agent` takes a later baseline than the other
+frozen modules; the per-module baseline makes either answer a one-line change.
 
 ### Setting and bumping the baseline
 
-`mimaBaselineVersion` is a plain `val`, not an sbt setting, so it is edited in the file; it cannot be
-changed with `set`:
+`mimaBaselineVersion` and `mimaBaselineOverrides` are plain `val`s, not sbt settings, so they are edited in
+the file; they cannot be changed with `set`:
 
 1. Publish the release and confirm every frozen artifact is on Maven Central under its `_3` name, for
    example `https://repo1.maven.org/maven2/org/llm4s/llm4s-agent_3/X.Y.Z/`. A frozen module whose
    baseline is not published fails `mimaPreviousClassfiles` with a "not found" error, by design.
-2. Change the line to `val mimaBaselineVersion: Option[String] = Some("X.Y.Z")`.
+2. Change the line to `val mimaBaselineVersion: Option[String] = Some("X.Y.Z")`. To give one module a
+   different baseline, add an entry to `mimaBaselineOverrides` instead (or as well), one per line:
+
+   ```scala
+   val mimaBaselineOverrides: Map[String, Option[String]] = Map(
+     "llm4s-agent" -> None // no baseline yet; later Some("X.Y.Z"), its own release
+   )
+   ```
+
+   `scripts/mima-dry-run.sh --list-frozen` prints each frozen module's baseline (`shared`, `none` or its own
+   version) as the dry run reads it, and refuses an entry for a module that is not frozen.
 3. Run `sbt mimaReportBinaryIssues`. Fix real breaks. Add a filter (below) only for an intentional one.
 4. When the baseline later moves to a newer release, **delete every `mimaBinaryIssueFilters` entry**
    first: each one excuses a break against the old baseline, so against the new one it is stale and would
@@ -159,8 +174,9 @@ Before the first run against the baseline, review the Beta parts that ship insid
 [1.0 Scope](v1-scope) does not freeze them: `org.llm4s.assistant.*` (`llm4s-agent`) and the Mistral and
 Cohere dialect classes (`llm4s-openai-compatible`). Either exclude them with a documented filter or
 decide that they are frozen too. `llm4s-agent` may also wait for the graph runtime
-([#1266](https://github.com/llm4s/llm4s/issues/1266)) before it gets a baseline; if so, drop
-`mimaFrozen("llm4s-agent")` from `modules/agent` until then.
+([#1266](https://github.com/llm4s/llm4s/issues/1266)) before it gets a baseline; if so, hold it back with
+`"llm4s-agent" -> None` in `mimaBaselineOverrides` until then, and give it `Some("X.Y.Z")` once its API is
+final. It stays a frozen module meanwhile: the stability, dependency and tier checks keep covering it.
 
 The build is Scala 3 only, so one `sbt mimaReportBinaryIssues` covers every artifact. If a second Scala
 version returns, CI must run it cross-built (with sbt's `+` prefix) to check each version.

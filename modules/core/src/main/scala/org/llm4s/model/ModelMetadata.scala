@@ -441,10 +441,14 @@ object ModelCapabilities {
 }
 
 /**
- * Detailed pricing information for a model.
+ * Detailed pricing information for a model, in USD per unit; `None` where the model's metadata gives no price.
+ *
+ * Build one with [[ModelPricing.apply]] and change it with the `with*` setters, each of which takes the value or an
+ * `Option`; the constructor and `copy` are private, so a new field never breaks callers. The constructor keeps its
+ * defaults because the JSON codec fills a missing key from them.
  */
 @Stable
-case class ModelPricing(
+final case class ModelPricing private (
   inputCostPerToken: Option[Double] = None,
   outputCostPerToken: Option[Double] = None,
   cacheCreationInputTokenCost: Option[Double] = None,
@@ -462,6 +466,123 @@ case class ModelPricing(
   outputCostPerPixel: Option[Double] = None
 ) {
 
+  /** Sets the `inputCostPerToken` price. */
+  def withInputCostPerToken(inputCostPerToken: Double): ModelPricing = copy(inputCostPerToken = Some(inputCostPerToken))
+
+  /** Sets, or with `None` clears, the `inputCostPerToken` price. */
+  def withInputCostPerToken(inputCostPerToken: Option[Double]): ModelPricing =
+    copy(inputCostPerToken = inputCostPerToken)
+
+  /** Sets the `outputCostPerToken` price. */
+  def withOutputCostPerToken(outputCostPerToken: Double): ModelPricing =
+    copy(outputCostPerToken = Some(outputCostPerToken))
+
+  /** Sets, or with `None` clears, the `outputCostPerToken` price. */
+  def withOutputCostPerToken(outputCostPerToken: Option[Double]): ModelPricing =
+    copy(outputCostPerToken = outputCostPerToken)
+
+  /** Sets the `cacheCreationInputTokenCost` price. */
+  def withCacheCreationInputTokenCost(cacheCreationInputTokenCost: Double): ModelPricing =
+    copy(cacheCreationInputTokenCost = Some(cacheCreationInputTokenCost))
+
+  /** Sets, or with `None` clears, the `cacheCreationInputTokenCost` price. */
+  def withCacheCreationInputTokenCost(cacheCreationInputTokenCost: Option[Double]): ModelPricing =
+    copy(cacheCreationInputTokenCost = cacheCreationInputTokenCost)
+
+  /** Sets the `cacheReadInputTokenCost` price. */
+  def withCacheReadInputTokenCost(cacheReadInputTokenCost: Double): ModelPricing =
+    copy(cacheReadInputTokenCost = Some(cacheReadInputTokenCost))
+
+  /** Sets, or with `None` clears, the `cacheReadInputTokenCost` price. */
+  def withCacheReadInputTokenCost(cacheReadInputTokenCost: Option[Double]): ModelPricing =
+    copy(cacheReadInputTokenCost = cacheReadInputTokenCost)
+
+  /** Sets the `inputCostPerTokenBatches` price. */
+  def withInputCostPerTokenBatches(inputCostPerTokenBatches: Double): ModelPricing =
+    copy(inputCostPerTokenBatches = Some(inputCostPerTokenBatches))
+
+  /** Sets, or with `None` clears, the `inputCostPerTokenBatches` price. */
+  def withInputCostPerTokenBatches(inputCostPerTokenBatches: Option[Double]): ModelPricing =
+    copy(inputCostPerTokenBatches = inputCostPerTokenBatches)
+
+  /** Sets the `outputCostPerTokenBatches` price. */
+  def withOutputCostPerTokenBatches(outputCostPerTokenBatches: Double): ModelPricing =
+    copy(outputCostPerTokenBatches = Some(outputCostPerTokenBatches))
+
+  /** Sets, or with `None` clears, the `outputCostPerTokenBatches` price. */
+  def withOutputCostPerTokenBatches(outputCostPerTokenBatches: Option[Double]): ModelPricing =
+    copy(outputCostPerTokenBatches = outputCostPerTokenBatches)
+
+  /** Sets the `inputCostPerTokenPriority` price. */
+  def withInputCostPerTokenPriority(inputCostPerTokenPriority: Double): ModelPricing =
+    copy(inputCostPerTokenPriority = Some(inputCostPerTokenPriority))
+
+  /** Sets, or with `None` clears, the `inputCostPerTokenPriority` price. */
+  def withInputCostPerTokenPriority(inputCostPerTokenPriority: Option[Double]): ModelPricing =
+    copy(inputCostPerTokenPriority = inputCostPerTokenPriority)
+
+  /** Sets the `outputCostPerTokenPriority` price. */
+  def withOutputCostPerTokenPriority(outputCostPerTokenPriority: Double): ModelPricing =
+    copy(outputCostPerTokenPriority = Some(outputCostPerTokenPriority))
+
+  /** Sets, or with `None` clears, the `outputCostPerTokenPriority` price. */
+  def withOutputCostPerTokenPriority(outputCostPerTokenPriority: Option[Double]): ModelPricing =
+    copy(outputCostPerTokenPriority = outputCostPerTokenPriority)
+
+  /** Sets the `outputCostPerReasoningToken` price. */
+  def withOutputCostPerReasoningToken(outputCostPerReasoningToken: Double): ModelPricing =
+    copy(outputCostPerReasoningToken = Some(outputCostPerReasoningToken))
+
+  /** Sets, or with `None` clears, the `outputCostPerReasoningToken` price. */
+  def withOutputCostPerReasoningToken(outputCostPerReasoningToken: Option[Double]): ModelPricing =
+    copy(outputCostPerReasoningToken = outputCostPerReasoningToken)
+
+  /** Sets the `inputCostPerAudioToken` price. */
+  def withInputCostPerAudioToken(inputCostPerAudioToken: Double): ModelPricing =
+    copy(inputCostPerAudioToken = Some(inputCostPerAudioToken))
+
+  /** Sets, or with `None` clears, the `inputCostPerAudioToken` price. */
+  def withInputCostPerAudioToken(inputCostPerAudioToken: Option[Double]): ModelPricing =
+    copy(inputCostPerAudioToken = inputCostPerAudioToken)
+
+  /** Sets the `outputCostPerAudioToken` price. */
+  def withOutputCostPerAudioToken(outputCostPerAudioToken: Double): ModelPricing =
+    copy(outputCostPerAudioToken = Some(outputCostPerAudioToken))
+
+  /** Sets, or with `None` clears, the `outputCostPerAudioToken` price. */
+  def withOutputCostPerAudioToken(outputCostPerAudioToken: Option[Double]): ModelPricing =
+    copy(outputCostPerAudioToken = outputCostPerAudioToken)
+
+  /** Sets the `inputCostPerImage` price. */
+  def withInputCostPerImage(inputCostPerImage: Double): ModelPricing = copy(inputCostPerImage = Some(inputCostPerImage))
+
+  /** Sets, or with `None` clears, the `inputCostPerImage` price. */
+  def withInputCostPerImage(inputCostPerImage: Option[Double]): ModelPricing =
+    copy(inputCostPerImage = inputCostPerImage)
+
+  /** Sets the `outputCostPerImage` price. */
+  def withOutputCostPerImage(outputCostPerImage: Double): ModelPricing =
+    copy(outputCostPerImage = Some(outputCostPerImage))
+
+  /** Sets, or with `None` clears, the `outputCostPerImage` price. */
+  def withOutputCostPerImage(outputCostPerImage: Option[Double]): ModelPricing =
+    copy(outputCostPerImage = outputCostPerImage)
+
+  /** Sets the `inputCostPerPixel` price. */
+  def withInputCostPerPixel(inputCostPerPixel: Double): ModelPricing = copy(inputCostPerPixel = Some(inputCostPerPixel))
+
+  /** Sets, or with `None` clears, the `inputCostPerPixel` price. */
+  def withInputCostPerPixel(inputCostPerPixel: Option[Double]): ModelPricing =
+    copy(inputCostPerPixel = inputCostPerPixel)
+
+  /** Sets the `outputCostPerPixel` price. */
+  def withOutputCostPerPixel(outputCostPerPixel: Double): ModelPricing =
+    copy(outputCostPerPixel = Some(outputCostPerPixel))
+
+  /** Sets, or with `None` clears, the `outputCostPerPixel` price. */
+  def withOutputCostPerPixel(outputCostPerPixel: Option[Double]): ModelPricing =
+    copy(outputCostPerPixel = outputCostPerPixel)
+
   /**
    * Estimate the cost of a completion given token counts.
    *
@@ -477,6 +598,43 @@ case class ModelPricing(
 }
 
 object ModelPricing {
+
+  /** Creates a [[ModelPricing]]; every price defaults to `None`. Named arguments are the supported way to build one. */
+  def apply(
+    inputCostPerToken: Option[Double] = None,
+    outputCostPerToken: Option[Double] = None,
+    cacheCreationInputTokenCost: Option[Double] = None,
+    cacheReadInputTokenCost: Option[Double] = None,
+    inputCostPerTokenBatches: Option[Double] = None,
+    outputCostPerTokenBatches: Option[Double] = None,
+    inputCostPerTokenPriority: Option[Double] = None,
+    outputCostPerTokenPriority: Option[Double] = None,
+    outputCostPerReasoningToken: Option[Double] = None,
+    inputCostPerAudioToken: Option[Double] = None,
+    outputCostPerAudioToken: Option[Double] = None,
+    inputCostPerImage: Option[Double] = None,
+    outputCostPerImage: Option[Double] = None,
+    inputCostPerPixel: Option[Double] = None,
+    outputCostPerPixel: Option[Double] = None
+  ): ModelPricing =
+    new ModelPricing(
+      inputCostPerToken,
+      outputCostPerToken,
+      cacheCreationInputTokenCost,
+      cacheReadInputTokenCost,
+      inputCostPerTokenBatches,
+      outputCostPerTokenBatches,
+      inputCostPerTokenPriority,
+      outputCostPerTokenPriority,
+      outputCostPerReasoningToken,
+      inputCostPerAudioToken,
+      outputCostPerAudioToken,
+      inputCostPerImage,
+      outputCostPerImage,
+      inputCostPerPixel,
+      outputCostPerPixel
+    )
+
   implicit val rw: ReadWriter[ModelPricing] = macroRW
 
   def fromJson(data: ujson.Value): ModelPricing = {

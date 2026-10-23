@@ -16,15 +16,34 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  * @param outputTokens   cumulative completion tokens received from the model
  * @param thinkingTokens cumulative extended-thinking tokens (Anthropic only; zero for other providers)
  * @param totalCost      cumulative estimated cost in USD; `BigDecimal(0)` when cost data is unavailable
+ *
+ * Build one with [[ModelUsage.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a new field never breaks callers. The constructor keeps its defaults because the JSON codec fills a
+ * missing key from them.
  */
 @Stable
-case class ModelUsage(
+final case class ModelUsage private (
   requestCount: Long = 0L,
   inputTokens: Long = 0L,
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
   totalCost: BigDecimal = BigDecimal(0)
 ) {
+
+  /** Sets the number of API calls attributed to this model. */
+  def withRequestCount(requestCount: Long): ModelUsage = copy(requestCount = requestCount)
+
+  /** Sets the cumulative prompt tokens. */
+  def withInputTokens(inputTokens: Long): ModelUsage = copy(inputTokens = inputTokens)
+
+  /** Sets the cumulative completion tokens. */
+  def withOutputTokens(outputTokens: Long): ModelUsage = copy(outputTokens = outputTokens)
+
+  /** Sets the cumulative extended-thinking tokens. */
+  def withThinkingTokens(thinkingTokens: Long): ModelUsage = copy(thinkingTokens = thinkingTokens)
+
+  /** Sets the cumulative estimated cost in USD. */
+  def withTotalCost(totalCost: BigDecimal): ModelUsage = copy(totalCost = totalCost)
 
   /**
    * Returns a new [[ModelUsage]] with `usage` and `cost` folded in.
@@ -65,6 +84,25 @@ case class ModelUsage(
 }
 
 object ModelUsage {
+
+  /**
+   * Creates a [[ModelUsage]]; every field defaults to zero.
+   *
+   * @param requestCount   number of API calls attributed to this model
+   * @param inputTokens    cumulative prompt tokens
+   * @param outputTokens   cumulative completion tokens
+   * @param thinkingTokens cumulative extended-thinking tokens
+   * @param totalCost      cumulative estimated cost in USD
+   */
+  def apply(
+    requestCount: Long = 0L,
+    inputTokens: Long = 0L,
+    outputTokens: Long = 0L,
+    thinkingTokens: Long = 0L,
+    totalCost: BigDecimal = BigDecimal(0)
+  ): ModelUsage =
+    new ModelUsage(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost)
+
   implicit val rw: RW[ModelUsage] = macroRW
 }
 
@@ -90,17 +128,39 @@ object ModelUsage {
  * @param totalCost      total estimated cost in USD; `BigDecimal(0)` when unavailable
  * @param byModel        per-model breakdown; keyed by the model identifier string
  *
+ * Build one with [[UsageSummary.apply]] and change it with the `with*` setters; the constructor and `copy` are
+ * private, so a new field never breaks callers. The constructor keeps its defaults because the JSON codec fills a
+ * missing key from them.
+ *
  * @see [[ModelUsage]] for the per-model record type
  */
 @Stable
-case class UsageSummary(
+final case class UsageSummary private (
   requestCount: Long = 0L,
   inputTokens: Long = 0L,
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
   totalCost: BigDecimal = BigDecimal(0),
-  byModel: Map[String, ModelUsage] = Map.empty
+  byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage]
 ) {
+
+  /** Sets the total API calls across all models. */
+  def withRequestCount(requestCount: Long): UsageSummary = copy(requestCount = requestCount)
+
+  /** Sets the total prompt tokens across all models. */
+  def withInputTokens(inputTokens: Long): UsageSummary = copy(inputTokens = inputTokens)
+
+  /** Sets the total completion tokens across all models. */
+  def withOutputTokens(outputTokens: Long): UsageSummary = copy(outputTokens = outputTokens)
+
+  /** Sets the total extended-thinking tokens across all models. */
+  def withThinkingTokens(thinkingTokens: Long): UsageSummary = copy(thinkingTokens = thinkingTokens)
+
+  /** Sets the total estimated cost in USD. */
+  def withTotalCost(totalCost: BigDecimal): UsageSummary = copy(totalCost = totalCost)
+
+  /** Sets the per-model breakdown, keyed by model identifier. */
+  def withByModel(byModel: Map[String, ModelUsage]): UsageSummary = copy(byModel = byModel)
 
   /**
    * Returns a new [[UsageSummary]] with the given usage record folded in.
@@ -200,7 +260,32 @@ case class UsageSummary(
 }
 
 object UsageSummary {
-  implicit val bigDecimalRw: RW[BigDecimal] = readwriter[ujson.Value].bimap[BigDecimal](
+
+  /**
+   * Creates a [[UsageSummary]]; every field defaults to zero or empty.
+   *
+   * @param requestCount   total API calls across all models
+   * @param inputTokens    total prompt tokens across all models
+   * @param outputTokens   total completion tokens across all models
+   * @param thinkingTokens total extended-thinking tokens
+   * @param totalCost      total estimated cost in USD
+   * @param byModel        per-model breakdown, keyed by model identifier
+   */
+  def apply(
+    requestCount: Long = 0L,
+    inputTokens: Long = 0L,
+    outputTokens: Long = 0L,
+    thinkingTokens: Long = 0L,
+    totalCost: BigDecimal = BigDecimal(0),
+    byModel: Map[String, ModelUsage] = Map.empty[String, ModelUsage]
+  ): UsageSummary =
+    new UsageSummary(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost, byModel)
+
+  /**
+   * `totalCost`'s codec: written as a string, read from a string or a number. Private, so a wildcard import of
+   * `UsageSummary._` does not pick up a `ReadWriter[BigDecimal]` (#2356); [[rw]] still uses it.
+   */
+  implicit private val bigDecimalRw: RW[BigDecimal] = readwriter[ujson.Value].bimap[BigDecimal](
     bd => ujson.Str(bd.toString),
     {
       case ujson.Num(n) => BigDecimal.decimal(n)

@@ -135,20 +135,31 @@ addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
 // ---- binary compatibility (MiMa) ----
-// MiMa compares a module with the artifact of the same name in a previous release. It can only
-// run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
-// modularisation (#1126) moved every package this check would cover. 0.5.0 sets no baseline: #1281
-// sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen
-// modules only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// MiMa compares a module with the artifact of the same name in a previous release. The releases so far set no
+// baseline: 0.4.1 is a single `llm4s-core` of the pre-modularisation code (#1126 moved every package this check
+// would cover), and 0.5.0 and 0.5.1, the first releases with the split coordinates, were published without one.
+// #1281 sets it at a pre-1.0 release, version to be decided, once the designs are final, for the frozen modules
+// only. Until then `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
 // `sbt mimaReportBinaryIssues` checks nothing; see docs/reference/api-stability.md.
 val mimaBaselineVersion: Option[String] = None
+
+// The baseline is per module (#2355): a frozen module listed here is compared with its own release instead of
+// `mimaBaselineVersion`. `Some("X.Y.Z")` gives it a different baseline, for example a later one for `llm4s-agent`
+// once its runtime is final (docs/rfcs/0001-agent-baseline.md); `None` holds it back with no baseline while the
+// others have one. The key is the artifact name passed to `mimaFrozen`. Empty for now: every frozen module shares
+// `mimaBaselineVersion`. scripts/mima-dry-run.sh reads and rewrites these entries, so keep each one a literal
+// `"llm4s-<name>" -> None` or `"llm4s-<name>" -> Some("X.Y.Z")`.
+val mimaBaselineOverrides: Map[String, Option[String]] = Map.empty
+
+// The release `module` (an artifact name) is compared with, if any.
+def mimaBaselineOf(module: String): Option[String] = mimaBaselineOverrides.getOrElse(module, mimaBaselineVersion)
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
 // A type annotated `@Experimental` (org.llm4s.annotation, a runtime-retained Java annotation) is outside the
 // freeze, so MiMa skips it: no hand-written `ProblemFilters.exclude` per type. scripts/mima-dry-run.sh checks
 // that this works, and that a `@Stable` type is still reported.
 def mimaFrozen(module: String) = Seq(
-  mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
+  mimaPreviousArtifacts := mimaBaselineOf(module).map(v => "org.llm4s" %% module % v).toSet,
   mimaFailOnNoPrevious  := false,
   mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"
 )
