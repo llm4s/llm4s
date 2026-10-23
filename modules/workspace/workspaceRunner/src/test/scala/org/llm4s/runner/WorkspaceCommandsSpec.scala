@@ -33,7 +33,7 @@ import scala.util.Try
  * sandbox config and applies `Permissive`; that is what [[containerDefault]] builds. Keep this spec in step with
  * those suites: change a command there, change it here.
  */
-class WorkspaceCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class WorkspaceCommandsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val ec: ExecutionContext = ExecutionContext.global
 

@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.scalatest.EitherValues
@@ -11,7 +13,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.concurrent.duration.DurationInt
 import scala.util.Try
 
-class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
+class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues {
 
   private val thread = ThreadId("t-1")
 

@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -17,7 +19,7 @@ import java.time.Instant
  * `CompletionOptionsCheck.java`; this spec checks the core [[CompletionOptions]] each option set becomes, as the
  * client receives it.
  */
-class JCompletionOptionsSpec extends AnyFlatSpec with Matchers {
+class JCompletionOptionsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A client that records the options of every request and answers "4". */
   private class Capturing extends LLMClient {

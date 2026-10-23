@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.ReadWriter
@@ -8,7 +10,7 @@ import java.time.Instant
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters.*
 
-class EventTypeSpec extends AnyFlatSpec with Matchers:
+class EventTypeSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   final case class Ping(n: Int) derives ReadWriter
   private val ping = EventType[Ping]("test.ping", 1)

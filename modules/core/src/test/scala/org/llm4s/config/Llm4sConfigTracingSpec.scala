@@ -16,8 +16,8 @@ class Llm4sConfigTracingSpec extends AnyWordSpec with Matchers {
         Llm4sConfig.tracing().fold(err => fail(err.toString), identity)
 
       pure.mode shouldBe TracingMode.Console
-      // Console has no block of its own, and core binds no backend's keys (#1133).
-      pure.extras shouldBe empty
+      // Console's own block, off by default (#2311); core binds no backend's keys (#1133).
+      pure.extras shouldBe Map("captureContent" -> "false")
     }
   }
 }

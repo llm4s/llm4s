@@ -20,7 +20,7 @@ import scala.util.Try
  * applied. These specs drive [[WebSocketCommandExecutor]], which `RunnerMain.handleExecuteCommand` delegates to, with
  * a fake channel that records every message the client would receive.
  */
-class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class WebSocketCommandExecutorSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val ec: ExecutionContext = ExecutionContext.global
 

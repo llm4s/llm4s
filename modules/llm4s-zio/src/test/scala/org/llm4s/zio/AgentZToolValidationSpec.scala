@@ -11,6 +11,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
+import zio.durationInt
 import zio.test.*
 import java.time.Instant
 
@@ -159,5 +160,5 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
           err   <- agent.continueConversation(first, "q2").flip
         } yield assertTrue(Fixtures.causeOf(err) == SimpleError("provider down"))
       }
-    ) @@ TestAspect.sequential
+    ) @@ TestAspect.sequential @@ TestAspect.timeout(120.seconds)
 }

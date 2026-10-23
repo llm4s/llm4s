@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.llm4s.agent.AgentFixture._
@@ -24,7 +26,7 @@ import scala.concurrent.duration._
  * both directly and through a `ReliableClient`, and that the retry layer's recoverable /
  * non-recoverable classification decides how often it is retried.
  */
-class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
+class AgentErrorPropagationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   final case class EchoResult(value: String)
   object EchoResult {

@@ -1,5 +1,7 @@
 package org.llm4s.agent.service
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentId, CompletionFixture, ScriptedLLMClient }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.ForwardingCheckpointer
@@ -13,7 +15,7 @@ import pureconfig.ConfigSource
 import java.time.Instant
 import scala.concurrent.duration.*
 
-class RunQueueSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val start  = Instant.parse("2026-10-21T12:00:00Z")
   private val agent  = AgentId.of("assistant").value

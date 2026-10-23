@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.graph.{ IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
@@ -31,7 +33,7 @@ import java.time.Instant
  * [[JUsageSummary]], [[JModelUsage]] - built from the agent's Scala values: every case, and value
  * semantics.
  */
-class JAgentResultSpec extends AnyFlatSpec with Matchers {
+class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def pending(kind: AgentStatusKind, status: JAgentStatus) = {
     status.kind shouldBe kind

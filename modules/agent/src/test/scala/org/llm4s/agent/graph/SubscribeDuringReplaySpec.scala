@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -18,7 +20,7 @@ import scala.jdk.CollectionConverters.*
  * A subscription receives every live event sent after `subscribe` returns, also while its
  * dispatcher is still replaying the log (#1731), in its place among the durable events.
  */
-class SubscribeDuringReplaySpec extends AnyFlatSpec with Matchers with EitherValues with Eventually {
+class SubscribeDuringReplaySpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with Eventually {
 
   given ExecutionContext                               = ExecutionContext.global
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(10, Seconds))

@@ -1,5 +1,7 @@
 package org.llm4s.trace
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.agent.graph.{
   Checkpointer,
@@ -33,7 +35,7 @@ import java.time.Instant
  * `withTracing` traces each run's durable events as `graph.*`/`agent.*` custom events, its model
  * calls' usage as `TokenUsageRecorded`, and ends each run with one `AgentRunEnded`.
  */
-class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
+class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))
@@ -179,6 +181,42 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
       case _                                                                                          => true
     } shouldBe empty
     tracing.names.foreach(n => (n.startsWith("graph.") || n.startsWith("agent.")) shouldBe true)
+  }
+
+  /** Runs `underlying` with stdout captured, on whichever thread traces, and keeps what it printed. */
+  final private class Captured(underlying: Tracing) extends Tracing {
+    private val out                                 = new java.io.ByteArrayOutputStream()
+    private def capture[A](body: => A): A           = Console.withOut(out)(body)
+    def traceEvent(event: TraceEvent): Result[Unit] = capture(underlying.traceEvent(event))
+    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
+      capture(underlying.traceToolCall(toolName, input, output))
+    def traceError(error: Throwable, context: String): Result[Unit] = capture(underlying.traceError(error, context))
+    def traceCompletion(completion: Completion, model: String): Result[Unit] =
+      capture(underlying.traceCompletion(completion, model))
+    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
+      capture(underlying.traceTokenUsage(usage, model, operation))
+    def printed: String = out.synchronized(out.toString).replaceAll("\u001b\\[[0-9;]*m", "")
+  }
+
+  private def secret = "SECRET-4111-1111"
+
+  /** A run whose query, tool call and answer all hold `secret`, traced to `console`. */
+  private def secretRun(console: ConsoleTracing): String = {
+    val tracing = new Captured(console)
+    val call    = ToolCall("call-1", "echo", ujson.Obj("message" -> secret))
+    val calling =
+      Completion("turn-1", Instant.EPOCH, "", "test-model", AssistantMessage(None, Seq(call)), List(call), usage)
+    ok(traced(new Scripted(Right(calling), Right(answer(s"Echoed $secret"))), tracing).run(s"Echo $secret"))
+    eventually(tracing.printed should include("AGENT RUN ENDED"))
+    tracing.printed
+  }
+
+  "Console tracing of an agent run" should "print no query, tool input/output or answer by default (#2311)" in {
+    val printed = secretRun(new ConsoleTracing())
+
+    printed should include("graph.run_started")
+    printed should include("Model: test-model")
+    (printed should not).include(secret)
   }
 
   private def endedOf(tracing: Recording): Vector[TraceEvent.AgentRunEnded] =

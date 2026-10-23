@@ -6,8 +6,9 @@ import org.llm4s.trace.TracingMode
 /**
  * Tracing configuration used by [[org.llm4s.trace.Tracing]].
  *
- * `mode` selects the backend. Core builds `NoOp` and `Console` itself and needs
- * nothing more; every other mode is served by a [[org.llm4s.trace.spi.TracingBackend]]
+ * `mode` selects the backend. Core builds `NoOp` and `Console` itself; `Console` reads
+ * `captureContent` from `extras` (the `llm4s.tracing.console` block, `false` by default, so
+ * the console prints no prompt or completion text unless enabled). Every other mode is served by a [[org.llm4s.trace.spi.TracingBackend]]
  * on the classpath, which reads its own keys from `extras`: the block
  * `llm4s.tracing.<mode>` for the selected mode, flattened to strings. The backend's
  * module ships that block's defaults and `${?VAR}` bindings in its own

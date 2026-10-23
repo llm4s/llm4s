@@ -21,7 +21,7 @@ import scala.util.Using
  * its lines must still be on the page, and the buffer sizes the page states must be the ones in the code. How the
  * stream behaves (order, backpressure, cancellation, errors) is the subject of the other specs of this module.
  */
-class PekkoGuideSpec extends AnyFlatSpec with Matchers {
+class PekkoGuideSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // --- the snippets of the guide, compiled (they need a provider, so they are not run) ---------------------
 

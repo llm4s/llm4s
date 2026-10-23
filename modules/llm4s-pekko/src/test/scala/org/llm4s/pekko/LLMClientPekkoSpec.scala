@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration.*
 
-class LLMClientPekkoSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class LLMClientPekkoSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val system: ActorSystem = ActorSystem("llm-client-pekko-spec")
   private val ec: ExecutionContext         = ExecutionContext.global

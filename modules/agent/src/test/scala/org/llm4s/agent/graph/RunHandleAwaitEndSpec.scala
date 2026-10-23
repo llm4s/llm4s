@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -13,7 +15,7 @@ import scala.concurrent.duration._
  * [[DefaultRunHandle.awaitEnd]] for a [[RunHandle]] that is not the runtime's own - a test double or an
  * adapter - which it polls; the runtime's handles are covered through `AgentRun.cancelAndAwaitEnd`.
  */
-class RunHandleAwaitEndSpec extends AnyFlatSpec with Matchers {
+class RunHandleAwaitEndSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A handle whose status is whatever `current` holds. */
   final private class Foreign extends RunHandle[Unit] {

@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.types.Result
 import zio.ZIO
+import zio.durationInt
 import zio.test.*
 import java.time.Instant
 
@@ -90,5 +91,5 @@ object AgentZSpec extends ZIOSpecDefault {
         err <- agent.continueConversation(s1, "Follow-up").flip
       } yield assertTrue(Fixtures.causeOf(err) == SimpleError("agent-fail"))
     }
-  )
+  ) @@ TestAspect.timeout(120.seconds)
 }

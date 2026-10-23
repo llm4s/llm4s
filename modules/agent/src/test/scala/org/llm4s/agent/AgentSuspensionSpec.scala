@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.graph.InterruptId
@@ -14,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import scala.jdk.CollectionConverters._
 
 /** Parked turns: approvals from `ApprovalMiddleware`, questions from asking tools, and `resume`. */
-class AgentSuspensionSpec extends AnyFlatSpec with Matchers {
+class AgentSuspensionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   final case class Confirm(prompt: String) derives ReadWriter
   final case class Answer(ok: Boolean) derives ReadWriter

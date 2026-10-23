@@ -12,7 +12,11 @@ import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
 
-class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org.scalatest.BeforeAndAfterAll {
+class WorkspaceAgentInterfaceImplTest
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with org.scalatest.BeforeAndAfterAll {
 
   // Create a temporary workspace for testing
   val tempDir               = Files.createTempDirectory("workspace-test")

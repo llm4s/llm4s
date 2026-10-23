@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -13,7 +15,7 @@ import scala.jdk.CollectionConverters.*
  *
  * Nothing here pins a JSON shape: these types carry no codec of their own.
  */
-class GraphIdsSpec extends AnyFlatSpec with Matchers:
+class GraphIdsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   /** One identifier type: how to build it from a string and read the string back. */
   final private case class IdType[A](name: String, make: String => A, read: A => String)

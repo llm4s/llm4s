@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `PgVectorStore.apply(dataSource, tableName)`, and `PgKeywordIndex.apply(dataSource, ...)`. Source-compatible for
   callers passing a Hikari pool; recompile against the new signatures. `PgSearchIndex.close()` no longer closes a pool it
   did not create; [migration](docs/reference/migration.md#postgres-stores-take-a-javaxsqldatasource-2300).
+- The default console tracer prints metadata only: queries, completion content, tool input/output, custom event data
+  and error messages are withheld unless `llm4s.tracing.console.captureContent = true`
+  (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT`) or `new ConsoleTracing(captureContent = true)`; see the new
+  [data protection guide](docs/guide/data-protection.md);
+  [migration](docs/reference/migration.md#console-tracing-prints-no-content-by-default-2311).
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
@@ -398,6 +403,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
+  frozen module (top-level or nested) whose constructor is not `private` / `private[x]`, and for a public `copy` on
+  one, naming the file, line and type. Case classes with no fields are exempt; `GrowthExempted` in
+  `project/StabilityTiers.scala` lists the deliberately closed types with a reason, and the 75 types that predate the
+  check with `TODO(#2369)` to be converted before the baseline. A stale entry fails the check, and
+  `StabilityTiers.selfTest` covers a passing type, a public constructor, a public `copy` and an allow-listed type
+  [#2369](https://github.com/llm4s/llm4s/issues/2369); [API stability](docs/reference/api-stability.md#tiers-in-the-code).
 - **Added** `stabilityTierCheck` enforces RFC 0004: it fails for a public member of a `@Stable` type in a frozen module
   whose signature names a type from fansi, `cats`, pureconfig, `com.typesafe.config`, jtokkit, slf4j, OkHttp, Jackson,
   `com.openai`, `com.anthropic` or `software.amazon`, written fully qualified or through an imported (or renamed) name.
@@ -406,6 +418,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#2360](https://github.com/llm4s/llm4s/issues/2360) decides its tier), and `StabilityTiers.selfTest` has a violating
   fixture for every deny-listed package [#2357](https://github.com/llm4s/llm4s/issues/2357);
   [API stability](docs/reference/api-stability.md#tiers-in-the-code).
+- **Added** CI time limits: every job of the workflows that run on pull requests has a `timeout-minutes` of about twice
+  its usual duration, instead of GitHub's six-hour default, and the specs that wait on futures, actors or threads (agent
+  runtime, effect bridges, `java-api`, `java-rag`, workspace runner) fail a test that hangs under its own name after two
+  minutes (`TestTimeLimit`, ZIO's `TestAspect.timeout`); [how to raise one](CONTRIBUTING.md#ci-time-limits)
+  [#2370](https://github.com/llm4s/llm4s/issues/2370).
 - **Added** a per-module MiMa baseline: `mimaBaselineOverrides` in `build.sbt` gives a frozen module its own baseline
   release (`"llm4s-<name>" -> Some("X.Y.Z")`) or none (`-> None`) while the others use `mimaBaselineVersion`, so
   `llm4s-agent` can take a later baseline than the other frozen modules ([RFC 0001](docs/rfcs/0001-agent-baseline.md)).

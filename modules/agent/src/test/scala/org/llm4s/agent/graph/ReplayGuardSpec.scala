@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ CancelledError, ProcessingError }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -14,7 +16,7 @@ import scala.collection.mutable
  * row of the crash table, bounds, decoding and ownership (design §4.24). The runtime and the stores are
  * covered by `EffectReplayRuntimeSpec`, `CheckpointerContract` and `ReplayContract`.
  */
-class ReplayGuardSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class ReplayGuardSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   /** A journal that outlives a run, as the thread's store does, and can die before or after a write. */
   private class Journal extends EffectJournal {

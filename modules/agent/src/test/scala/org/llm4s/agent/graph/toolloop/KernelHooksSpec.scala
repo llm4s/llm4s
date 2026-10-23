@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
@@ -24,7 +26,7 @@ import scala.jdk.CollectionConverters.*
  * The kernel hooks of Stage 3 slice C1 (#1902, design §4.22): hooks that read thread state and write their own
  * keys, prompt sections, usage the loop counts, and an output Block that restores every key the turn wrote.
  */
-class KernelHooksSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class KernelHooksSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
   import ToolLoopFixtures.*
 
   private val agentA = AgentId.unsafe("a")

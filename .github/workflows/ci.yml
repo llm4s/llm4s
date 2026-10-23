@@ -30,10 +30,13 @@ concurrency:
   # Only cancel in-progress runs for pull requests, not for pushes to main/master
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every job sets timeout-minutes, about twice its usual duration on main, so a hung job cannot hold a runner and the
+# merge queue for GitHub's six-hour default (#2370). Raising one: CONTRIBUTING.md#ci-time-limits.
 jobs:
   config-policy-check:
     name: Config Policy Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -92,6 +95,7 @@ jobs:
   quick-checks:
     name: Quick Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
     
@@ -290,7 +294,8 @@ jobs:
 
       # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
       # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md; and when a @Stable
-      # signature names an @Experimental type or a deny-listed third-party type (RFC 0004).
+      # signature names an @Experimental type or a deny-listed third-party type (RFC 0004); and when a @Stable
+      # case class has a public constructor or copy (RFC 0002 growth safety).
       - name: Check every frozen type declares a stability tier
         run: sbt --client stabilityTierCheck
 
@@ -309,6 +314,7 @@ jobs:
   scaladoc:
     name: ScalaDoc
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -361,7 +367,7 @@ jobs:
     name: Code Coverage (${{ matrix.leg }})
     runs-on: ubuntu-latest
     # Healthy legs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -963,7 +969,7 @@ jobs:
     needs: [coverage-leg]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -1025,7 +1031,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     # Healthy runs take about 10-15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
-    timeout-minutes: 90
+    timeout-minutes: 40
     
     steps:
       - uses: actions/checkout@v7
@@ -1063,7 +1069,7 @@ jobs:
     name: Performance tests
     runs-on: ubuntu-latest
     # Healthy runs take about 15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
 
@@ -1099,6 +1105,7 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -1324,6 +1331,7 @@ jobs:
   mima-check:
     name: Binary Compatibility (MiMa)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -1349,6 +1357,7 @@ jobs:
   kotlin-api:
     name: Kotlin API
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -1446,6 +1455,7 @@ jobs:
   spring-boot-latest:
     name: Spring Boot 3.x (latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -1469,6 +1479,7 @@ jobs:
   spring-boot-4:
     name: Spring Boot 4.x
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -1497,6 +1508,7 @@ jobs:
     # is not, so a PR that changes the workspace cannot merge with the live suites red.
     needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest, spring-boot-4, workspace-changes, workspace-integration]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
 
@@ -1577,6 +1589,7 @@ jobs:
   ollama-integration:
     name: Ollama Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -1645,6 +1658,7 @@ jobs:
   workspace-changes:
     name: Workspace Changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
@@ -1667,6 +1681,7 @@ jobs:
   workspace-integration:
     name: Workspace Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     # On a push to main, on a pull request that changes the workspace (workspace-changes; All Tests Pass then requires
     # it to pass), and on demand: `gh workflow run ci.yml --ref <branch> -f tier=workspace`. Not on a merge group: the
     # queued PR already ran it. `!cancelled()` because workspace-changes is skipped on every event but a pull request.
@@ -1722,6 +1737,7 @@ jobs:
   mcp-reference-integration:
     name: MCP Reference Server Integration
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'mcp-reference'))
@@ -1782,6 +1798,7 @@ jobs:
   cloud-smoke:
     name: Cloud Smoke Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'cloud-smoke')
     permissions:
       contents: read

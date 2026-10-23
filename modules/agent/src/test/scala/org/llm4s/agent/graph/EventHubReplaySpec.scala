@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.types.Result
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
@@ -15,7 +17,7 @@ import scala.jdk.CollectionConverters.*
  * Live events handed to the event hub while a subscription replays (#1731): held, bounded, and
  * delivered in their place among the durable events, at the dispatcher.
  */
-class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
+class EventHubReplaySpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually:
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 
   private val thread = ThreadId("t")

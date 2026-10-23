@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, RunBudgets, RunConfig, ThreadId }
@@ -18,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * usage since the run was admitted, plus the current task's - and at the budget ends the turn `TokenLimitReached`
  * without calling the model. Every scripted completion here uses 30 tokens (10 in, 20 out).
  */
-class AgentTokenBudgetSpec extends AnyFlatSpec with Matchers {
+class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val thread = ThreadId("token-budget")
 

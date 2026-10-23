@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, StateKey, StateUpdate, ThreadId }
@@ -15,7 +17,7 @@ import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 
 /** Tool timeouts (#1903): a run of a tool past its timeout is interrupted and is an error the model sees. */
-class ToolTimeoutSpec extends AnyFlatSpec with Matchers {
+class ToolTimeoutSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val written: StateKey[Int, Int] = StateKey.replace[Int]("written", 0)
 

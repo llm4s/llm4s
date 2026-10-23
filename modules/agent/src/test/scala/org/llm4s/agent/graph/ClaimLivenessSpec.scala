@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.{ CancelledError, ProcessingError }
 import org.llm4s.types.Result
@@ -22,7 +24,7 @@ import scala.jdk.CollectionConverters.*
  * Time is manual: [[ManualTime]] is both the store's clock and the runtime's lease clock
  * ([[GraphRuntime.ticker]]), and moves only when a test moves it. Renewal ticks are real time.
  */
-class ClaimLivenessSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class ClaimLivenessSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val thread = ThreadId("t")
   private val t0     = Instant.parse("2026-10-13T09:00:00Z")

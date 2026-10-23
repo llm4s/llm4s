@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.guardrails.builtin.PIIMasker
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 import org.scalatest.flatspec.AnyFlatSpec
@@ -16,7 +18,7 @@ import scala.concurrent.duration._
  * part of the value behind, fails here. The expected values were taken from running the masker, not from the
  * patterns' comments.
  */
-class PIIMaskerFormatsSpec extends AnyFlatSpec with Matchers {
+class PIIMaskerFormatsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def phones = PIIMasker(Seq(PIIType.Phone))
   private def cards  = PIIMasker(Seq(PIIType.CreditCard))

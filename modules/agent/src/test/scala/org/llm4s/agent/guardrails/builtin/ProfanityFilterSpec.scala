@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -15,7 +17,7 @@ import scala.concurrent.duration._
  * tokens, so obfuscated spellings such as `f.u.c.k` are not detectable by this class; that is a design decision and
  * is not asserted here.
  */
-class ProfanityFilterSpec extends AnyFlatSpec with Matchers {
+class ProfanityFilterSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A generous bound, only there so that a pathological (quadratic) scan fails the test instead of hanging the build. */
   private val Bound = 60.seconds

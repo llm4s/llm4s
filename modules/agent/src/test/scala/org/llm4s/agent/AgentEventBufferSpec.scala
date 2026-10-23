@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -7,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 
-class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
+class AgentEventBufferSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   private def durable(seq: Long, event: RunEvent): StreamEvent =
     StreamEvent.Durable(EventRecord("t", seq, "r", FencingToken(1L), None, None, None, Instant.EPOCH, event))

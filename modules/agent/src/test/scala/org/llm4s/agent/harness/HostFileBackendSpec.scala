@@ -1,5 +1,7 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.testRunContext
 import org.llm4s.agent.graph.HarnessTestSupport.stateOf
 import org.llm4s.agent.graph.{ IdempotencyKey, ReplaySupport, StateUpdate, ToolCallId }
@@ -18,6 +20,7 @@ import scala.jdk.CollectionConverters._
 
 class HostFileBackendSpec
     extends AnyFlatSpec
+    with TestTimeLimit
     with Matchers
     with EitherValues
     with org.scalatest.OptionValues

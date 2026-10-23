@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ APIError, CancelledError }
 import org.llm4s.llmconnect.LLMClient
@@ -32,7 +34,7 @@ import java.time.Instant
  * The calls that go over HTTP use the real Ollama client against a local server, so the claims
  * hold for a real provider's request path and not only for a fake.
  */
-class ThreadingModelSpec extends AnyFlatSpec with Matchers {
+class ThreadingModelSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def waitSeconds: Long = 20L
 

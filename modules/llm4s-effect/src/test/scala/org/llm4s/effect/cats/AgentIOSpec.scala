@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.AgentStatus
@@ -12,7 +14,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 
-class AgentIOSpec extends AnyFlatSpec with Matchers {
+class AgentIOSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def completion(text: String) = Completion(
     id = "test-id",

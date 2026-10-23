@@ -1,5 +1,7 @@
 package org.llm4s.agent.harness
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.HarnessTestSupport.{ discardAttempt, recordingRunContext, stateOf }
 import org.llm4s.agent.graph.middleware.MiddlewareId
 import org.llm4s.agent.harness.HarnessFiles.*
@@ -12,7 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Stage 3 slice F5 (#1909, design §4.35): the read-once, bounded document mechanism F5 and F6 share. */
-class RunDocumentsSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class RunDocumentsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private def ctxOn(backend: FileBackend) =
     FileContext(org.llm4s.agent.graph.GraphTestSupport.testRunContext(), stateOf(backend.writes.toSeq*))

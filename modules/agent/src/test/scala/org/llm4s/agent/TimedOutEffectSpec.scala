@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling }
 import org.llm4s.agent.graph.{ GraphError, ReplayGuard, StateCheck }
@@ -17,7 +19,7 @@ import scala.concurrent.duration._
  * the guard recorded its intent, so the record stays begun, and a run of the same call again - a retrying
  * middleware, or `recover` - is decided by the target's support class. The record goes with the task's commit.
  */
-class TimedOutEffectSpec extends AnyFlatSpec with Matchers {
+class TimedOutEffectSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def results(result: AgentResult): Vector[String] = result.messages.collect { case t: ToolMessage =>
     t.content

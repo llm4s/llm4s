@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ProcessingError, ValidationError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -19,7 +21,7 @@ import scala.jdk.CollectionConverters.*
  * `JEmbeddingClient`, `JEmbeddings` and `Llm4s.createDefaultEmbeddingClient` (#1490), against an embedding provider that
  * records each request it is sent and answers what the test scripts.
  */
-class JEmbeddingClientSpec extends AnyFlatSpec with Matchers {
+class JEmbeddingClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A provider that records every request and answers `reply` to it. */
   final private class Recording(reply: EmbeddingRequest => Result[EmbeddingResponse]) extends EmbeddingProvider {

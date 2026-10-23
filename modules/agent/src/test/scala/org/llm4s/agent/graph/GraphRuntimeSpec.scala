@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
@@ -11,7 +13,13 @@ import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, LinkedBlockingQ
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.collection.mutable
 
-class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
+class GraphRuntimeSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with OptionValues
+    with LoneElement {
 
   private val thread = ThreadId("thread-1")
 

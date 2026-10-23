@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{
   APIError,
   AuthenticationError,
@@ -37,7 +39,7 @@ import java.time.Instant
  * compiling or an assertion fails, the guide is teaching something that no longer works: change the guide and
  * these files together.
  */
-class JavaGuideSpec extends AnyWordSpec with Matchers {
+class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   // ---- The guide itself: its blocks are read from docs/guide/java.md, so a block cannot drift from the code.
 

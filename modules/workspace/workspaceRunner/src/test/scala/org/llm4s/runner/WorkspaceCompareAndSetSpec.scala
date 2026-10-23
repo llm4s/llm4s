@@ -15,7 +15,7 @@ import scala.util.{ Try, Using }
  * C4's `StateCheck` format, compare-and-set writes and deletes that change nothing when they lose, atomic
  * replacement, and the sandbox's `allowedPaths`, `readOnlyPaths` and size limits enforced in the runner (#870).
  */
-class WorkspaceCompareAndSetSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class WorkspaceCompareAndSetSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterEach {
 
   private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
   private var root: Path    = _

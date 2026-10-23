@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.{ APIError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -8,7 +10,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.time.Instant
 
-class JLlmClientSpec extends AnyFlatSpec with Matchers {
+class JLlmClientSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def successClient(content: String): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.types.Result
@@ -19,7 +21,7 @@ import scala.jdk.CollectionConverters.*
  * named by `ThreadBusy`, and a run that lost its claim refused by the store. The store side of the
  * contract is `CheckpointerContract` in `llm4s-agent-testkit`.
  */
-class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class RunClaimSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val thread = ThreadId("t")
   private val start  = Instant.parse("2026-10-09T12:00:00Z")

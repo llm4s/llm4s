@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.NetworkError
 import org.llm4s.javaapi.StreamFixtures.*
 import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
@@ -11,7 +13,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.jdk.CollectionConverters.*
 
 /** `JLlmClient.stream` and `streamAsPublisher` (#1485): a reply's text streamed to Java. */
-class JCompletionStreamSpec extends AnyFlatSpec with Matchers {
+class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   /** A listener that records every callback in order. */
   private class Recording extends CompletionStreamListener {

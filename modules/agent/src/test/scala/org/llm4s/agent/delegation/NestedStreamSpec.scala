@@ -1,5 +1,7 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ Agent, CompletionFixture, ScriptedLLMClient, SpecTools }
 import org.llm4s.agent.events.{ AgentEvents, SubagentEvents }
 import org.llm4s.agent.graph.*
@@ -26,7 +28,13 @@ import scala.jdk.CollectionConverters.*
  * merged stream of its children's events, `subscribeChild`, `TaskStarted` / `TaskEnded`, and `AgentRunEnded`'s
  * parent ids.
  */
-class NestedStreamSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
+class NestedStreamSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with OptionValues
+    with LoneElement {
   import DelegationSpec.*
   import NestedStreamSpec.*
 

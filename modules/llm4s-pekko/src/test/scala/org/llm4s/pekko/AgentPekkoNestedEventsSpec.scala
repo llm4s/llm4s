@@ -19,7 +19,7 @@ import scala.concurrent.duration.*
 import java.time.Instant
 
 /** `AgentPekko.nestedEvents`: a delegating run's children's events, through `EventHandlers.onChild` (design 4.47). */
-class AgentPekkoNestedEventsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class AgentPekkoNestedEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
   import AgentPekkoNestedEventsSpec.*
 
   implicit private val system: ActorSystem = ActorSystem("agent-pekko-nested-spec")

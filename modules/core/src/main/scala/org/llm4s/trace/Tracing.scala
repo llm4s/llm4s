@@ -19,7 +19,8 @@ import scala.util.control.NonFatal
  *
  * == Implementations ==
  *
- *  - [[ConsoleTracing]] - Colored console output for development (core)
+ *  - [[ConsoleTracing]] - Colored console output for development (core); metadata only unless
+ *    `llm4s.tracing.console.captureContent` is set
  *  - [[NoOpTracing]] - Silent implementation for testing/disabled tracing (core)
  *  - `LangfuseTracing` - Production observability via Langfuse (`llm4s-observability`)
  *  - `OpenTelemetryTracing` - OTLP export (`llm4s-observability-otel`)
@@ -392,7 +393,9 @@ object Tracing {
   /**
    * Builds the tracer `settings` select, reporting a missing or failing backend as an error.
    *
-   * `NoOp` and `Console` are built directly. Any other mode is dispatched to the
+   * `NoOp` and `Console` are built directly; `Console` reads `captureContent` from the extras
+   * (`llm4s.tracing.console`), and a value other than `true` or `false` is a
+   * [[org.llm4s.error.ConfigurationError]]. Any other mode is dispatched to the
    * [[org.llm4s.trace.spi.TracingBackend]] discovered for it on the classpath.
    *
    * @return the tracer, or a [[org.llm4s.error.ConfigurationError]] when no backend
@@ -415,7 +418,7 @@ object Tracing {
   private def resolve(settings: TracingSettings, backends: => TracingBackends): Result[Tracing] =
     canonical(settings.mode) match {
       case TracingMode.NoOp    => Right(new NoOpTracing())
-      case TracingMode.Console => Right(new ConsoleTracing())
+      case TracingMode.Console => ConsoleTracing.fromExtras(settings.extras)
       case mode =>
         val available = backends
         available.find(mode) match {

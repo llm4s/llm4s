@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{
   Checkpointer,
@@ -33,7 +35,7 @@ import java.util.concurrent.{
 }
 import scala.jdk.CollectionConverters._
 import scala.concurrent.duration._
-class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually {
+class AgentRunCancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 

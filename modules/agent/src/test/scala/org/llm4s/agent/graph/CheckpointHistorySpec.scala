@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.scalatest.{ EitherValues, OptionValues }
@@ -18,7 +20,7 @@ import scala.jdk.CollectionConverters.*
  * them, edits the latest one's state as a new checkpoint, and prunes by age or size; a guardrail Block
  * retracts its turn from the history.
  */
-class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
+class CheckpointHistorySpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues with OptionValues {
 
   private val thread = ThreadId("t")
   private val other  = ThreadId("t-fork")

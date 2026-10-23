@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -14,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.time.Instant
 
 /** Null-safety, lambda-exception, lifecycle and cause-extraction behaviour for Java callers. */
-class RobustnessSpec extends AnyFlatSpec with Matchers {
+class RobustnessSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val error: LLMError = ValidationError("boom", "field")
 

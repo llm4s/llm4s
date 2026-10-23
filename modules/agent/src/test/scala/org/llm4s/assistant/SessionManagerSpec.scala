@@ -1,5 +1,7 @@
 package org.llm4s.assistant
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -17,7 +19,7 @@ import scala.util.Try
  * Tests session save/load operations using temporary directories
  * to avoid file system side effects.
  */
-class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class SessionManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterEach {
 
   private var tempDir: Path = _
 

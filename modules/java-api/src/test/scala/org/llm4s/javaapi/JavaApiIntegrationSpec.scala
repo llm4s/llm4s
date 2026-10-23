@@ -1,5 +1,7 @@
 package org.llm4s.javaapi
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.error.APIError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -13,7 +15,7 @@ import scala.jdk.CollectionConverters.*
 import upickle.default._
 import java.time.Instant
 
-class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
+class JavaApiIntegrationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   // ── Shared mock helpers (core test mocks) ──
 

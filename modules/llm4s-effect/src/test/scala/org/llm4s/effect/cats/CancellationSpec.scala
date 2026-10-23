@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 
@@ -32,7 +34,7 @@ import java.time.Instant
  * `Left(CancelledError)`. The non-streaming bridges must therefore run the provider call on an
  * interruptible thread, otherwise cancelling the fiber (or `IO.timeout`) waits for the whole call.
  */
-class CancellationSpec extends AnyFlatSpec with Matchers {
+class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
   import Fixtures.*
 
   final private class Parked {

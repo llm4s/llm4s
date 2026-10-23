@@ -21,7 +21,7 @@ import scala.util.{ Try, Using }
  * A program's own exit 125 (no status file) is passed through as its exit code. No allowlisted program exits 125, so
  * that is covered at the helper level (`ConfineHelperSpec`) and by the `CommandScratch.unavailable` case below.
  */
-class CommandConfinementExecuteSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class CommandConfinementExecuteSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val ec: ExecutionContext = ExecutionContext.global
 

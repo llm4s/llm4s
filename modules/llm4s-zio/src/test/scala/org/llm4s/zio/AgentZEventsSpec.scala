@@ -8,6 +8,7 @@ import org.llm4s.agent.testkit.Fixtures.Pings
 import org.llm4s.agent.testkit.Fixtures.Pings.Ping
 import org.llm4s.error.LLMError
 import zio.{ Chunk, ZIO }
+import zio.durationInt
 import zio.test.*
 
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
@@ -121,5 +122,5 @@ object AgentZEventsSpec extends ZIOSpecDefault {
         answer <- awaited(s.run)
       } yield assertTrue(exit.isFailure, answer == Some("done"))
     }
-  )
+  ) @@ TestAspect.timeout(120.seconds)
 }

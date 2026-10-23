@@ -90,9 +90,12 @@ LLM4S supports five tracing backends:
 |------|----------|---------------|--------|
 | `langfuse` | Production LLM observability | `TRACING_MODE=langfuse` | `llm4s-observability` |
 | `opentelemetry` | Integration with existing APM | `TRACING_MODE=opentelemetry` | `llm4s-observability-otel` |
-| `console` | Local development/debugging | `TRACING_MODE=console` | `llm4s-core` |
+| `console` (default) | Local development/debugging; metadata only unless `llm4s.tracing.console.captureContent = true` | `TRACING_MODE=console` | `llm4s-core` |
 | `noop` | Disabled | `TRACING_MODE=noop` | `llm4s-core` |
 | `collector` | In-process queryable store | Programmatic (see below) | `llm4s-observability` |
+
+What each mode records, and which settings keep personal data out of traces, is in
+[Data protection](../data-protection#logging-and-tracing-defaults).
 
 All backends implement the `Tracing` trait and can be composed with `TracingComposer.combine()`.
 `llm4s-core` holds the contract - `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`, the

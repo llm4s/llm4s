@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.scalatest.EitherValues
@@ -9,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, TimeUnit }
 
-class BreakpointSpec extends AnyFlatSpec with Matchers with EitherValues {
+class BreakpointSpec extends AnyFlatSpec with TestTimeLimit with Matchers with EitherValues {
 
   private val log     = StateKey.appending[String]("log")
   private val results = StateKey.appending[String]("results")

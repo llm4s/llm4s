@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.regex.Pattern
 
-class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with Matchers {
+class WorkspaceRegexSafetyManagerSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private val recursivePattern = Pattern.compile("(a|aa)*b")
   private val recursiveInput   = "a" * 50000

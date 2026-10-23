@@ -1,5 +1,7 @@
 package org.llm4s.agent.delegation
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.{ AgentTraceSpans, CompletionFixture }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContent, ToolOutcome, ToolSet }
@@ -19,7 +21,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * that started it - and a run continues a given context as its remote parent; a recovered child, the trace its origin
  * recorded.
  */
-class SpanTreeSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
+class SpanTreeSpec
+    extends AnyFlatSpec
+    with TestTimeLimit
+    with Matchers
+    with EitherValues
+    with OptionValues
+    with LoneElement {
   import DelegationSpec.*
   import NestedStreamSpec.Recording
 

@@ -1,5 +1,7 @@
 package org.llm4s.agent.guardrails
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.guardrails.builtin.PIIMasker
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 import org.scalatest.flatspec.AnyFlatSpec
@@ -16,7 +18,7 @@ import scala.concurrent.duration._
  * behind, fails. The inputs that must NOT change are as much the point as the ones that must: the new patterns
  * favour recall, but only inside the shapes the issue names.
  */
-class PIIMaskerInternationalSpec extends AnyFlatSpec with Matchers {
+class PIIMaskerInternationalSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   private def phones  = PIIMasker(Seq(PIIType.Phone))
   private def cards   = PIIMasker(Seq(PIIType.CreditCard))

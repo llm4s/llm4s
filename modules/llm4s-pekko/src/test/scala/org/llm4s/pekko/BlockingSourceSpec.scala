@@ -18,7 +18,7 @@ import scala.concurrent.duration.*
  * The stage under both adapters, driven by producers that record what happens to them: order, ending,
  * backpressure, cancellation, and the producer's thread.
  */
-class BlockingSourceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class BlockingSourceSpec extends AnyFlatSpec with TestTimeLimit with Matchers with BeforeAndAfterAll {
 
   implicit private val system: ActorSystem = ActorSystem("blocking-source-spec")
 

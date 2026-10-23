@@ -1,5 +1,7 @@
 package org.llm4s.agent
 
+import org.llm4s.testutil.TestTimeLimit
+
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, ApprovalMiddleware, GuardrailMiddleware, MiddlewareId }
@@ -21,7 +23,7 @@ import scala.jdk.CollectionConverters.*
 import java.time.Instant
 
 /** The tool and guardrail events of an agent run, and what the durable ones may carry. */
-class AgentEventsSpec extends AnyFlatSpec with Matchers:
+class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
 
   /** Answers call N with `responses(N)`. */
   final private class Scripted(responses: Result[Completion]*) extends LLMClient:

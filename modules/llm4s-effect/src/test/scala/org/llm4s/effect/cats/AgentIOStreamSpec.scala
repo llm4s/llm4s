@@ -1,5 +1,7 @@
 package org.llm4s.effect.cats
 
+import org.llm4s.testutil.TestTimeLimit
+
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import org.llm4s.agent.graph.{
@@ -32,7 +34,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.concurrent.duration.*
 import java.time.Instant
 
-class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
+class AgentIOStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig =
     PatienceConfig(timeout = Span(10, Seconds), interval = Span(20, Millis))
