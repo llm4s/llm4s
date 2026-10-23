@@ -324,7 +324,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     // Convert MCP input schema to our ObjectSchema format
     val schema = convertMCPSchemaToObjectSchema(name, inputSchema)
 
-    new ToolFunction[Value, Value](
+    ToolFunction[Value, Value](
       name = name,
       description = description,
       schema = schema,

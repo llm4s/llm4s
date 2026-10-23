@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`. JSON is
   unchanged. `UsageSummary.bigDecimalRw` is private;
   [migration](docs/reference/migration.md#core-data-types-are-growth-safe-2356).
+- The tool schemas (`StringSchema`, `NumberSchema`, `IntegerSchema`, `BooleanSchema`, `ArraySchema`, `ObjectSchema`),
+  `PropertyDefinition`, `SafeParameterExtractor`, `ToolCallRequest` and `ToolFunction` are growth-prone types: build
+  them with `X(...)` (or `Schema.*`) and change them with `with*`; `new` and `.copy` are private, and the classes are
+  `final`. `SafeParameterExtractor`'s Java constructor is now `SafeParameterExtractor.apply(params)`;
+  [migration](docs/reference/migration.md#tool-schemas-and-tool-call-types-are-growth-safe-2381).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
