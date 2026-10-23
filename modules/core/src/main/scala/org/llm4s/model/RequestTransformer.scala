@@ -258,13 +258,32 @@ final private[model] class DefaultRequestTransformer(
  * Transformed options and messages for one request, and whether the client must fake streaming.
  */
 @Stable
-case class TransformationResult(
+final case class TransformationResult private (
   options: CompletionOptions,
   messages: Seq[Message],
-  requiresFakeStreaming: Boolean = false
-)
+  requiresFakeStreaming: Boolean
+) {
+
+  /** Sets the transformed completion options. */
+  def withOptions(options: CompletionOptions): TransformationResult = copy(options = options)
+
+  /** Sets the transformed messages. */
+  def withMessages(messages: Seq[Message]): TransformationResult = copy(messages = messages)
+
+  /** Sets whether the client must fake streaming. */
+  def withRequiresFakeStreaming(requiresFakeStreaming: Boolean): TransformationResult =
+    copy(requiresFakeStreaming = requiresFakeStreaming)
+}
 
 object TransformationResult {
+
+  /** Creates a [[TransformationResult]]; streaming is real unless `requiresFakeStreaming` says otherwise. */
+  def apply(
+    options: CompletionOptions,
+    messages: Seq[Message],
+    requiresFakeStreaming: Boolean = false
+  ): TransformationResult =
+    new TransformationResult(options, messages, requiresFakeStreaming)
 
   /**
    * Convenience method to transform both options and messages in one call.

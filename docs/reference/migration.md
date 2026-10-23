@@ -608,6 +608,34 @@ private:
 
 Pattern matching (`case ToolCallRequest(name, args)`) and the fields are unchanged.
 
+### Config, model and util types are growth-safe (#2384)
+
+`Llm4sConfig.TextEmbeddingModelSettings`, `ProvidersConfigModel.ProvidersConfig` (`org.llm4s.config`),
+`TransformationResult` (`org.llm4s.model`) and `SecretPatterns.SecretMatch` (`org.llm4s.util`) follow the growth-prone
+pattern ([#2384](https://github.com/llm4s/llm4s/issues/2384)). Each is a `final case class` whose constructor and `copy`
+are private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, still compiles;
+  `TransformationResult(options, messages)` keeps `requiresFakeStreaming = false` as its default. `new X(...)` does not;
+  drop the `new`.
+- **Replace `.copy` with a setter**, one per field, named `with<Field>`:
+
+  | Type | Setters |
+  |---|---|
+  | `TextEmbeddingModelSettings` | `withProvider`, `withModelName`, `withDimensions` |
+  | `ProvidersConfig` | `withSelectedProvider` (a `ProviderName` or an `Option`), `withNamedProviders` |
+  | `TransformationResult` | `withOptions`, `withMessages`, `withRequiresFakeStreaming` |
+  | `SecretMatch` | `withSecretType`, `withValue`, `withStartIndex`, `withEndIndex` |
+
+  ```scala
+  val fake = result.withRequiresFakeStreaming(true) // was result.copy(requiresFakeStreaming = true)
+  ```
+
+- **Java and Kotlin**: call the companion's `apply` (`TransformationResult.apply(options, messages, false)`) instead
+  of the constructor, and chain the setters.
+
+Pattern matching (`case SecretMatch(secretType, value, start, end)`) and the fields are unchanged.
+
 ### Context types are growth-safe (#2380)
 
 `CompressionRule`, `ContextStep`, `PipelineStep`, `ManagedConversation`, `ConversationWindow`, `TokenUsageInfo`,

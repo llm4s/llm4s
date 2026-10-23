@@ -332,11 +332,35 @@ object Llm4sConfig {
   def exchangeLogging(): Result[ProviderExchangeLogging] =
     org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
-  final case class TextEmbeddingModelSettings(
+  /**
+   * The active embedding model, as [[textEmbeddingModel]] resolves it.
+   *
+   * @param provider   the embedding provider id, lower-cased
+   * @param modelName  the provider's model name
+   * @param dimensions the model's output dimensions
+   */
+  final case class TextEmbeddingModelSettings private (
     provider: String,
     modelName: String,
     dimensions: Int
-  )
+  ) {
+
+    /** Sets the embedding provider id. */
+    def withProvider(provider: String): TextEmbeddingModelSettings = copy(provider = provider)
+
+    /** Sets the model name. */
+    def withModelName(modelName: String): TextEmbeddingModelSettings = copy(modelName = modelName)
+
+    /** Sets the output dimensions. */
+    def withDimensions(dimensions: Int): TextEmbeddingModelSettings = copy(dimensions = dimensions)
+  }
+
+  object TextEmbeddingModelSettings {
+
+    /** Creates a [[TextEmbeddingModelSettings]]. */
+    def apply(provider: String, modelName: String, dimensions: Int): TextEmbeddingModelSettings =
+      new TextEmbeddingModelSettings(provider, modelName, dimensions)
+  }
 
   /**
    * Loads the active embedding provider and its configuration from the current environment.

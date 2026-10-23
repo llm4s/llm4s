@@ -23,7 +23,7 @@ object SecretPatterns {
    * @param startIndex  Inclusive start position in the original string.
    * @param endIndex    Exclusive end position in the original string.
    */
-  final case class SecretMatch(
+  final case class SecretMatch private (
     secretType: SecretType,
     value: String,
     startIndex: Int,
@@ -32,6 +32,25 @@ object SecretPatterns {
 
     /** The placeholder that should replace [[value]] when masking. */
     def redactedValue: String = secretType.placeholder
+
+    /** Sets the [[SecretType]] that produced this match. */
+    def withSecretType(secretType: SecretType): SecretMatch = copy(secretType = secretType)
+
+    /** Sets the matched secret text. */
+    def withValue(value: String): SecretMatch = copy(value = value)
+
+    /** Sets the inclusive start position. */
+    def withStartIndex(startIndex: Int): SecretMatch = copy(startIndex = startIndex)
+
+    /** Sets the exclusive end position. */
+    def withEndIndex(endIndex: Int): SecretMatch = copy(endIndex = endIndex)
+  }
+
+  object SecretMatch {
+
+    /** Creates a [[SecretMatch]]. */
+    def apply(secretType: SecretType, value: String, startIndex: Int, endIndex: Int): SecretMatch =
+      new SecretMatch(secretType, value, startIndex, endIndex)
   }
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -190,7 +190,7 @@ object ProvidersConfigModel:
    *  @param selectedProvider the name of the default provider, if configured
    *  @param namedProviders   map of provider name to validated `NamedProviderConfig`
    */
-  final case class ProvidersConfig(
+  final case class ProvidersConfig private (
     selectedProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, NamedProviderConfig]
   ):
@@ -203,3 +203,24 @@ object ProvidersConfigModel:
       selectedProvider.toRight(
         ConfigurationError("No default provider configured under llm4s.providers.provider")
       )
+
+    /** Sets the default provider's name. */
+    def withSelectedProvider(selectedProvider: ProviderName): ProvidersConfig =
+      copy(selectedProvider = Some(selectedProvider))
+
+    /** Sets the default provider's name, or clears it with `None`. */
+    def withSelectedProvider(selectedProvider: Option[ProviderName]): ProvidersConfig =
+      copy(selectedProvider = selectedProvider)
+
+    /** Sets the named provider sections. */
+    def withNamedProviders(namedProviders: Map[ProviderName, NamedProviderConfig]): ProvidersConfig =
+      copy(namedProviders = namedProviders)
+
+  object ProvidersConfig:
+
+    /** Creates a [[ProvidersConfig]]. */
+    def apply(
+      selectedProvider: Option[ProviderName],
+      namedProviders: Map[ProviderName, NamedProviderConfig]
+    ): ProvidersConfig =
+      new ProvidersConfig(selectedProvider, namedProviders)

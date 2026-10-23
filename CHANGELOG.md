@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SemanticBlock`) are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and `.copy` are
   private, and the classes are `final`;
   [migration](docs/reference/migration.md#context-types-are-growth-safe-2380).
+- `Llm4sConfig.TextEmbeddingModelSettings`, `ProvidersConfigModel.ProvidersConfig`, `TransformationResult` and
+  `SecretPatterns.SecretMatch` are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and
+  `.copy` are private, and `TransformationResult` is `final`;
+  [migration](docs/reference/migration.md#config-model-and-util-types-are-growth-safe-2384).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive

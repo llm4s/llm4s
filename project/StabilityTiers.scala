@@ -411,14 +411,6 @@ object StabilityTiers {
    * fails the check, so a converted type cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
-    GrowthExempt(
-      "org.llm4s.config.Llm4sConfig.TextEmbeddingModelSettings",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.config.ProvidersConfigModel.ProvidersConfig",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),
     GrowthExempt(
       "org.llm4s.context.tokens.TokenizerAccuracy.Approximate",
@@ -508,10 +500,6 @@ object StabilityTiers {
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
     GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),
-    GrowthExempt(
-      "org.llm4s.model.TransformationResult",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
     GrowthExempt(
@@ -559,11 +547,7 @@ object StabilityTiers {
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
-    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name"),
-    GrowthExempt(
-      "org.llm4s.util.SecretPatterns.SecretMatch",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    )
+    GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name")
   )
 
   private val PackageLine = "^package\\s+([\\w.]+)$".r
