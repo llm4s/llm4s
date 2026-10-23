@@ -891,6 +891,15 @@ SQLite file, so a run survives a restart and `recover` continues it in the next 
 
 [Learn more about durable checkpointers →](durable-checkpointers)
 
+### [Running agents on several machines](multiple-machines)
+
+Several instances of one agent service share threads through one PostgreSQL database: runs are submitted to a durable
+queue and executed by whichever instance's `AgentWorker` takes them, a run whose machine dies is recovered by
+another, any instance can follow or cancel any run, and a message for a busy thread is rejected, queued or
+interrupts the running turn, as the caller chooses.
+
+[Learn more about running on several machines →](multiple-machines)
+
 ---
 
 ## Built-in Tools
@@ -1090,4 +1099,5 @@ For in-depth technical details:
 3. **[Handoffs Guide](handoffs)** - Agent delegation
 4. **[Streaming Guide](streaming)** - Real-time events
 5. **[Durable Checkpointers](durable-checkpointers)** - Shared stores, claims and recovery
-6. **[Examples Gallery](/examples/)** - Working code samples
+6. **[Running agents on several machines](multiple-machines)** - One service, several instances, one Postgres
+7. **[Examples Gallery](/examples/)** - Working code samples

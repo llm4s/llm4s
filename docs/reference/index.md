@@ -39,6 +39,7 @@ Start here if you want to contribute to the project.
 ## Roadmap & Planning
 
 - **[Project Roadmap](roadmap)** - Development roadmap, production readiness, and future plans (single source of truth)
+- **[Agent Platform Parity](agent-platform-parity)** - The agent runtime against LangGraph Platform and Deep Agents, capability by capability, and where each gap went
 - **[1.0 Scope](v1-scope)** - Which packages are Frozen, Beta, or Experimental ahead of the 1.0 modularisation
 - **[API Stability](api-stability)** - How binary compatibility is checked with MiMa, which modules are covered, and how to add a filter
 - **[Compatibility and Deprecation Policy](compatibility-policy)** - What you can rely on when you upgrade, and how an API is deprecated and removed
