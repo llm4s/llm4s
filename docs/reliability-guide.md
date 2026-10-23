@@ -129,16 +129,22 @@ clientResult.foreach { client =>
 ```scala
 import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
 
+import org.llm4s.metrics.MetricsCollector
+import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
+
 val reliableClient = new ReliableClient(
-  underlying = myLLMClient,
+  underlying = baseClient,
   providerName = "openai",
   config = ReliabilityConfig.default,
-  collector = Some(metricsCollector)
+  collector = Some(MetricsCollector.noop) // or your own collector: see Metrics Integration
 )
 ```
 
 The provider name is not inferred: pass the provider id (`providerConfig.providerId.asString`)
 or any stable label you want on your metrics.
+
+Here and in the fragments below, `baseClient` is the `LLMClient` being wrapped - one from
+`LLMConnect.getClient`, as in the Quick Start - and `conversation` is a `Conversation`.
 
 ## Configuration Examples
 
@@ -284,7 +290,10 @@ val config = ToolExecutionConfig(
   retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis, backoffFactor = 2.0))
 )
 
-val registry = new ToolRegistry(Seq(myTool))
+val registry = new ToolRegistry(myTools) // your ToolFunctions
+val request  = ToolCallRequest("get_weather", ujson.Obj("city" -> "Paris"))
+val requests = Seq(request, ToolCallRequest("get_weather", ujson.Obj("city" -> "Rome")))
+
 registry.execute(request, config)                                       // blocks the calling thread
 registry.executeAsync(request, config)                                  // Future
 registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(4), config)
@@ -325,7 +334,7 @@ CircuitBreakerConfig(
 ### Monitoring
 
 ```scala
-val reliableClient: ReliableClient = ???
+val reliableClient = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 
 // Check circuit breaker state
 reliableClient.currentCircuitState match {
@@ -343,7 +352,8 @@ reliableClient.resetCircuitBreaker()
 Track reliability metrics with any MetricsCollector:
 
 ```scala
-import org.llm4s.metrics.MetricsCollector
+import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import scala.concurrent.duration.FiniteDuration
 
 class MyMetricsCollector extends MetricsCollector {
   override def recordRetryAttempt(provider: String, attemptNumber: Int): Unit = {
@@ -354,7 +364,10 @@ class MyMetricsCollector extends MetricsCollector {
     println(s"$provider: Circuit breaker → $newState")
   }
 
-  // ... implement other methods
+  // The three methods without a default: per-call latency, tokens and cost
+  override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
+  override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
+  override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
 }
 
 val metrics = new MyMetricsCollector
@@ -401,8 +414,8 @@ exactly what the other policies retry.
 ### 1. Use Default Configuration First
 
 ```scala
-// Start here
-val client = new ReliableClient(baseClient, providerConfig.providerId.asString, ReliabilityConfig.default)
+// Start here (pass providerConfig.providerId.asString when you loaded the client from config)
+val client = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 ```
 
 Only customize if you have specific requirements.
@@ -410,13 +423,25 @@ Only customize if you have specific requirements.
 ### 2. Monitor Circuit Breaker State
 
 ```scala
+import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.slf4j.LoggerFactory
+import scala.concurrent.duration.FiniteDuration
+
+// Your paging or chat-ops integration
+trait Alerting { def sendAlert(message: String): Unit }
+
 // In production, log circuit breaker transitions
-class ProductionMetrics extends MetricsCollector {
+class ProductionMetrics(alerting: Alerting) extends MetricsCollector {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
     logger.warn(s"Circuit breaker for $provider transitioned to $newState")
     alerting.sendAlert(s"Circuit breaker: $provider → $newState")
   }
-  // ... observeRequest, addTokens, recordCost
+
+  override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
+  override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
+  override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
 }
 ```
 
@@ -433,9 +458,12 @@ ReliabilityConfig.default.withDeadline(30.seconds)
 ### 4. Disable for Testing
 
 ```scala
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient } // llm4s-testkit
+
 // In tests, disable reliability for faster failures
+val scripted = ScriptedLLMClient.sequence(Reply.text("Hello"))
 val testClient = new ReliableClient(
-  underlying = mockClient,
+  underlying = scripted,
   providerName = "test",
   config = ReliabilityConfig.disabled,
   collector = None
@@ -456,7 +484,7 @@ object ReliabilityProfiles {
   }
 }
 
-// appEnv comes from your application's own configuration
+val appEnv = "staging" // from your application's own configuration
 val config = ReliabilityProfiles.forEnvironment(appEnv)
 val client = new ReliableClient(baseClient, "openai", config)
 ```
@@ -493,6 +521,16 @@ val chatClient = new ReliableClient(baseClient, "openai", chatConfig)
 ### Pattern 4: Graceful Degradation
 
 ```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.model.{ Completion, Conversation }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
+
+val logger = LoggerFactory.getLogger("fallback")
+
 def callWithFallback(
   primaryClient: LLMClient,
   fallbackClient: LLMClient,
@@ -506,8 +544,10 @@ def callWithFallback(
   }
 }
 
-// Usage (with a given ModelRegistryService in scope, as in the Quick Start)
+// Usage
 for
+  registry        <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   openAIConfig    <- Llm4sConfig.provider("openai-main")
   anthropicConfig <- Llm4sConfig.provider("claude")
   openAIBase      <- LLMConnect.getClient(openAIConfig)
@@ -521,7 +561,19 @@ yield completion
 ### Pattern 5: Circuit Breaker Monitoring
 
 ```scala
-class ProductionMetrics extends MetricsCollector {
+import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.slf4j.LoggerFactory
+import scala.collection.mutable
+import scala.concurrent.duration.FiniteDuration
+
+// Your paging or chat-ops integration
+trait Alerting {
+  def sendCritical(message: String): Unit
+  def sendInfo(message: String): Unit
+}
+
+class ProductionMetrics(alerting: Alerting) extends MetricsCollector {
+  private val logger            = LoggerFactory.getLogger(getClass)
   private val circuitOpenAlerts = mutable.Set[String]()
   
   override def recordCircuitBreakerTransition(provider: String, newState: String): Unit = {
@@ -540,9 +592,14 @@ class ProductionMetrics extends MetricsCollector {
         
       case "half-open" =>
         logger.info(s"Circuit breaker testing recovery for $provider")
+
+      case _ => ()
     }
   }
-  // ... observeRequest, addTokens, recordCost
+
+  override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
+  override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
+  override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
 }
 ```
 
@@ -560,7 +617,7 @@ val config = ReliabilityConfig.default.withRetryPolicy(
 )
 
 // Or disable for specific operations
-val config = ReliabilityConfig.disabled
+val noReliability = ReliabilityConfig.disabled
 ```
 
 ### Issue: Circuit Breaker Opens Too Quickly
@@ -589,7 +646,7 @@ val config = ReliabilityConfig.default.withCircuitBreaker(
 val config = ReliabilityConfig.default.withDeadline(5.minutes)
 
 // Or remove deadline entirely
-val config = ReliabilityConfig.default.withoutDeadline
+val noDeadline = ReliabilityConfig.default.withoutDeadline
 ```
 
 ### Issue: Rate Limits Not Respected
@@ -631,18 +688,15 @@ A request rejected locally fails with a `RateLimitError` of origin
 
 **Diagnosis**:
 ```scala
-val reliableClient: ReliableClient = ???
+val reliableClient = new ReliableClient(baseClient, "openai", ReliabilityConfig.default)
 reliableClient.currentCircuitState // Check state
-```
 
-**Solution**:
-```scala
 // For emergencies only (not for production automation)
 reliableClient.resetCircuitBreaker()
-
-// Better: Fix underlying service issues and wait for auto-recovery
-// Circuit will automatically test recovery after recoveryTimeout
 ```
+
+**Solution**: fix the underlying service issue and wait for auto-recovery: the circuit
+tests recovery by itself after `recoveryTimeout`. Reset it by hand only in an emergency.
 
 ## Migration Guide
 
@@ -685,12 +739,16 @@ applied by `ReliableClient` itself.
 
 **Unit Tests (Disable Reliability)**:
 ```scala
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient } // llm4s-testkit
+import org.scalatest.flatspec.AnyFlatSpec
+
 class MyServiceTest extends AnyFlatSpec {
-  val mockClient: LLMClient = ???
-  
+  val scripted = ScriptedLLMClient.sequence(Reply.text("A scripted answer"))
+
   // No retries in tests for fast failures
-  val testClient = new ReliableClient(mockClient, "test", ReliabilityConfig.disabled)
-  
+  val testClient = new ReliableClient(scripted, "test", ReliabilityConfig.disabled)
+
   "MyService" should "handle LLM responses" in {
     // Test logic
   }
@@ -699,23 +757,30 @@ class MyServiceTest extends AnyFlatSpec {
 
 **Integration Tests (Verify Reliability)**:
 ```scala
-class ReliabilityIntegrationTest extends AnyFlatSpec {
+import org.llm4s.error.RateLimitError
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableClient, RetryPolicy }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient } // llm4s-testkit
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration._
+
+class ReliabilityIntegrationTest extends AnyFlatSpec with Matchers {
   "ReliableClient" should "retry on rate limits" in {
-    var attempts = 0
-    val mockClient = new LLMClient {
-      override def complete(conv: Conversation, opts: CompletionOptions) = {
-        attempts += 1
-        if (attempts < 3) Left(RateLimitError("test", 1.second)) // retry after 1s
-        else Right(mockCompletion)
-      }
-      // ... other methods
-    }
-    
-    val reliableClient = new ReliableClient(mockClient, "test", ReliabilityConfig.default)
-    val result = reliableClient.complete(conversation)
-    
-    result shouldBe Right(mockCompletion)
-    attempts shouldBe 3 // Verify it retried
+    // Two rate-limit failures, then an answer
+    val scripted = ScriptedLLMClient.sequence(
+      Reply.failure(RateLimitError("test")),
+      Reply.failure(RateLimitError("test")),
+      Reply.text("Recovered")
+    )
+    // A short fixed delay keeps the test fast
+    val config         = ReliabilityConfig.default.withRetryPolicy(RetryPolicy.fixedDelay(maxAttempts = 3, delay = 10.millis))
+    val reliableClient = new ReliableClient(scripted, "test", config)
+
+    val result = reliableClient.complete(Conversation(Seq(UserMessage("Hello"))))
+
+    result.map(_.content) shouldBe Right("Recovered")
+    scripted.callCount shouldBe 3 // Verify it retried
   }
 }
 ```

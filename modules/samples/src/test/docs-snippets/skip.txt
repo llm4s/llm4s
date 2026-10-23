@@ -79,3 +79,44 @@ guide/basic-usage.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 getting-started/installation.md | acebca2c40 | skip | sbt build definition, not Scala source
 getting-started/installation.md | f178be64a2 | skip | sbt build definition, not Scala source
+guide/vector-store.md | 82d7940cc0 | skip | sbt build definition, not Scala source
+guide/vector-store.md | 1ec60e6ed3 | skip | sbt build definition, not Scala source
+guide/vector-store.md | 0c5a836dc4 | with | import org.llm4s.vectorstore.elasticsearch._
+guide/vector-store.md | e77789c123 | with | import org.llm4s.vectorstore.opensearch._
+guide/vector-store.md | c2d63ce84e | with | import org.llm4s.vectorstore.redis._
+guide/vector-store.md | 3444be8ce8 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | a95d21c168 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | 6d038549b2 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | 81578bed66 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | dd3f42e9a1 | with | import org.llm4s.vectorstore.MetadataFilter._
+guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.MetadataFilter._
+guide/vector-store.md | 84a5714593 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
+guide/vector-store.md | df1066d8ee | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
+reliability-guide.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block
+reliability-guide.md | 59c7ab6934 | skip | API reference: the class's signature and members without their bodies
+reliability-guide.md | f4a41421d1 | with | import org.llm4s.reliability._
+reliability-guide.md | 3cb4356d69 | with | import org.llm4s.reliability._
+reliability-guide.md | fd2c3a178c | with | import org.llm4s.reliability._
+reliability-guide.md | a48b40ce3c | with | import org.llm4s.reliability._; import scala.concurrent.duration._; import org.llm4s.error._
+reliability-guide.md | b30e8f450e | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | c7ecba27e8 | with | import org.llm4s.reliability._
+reliability-guide.md | b52cbbfd39 | with | import org.llm4s.reliability._
+reliability-guide.md | 86288480cb | with | import org.llm4s.reliability._
+reliability-guide.md | 37f427ee8d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | d58076267d | with | import org.llm4s.reliability._
+reliability-guide.md | 9d9432e21d | with | import org.llm4s.reliability._
+reliability-guide.md | 2c0d6d235a | with | import org.llm4s.reliability._
+reliability-guide.md | c727d02cbc | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | 73e2ef368d | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | 94a0e049b6 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | 25116bcad0 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | f07b226a63 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | fd762bb41c | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | 72f66091ea | with | import org.llm4s.reliability._
+reliability-guide.md | 96df290f68 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService
+reliability-guide.md | 7d18961271 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.model.ModelRegistryService; import org.llm4s.reliability._
+reliability-guide.md | 3e60aa3697 | with | import org.llm4s.reliability._; import scala.concurrent.duration._
+reliability-guide.md | ea2b58a14f | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
+reliability-guide.md | b36aaef65f | with | import scala.concurrent.duration._
+reliability-guide.md | fa35020d32 | with | import scala.concurrent.duration._
