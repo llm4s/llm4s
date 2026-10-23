@@ -2143,6 +2143,9 @@ lazy val javaRag = (project in file("modules/java-rag"))
     // Measured 100.00% statement coverage (`sbt coverage javaRag/test javaRag/coverageReport`); floor is the measured
     // value rounded down to the nearest 5.
     coverageFloor(100),
+    // JavaRagGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
+    // process-wide. Run the suites one at a time, so another suite's output cannot print into it, as java-api does.
+    Test / parallelExecution        := false,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -2162,6 +2165,9 @@ lazy val reactor = (project in file("modules/reactor"))
     // Measured 100.00% statement coverage (`sbt coverage reactor/test reactor/coverageReport`); floor is the measured
     // value rounded down to the nearest 5.
     coverageFloor(100),
+    // ReactorGuideSpec checks what the guide's snippets print by redirecting System.out, which is process-wide. Run
+    // the suites one at a time, so another suite's output cannot print into it, as java-api does.
+    Test / parallelExecution        := false,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
