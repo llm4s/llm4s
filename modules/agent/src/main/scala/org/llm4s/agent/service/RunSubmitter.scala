@@ -28,7 +28,8 @@ final case class FollowedRun(entry: QueueEntry, events: Vector[EventRecord], nex
  *
  * Entries are submitted with `settings.maxAttempts`; the worker side (W2) takes them. The entries this API closes
  * itself - one a cancel closes before it runs, an earlier unstarted `Interrupt` entry a new one closes - are counted on
- * `metrics` as the worker counts its closes (`llm4s.agent.queue.closed`, design 4.59; W3).
+ * `metrics` as the worker counts its closes (`llm4s.agent.queue.closed`, design 4.59; W3): those the store reports this
+ * call closed ([[Ticket.interrupted]], [[Cancellation.closed]]), so a close two racing calls both saw is counted once.
  */
 @Experimental
 final class RunSubmitter(
@@ -53,22 +54,13 @@ final class RunSubmitter(
     submissionKey: Option[SubmissionKey] = None,
     traceContext: Option[TraceContext] = None
   ): Result[Ticket] =
-    // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store: counted here, by reading them
-    // before and after (W3); only when anything is recorded
-    val earlier =
-      if meter.enabled && policy == BusyThreadPolicy.Interrupt then
-        queue
-          .openEntries(tenantId, threadId)
-          .toOption
-          .toVector
-          .flatten
-          .filter(e => e.policy == BusyThreadPolicy.Interrupt && e.attempts.isEmpty)
-      else Vector.empty
+    // an Interrupt closes the thread's earlier unstarted Interrupt entries in the store, which answers them in the
+    // ticket - only to the submit that closed them - and they are counted here (W3, #2368)
     Submission
       .of(threadId, agentId, input, tenantId, policy, submissionKey, settings.maxAttempts, traceContext)
       .flatMap(queue.submit)
       .map { ticket =>
-        if !ticket.existing then countClosed(tenantId, earlier)
+        countClosed(ticket.interrupted)
         ticket
       }
 
@@ -85,27 +77,20 @@ final class RunSubmitter(
     note: Option[String] = None
   ): Result[Vector[QueueEntry]] = cancelled(tenantId, target, CancelReason.Requested(note))
 
-  /** [[RunQueue.cancel]], counting the entries it closed before they ran. */
+  /** [[RunQueue.cancel]], counting the entries the store reports it closed before they ran. */
   private def cancelled(
     tenantId: Option[TenantId],
     target: CancelTarget,
     reason: CancelReason
   ): Result[Vector[QueueEntry]] =
-    val before =
-      if !meter.enabled then Vector.empty
-      else
-        target match
-          case CancelTarget.Entry(id)      => queue.entry(tenantId, id).toOption.toVector.filter(_.isOpen)
-          case CancelTarget.Thread(thread) => queue.openEntries(tenantId, thread).toOption.toVector.flatten
-    queue.cancel(tenantId, target, reason).map { after =>
-      val wasOpen = before.map(_.id).toSet
-      after.filter(e => wasOpen(e.id)).foreach(e => e.outcome.foreach(meter.closed(e.agentId, _)))
-      after
+    queue.cancel(tenantId, target, reason).map { cancellation =>
+      countClosed(cancellation.closedEntries)
+      cancellation.entries
     }
 
-  /** Counts each of `entries`, open before, that is closed now. */
-  private def countClosed(tenantId: Option[TenantId], entries: Vector[QueueEntry]): Unit =
-    entries.foreach(e => queue.entry(tenantId, e.id).toOption.flatMap(_.outcome).foreach(meter.closed(e.agentId, _)))
+  /** Counts each of `entries`, which the store reports the call closed. */
+  private def countClosed(entries: Vector[QueueEntry]): Unit =
+    entries.foreach(e => e.outcome.foreach(meter.closed(e.agentId, _)))
 
   /**
    * The service's delete of `threadId` for `tenantId` (W3, Stage 5 rule 4): it closes the thread's queued entries,

@@ -26,8 +26,9 @@ import scala.concurrent.duration.*
  *    thread with an open entry, or one a live claim of the submitter's tenant holds by the store's clock (a direct
  *    run, W3; another tenant's claim is never reported, rule 9), with
  *    `GraphError.ThreadBusy` naming no holder; when an `Interrupt` entry is submitted, close every queued `Interrupt`
- *    entry of the thread that has recorded no attempt `Interrupted(by = the new entry)` and ask every open entry of
- *    the thread that has recorded one to stop for it ([[StopRequest.Interrupt]]) unless a cancel was asked of it; and
+ *    entry of the thread that has recorded no attempt `Interrupted(by = the new entry)`, answering them in
+ *    [[Ticket.interrupted]], and ask every open entry of the thread that has recorded one to stop for it
+ *    ([[StopRequest.Interrupt]]) unless a cancel was asked of it; and
  *    issue entry ids in submission order, never reused;
  *  - '''order''' each thread's open entries (rule 5): an entry that has recorded an attempt first, then `Interrupt`
  *    entries, then the rest, each by id; only a thread's first entry in that order - its head - is ever taken, and only
@@ -56,7 +57,8 @@ import scala.concurrent.duration.*
  *  - '''keep the evidence''': while an entry is open, its store's `Checkpointer.prune` keeps the newest checkpoint each
  *    of the entry's recorded runs committed on its thread, so `latestOfRuns` never loses an admitted run;
  *  - '''cancel''' durably ([[cancel]], W3): close a targeted open entry that has recorded no attempt
- *    `Cancelled(reason)` at once, so it never runs, and ask one that has recorded an attempt to stop
+ *    `Cancelled(reason)` at once, so it never runs, reporting it closed only to the call that closed it
+ *    ([[Cancellation.closed]]), and ask one that has recorded an attempt to stop
  *    ([[StopRequest.Cancel]], replacing an interrupt), keeping the request until the entry closes and answering it with
  *    every lease granted or renewed on the entry ([[Lease.stop]]), so its worker - on any machine - sees it;
  *  - '''close''' an entry once, with its [[EntryOutcome]], the store's time and the thread's last event number then
@@ -133,11 +135,13 @@ trait RunQueue:
    * that has recorded no attempt is closed `Cancelled(reason)` at once, so no worker runs it; each that has recorded
    * one - running, or left by a worker that died - is asked to stop ([[StopRequest.Cancel]], replacing an
    * interrupt; a cancel already asked keeps its reason), and stays open until the worker holding it, or the next to
-   * take it, stops its run, settles the thread and closes it. A closed entry is answered as it is. `CancelTarget.Entry`
-   * answers [[entry]]'s errors for an entry that is not the tenant's; `CancelTarget.Thread` cancels only the tenant's
-   * open entries of the thread, and answers none for a thread with none.
+   * take it, stops its run, settles the thread and closes it. A closed entry is answered as it is.
+   * [[Cancellation.closed]] names the entries this call closed, decided in the transaction (or under the lock) that
+   * closed them: of concurrent cancels of one entry, exactly one reports it closed. `CancelTarget.Entry` answers
+   * [[entry]]'s errors for an entry that is not the tenant's; `CancelTarget.Thread` cancels only the tenant's open
+   * entries of the thread, and answers none for a thread with none.
    */
-  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Vector[QueueEntry]]
+  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation]
 
   /**
    * Gives the entry back without closing it - as a worker that defers to a live run on the thread does, recording no

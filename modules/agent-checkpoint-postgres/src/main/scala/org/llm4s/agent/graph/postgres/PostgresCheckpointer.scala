@@ -1173,10 +1173,13 @@ object PostgresCheckpointer:
       statement.setArray(index, statement.getConnection.createArrayOf("text", a.map(s => s: AnyRef)))
     case other => statement.setObject(index, other)
 
-  private[postgres] def update(c: Connection, sql: String, params: Any*): Unit =
+  private[postgres] def update(c: Connection, sql: String, params: Any*): Unit = updated(c, sql, params*): Unit
+
+  /** [[update]], answering how many rows it changed. */
+  private[postgres] def updated(c: Connection, sql: String, params: Any*): Int =
     Using.resource(c.prepareStatement(sql)) { statement =>
       bind(statement, params*)
-      statement.executeUpdate(): Unit
+      statement.executeUpdate()
     }
 
   private[postgres] def query[A](c: Connection, sql: String, params: Any*)(read: ResultSet => A): Vector[A] =

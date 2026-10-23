@@ -129,12 +129,16 @@ final class InMemoryRunQueue private[agent] (
           val now = clock.instant()
           // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it runs
+          // the entries closed here are answered in the ticket, under the lock, so only this submit reports them
+          val interrupted =
+            if submission.policy != BusyThreadPolicy.Interrupt then Vector.empty
+            else
+              queued
+                .filter(r =>
+                  r.tenantId == submission.tenantId && r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty
+                )
+                .map(r => closeRow(r, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now))
           if submission.policy == BusyThreadPolicy.Interrupt then
-            queued
-              .filter(r =>
-                r.tenantId == submission.tenantId && r.policy == BusyThreadPolicy.Interrupt && r.attempts.isEmpty
-              )
-              .foreach(r => closeRow(r, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now))
             // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled (W3)
             queued.filter(r => r.tenantId == submission.tenantId && r.attempts.nonEmpty && !cancelling(r)).foreach {
               r => rows.update(r.id, r.copy(stop = Some(StopRequest.Interrupt(EntryId.unsafe(id)))))
@@ -159,7 +163,9 @@ final class InMemoryRunQueue private[agent] (
           rows.update(id, row)
           openByThread.getOrElseUpdate(row.threadId, mutable.Set.empty) += id
           submission.submissionKey.foreach(k => keys.update(tenant -> k.value, id))
-          Right(Ticket(EntryId.unsafe(id), submission.threadId, view(row).position, existing = false))
+          Right(
+            Ticket(EntryId.unsafe(id), submission.threadId, view(row).position, existing = false, interrupted.map(view))
+          )
   }
 
   private def cancelling(row: Row): Boolean = row.stop.exists(_.isInstanceOf[StopRequest.Cancel])
@@ -295,21 +301,25 @@ final class InMemoryRunQueue private[agent] (
     }
   }
 
-  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Vector[QueueEntry]] =
+  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Cancellation] =
     withLock(lock) {
       val targeted: Result[Vector[Row]] = target match
         case CancelTarget.Entry(id) => found(tenantId, id).map(_ => Vector(rows(id.value)))
         case CancelTarget.Thread(t) => Right(queueOf(t).filter(_.tenantId == tenantId))
-      targeted.map(_.map { row =>
-        if !row.open then view(row)
-        // never started: closed now, so no worker runs it
-        else if row.attempts.isEmpty then view(closeRow(row, EntryOutcome.Cancelled(reason)))
-        else if cancelling(row) then view(row)
-        else
-          val asked = row.copy(stop = Some(StopRequest.Cancel(reason)))
-          rows.update(row.id, asked)
-          view(asked)
-      })
+      targeted.map { targets =>
+        // (entry, closed by this call), decided under the lock
+        val answered = targets.map { row =>
+          if !row.open then view(row) -> false
+          // never started: closed now, so no worker runs it
+          else if row.attempts.isEmpty then view(closeRow(row, EntryOutcome.Cancelled(reason))) -> true
+          else if cancelling(row) then view(row) -> false
+          else
+            val asked = row.copy(stop = Some(StopRequest.Cancel(reason)))
+            rows.update(row.id, asked)
+            view(asked) -> false
+        }
+        Cancellation(answered.map(_._1), answered.collect { case (e, true) => e.id }.toSet)
+      }
     }
 
   def close(lease: Lease, outcome: EntryOutcome): Result[QueueEntry] = withLock(lock) {
