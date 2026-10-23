@@ -162,7 +162,14 @@ object DeterministicCompressor {
  * @param apply The transformation function
  */
 @Stable
-case class CompressionRule(name: String, apply: Seq[Message] => Seq[Message])
+final case class CompressionRule private (name: String, apply: Seq[Message] => Seq[Message]) {
+
+  /** Sets the rule's identifier. */
+  def withName(name: String): CompressionRule = copy(name = name)
+
+  /** Sets the transformation function. */
+  def withApply(apply: Seq[Message] => Seq[Message]): CompressionRule = copy(apply = apply)
+}
 
 /**
  * Built-in compression rules for common scenarios.
@@ -177,6 +184,15 @@ case class CompressionRule(name: String, apply: Seq[Message] => Seq[Message])
  *  - '''compressToolOutputs''': Compresses large tool outputs (see [[ToolOutputCompressor]])
  */
 object CompressionRule {
+
+  /**
+   * Creates a [[CompressionRule]].
+   *
+   * @param name Identifier for logging and debugging
+   * @param apply The transformation function
+   */
+  def apply(name: String, apply: Seq[Message] => Seq[Message]): CompressionRule =
+    new CompressionRule(name, apply)
 
   /** Removes phrases like "as I mentioned before", "like I said", etc. */
   val removeRedundantPhrases: CompressionRule = CompressionRule(
