@@ -226,11 +226,21 @@ object ConversationTokenCounter {
  * Detailed breakdown of token usage in a conversation
  */
 @Stable
-case class TokenBreakdown(
+final case class TokenBreakdown private (
   totalTokens: Int,
   messages: Seq[MessageTokenInfo],
   overhead: Int
 ) {
+
+  /** Sets the total token count. */
+  def withTotalTokens(totalTokens: Int): TokenBreakdown = copy(totalTokens = totalTokens)
+
+  /** Sets the per-message token information. */
+  def withMessages(messages: Seq[MessageTokenInfo]): TokenBreakdown = copy(messages = messages)
+
+  /** Sets the conversation overhead in tokens. */
+  def withOverhead(overhead: Int): TokenBreakdown = copy(overhead = overhead)
+
   def prettyPrint(): String = {
     val header       = s"=== Token Breakdown (Total: $totalTokens) ===\n"
     val messageLines = messages.zipWithIndex.map(formatMessageLine).mkString
@@ -244,12 +254,36 @@ case class TokenBreakdown(
   }
 }
 
+object TokenBreakdown {
+
+  /** Creates a [[TokenBreakdown]]. */
+  def apply(totalTokens: Int, messages: Seq[MessageTokenInfo], overhead: Int): TokenBreakdown =
+    new TokenBreakdown(totalTokens, messages, overhead)
+}
+
 /**
  * Token information for a single message
  */
 @Stable
-case class MessageTokenInfo(
+final case class MessageTokenInfo private (
   role: String,
   tokens: Int,
   preview: String
-)
+) {
+
+  /** Sets the message role. */
+  def withRole(role: String): MessageTokenInfo = copy(role = role)
+
+  /** Sets the message's token count. */
+  def withTokens(tokens: Int): MessageTokenInfo = copy(tokens = tokens)
+
+  /** Sets the content preview. */
+  def withPreview(preview: String): MessageTokenInfo = copy(preview = preview)
+}
+
+object MessageTokenInfo {
+
+  /** Creates a [[MessageTokenInfo]]. */
+  def apply(role: String, tokens: Int, preview: String): MessageTokenInfo =
+    new MessageTokenInfo(role, tokens, preview)
+}

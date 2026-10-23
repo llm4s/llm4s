@@ -50,7 +50,7 @@ class TokenWindowTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "not depend on the withinBudget flag" in {
     val within = TokenUsageInfo(1200, 1000, withinBudget = true, utilizationPercentage = 120)
-    val over   = within.copy(withinBudget = false)
+    val over   = within.withWithinBudget(false)
     over.summary shouldBe within.summary
   }
 
@@ -117,10 +117,10 @@ class TokenWindowTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "differ when any one field differs" in {
     val base = ConversationWindow(conversation, usage, wasTrimmed = true, removedMessageCount = 3)
-    base should not be base.copy(conversation = otherConversation)
-    base should not be base.copy(usage = usage.copy(currentTokens = 851))
-    base should not be base.copy(wasTrimmed = false)
-    base should not be base.copy(removedMessageCount = 4)
+    base should not be base.withConversation(otherConversation)
+    base should not be base.withUsage(usage.withCurrentTokens(851))
+    base should not be base.withWasTrimmed(false)
+    base should not be base.withRemovedMessageCount(4)
   }
 
   "TokenUsageInfo" should "compare equal when all its fields are equal" in {
@@ -130,10 +130,10 @@ class TokenWindowTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "differ when any one field differs" in {
-    usage should not be usage.copy(currentTokens = 851)
-    usage should not be usage.copy(budgetLimit = 1001)
-    usage should not be usage.copy(withinBudget = false)
-    usage should not be usage.copy(utilizationPercentage = 86)
+    usage should not be usage.withCurrentTokens(851)
+    usage should not be usage.withBudgetLimit(1001)
+    usage should not be usage.withWithinBudget(false)
+    usage should not be usage.withUtilizationPercentage(86)
   }
 
   /** Sets the default FORMAT locale for the length of a `Using.resource` block, then restores the previous one. */
