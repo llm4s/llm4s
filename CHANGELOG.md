@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
+- Tier hygiene before the baseline: `org.llm4s.trace.AnsiColors` is `private[llm4s]`; `org.llm4s.core.safety.UsingOps`
+  moved to `llm4s-agent-tools` and `org.llm4s.llmconnect.utils.ModelSelector` to `llm4s-rag`, their only consumers,
+  with packages unchanged; the `org.llm4s.assistant` types are `@Experimental`, matching their Beta tier;
+  [migration](docs/reference/migration.md#tier-hygiene-before-the-baseline-2358).
 - `Completion.created` is a `java.time.Instant`, not epoch seconds as a `Long`; `withCreated` and
   `StreamingAccumulator.toCompletion(created)` take one, and the wire's epoch seconds are converted in each provider
   client; [migration](docs/reference/migration.md#completioncreated-is-an-instant-2262).
