@@ -14,7 +14,7 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * The [[org.llm4s.agent.service.RunQueue RunQueue]] of a [[PostgresCheckpointer]] (`PostgresCheckpointer.runQueue`,
- * design 4.55): entries and attempts in the store's schema (version 3), each call one transaction on a pooled
+ * design 4.55): entries and attempts in the store's schema (version 4, and 5 for W3's stop requests), each call one transaction on a pooled
  * connection, bounded as the store's calls are (rule 2). Leases expire, and closes are stamped, by the database's clock
  * - the one claims expire by - never a host's (rule 1).
  *
@@ -56,16 +56,33 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         else Left(QueueError.SubmissionKeyReused(submission.submissionKey.get, EntryId.unsafe(existing.id)))
       case None =>
         val queued = openOf(c, submission.threadId)
-        if submission.policy == BusyThreadPolicy.Reject && queued.nonEmpty then
+        // Reject: busy with an open entry, or with a live claim - a direct run (W3) - by the database's clock
+        // another tenant's claim is never reported (rule 9): its submission is queued, and the worker refuses it
+        def claimed = query(
+          c,
+          Sql.queueThreadClaimed(t),
+          submission.threadId.value,
+          submission.tenantId.map(_.value),
+          submission.tenantId.map(_.value),
+          store.clockNow(c)
+        )(_ => ()).nonEmpty
+        if submission.policy == BusyThreadPolicy.Reject && (queued.nonEmpty || claimed) then
           Left(GraphError.ThreadBusy(submission.threadId.value, None, GraphError.BusyHolder.Unnamed))
         else
           val now = store.clockNow(c)
           val id  = query(c, Sql.nextQueueEntryId(t))(_.getLong(1)).head
+          // an Interrupt reaches only its own tenant's entries of the thread (rule 9)
+          val tenant = submission.tenantId.map(_.value)
           // of two Interrupt entries the later goes first: an earlier one that has not started is closed before it
           // runs - only while it still has no attempt, which a concurrent recordAttempt may have recorded meanwhile
           if submission.policy == BusyThreadPolicy.Interrupt then
-            queued.filter(r => r.interrupt && r.attempts == 0).foreach { r =>
+            queued.filter(r => r.tenantId == tenant && r.interrupt && r.attempts == 0).foreach { r =>
               closeRow(c, r.id, EntryOutcome.Interrupted(Some(EntryId.unsafe(id))), now, unstarted = true)
+            }
+            // an entry that has started is asked to stop at its next safe point for this one, unless it is cancelled;
+            // decided under the thread's lock, which recording an attempt takes too
+            queued.filter(r => r.tenantId == tenant && r.attempts > 0 && !cancelling(r)).foreach { r =>
+              setStop(c, r.id, StopRequest.Interrupt(EntryId.unsafe(id)))
             }
           update(
             c,
@@ -86,6 +103,19 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           val position = openOf(c, submission.threadId).indexWhere(_.id == id)
           Right(Ticket(EntryId.unsafe(id), submission.threadId, Some(position), existing = false))
   }
+
+  private def cancelling(row: Raw): Boolean =
+    row.stop.exists(json => StopRequest.fromJson(ujson.read(json)).exists(_.isInstanceOf[StopRequest.Cancel]))
+
+  private def setStop(c: Connection, id: Long, request: StopRequest): Unit =
+    update(c, Sql.setQueueStop(t), ujson.write(StopRequest.toJson(request)), id)
+
+  private def stopOf(row: Raw): Result[Option[StopRequest]] =
+    decoding("queue", "queue stop request")(
+      row.stop.map(json =>
+        StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
+      )
+    )
 
   private def same(row: Raw, submission: Submission): Boolean =
     row.threadId == submission.threadId.value && row.agentId == submission.agentId.value &&
@@ -175,7 +205,7 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
               id
             )
             view(c, rowOf(c, id).get).map { e =>
-              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires), expired))
+              Some(LeasedEntry(e, Lease(e.id, LeaseToken(token), request.holder, expires, e.stopRequest), expired))
             }
       }
 
@@ -204,12 +234,35 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
           case None => Right(row)
 
   def renew(lease: Lease, ttl: FiniteDuration): Result[Lease] = store.writing("queue.renew") { c =>
-    leased(c, lease).map { row =>
+    leased(c, lease).flatMap { row =>
       val expires = micros(store.clockNow(c).plusNanos(ttl.toNanos))
       update(c, Sql.renewLease(t), expires, row.id)
-      lease.copy(expiresAt = expires)
+      stopOf(row).map(stop => lease.copy(expiresAt = expires, stop = stop))
     }
   }
+
+  def cancel(tenantId: Option[TenantId], target: CancelTarget, reason: CancelReason): Result[Vector[QueueEntry]] =
+    store.writing("queue.cancel") { c =>
+      // under the thread's lock, as recording an attempt is: an entry is closed only while it has none
+      val thread = target match
+        case CancelTarget.Entry(id)  => query(c, Sql.queueEntryThread(t), id.value)(_.getString(1)).headOption
+        case CancelTarget.Thread(th) => Some(th.value)
+      thread.foreach(th => lock(c, s"thread:$th"))
+      val targeted: Result[Vector[Raw]] = target match
+        case CancelTarget.Entry(id) =>
+          found(c, tenantId, id).map(_ => query(c, Sql.lockedQueueEntry(t), id.value)(raw))
+        case CancelTarget.Thread(th) => Right(openOf(c, th).filter(_.tenantId == tenantId.map(_.value)))
+      targeted.flatMap { rows =>
+        val now = store.clockNow(c)
+        rows.foreach { row =>
+          // never started: closed now, so no worker runs it; started: asked to stop, a cancel replacing an interrupt
+          if row.outcome.isEmpty && row.attempts == 0 then
+            closeRow(c, row.id, EntryOutcome.Cancelled(reason), now, unstarted = true)
+          else if row.outcome.isEmpty && !cancelling(row) then setStop(c, row.id, StopRequest.Cancel(reason))
+        }
+        sequence(rows.map(r => view(c, rowOf(c, r.id).get)))
+      }
+    }
 
   def release(lease: Lease): Result[Unit] = store.writing("queue.release") { c =>
     leased(c, lease) match
@@ -224,41 +277,49 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         Right(())
   }
 
-  def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store.writing("queue.recordAttempt") { c =>
-    // an attempt moves its entry ahead in the thread's run order, so it is decided under the thread's lock, as a take
-    // and a submission are: a take can never lease another head while this attempt is being recorded
-    query(c, Sql.queueEntryThread(t), lease.entryId.value)(_.getString(1)).headOption
-      .foreach(thread => lock(c, s"thread:$thread"))
-    leased(c, lease).flatMap { row =>
-      // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
-      val used =
-        query(c, Sql.runIdUsed(t), row.threadId, runId.value, row.threadId, runId.value)(_.getBoolean(1)).head
-      if used then
-        Left(
-          ValidationError(
-            "runId",
-            s"run '${runId.value}' already names a run or an attempt on thread '${row.threadId}'"
+  def recordAttempt(lease: Lease, runId: RunId): Result[AttemptStart] = store
+    .writing("queue.recordAttempt") { c =>
+      // an attempt moves its entry ahead in the thread's run order, so it is decided under the thread's lock, as a take
+      // and a submission are: a take can never lease another head while this attempt is being recorded
+      query(c, Sql.queueEntryThread(t), lease.entryId.value)(_.getString(1)).headOption
+        .foreach(thread => lock(c, s"thread:$thread"))
+      leased(c, lease).flatMap { row =>
+        // an attempt's run id names no other run on the thread: no checkpoint and no other attempt has it (rule 4)
+        val used =
+          query(c, Sql.runIdUsed(t), row.threadId, runId.value, row.threadId, runId.value)(_.getBoolean(1)).head
+        // an entry an Interrupt entry displaced after its take is no longer the head: its lease ends here, so the
+        // interrupting entry runs first (W3, Codex round 6); decided under the thread's lock, as a submission is
+        if !openOf(c, ThreadId(row.threadId)).headOption.exists(_.id == row.id) then
+          update(c, Sql.releaseLease(t), row.id)
+          // committed, so the lease's end lands; the refusal is answered below
+          Right(None)
+        else if used then
+          Left(
+            ValidationError(
+              "runId",
+              s"run '${runId.value}' already names a run or an attempt on thread '${row.threadId}'"
+            )
           )
-        )
-      else if row.threadDeleted then
-        closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), store.clockNow(c))
-        view(c, rowOf(c, row.id).get).map(AttemptStart.ThreadDeleted(_))
-      else if row.attempts >= row.maxAttempts then view(c, row).map(AttemptStart.Exhausted(_))
-      else
-        update(
-          c,
-          Sql.insertQueueAttempt(t),
-          row.id,
-          row.attempts + 1,
-          row.threadId,
-          runId.value,
-          micros(store.clockNow(c)),
-          lease.holder
-        )
-        update(c, Sql.countQueueAttempt(t), row.id)
-        view(c, rowOf(c, row.id).get).map(AttemptStart.Recorded(_))
+        else if row.threadDeleted then
+          closeRow(c, row.id, EntryOutcome.Cancelled(CancelReason.ThreadDeleted), store.clockNow(c))
+          view(c, rowOf(c, row.id).get).map(e => Some(AttemptStart.ThreadDeleted(e)))
+        else if row.attempts >= row.maxAttempts then view(c, row).map(e => Some(AttemptStart.Exhausted(e)))
+        else
+          update(
+            c,
+            Sql.insertQueueAttempt(t),
+            row.id,
+            row.attempts + 1,
+            row.threadId,
+            runId.value,
+            micros(store.clockNow(c)),
+            lease.holder
+          )
+          update(c, Sql.countQueueAttempt(t), row.id)
+          view(c, rowOf(c, row.id).get).map(e => Some(AttemptStart.Recorded(e)))
+      }
     }
-  }
+    .flatMap(_.toRight(QueueError.LeaseLost(lease.entryId, lease.token, None)))
 
   def close(lease: Lease, outcome: EntryOutcome): Result[QueueEntry] = store.writing("queue.close") { c =>
     leased(c, lease).flatMap { row =>
@@ -364,7 +425,10 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
         ),
         row.closed,
         row.closedSeq,
-        position
+        position,
+        row.stop.map(json =>
+          StopRequest.fromJson(ujson.read(json)).fold(p => throw new IllegalStateException(p), identity)
+        )
       )
     }
 
@@ -399,7 +463,8 @@ final private[postgres] class PostgresRunQueue(store: PostgresCheckpointer) exte
       at(17),
       long(18),
       r.getBoolean(19),
-      Option(r.getString(20))
+      Option(r.getString(20)),
+      Option(r.getString(21))
     )
 
 private[postgres] object PostgresRunQueue:
@@ -410,7 +475,7 @@ private[postgres] object PostgresRunQueue:
   val Columns: String =
     """entry_id, thread_id, agent_id, tenant_id, input_json, policy, is_interrupt, submission_key, max_attempts,
       |attempt_count, submitted_at, thread_deleted, lease_holder, lease_token, lease_expires_at, outcome_json,
-      |closed_at, closed_seq, admitted, trace_parent""".stripMargin
+      |closed_at, closed_seq, admitted, trace_parent, stop_json""".stripMargin
 
   final case class Raw(
     id: Long,
@@ -432,7 +497,8 @@ private[postgres] object PostgresRunQueue:
     closed: Option[Instant],
     closedSeq: Option[Long],
     admitted: Boolean,
-    traceParent: Option[String]
+    traceParent: Option[String],
+    stop: Option[String]
   )
 
   /** The scope a submission key is unique in: its tenant (`t:` and its id), or `-` for none. */

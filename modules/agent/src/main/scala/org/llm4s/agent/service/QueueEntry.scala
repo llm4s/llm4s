@@ -10,12 +10,22 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 /**
- * How a submission treats a thread that already has an open entry or a live run (design 4.55; W3 #2136 gives each its
- * full behaviour). `Reject`, the default, refuses the submission with `GraphError.ThreadBusy`, as a direct run on a
- * busy thread is refused (§5.3). `Enqueue` waits behind the thread's open entries, in submission order. `Interrupt`
- * goes ahead of the thread's queued entries, which keep their order behind it; of two `Interrupt` entries the later
- * goes first and the earlier is closed [[EntryOutcome.Interrupted]] before it runs (Stage 5 rule 5). Stopping the
- * thread's running entry at its next safe point is W3's.
+ * How a submission treats a thread that already has an open entry or a live run (Stage 5 W1 and W3, designs 4.55 and
+ * 4.57), reversing §5.3's "do not queue".
+ *
+ *  - `Reject`, the default: refused with `GraphError.ThreadBusy` while the thread has an open entry or a live claim -
+ *    a run there, queued or direct, on any machine - as a direct run on a busy thread is refused (§5.3).
+ *  - `Enqueue`: waits behind the thread's running and queued entries, in submission order (W1's FIFO); behind a direct
+ *    run, the worker that takes it waits for the run's claim.
+ *  - `Interrupt`: goes ahead of the thread's queued entries, which keep their order behind it, and asks the thread's
+ *    running entry to stop at its next superstep boundary: its model call in flight is cut, tool calls already started
+ *    finish and keep their results, none not yet started starts, the turn is closed with a synthetic "interrupted"
+ *    result for each call left without one, and the entry closes [[EntryOutcome.Interrupted]], not retried. Of two
+ *    `Interrupt` entries the later goes first and the earlier is closed `Interrupted` before it runs (Stage 5 rule 5).
+ *    A direct run is not interrupted - it is its owner's - so the entry waits for it, as `Enqueue` does.
+ *
+ * A pending approval or question on the thread is not a busy thread, whatever the policy: the thread is at rest, and a
+ * queued start is refused by the runtime while the interrupts are pending (§5.3) - a resume is what answers them.
  */
 @Experimental
 enum BusyThreadPolicy derives upickle.default.ReadWriter:
@@ -48,13 +58,56 @@ enum FailureReason:
 
 /**
  * Why an entry closed `cancelled` (design 4.55). `ThreadDeleted`: the thread was deleted after the entry was
- * submitted, so the entry ran nothing (a deleted thread is never resurrected, rule 4). `Requested`: a cancel request
- * stopped it (W3), with the requester's note.
+ * submitted, so the entry ran nothing (a deleted thread is never resurrected, rule 4) - or a service's delete of the
+ * thread cancelled it first (`RunSubmitter.deleteThread`, W3). `Requested`: a cancel request stopped it (W3), with the
+ * requester's note.
  */
 @Experimental
 enum CancelReason:
   case ThreadDeleted
   case Requested(note: Option[String])
+
+/**
+ * A stop asked of an open entry that has recorded an attempt (Stage 5 W3, design 4.57), which the worker running it sees
+ * when it next renews the entry's lease ([[Lease.stop]]), or when it takes the entry.
+ *
+ *  - `Cancel`: stop now, as `AgentRun.cancel` stops a run, settle the thread, and close the entry `Cancelled(reason)` -
+ *    or with the run's own outcome if it reached rest first. Asked by [[RunQueue.cancel]]; it replaces an `Interrupt`.
+ *  - `Interrupt`: stop at the next superstep boundary for the `Interrupt` entry `by`, settle the thread, and close
+ *    `Interrupted(by)`. Asked by an `Interrupt` submission to the thread; a later one replaces `by`.
+ */
+@Experimental
+enum StopRequest:
+  case Cancel(reason: CancelReason)
+  case Interrupt(by: EntryId)
+
+  /** The outcome an entry stopped by this request closes with. */
+  def outcome: EntryOutcome = this match
+    case Cancel(reason) => EntryOutcome.Cancelled(reason)
+    case Interrupt(by)  => EntryOutcome.Interrupted(Some(by))
+
+@Experimental
+object StopRequest:
+
+  /** The request as an entry stores it: its outcome's JSON. */
+  private[llm4s] def toJson(request: StopRequest): ujson.Value = EntryOutcome.toJson(request.outcome)
+
+  /** The request [[toJson]] stored, or why it cannot be read. */
+  private[llm4s] def fromJson(json: ujson.Value): Either[String, StopRequest] =
+    EntryOutcome.fromJson(json).flatMap {
+      case EntryOutcome.Cancelled(reason)    => Right(Cancel(reason))
+      case EntryOutcome.Interrupted(Some(b)) => Right(Interrupt(b))
+      case other                             => Left(s"not a stop request: ${other.state}")
+    }
+
+/**
+ * What [[RunQueue.cancel]] cancels (Stage 5 W3, design 4.57): one entry, by its ticket, or every open entry of a
+ * thread - the running one and the queued ones.
+ */
+@Experimental
+enum CancelTarget:
+  case Entry(entryId: EntryId)
+  case Thread(threadId: ThreadId)
 
 /**
  * How an entry closed: its terminal state (design 4.55).
@@ -145,6 +198,8 @@ object EntryOutcome:
  *   finds it ([[AttemptPlan]])
  * @param closedAtSeq the number of the thread's last event when the entry closed (`0` for none): every event of the
  *   entry's runs is at or below it, so following the entry stops there ([[RunSubmitter.follow]])
+ * @param stopRequest the stop asked of the entry's running attempt, if any (W3): a cancel, or an interrupt by a later
+ *   `Interrupt` entry; kept until the entry closes
  */
 @Experimental
 final case class QueueEntry private (
@@ -165,7 +220,8 @@ final case class QueueEntry private (
   outcome: Option[EntryOutcome],
   closedAt: Option[Instant],
   closedAtSeq: Option[Long],
-  position: Option[Int]
+  position: Option[Int],
+  stopRequest: Option[StopRequest]
 ):
   /** Whether the entry is still to run or running: it has no outcome. */
   def isOpen: Boolean = outcome.isEmpty
@@ -204,7 +260,8 @@ object QueueEntry:
     outcome: Option[EntryOutcome],
     closedAt: Option[Instant],
     closedAtSeq: Option[Long],
-    position: Option[Int]
+    position: Option[Int],
+    stopRequest: Option[StopRequest]
   ): QueueEntry =
     new QueueEntry(
       id,
@@ -224,16 +281,25 @@ object QueueEntry:
       outcome,
       closedAt,
       closedAtSeq,
-      position
+      position,
+      stopRequest
     )
 
 /**
  * A lease on an open entry, as [[RunQueue.take]] grants it: the worker holding it may record attempts at the entry,
  * renew the lease and close the entry, for as long as no other lease replaced it - expiry, by the store's clock, only
- * lets another worker take the entry over. `token` fences every call made under it.
+ * lets another worker take the entry over. `token` fences every call made under it. `stop` is the stop asked of the
+ * entry when the store granted or last renewed the lease ([[QueueEntry.stopRequest]], W3): a worker learns of a cancel
+ * or an interrupt from its renewals.
  */
 @Experimental
-final case class Lease(entryId: EntryId, token: LeaseToken, holder: String, expiresAt: Instant)
+final case class Lease(
+  entryId: EntryId,
+  token: LeaseToken,
+  holder: String,
+  expiresAt: Instant,
+  stop: Option[StopRequest] = None
+)
 
 /**
  * An entry [[RunQueue.take]] leased, with its lease. `expiredLease` is whether the take replaced a lease of the entry

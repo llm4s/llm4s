@@ -127,6 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `AgentWorker` (`org.llm4s.agent.service`): takes queued runs, recovers a dead worker's entries once their leases
   expire, settles exhausted ones, runs the retention sweep, drains on shutdown and answers health; `llm4s.agent.worker`
   settings (`WorkerConfigLoader`) [#2135](https://github.com/llm4s/llm4s/issues/2135); [design §4.56](docs/design/typed-agent-runtime/4.56-stage-5-slice-w2-workers.md).
+- **Added** cancel from any machine (`RunSubmitter.cancel`, `RunSubmitter.deleteThread`) and the busy-thread policy per
+  submission: `Reject` (also a direct run's thread), `Enqueue`, `Interrupt` at the next superstep boundary; a stopped queued run settles its thread [#2136](https://github.com/llm4s/llm4s/issues/2136); [design §4.57](docs/design/typed-agent-runtime/4.57-stage-5-slice-w3-cancel-from-any-machine-and-the-busy-thread-policy.md).
 - **Added** one trace per agent run: an OpenTelemetry span tree (`invoke_agent` over `chat` and `execute_tool`, a child
   run under its `task` call) and Langfuse nesting, continued across machines through `TraceContext` on
   `RunConfig.traceContext` and `RunOrigin.trace` ([#2137](https://github.com/llm4s/llm4s/issues/2137), [design 4.58](docs/design/typed-agent-runtime/4.58-stage-5-slice-o1-one-trace-per-run-across-machines-and-child-runs.md)).
