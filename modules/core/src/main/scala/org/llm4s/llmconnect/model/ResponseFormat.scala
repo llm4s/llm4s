@@ -33,10 +33,30 @@ object ResponseFormat {
    *               Default "response" for backward compatibility.
    * @param strict When true, model must follow the exact schema (OpenAI strict mode).
    *               Default true; set false for partial schema adherence.
+   *
+   * Build one with [[JsonSchema.apply]] and change it with the `with*` setters; the constructor and `copy` are
+   * private, so a new field never breaks callers.
    */
-  case class JsonSchema(
+  final case class JsonSchema private (
     schema: ujson.Value,
-    name: String = "response",
-    strict: Boolean = true
-  ) extends ResponseFormat
+    name: String,
+    strict: Boolean
+  ) extends ResponseFormat {
+
+    /** Sets the JSON schema. */
+    def withSchema(schema: ujson.Value): JsonSchema = copy(schema = schema)
+
+    /** Sets the schema name. */
+    def withName(name: String): JsonSchema = copy(name = name)
+
+    /** Sets whether the model must follow the schema exactly. */
+    def withStrict(strict: Boolean): JsonSchema = copy(strict = strict)
+  }
+
+  object JsonSchema {
+
+    /** Creates a [[JsonSchema]] format; `name` defaults to `"response"` and `strict` to `true`. */
+    def apply(schema: ujson.Value, name: String = "response", strict: Boolean = true): JsonSchema =
+      new JsonSchema(schema, name, strict)
+  }
 }

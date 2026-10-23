@@ -297,7 +297,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       created = Instant.EPOCH,
       content = "Calling echo",
       model = "model-in-completion",
-      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.copy(id = "call-2")))
+      message = AssistantMessage("Calling echo", Seq(toolCall, toolCall.withId("call-2")))
     )
 
     val output = printed(new ConsoleTracing(captureContent = true).traceCompletion(completion, "model-from-caller"))

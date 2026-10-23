@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`. JSON is
   unchanged. `UsageSummary.bigDecimalRw` is private;
   [migration](docs/reference/migration.md#core-data-types-are-growth-safe-2356).
+- `Conversation`, `SystemMessage`, `ToolCall`, `ResponseFormat.JsonSchema`, `EmbeddingVector`,
+  `MultimediaEmbeddingRequest`, `ImageInput`, `AudioInput`, `VideoInput` and `RawMediaInput` are growth-prone types:
+  build them with `X(...)` and change them with `with*`; `new` and `.copy` are private, and the classes are `final`.
+  JSON is unchanged; [migration](docs/reference/migration.md#llmconnectmodel-types-are-growth-safe-2378).
 - The `TraceEvent` cases (`AgentInitialized`, `CompletionReceived`, `ToolExecuted`, `ErrorOccurred`, `TokenUsageRecorded`,
   `AgentRunEnded`, `CustomEvent`, `EmbeddingUsageRecorded`, `CostRecorded`, `RAGOperationCompleted`,
   `ImageGenerationCompleted`, `CacheHit`, `CacheMiss`) are growth-prone types: build them with `TraceEvent.X(...)` and

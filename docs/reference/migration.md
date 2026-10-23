@@ -507,6 +507,44 @@ private:
 
 Pattern matching (`case HttpResponse(status, body, headers)`) and the fields are unchanged.
 
+### `llmconnect.model` types are growth-safe (#2378)
+
+`Conversation`, `SystemMessage`, `ToolCall`, `ResponseFormat.JsonSchema`, `EmbeddingVector`,
+`MultimediaEmbeddingRequest`, `ImageInput`, `AudioInput`, `VideoInput` and `RawMediaInput`
+(`org.llm4s.llmconnect.model`) follow the growth-prone pattern ([#2378](https://github.com/llm4s/llm4s/issues/2378)).
+Each is a `final case class` whose constructor and `copy` are private:
+
+- **Construction is unchanged**: `X(...)` with the same arguments, positional or named, and the same defaults, still
+  compiles. `new X(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**, one per field:
+
+  | Type | Setters |
+  |---|---|
+  | `Conversation` | `withMessages` (beside `addMessage` and `addMessages`) |
+  | `SystemMessage` | `withContent` |
+  | `ToolCall` | `withId`, `withName`, `withArguments` |
+  | `ResponseFormat.JsonSchema` | `withSchema`, `withName`, `withStrict` |
+  | `EmbeddingVector` | `withId`, `withModality`, `withModel`, `withDim`, `withValues`, `withMeta` |
+  | `MultimediaEmbeddingRequest` | `withInputs`, `withModel`, `withModality`, `withMeta` |
+  | `ImageInput` | `withWidth`, `withHeight`, `withChannels`, `withData` |
+  | `AudioInput` | `withSamples`, `withSampleRate` |
+  | `VideoInput` | `withFrameWidth`, `withFrameHeight`, `withChannels`, `withFps`, `withFrames` |
+  | `RawMediaInput` | `withData`, `withMime` |
+
+  ```scala
+  val pruned = conversation.withMessages(kept)                   // was conversation.copy(messages = kept)
+  val edited = call.withArguments(ujson.Obj("city" -> "Lyon"))   // was call.copy(arguments = ...)
+  val loose  = format.withStrict(false)                          // was format.copy(strict = false)
+  ```
+
+- **JSON is unchanged.** `Conversation`, `SystemMessage` and `ToolCall` keep their `ReadWriter`s and write the same
+  bytes.
+- **Java and Kotlin**: call the companion's `apply` (`ToolCall.apply("id", "name", args)`) instead of the
+  constructor, and chain the setters.
+- `Conversation`, `ToolCall` and `ResponseFormat.JsonSchema` are now `final`.
+
+Pattern matching (`case ToolCall(id, name, args)`) and the fields are unchanged.
+
 ### `TraceEvent` cases are growth-safe (#2377)
 
 The thirteen `TraceEvent` cases - `AgentInitialized`, `CompletionReceived`, `ToolExecuted`, `ErrorOccurred`,

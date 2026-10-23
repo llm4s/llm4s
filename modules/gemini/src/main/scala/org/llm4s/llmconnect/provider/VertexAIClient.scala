@@ -109,7 +109,7 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
         val url                     = modelUrl("generateContent")
@@ -162,7 +162,7 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
         val url                     = s"${modelUrl("streamGenerateContent")}?alt=sse"

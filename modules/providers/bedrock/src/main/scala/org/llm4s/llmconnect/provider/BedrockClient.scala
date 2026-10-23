@@ -243,7 +243,7 @@ class BedrockClient(
         RequestTransformer.default(registryService),
         dropUnsupported = true
       )
-      .map(t => (conversation.copy(messages = t.messages), t.options))
+      .map(t => (conversation.withMessages(t.messages), t.options))
 
   // ---- streaming ----
 
