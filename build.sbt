@@ -281,7 +281,8 @@ lazy val itTierCheck = taskKey[Unit](
 // project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`, minus
 // `llm4s-agent`, whose tier waits on the typed graph runtime (#1266, open question in #1281).
 lazy val stabilityTierCheck = taskKey[Unit](
-  "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental"
+  "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental, or a " +
+    "@Stable signature names an @Experimental or deny-listed third-party type"
 )
 val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama")
 // Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
