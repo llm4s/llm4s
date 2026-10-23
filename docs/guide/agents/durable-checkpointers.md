@@ -617,6 +617,15 @@ yield (store, agent, submitter)
   as the checkpoints, on the checkpointer's own connection or pool, so `llm4s.agent.queue` holds only the queue's own
   settings, as above. All three built-in kinds have one; a store whose backend gave it none answers a
   `ConfigurationError`.
+- **A busy thread is the submission's choice** (`policy` on `submitter.submit`): `BusyThreadPolicy.Reject`, the
+  default, refuses it with `ThreadBusy` while the thread has an open entry or a run holds it; `Enqueue` waits behind
+  them; `Interrupt` stops the thread's running queued run at its next superstep boundary - its model call cut, tool
+  calls already started finished and kept, the rest answered "interrupted" - and runs next, ahead of the queue.
+- **Cancel from any machine** with `submitter.cancel(tenant, CancelTarget.Entry(ticket.entryId))` (or
+  `CancelTarget.Thread(threadId)`): an entry not yet started closes at once; a running one is stopped by its worker at
+  the worker's next lease renewal, its thread settled so the next entry starts normally, and its ticket closes
+  `Cancelled` - or with the run's own outcome if it finished first. `submitter.deleteThread(runtime, tenant, threadId,
+  timeout)` cancels the thread's entries, waits for them to close, then deletes it.
 - **Only the selected kind's block is read**, so a half-written `postgres` block does not matter while `kind = sqlite`.
 - **Credentials stay out of logs.** No setting's value reaches a log line or an error; set the password through its
   variable rather than in a checked-in file.

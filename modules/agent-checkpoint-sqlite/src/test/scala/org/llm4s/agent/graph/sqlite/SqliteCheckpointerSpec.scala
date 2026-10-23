@@ -44,6 +44,14 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "UPDATE llm4s_checkpoint_schema SET version = 1"
     )
 
+  /** The file as a version-10 build left it: no stop requests on queue entries (design 4.57). */
+  private def asVersionTen(path: Path): Unit =
+    exec(
+      path,
+      "ALTER TABLE llm4s_checkpoint_queue_entries DROP COLUMN stop_json",
+      "UPDATE llm4s_checkpoint_schema SET version = 10"
+    )
+
   /** The file as a version-9 build left it: no run queue and no run ids on history rows (design 4.55). */
   private def asVersionNine(path: Path): Unit =
     exec(
@@ -1228,5 +1236,35 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       steps.exists(_.contains("USING INDEX llm4s_checkpoint_history_run")) shouldBe true
       steps.exists(_.contains("TEMP B-TREE")) shouldBe false
     }
+  }
+
+  "A version-10 file" should "open at the current version, its open entries with no stop request, and take one" in {
+    val db     = SqliteFiles.fresh()
+    val thread = ThreadId("v10-thread")
+    val agent  = org.llm4s.agent.AgentId.unsafe("upgraded")
+    val first  = SqliteCheckpointer.open(db).value
+    val queued = first.runQueue
+      .submit(
+        org.llm4s.agent.service.Submission(thread, agent, org.llm4s.agent.service.QueuedInput.query("q"))
+      )
+      .value
+    first.close()
+    asVersionTen(db)
+
+    val reopened = SqliteCheckpointer.open(db).value
+    scalar(db, "SELECT version FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe SqliteSchema.Current
+    reopened.runQueue.entry(None, queued.entryId).value.stopRequest shouldBe None
+    val leased = reopened.runQueue
+      .take(org.llm4s.agent.service.TakeRequest("w", Set(agent), ttl))
+      .value
+      .value
+    reopened.runQueue.recordAttempt(leased.lease, RunId.random()).value
+    val reason = org.llm4s.agent.service.CancelReason.Requested(Some("upgraded"))
+    reopened.runQueue
+      .cancel(None, org.llm4s.agent.service.CancelTarget.Entry(queued.entryId), reason)
+      .value
+      .entries
+      .map(_.stopRequest) shouldBe Vector(Some(org.llm4s.agent.service.StopRequest.Cancel(reason)))
+    reopened.close()
   }
 }

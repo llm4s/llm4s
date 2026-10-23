@@ -49,13 +49,14 @@ import scala.util.Using
 private[postgres] object PostgresSchema:
 
   /** The schema version this build writes. */
-  val Current: Int = 4
+  val Current: Int = 5
 
   /** A migration from the version it is keyed by to the next, given the tables' names. */
   type Step = Tables => Vector[String]
 
   /** The steps, keyed by the version each upgrades from. */
-  val steps: Map[Int, Step] = Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addReclamation, 3 -> addRunQueue)
+  val steps: Map[Int, Step] =
+    Map(0 -> createTables, 1 -> addThreadRegistry, 2 -> addReclamation, 3 -> addRunQueue, 4 -> addStopRequests)
 
   /**
    * Version 3: tombstone reclamation (Stage 5 slice S4, design 4.53). Each thread's row gains `deleted_at`, when the
@@ -138,6 +139,14 @@ private[postgres] object PostgresSchema:
    * `(entry_id, attempt)` with the attempt's thread, run id, start time and holder, indexed by `(thread_id, run_id)`
    * for `prune`'s evidence.
    */
+  /**
+   * Version 5: stop requests (Stage 5 slice W3, design 4.57). Each queue entry gains `stop_json`, the cancel or
+   * interrupt asked of its running attempt, as `StopRequest.toJson` writes it; `NULL` for none, so every entry of a
+   * version-4 schema has none.
+   */
+  private def addStopRequests(t: Tables): Vector[String] =
+    Vector(s"ALTER TABLE ${t.queueEntries} ADD COLUMN stop_json text")
+
   private def addRunQueue(t: Tables): Vector[String] = Vector(
     s"ALTER TABLE ${t.history} ADD COLUMN run_id text",
     // a row whose JSON cannot be read keeps no run id: its reads already fail as undecodable, and the schema still opens

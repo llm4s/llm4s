@@ -97,7 +97,16 @@ object Submission:
  * What [[RunQueue.submit]] answers (design 4.55): the entry `entryId` made for the submission on `threadId`, and its
  * `position` among the thread's open entries when the store answered (`0`: it runs next). `existing` is `true` when a
  * submission key named an entry the store already held, so this submit made none; its `position` is then the entry's
- * current one, and `None` once that entry has closed.
+ * current one, and `None` once that entry has closed. `interrupted` holds the entries this submit closed - for an
+ * `Interrupt` submission, the thread's earlier `Interrupt` entries that had not started, closed `Interrupted(by = this
+ * entry)` in the submit's own transaction (or under its lock) - as they are after; empty otherwise, and for an
+ * `existing` ticket. Only the submit that closed an entry reports it, which [[RunSubmitter]] counts (design 4.59, #2368).
  */
 @Experimental
-final case class Ticket(entryId: EntryId, threadId: ThreadId, position: Option[Int], existing: Boolean)
+final case class Ticket(
+  entryId: EntryId,
+  threadId: ThreadId,
+  position: Option[Int],
+  existing: Boolean,
+  interrupted: Vector[QueueEntry] = Vector.empty
+)

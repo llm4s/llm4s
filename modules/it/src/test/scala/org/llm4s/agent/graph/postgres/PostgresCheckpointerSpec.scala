@@ -237,6 +237,41 @@ class PostgresCheckpointerSpec
     store.close()
   }
 
+  /** The schema as a version-4 build left it: no stop requests on queue entries (design 4.57). */
+  private def asVersionFour(config: PostgresCheckpointerConfig): Unit = {
+    val q = s""""${config.schema}""""
+    PgCheckpointerDb.execute(
+      s"""ALTER TABLE $q.checkpoint_queue_entries DROP COLUMN stop_json;
+         |UPDATE $q.checkpoint_schema SET version = 4""".stripMargin
+    )
+  }
+
+  "A version-4 schema" should "open at the current version, its open entries with no stop request" in {
+    val config = fresh()
+    val store  = PgCheckpointerDb.store(config)
+    val t      = ThreadId("v4-thread")
+    val agent  = org.llm4s.agent.AgentId.unsafe("upgraded")
+    val queued = store.runQueue
+      .submit(org.llm4s.agent.service.Submission(t, agent, org.llm4s.agent.service.QueuedInput.query("q")))
+      .value
+    store.close()
+    asVersionFour(config)
+    val q        = s""""${config.schema}""""
+    val reopened = PgCheckpointerDb.store(config)
+    PgCheckpointerDb.scalar(s"SELECT version FROM $q.checkpoint_schema")(_.getInt(1)) shouldBe PostgresSchema.Current
+    reopened.runQueue.entry(None, queued.entryId).value.stopRequest shouldBe None
+    val leased =
+      reopened.runQueue.take(org.llm4s.agent.service.TakeRequest("w", Set(agent), 30.seconds)).value.value
+    reopened.runQueue.recordAttempt(leased.lease, RunId.random()).value
+    val reason = org.llm4s.agent.service.CancelReason.Requested(Some("upgraded"))
+    reopened.runQueue
+      .cancel(None, org.llm4s.agent.service.CancelTarget.Entry(queued.entryId), reason)
+      .value
+      .entries
+      .map(_.stopRequest) shouldBe Vector(Some(org.llm4s.agent.service.StopRequest.Cancel(reason)))
+    reopened.close()
+  }
+
   /** The schema as a version-3 build left it: no run queue and no run ids on history rows (design 4.55). */
   private def asVersionThree(config: PostgresCheckpointerConfig): Unit = {
     val q = s""""${config.schema}""""
@@ -257,6 +292,8 @@ class PostgresCheckpointerSpec
     store.commit(t, Commit(token, Some(checkpoint("c1", None, t).withRunId("run-a")))).value
     store.commit(t, Commit(token, Some(checkpoint("c2", Some("c1"), t).withRunId("run-b")))).value
     store.commit(t, Commit(token, Some(checkpoint("c3", Some("c2"), t).withRunId("run-c")))).value
+    // released: a live claim would refuse the Reject submission below (W3)
+    store.release(t, token).value
     store.close()
     asVersionThree(config)
     val q = s""""${config.schema}""""

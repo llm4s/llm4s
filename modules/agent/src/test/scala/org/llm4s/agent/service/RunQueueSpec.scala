@@ -52,7 +52,8 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
       None,
       None,
       None,
-      Some(0)
+      Some(0),
+      None
     )
 
   // ---- rule 4: classifying an attempt ----
