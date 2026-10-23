@@ -57,7 +57,7 @@ private[config] object EmbeddingsConfigLoader {
           )
           .from(objCursor)
         timeouts <- ProviderTimeoutsReader.read(objCursor)
-      yield fields.copy(timeouts = timeouts.getOrElse(ProviderTimeouts.default))
+      yield fields.withTimeouts(timeouts.getOrElse(ProviderTimeouts.default))
     }
 
   // ---- Public API used by Llm4sConfig ----
@@ -135,7 +135,7 @@ private[config] object EmbeddingsConfigLoader {
       id = descriptor.id.asString
       section  <- readSection(source, descriptor)
       resolved <- resolveApiKey(section, descriptor, source)
-      config   <- descriptor.buildConfig(section.copy(apiKey = resolved.map(_.value)), selected.modelOverride)
+      config   <- descriptor.buildConfig(section.withApiKey(resolved.map(_.value)), selected.modelOverride)
       // The timeouts block is read once, for every provider, as a chat section's is.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))

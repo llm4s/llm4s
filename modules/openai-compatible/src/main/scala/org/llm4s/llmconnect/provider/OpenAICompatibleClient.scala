@@ -767,7 +767,7 @@ object OpenAICompatibleClient {
    * @param contextWindow     the model's total token capacity.
    * @param reserveCompletion tokens held back from the prompt for the reply.
    */
-  final case class Settings(
+  final case class Settings private (
     providerName: String,
     displayName: String,
     model: String,
@@ -775,11 +775,36 @@ object OpenAICompatibleClient {
     credential: Credential,
     contextWindow: Int,
     reserveCompletion: Int,
-    timeouts: ProviderTimeouts = ProviderTimeouts.default
+    timeouts: ProviderTimeouts
   ) {
+    def withProviderName(providerName: String): Settings        = copy(providerName = providerName)
+    def withDisplayName(displayName: String): Settings          = copy(displayName = displayName)
+    def withModel(model: String): Settings                      = copy(model = model)
+    def withBaseUrl(baseUrl: String): Settings                  = copy(baseUrl = baseUrl)
+    def withCredential(credential: Credential): Settings        = copy(credential = credential)
+    def withContextWindow(contextWindow: Int): Settings         = copy(contextWindow = contextWindow)
+    def withReserveCompletion(reserveCompletion: Int): Settings = copy(reserveCompletion = reserveCompletion)
+    def withTimeouts(timeouts: ProviderTimeouts): Settings      = copy(timeouts = timeouts)
+
     override def toString: String =
       s"Settings(providerName=$providerName, displayName=$displayName, model=$model, baseUrl=$baseUrl, " +
         s"credential=$credential, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+  }
+
+  object Settings {
+
+    /** Creates [[Settings]]. Named arguments are the supported way to construct one. */
+    def apply(
+      providerName: String,
+      displayName: String,
+      model: String,
+      baseUrl: String,
+      credential: Credential,
+      contextWindow: Int,
+      reserveCompletion: Int,
+      timeouts: ProviderTimeouts = ProviderTimeouts.default
+    ): Settings =
+      new Settings(providerName, displayName, model, baseUrl, credential, contextWindow, reserveCompletion, timeouts)
   }
 
   /** The settings the generic `openai-compatible` provider derives from its config. */

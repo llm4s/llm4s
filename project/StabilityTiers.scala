@@ -505,18 +505,6 @@ object StabilityTiers {
     GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
     GrowthExempt(
-      "org.llm4s.llmconnect.JsonlProviderExchangeSink",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.caching.CacheEntry",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.caching.CacheStats",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
       "org.llm4s.llmconnect.model.AudioInput",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
@@ -555,38 +543,6 @@ object StabilityTiers {
     ),
     GrowthExempt(
       "org.llm4s.llmconnect.model.VideoInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.provider.OpenAICompatibleClient.Settings",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.EmbeddingProviderSection",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.ProviderConfigKey",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.ProviderDiscoveryFailure",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.ProviderIdCollision",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.ProviderModuleReport",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.spi.ProviderRegistryReport",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.streaming.SSEParser.SSEEvent",
       "TODO(#2369): predates the check; convert to a private constructor"
     ),
     GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),

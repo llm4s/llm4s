@@ -22,15 +22,35 @@ object SSEParser {
   /**
    * Represents a parsed SSE event
    */
-  case class SSEEvent(
-    data: Option[String] = None,
-    event: Option[String] = None,
-    id: Option[String] = None,
-    retry: Option[Int] = None
+  final case class SSEEvent private (
+    data: Option[String],
+    event: Option[String],
+    id: Option[String],
+    retry: Option[Int]
   ) {
     def isEmpty: Boolean = data.isEmpty && event.isEmpty && id.isEmpty && retry.isEmpty
 
     def isComplete: Boolean = data.isDefined || event.isDefined
+
+    def withData(data: String): SSEEvent           = copy(data = Some(data))
+    def withData(data: Option[String]): SSEEvent   = copy(data = data)
+    def withEvent(event: String): SSEEvent         = copy(event = Some(event))
+    def withEvent(event: Option[String]): SSEEvent = copy(event = event)
+    def withId(id: String): SSEEvent               = copy(id = Some(id))
+    def withId(id: Option[String]): SSEEvent       = copy(id = id)
+    def withRetry(retry: Int): SSEEvent            = copy(retry = Some(retry))
+    def withRetry(retry: Option[Int]): SSEEvent    = copy(retry = retry)
+  }
+
+  object SSEEvent {
+
+    /** Creates an [[SSEEvent]]; every field defaults to absent. */
+    def apply(
+      data: Option[String] = None,
+      event: Option[String] = None,
+      id: Option[String] = None,
+      retry: Option[Int] = None
+    ): SSEEvent = new SSEEvent(data, event, id, retry)
   }
 
   /**
@@ -58,13 +78,13 @@ object SSEParser {
               // Accumulate data fields (SSE joins multiple data lines with newlines)
               val prev   = event.data.getOrElse("")
               val joined = if (prev.isEmpty) value else s"$prev\n$value"
-              event = event.copy(data = Some(joined))
+              event = event.withData(joined)
             case "event" =>
-              event = event.copy(event = Some(value))
+              event = event.withEvent(value)
             case "id" =>
-              event = event.copy(id = Some(value))
+              event = event.withId(value)
             case "retry" =>
-              Try(value.toInt).toOption.foreach(retryTime => event = event.copy(retry = Some(retryTime)))
+              Try(value.toInt).toOption.foreach(retryTime => event = event.withRetry(retryTime))
             case _ =>
             // Unknown field, ignore
           }

@@ -36,16 +36,37 @@ import org.llm4s.annotation.Stable
  *                          `headers` cannot be aliases, and a spec naming one fails validation.
  */
 @Stable
-final case class ProviderConfigKey(
+final case class ProviderConfigKey private (
   name: String,
   description: String,
-  required: Boolean = false,
-  default: Option[String] = None,
-  env: Option[String] = None,
-  deprecatedAliases: Seq[String] = Seq.empty
-)
+  required: Boolean,
+  default: Option[String],
+  env: Option[String],
+  deprecatedAliases: Seq[String]
+) {
+  def withName(name: String): ProviderConfigKey               = copy(name = name)
+  def withDescription(description: String): ProviderConfigKey = copy(description = description)
+  def withRequired(required: Boolean): ProviderConfigKey      = copy(required = required)
+  def withDefault(default: String): ProviderConfigKey         = copy(default = Some(default))
+  def withDefault(default: Option[String]): ProviderConfigKey = copy(default = default)
+  def withEnv(env: String): ProviderConfigKey                 = copy(env = Some(env))
+  def withEnv(env: Option[String]): ProviderConfigKey         = copy(env = env)
+  def withDeprecatedAliases(deprecatedAliases: Seq[String]): ProviderConfigKey =
+    copy(deprecatedAliases = deprecatedAliases)
+}
 
 object ProviderConfigKey:
+
+  /** Creates a [[ProviderConfigKey]]. Named arguments are the supported way to construct one. */
+  def apply(
+    name: String,
+    description: String,
+    required: Boolean = false,
+    default: Option[String] = None,
+    env: Option[String] = None,
+    deprecatedAliases: Seq[String] = Seq.empty
+  ): ProviderConfigKey =
+    new ProviderConfigKey(name, description, required, default, env, deprecatedAliases)
 
   /** A key the section must set. */
   def required(name: String, description: String): ProviderConfigKey =

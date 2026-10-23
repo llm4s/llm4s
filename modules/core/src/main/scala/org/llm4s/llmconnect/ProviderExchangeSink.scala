@@ -87,7 +87,11 @@ object ProviderExchangeSink:
  * line.
  */
 @Stable
-final case class JsonlProviderExchangeSink(path: Path) extends ProviderExchangeSink:
+final case class JsonlProviderExchangeSink private (path: Path) extends ProviderExchangeSink:
+
+  /** The same sink, writing to `path` instead. */
+  def withPath(path: Path): JsonlProviderExchangeSink = copy(path = path)
+
   override def record(exchange: ProviderExchange): Unit =
     val parent = path.getParent
     if parent != null then Files.createDirectories(parent)
@@ -100,6 +104,11 @@ final case class JsonlProviderExchangeSink(path: Path) extends ProviderExchangeS
       StandardOpenOption.WRITE,
       StandardOpenOption.APPEND
     )
+
+object JsonlProviderExchangeSink:
+
+  /** A sink that appends to `path`, creating it and its parent directories on the first write. */
+  def apply(path: Path): JsonlProviderExchangeSink = new JsonlProviderExchangeSink(path)
 
 private object ProviderExchangeJson:
   def toJson(exchange: ProviderExchange): ujson.Obj =
