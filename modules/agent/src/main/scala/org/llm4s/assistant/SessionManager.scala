@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.AssistantError
 import org.llm4s.types.{ SessionId, DirectoryPath, FilePath }
@@ -49,6 +50,7 @@ import upickle.default._
  * @see [[SessionState]] for the state being persisted
  * @see [[SessionInfo]] for session metadata returned after save
  */
+@Experimental
 class SessionManager(
   sessionDir: DirectoryPath,
   uniqueSuffix: () => String = () => System.nanoTime().toString

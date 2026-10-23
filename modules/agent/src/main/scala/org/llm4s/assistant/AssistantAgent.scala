@@ -1,5 +1,6 @@
 package org.llm4s.assistant
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.agent.graph.{ GraphError, RunConfig, ThreadId }
 import org.llm4s.llmconnect.LLMClient
@@ -12,7 +13,9 @@ import cats.implicits._
 import java.util.UUID
 import org.slf4j.LoggerFactory
 
+@Experimental
 sealed trait Command
+@Experimental
 object Command {
   case object Help               extends Command
   case object New                extends Command
@@ -47,6 +50,7 @@ object Command {
  * conversational loop with session management. The agent is built once, from `client` and
  * `tools`; each query is one turn on the session's thread.
  */
+@Experimental
 class AssistantAgent(
   client: LLMClient,
   tools: ToolRegistry,

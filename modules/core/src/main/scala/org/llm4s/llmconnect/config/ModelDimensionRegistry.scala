@@ -14,7 +14,7 @@ import org.llm4s.types.Result
  * nothing here needs editing when one is added.
  *
  * The one provider answered locally is `local`, the non-text encoders used by
- * `ModelSelector`. It is not an embedding provider - nothing can be configured
+ * `ModelSelector` (`llm4s-rag`). It is not an embedding provider - nothing can be configured
  * with it - so it has no descriptor to declare them. That table is only a
  * fallback: an application that registers a real embedding provider under the
  * id `local` gets that provider's dimensions, exactly as `EmbeddingClient.from`

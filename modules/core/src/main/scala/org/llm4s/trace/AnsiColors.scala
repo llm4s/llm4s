@@ -1,7 +1,5 @@
 package org.llm4s.trace
 
-import org.llm4s.annotation.Stable
-
 /**
  * ANSI escape codes for terminal color formatting.
  *
@@ -19,9 +17,10 @@ import org.llm4s.annotation.Stable
  *
  * @note These codes work on most Unix terminals and Windows Terminal.
  *       They may not render correctly in non-ANSI-compatible environments.
+ *
+ * Internal to llm4s: an application that wants terminal colours uses its own constants or a library such as fansi.
  */
-@Stable
-object AnsiColors {
+private[llm4s] object AnsiColors {
 
   /** Reset all formatting to terminal defaults */
   val RESET: String = "\u001b[0m"
