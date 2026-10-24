@@ -201,6 +201,27 @@ class AsyncCallsSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     client.close()
   }
 
+  "complete(value) from outside" should "interrupt the call, and the future keep that value" in {
+    val provider = new Blocking
+    val client   = Llm4s.wrapClient(provider)
+    val future   = client.completeAsync("q")
+    provider.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+    future.complete("mine") shouldBe true
+    provider.interrupted.await(secs, TimeUnit.SECONDS) shouldBe true
+    future.complete("again") shouldBe false
+    future.completeExceptionally(new IllegalStateException("late")) shouldBe false
+    future.get(secs, TimeUnit.SECONDS) shouldBe "mine"
+    client.close()
+  }
+
+  "A call that throws" should "fail the future with an LlmException of kind OTHER, keeping the cause" in {
+    val bug    = new IllegalStateException("bug")
+    val future = FacadeAsync.run[String]((r: Runnable) => r.run(), "test")(throw bug)
+    val e      = failure(future)
+    e.getKind shouldBe LlmErrorKind.OTHER
+    (e.getCause should be).theSameInstanceAs(bug)
+  }
+
   "withAsyncExecutor" should "run every async call on the supplied executor, and close() leave it running" in {
     val pool     = Executors.newFixedThreadPool(2, r => new Thread(r, "supplied-pool"))
     val counting = new Counting(pool)
