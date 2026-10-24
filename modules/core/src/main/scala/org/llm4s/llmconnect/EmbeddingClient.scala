@@ -6,53 +6,36 @@ import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingR
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.trace.Tracing
+import org.llm4s.trace.{ TraceAttributeNames, TraceEvent, Tracing }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
+
+/**
+ * Embeds text through an [[EmbeddingProvider]]. With a tracer, each call is traced: a completed call as one
+ * [[org.llm4s.trace.TraceEvent.EmbeddingUsageRecorded]] (with the call's provider and duration) and, when its model's
+ * pricing is known, a cost; a failed call as one [[org.llm4s.trace.TraceEvent.ErrorOccurred]] naming the `embeddings`
+ * operation (#2275).
+ *
+ * @param providerId the canonical id of the provider, which tracing reports; [[EmbeddingClient.from]] sets it
+ */
 @Stable
 class EmbeddingClient(
   provider: EmbeddingProvider,
   tracer: Option[Tracing] = None,
-  operation: String = "embedding"
+  operation: String = "embedding",
+  val providerId: Option[ProviderId] = None
 )(using service: ModelRegistryService) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Text embeddings via the configured HTTP provider. */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     logger.debug(s"[EmbeddingClient] Embedding with model=${request.model.name}, inputs=${request.input.size}")
-
-    val result = provider.embed(request)
-
-    // Emit trace events if tracing is enabled and we got a response with usage
-    result.foreach { response =>
-      tracer.foreach { t =>
-        response.usage.foreach { usage =>
-          // Emit embedding usage event
-          t.traceEmbeddingUsage(
-            usage = usage,
-            model = request.model.name,
-            operation = operation,
-            inputCount = request.input.size
-          )
-
-          // Try to calculate and emit cost
-          service.lookup(request.model.name).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
-              t.traceCost(
-                costUsd = cost,
-                model = request.model.name,
-                operation = operation,
-                tokenCount = usage.totalTokens,
-                costType = "embedding"
-              )
-            }
-          }
-        }
-      }
-    }
-
-    result
+    val startedAt = System.nanoTime()
+    val result    = provider.embed(request)
+    traced(result, request.model.name, request.input.size, startedAt)
   }
 
   /** Multimodal embeddings via the configured HTTP provider. */
@@ -62,47 +45,72 @@ class EmbeddingClient(
     logger.debug(
       s"[EmbeddingClient] Multimodal embedding with model=${request.model.name}, modality=${request.modality}"
     )
+    val startedAt = System.nanoTime()
+    val result    = provider.embedMultimodal(request)
+    traced(result, request.model.name, request.inputs.size, startedAt)
+  }
 
-    val result = provider.embedMultimodal(request)
-
-    // Emit trace events if tracing is enabled and we got a response with usage
-    result.foreach { response =>
-      tracer.foreach { t =>
-        response.usage.foreach { usage =>
-          // Emit embedding usage event
-          t.traceEmbeddingUsage(
-            usage = usage,
-            model = request.model.name,
-            operation = operation,
-            inputCount = request.inputs.size
-          )
-
-          // Try to calculate and emit cost
-          service.lookup(request.model.name).foreach { meta =>
-            meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
-              t.traceCost(
-                costUsd = cost,
-                model = request.model.name,
+  // Emits the call's trace events when tracing is enabled: its usage and cost, or its failure
+  private def traced(
+    result: Result[EmbeddingResponse],
+    model: String,
+    inputCount: Int,
+    startedAt: Long
+  ): Result[EmbeddingResponse] = {
+    val duration = Some(FiniteDuration(math.max(0L, System.nanoTime() - startedAt), NANOSECONDS))
+    val provider = providerId.map(_.asString)
+    tracer.foreach { t =>
+      result match {
+        case Right(response) =>
+          response.usage.foreach { usage =>
+            t.traceEvent(
+              TraceEvent.EmbeddingUsageRecorded(
+                usage = usage,
+                model = model,
                 operation = operation,
-                tokenCount = usage.totalTokens,
-                costType = "embedding"
+                inputCount = inputCount,
+                provider = provider,
+                duration = duration
               )
+            )
+
+            // Try to calculate and emit cost
+            service.lookup(model).foreach { meta =>
+              meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
+                t.traceCost(
+                  costUsd = cost,
+                  model = model,
+                  operation = operation,
+                  tokenCount = usage.totalTokens,
+                  costType = "embedding"
+                )
+              }
             }
           }
-        }
+        case Left(error) =>
+          t.traceEvent(
+            TraceEvent.ErrorOccurred(
+              new RuntimeException(error.message),
+              TraceAttributeNames.Embeddings,
+              operation = Some(TraceAttributeNames.Embeddings),
+              model = Some(model),
+              provider = provider,
+              errorType = Some(error.getClass.getSimpleName),
+              duration = duration
+            )
+          )
       }
     }
-
     result
   }
 
   /** Create a new client with tracing enabled. */
   def withTracing(tracer: Tracing): EmbeddingClient =
-    new EmbeddingClient(provider, Some(tracer), operation)
+    new EmbeddingClient(provider, Some(tracer), operation, providerId)
 
   /** Create a new client with a specific operation label for tracing. */
   def withOperation(op: String): EmbeddingClient =
-    new EmbeddingClient(provider, tracer, op)
+    new EmbeddingClient(provider, tracer, op, providerId)
 }
 
 object EmbeddingClient {
@@ -141,7 +149,7 @@ object EmbeddingClient {
         EmbeddingError(code = Some("400"), message = error.message, provider = "config")
       )
       .flatMap(_.build(cfg))
-      .map(new EmbeddingClient(_))
+      .map(new EmbeddingClient(_, providerId = Some(id)))
   }
 
 }

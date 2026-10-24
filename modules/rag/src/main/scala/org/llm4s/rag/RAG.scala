@@ -1629,7 +1629,7 @@ object RAG {
             providerConfig <- resolveEmbeddingProvider(id.asString)
             model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
             provider       <- descriptor.build(providerConfig.withModel(model))
-          } yield (new EmbeddingClient(provider), model)
+          } yield (new EmbeddingClient(provider, providerId = Some(id)), model)
       }
       (client, model) = clientAndModel
     } yield (client, createEmbeddingModelConfig(config, descriptor, model))

@@ -158,7 +158,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.CompletionReceived(id, model, toolCalls, content, ts) =>
+      case TraceEvent.CompletionReceived(id, model, toolCalls, content, ts, _, _, _, _, _, _, _, _, _) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -195,7 +195,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.ErrorOccurred(error, context, ts, _) =>
+      case TraceEvent.ErrorOccurred(error, context, ts, _, _, _, _, _, _) =>
         val errorMessage = Option(error.getMessage).getOrElse("")
         Span(
           spanId = spanId,
@@ -232,7 +232,19 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts, parentThread, parentRun, _) =>
+      case TraceEvent.AgentRunEnded(
+            threadId,
+            runId,
+            agent,
+            status,
+            messages,
+            usage,
+            ts,
+            parentThread,
+            parentRun,
+            _,
+            _
+          ) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -276,7 +288,7 @@ class TraceCollectorTracing[F[_]](
           attributes = attrs
         )
 
-      case TraceEvent.EmbeddingUsageRecorded(usage, model, operation, inputCount, ts) =>
+      case TraceEvent.EmbeddingUsageRecorded(usage, model, operation, inputCount, ts, _, _) =>
         Span(
           spanId = spanId,
           traceId = traceId,

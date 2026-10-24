@@ -372,6 +372,38 @@ only. A `captureContent` value other than `true` or `false` is a `ConfigurationE
 (`Tracing.create` logs it and falls back to `NoOpTracing`). A hand-built `TracingSettings(TracingMode.Console)` has
 no extras, so it gets the safe default.
 
+### OpenTelemetry spans follow the GenAI conventions; content is opt-in (#2275)
+
+`llm4s-observability-otel` names and annotates model calls by the OpenTelemetry GenAI semantic conventions, version
+`1.37.0` ([#2275](https://github.com/llm4s/llm4s/issues/2275); tables in
+[Monitoring](../guide/observability/index.html#genai-semantic-conventions)). Dashboards, alerts and queries that select
+the old names need updating:
+
+| Before | Now |
+|---|---|
+| span `LLM Completion` | `chat <model>` (`CLIENT`) |
+| span `Embedding Usage - <operation>` | `embeddings <model>` (`CLIENT`); the label stays in `operation` |
+| span `Error` of a `TracingLLMClient` or `EmbeddingClient` call | `chat <model>` / `embeddings <model>` with `error.type` and status `ERROR` |
+| attribute `completion_id` | `gen_ai.response.id` |
+| attribute `tool_calls` | `llm4s.model_call.tool_calls` |
+| attribute `content` (first 1000 characters of the answer) | `gen_ai.output.messages`, only with `captureContent` |
+| attribute `input` of `LLM4S Agent Run`, `tool.input` / `tool.output` of `execute_tool` | only with `captureContent` |
+
+Agent spans keep their names (`invoke_agent`, `chat`, `execute_tool`) and gain `gen_ai.provider.name`.
+
+**No span carries message content by default.** To record it again, redacted, set:
+
+```hocon
+llm4s.tracing.opentelemetry.captureContent = true   # or OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+```
+
+or pass `OpenTelemetryConfig(captureContent = true)`. Plain and streamed completions are traced by wrapping the client,
+`TracingLLMClient(client, tracing, providerConfig)`; an `EmbeddingClient` built by `EmbeddingClient.from` reports its
+provider. `TraceEvent.CompletionReceived`, `ErrorOccurred`, `EmbeddingUsageRecorded` and `AgentRunEnded` gained fields
+(provider, duration and the call's details), so a positional pattern on one of them no longer compiles: match on the
+type and read the fields (`case e: TraceEvent.CompletionReceived => e.model`). `LLMClient` gained
+`providerId: Option[ProviderId]` (default `None`), which a client that wraps another should forward.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last

@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
 import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.BoundedJson
 
 import scala.util.Try
@@ -163,6 +164,13 @@ trait LLMClient extends AutoCloseable {
    * @return Right(()) if validation succeeds, Left(LLMError) with details on failure
    */
   def validate(): Result[Unit] = Right(())
+
+  /**
+   * The canonical id of the provider this client calls (e.g. `openai`), when it is known. Tracing reports it as the
+   * OpenTelemetry GenAI conventions' `gen_ai.provider.name` (#2275). `None` by default; a provider client built on
+   * [[BaseLifecycleLLMClient]] reports its own, and a client that wraps another forwards the wrapped client's.
+   */
+  def providerId: Option[ProviderId] = None
 
   /**
    * Releases resources and closes connections to the LLM provider.

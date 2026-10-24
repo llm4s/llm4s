@@ -173,6 +173,9 @@ concepts map as follows, and a Micrometer `MeterFilter` can rename a meter if yo
 | `llm4s.tokens` with `type=input` / `type=output` | `gen_ai.client.inference.usage.input_tokens` / `.output_tokens` |
 | `error_type` tag | `error.type` |
 
+The `provider` tag is the llm4s provider id (`gemini`); OpenTelemetry spans report the conventions' well-known value for
+it (`gcp.gemini`) where there is one, as [the span tables](index#genai-semantic-conventions) list.
+
 ## Spring Boot
 
 With `llm4s-spring-boot-starter`, add this module next to `spring-boot-starter-actuator` and there is nothing to write:

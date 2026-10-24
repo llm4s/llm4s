@@ -102,6 +102,8 @@ final class ReliableClient(
   override def validate(): Result[Unit]    = underlying.validate()
   override def close(): Unit               = underlying.close()
 
+  override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = underlying.providerId
+
   /**
    * Execute operation with retry, circuit breaker, and deadline.
    */

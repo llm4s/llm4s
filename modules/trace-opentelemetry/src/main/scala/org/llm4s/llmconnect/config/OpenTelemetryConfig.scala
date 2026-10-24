@@ -23,11 +23,16 @@ import scala.util.Try
  * @param endpoint    OTLP/gRPC collector address; defaults to `"http://localhost:4317"`
  * @param headers     additional HTTP headers sent with each OTLP export request
  *                    (e.g. authentication tokens for hosted collectors)
+ * @param captureContent record message content - prompts, completions, an agent's query, tool input and output - on
+ *                    spans, redacted, as the GenAI conventions' `gen_ai.input.messages` / `gen_ai.output.messages`;
+ *                    `false` by default, as the conventions recommend, since content often holds personal or
+ *                    confidential data (#2275)
  */
 case class OpenTelemetryConfig(
   serviceName: String = OpenTelemetryConfig.DEFAULT_SERVICE_NAME,
   endpoint: String = OpenTelemetryConfig.DEFAULT_ENDPOINT,
-  headers: Map[String, String] = Map.empty
+  headers: Map[String, String] = Map.empty,
+  captureContent: Boolean = false
 )
 
 object OpenTelemetryConfig {
@@ -41,8 +46,9 @@ object OpenTelemetryConfig {
 
   /**
    * Builds the config from the `llm4s.tracing.opentelemetry` block, as
-   * `TracingSettings.extras` carries it: `serviceName`, `endpoint`, and one
-   * `headers.<name>` entry per header. Unset values take the defaults.
+   * `TracingSettings.extras` carries it: `serviceName`, `endpoint`, `captureContent`
+   * (`true` turns it on), and one `headers.<name>` entry per header. Unset values take
+   * the defaults.
    */
   def fromExtras(extras: Map[String, String]): OpenTelemetryConfig = {
     // An extras key is a HOCON path, quoted where a header name needs it
@@ -56,7 +62,8 @@ object OpenTelemetryConfig {
     OpenTelemetryConfig(
       serviceName = extras.get("serviceName").getOrElse(DEFAULT_SERVICE_NAME),
       endpoint = extras.get("endpoint").getOrElse(DEFAULT_ENDPOINT),
-      headers = headers
+      headers = headers,
+      captureContent = extras.get("captureContent").exists(_.trim.equalsIgnoreCase("true"))
     )
   }
 }

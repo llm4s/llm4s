@@ -22,7 +22,9 @@ object CallUsage:
  * wrappers kept, so the events sum to the thread's usage. `attempts` is the call's attempt number within its model
  * step, from 1 - a retrying wrapper's calls are 1, 2, ... - and 0 for a call a hook made through
  * `ModelContext.accounted`, or usage it recorded with `ModelContext.recordUsage`. `toolCalls` is the completion's.
- * `usage` and `estimatedCost` (USD) are the completion's, when the provider reported them.
+ * `usage` and `estimatedCost` (USD) are the completion's, when the provider reported them. `provider` is the canonical
+ * id of the provider called, when its client reported one (`LLMClient.providerId`); `None` in an event stored before
+ * it existed (#2275).
  */
 final case class ModelCallCompleted(
   agent: String,
@@ -30,7 +32,8 @@ final case class ModelCallCompleted(
   attempts: Int,
   toolCalls: Int,
   usage: Option[CallUsage],
-  estimatedCost: Option[Double]
+  estimatedCost: Option[Double],
+  provider: Option[String] = None
 ) derives ReadWriter
 
 /** How a tool call ended for the loop. */

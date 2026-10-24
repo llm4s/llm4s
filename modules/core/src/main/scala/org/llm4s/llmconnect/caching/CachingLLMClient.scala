@@ -214,4 +214,6 @@ class CachingLLMClient(
   override def validate(): Result[Unit] = baseClient.validate()
 
   override def close(): Unit = baseClient.close()
+
+  override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = baseClient.providerId
 }

@@ -132,8 +132,9 @@ llm4s {
     }
     
     opentelemetry {
-      serviceName = ${?OTEL_SERVICE_NAME}
-      endpoint    = ${?OTEL_EXPORTER_OTLP_ENDPOINT}
+      serviceName    = ${?OTEL_SERVICE_NAME}
+      endpoint       = ${?OTEL_EXPORTER_OTLP_ENDPOINT}
+      captureContent = false  # ${?OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT}
     }
   }
 }
@@ -158,6 +159,45 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion
 The module registers itself for `opentelemetry` through a `META-INF/services` entry, so the
 dependency is all it takes. Its backend builds an `OpenTelemetryConfig` from the
 `llm4s.tracing.opentelemetry` block with `OpenTelemetryConfig.fromExtras`.
+
+#### GenAI semantic conventions
+
+Model calls follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/),
+version `1.37.0` (`OpenTelemetryTracing.SemconvVersion`, also the tracer's schema URL). The GenAI conventions are
+still in Development status, so an attribute name may change when llm4s moves to a later version.
+
+A plain or streamed completion is traced by wrapping the client in `TracingLLMClient`; an `EmbeddingClient` with a
+tracer traces its own calls:
+
+```scala
+import org.llm4s.trace.TracingLLMClient
+
+val traced     = TracingLLMClient(client, tracing, providerConfig) // request model and server.address from the config
+val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTracing(tracing))
+```
+
+| Span | Kind | Attributes |
+|------|------|------------|
+| `chat <model>` (a completion, plain or streamed) | `CLIENT` | `gen_ai.operation.name` = `chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.id`, `gen_ai.response.finish_reasons` (streamed), `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.request.temperature`, `gen_ai.request.top_p`, `gen_ai.request.max_tokens` (when set), `gen_ai.request.presence_penalty`, `gen_ai.request.frequency_penalty`, `server.address`, `llm4s.model_call.tool_calls`, `llm4s.model_call.streamed`; with `captureContent`, `gen_ai.input.messages` and `gen_ai.output.messages` |
+| `embeddings <model>` | `CLIENT` | `gen_ai.operation.name` = `embeddings`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `operation` (the client's label), `input_count` |
+| `chat <model>` / `embeddings <model>` of a failed call | `CLIENT`, status `ERROR` (the error message, redacted) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `error.type` (the `LLMError`'s type, e.g. `RateLimitError`) |
+| `chat <model>` (an agent's model call) | `CLIENT` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` |
+| `invoke_agent <agent>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.provider.name` (the run's first model call's), `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, thread, run, status |
+| `execute_tool <tool>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; with `captureContent` (for `ToolExecuted`), `tool.input` and `tool.output` |
+
+`gen_ai.provider.name` is the conventions' well-known value where there is one (`gemini` is `gcp.gemini`, `vertexai`
+`gcp.vertex_ai`, `bedrock` `aws.bedrock`, `azure` `azure.ai.openai`, `watsonx` `ibm.watsonx.ai`, `mistral`
+`mistral_ai`, `xai` `x_ai`), else the llm4s provider id (`openai`, `anthropic`, `ollama`, ...). A client reports its
+provider through `LLMClient.providerId`.
+
+**Message content is opt-in.** Prompts and completions often hold personal or confidential data, so by default no span
+carries them, nor an agent's query or a tool's input and output. Set `llm4s.tracing.opentelemetry.captureContent = true`
+(or `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`) to record them as `gen_ai.input.messages` /
+`gen_ai.output.messages`, in the conventions' JSON form; every piece of text passes through llm4s' secret redaction
+first and is cut to 1000 characters.
+
+`TokenUsageRecorded` remains an `INTERNAL` span `Token Usage - <operation>`: it records usage, not a call. GenAI
+metrics (call duration and token usage) are not spans: [`llm4s-observability-micrometer`](micrometer) records them.
 
 ### Adding a Tracing Backend
 
