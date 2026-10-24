@@ -74,4 +74,10 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
     val failure = NetworkError("reset", None, "x")
     new Stub(() => Left(failure)).complete(conversation, CompletionOptions()) shouldBe Left(failure)
   }
+
+  "providerId" should "be the client's provider name, as tracing reports it (#2275)" in {
+    new Stub(() => Left(org.llm4s.error.UnknownError("x", new RuntimeException("x")))).providerId shouldBe Some(
+      org.llm4s.types.ProviderModelTypes.ProviderId("stub")
+    )
+  }
 }

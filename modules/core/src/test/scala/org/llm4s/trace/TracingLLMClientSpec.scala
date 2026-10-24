@@ -132,6 +132,29 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       stub.closed shouldBe true
     }
 
+    "be what ReliableClient and CachingLLMClient forward as their provider" in {
+      val stub = new Stub(Right(completion))
+      new org.llm4s.reliability.ReliableClient(
+        stub,
+        "openai",
+        org.llm4s.reliability.ReliabilityConfig.default
+      ).providerId shouldBe Some(
+        ProviderId("openai")
+      )
+      val embeddings = new EmbeddingClient(new EmbeddingProvider {
+        def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = Right(EmbeddingResponse(Seq(Seq(0.1))))
+      })
+      val cacheConfig =
+        org.llm4s.llmconnect.caching.CacheConfig.create(0.9, 1.minute).fold(e => fail(e.message), identity)
+      new org.llm4s.llmconnect.caching.CachingLLMClient(
+        stub,
+        embeddings,
+        EmbeddingModelConfig("embed-1", 1),
+        cacheConfig,
+        new Recording
+      ).providerId shouldBe Some(ProviderId("openai"))
+    }
+
     "take no server address from a config without a parsable endpoint" in {
       val tracing = new Recording
       TracingLLMClient(new Stub(Right(completion)), tracing, config.copy(baseUrl = "not a url"))

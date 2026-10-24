@@ -121,6 +121,31 @@ class AgentRunTracingSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
     tracing.custom.map(_.data("seq").num) shouldBe sorted
   }
 
+  it should "record the client's provider on its model calls and the run (#2275)" in {
+    val tracing = new Recording()
+    val client = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Right(answer("hello"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+      override def providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] =
+        Some(org.llm4s.types.ProviderModelTypes.ProviderId("anthropic"))
+    }
+    ok(traced(client, tracing).run("hi"))
+
+    eventually {
+      tracing.all.collect { case e: TraceEvent.AgentRunEnded => e.provider } shouldBe Vector(Some("anthropic"))
+    }
+    tracing.custom
+      .filter(_.name == "agent.model_call_completed")
+      .map(_.data("payload")("provider").str) shouldBe Vector("anthropic")
+  }
+
   it should "trace a tool call's task between the model calls around it" in {
     val tracing = new Recording()
     ok(traced(new Scripted(Right(toolCallCompletion), Right(answer("Echoed."))), tracing).run("Echo hello"))

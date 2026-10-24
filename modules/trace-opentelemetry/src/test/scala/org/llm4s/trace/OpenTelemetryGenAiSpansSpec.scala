@@ -232,6 +232,24 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       recorded(spans()).filter(_.contains(Secret)) shouldBe empty
     }
 
+    "record tool calls and tool results as their own message parts" in withTracing(captureContent = true) {
+      (tracing, spans) =>
+        val call = ToolCall("call-1", "search", ujson.Obj("q" -> "france"))
+        val history = Conversation(
+          Seq(UserMessage("find it"), AssistantMessage(None, Seq(call)), ToolMessage("Paris", "call-1"))
+        )
+        TracingLLMClient(new Stub("openai"), tracing).complete(history, options)
+
+        val input = ujson.read(str(spans().loneElement, "gen_ai.input.messages"))
+        input.arr.map(_("role").str) shouldBe Seq("user", "assistant", "tool")
+        input(1)("parts").arr.loneElement("type").str shouldBe "tool_call"
+        input(1)("parts")(0)("name").str shouldBe "search"
+        input(1)("parts")(0)("arguments").str should include("france")
+        input(2)("parts")(0)("type").str shouldBe "tool_call_response"
+        input(2)("parts")(0)("id").str shouldBe "call-1"
+        input(2)("parts")(0)("response").str shouldBe "Paris"
+    }
+
     "record an agent's query and tool input and output, redacted" in withTracing(captureContent = true) {
       (tracing, spans) =>
         tracing.traceEvent(TraceEvent.AgentInitialized(Prompt, Vector.empty))
@@ -288,7 +306,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
     }
   }
 
-  extension [A](as: Vector[A])
+  extension [A](as: collection.Seq[A])
     private def loneElement: A =
       as should have size 1
       as.head
