@@ -34,9 +34,8 @@ client.callCount        // 2
 client.calls.head.lastUserText
 ```
 
-A call the script has no reply for returns a `Left(UnscriptedCallError)` that names the call and the last message. A
-reply the code never asked for is caught by `client.assertExhausted()`, a `Left` naming each unused reply
-(`remaining` and `unusedReplies` give the same as values). The client is thread-safe. It drives `Agent`, `AgentIO` (`llm4s-effect`) and `AgentZ` (`llm4s-zio`) alike.
+A call the script has no reply for returns a `Left(UnscriptedCallError)` that names the call and the last message. The
+client is thread-safe. It drives `Agent`, `AgentIO` (`llm4s-effect`) and `AgentZ` (`llm4s-zio`) alike.
 
 ## Not included
 
@@ -47,6 +46,5 @@ tracked in [#1497](https://github.com/llm4s/llm4s/issues/1497).
 
 The full guide, with an `Agent` and a tool tested end to end, is `docs/guide/testing-with-the-testkit.md` (its code is
 compiled and run by `TestingWithTestkitGuideSpec` in `modules/samples`, and by `ScriptedAgentIOSpec` and
-`ScriptedAgentZSpec` in `modules/llm4s-effect` and `modules/llm4s-zio`). It also has fixtures for MUnit,
-munit-cats-effect, weaver and ZIO Test, run as suites in `modules/samples`. The module's own tests are in
+`ScriptedAgentZSpec` in `modules/llm4s-effect` and `modules/llm4s-zio`). The module's own tests are in
 `modules/testkit/src/test`.
