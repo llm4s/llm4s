@@ -120,3 +120,4 @@ reliability-guide.md | 3e60aa3697 | with | import org.llm4s.reliability._; impor
 reliability-guide.md | ea2b58a14f | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
 reliability-guide.md | b36aaef65f | with | import scala.concurrent.duration._
 reliability-guide.md | fa35020d32 | with | import scala.concurrent.duration._
+../README.md | 8e3d6eb36a | skip | sbt build definition, not Scala source

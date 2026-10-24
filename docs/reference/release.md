@@ -227,7 +227,9 @@ it never overwrites. Write whatever the release deserves once it exists.
 - Compile the Scala CLI quick start against the published artifacts: `gh workflow run scala-cli-quickstart.yml`.
   It checks that `modules/samples/scala-cli/hello.scala` pins the release now on Maven Central (the prepare commit
   bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
-  `scripts/check-scala-cli-quickstart.sh --central --compile`.
+  `scripts/check-scala-cli-quickstart.sh --central --compile`. The same prepare commit bumps the literal versions in
+  `README.md` (GitHub renders it without Liquid): `scripts/check-doc-versions.sh` fails until they equal
+  `latest_release`.
 
 ### Discoverability: Scaladex and GitHub
 
