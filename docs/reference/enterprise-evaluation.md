@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1408, 1465, 2289, 2305, 2306, 2307, 2308, 2309, 2310, 2313, 2315]
+cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2308, 2309, 2310, 2313, 2315]
 ---
 
 # Enterprise Evaluation
@@ -35,7 +35,7 @@ linked to its open issue.
 |---|---|
 | Who decides, and how? | Contributors, committers and maintainers; lazy consensus day to day, a maintainer majority for larger or contested decisions, and an [RFC](../rfcs/) for changes to a Frozen API, a tier, an SPI or a wire format. See [GOVERNANCE.md](https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md). |
 | Who maintains it (bus factor)? | Two maintainers, listed in [MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md); committers, committees and contributors are on the [People](../people/) page. |
-| Who owns the project? | It is stewarded by the LLM4S Foundation, a community-led group that is not yet a registered legal entity: see the [Foundation](../foundation/) page. Neutrality, continuity and a trademark policy are not documented yet: see [Known gaps](#known-gaps). |
+| Who owns the project? | It is stewarded by the LLM4S Foundation, a community-led group: see the [Foundation](../foundation/) page. Neutrality, continuity and a trademark policy are not documented yet: see [Known gaps](#known-gaps). |
 
 ## Release and support
 
@@ -55,7 +55,7 @@ linked to its open issue.
 | Who handles reports, and how? | The [Security Committee](../people/#security-committee) and the maintainers, following the steps in [MAINTAINERS.md](https://github.com/llm4s/llm4s/blob/main/MAINTAINERS.md#handling-security-reports): acknowledge, assess, fix in a private fork, release, publish an advisory. |
 | Can vulnerabilities be reported privately? | SECURITY.md names GitHub private vulnerability reporting as the preferred route and a private Discord channel as the fallback. Private vulnerability reporting is not enabled on the repository yet: see [Known gaps](#known-gaps). |
 | Is there a threat model? | Yes: the [Security Reference](security) lists data flows, trust boundaries, known risks with their mitigations and residual risk, and a checklist for pull requests. |
-| What is the track record? | No GitHub security advisory has been published ([advisories](https://github.com/llm4s/llm4s/security/advisories)). One report about the built-in file, shell and HTTP tools, [#1408](https://github.com/llm4s/llm4s/issues/1408), was filed as a public issue before SECURITY.md existed, and is still open. |
+| What is the track record? | No GitHub security advisory has been published ([advisories](https://github.com/llm4s/llm4s/security/advisories)). |
 
 ## Supply chain
 
@@ -137,8 +137,8 @@ Licence: MIT (https://github.com/llm4s/llm4s/blob/main/LICENSE). Contributions u
 Dependency licences: no licence report yet (https://github.com/llm4s/llm4s/issues/2308);
   per-module CycloneDX SBOMs list the dependencies (https://llm4s.org/reference/sbom).
 Governance: GOVERNANCE.md (lazy consensus; maintainer majority for larger decisions; RFCs for
-  Frozen API changes). Two maintainers (MAINTAINERS.md). Stewarded by the LLM4S Foundation,
-  not yet a registered legal entity (https://llm4s.org/foundation/).
+  Frozen API changes). Two maintainers (MAINTAINERS.md). Stewarded by the LLM4S Foundation
+  (https://llm4s.org/foundation/).
 Versioning: semantic versioning (early-semver). Pre-1.0: any 0.5.x release may break
   compatibility, with a migration note (https://llm4s.org/reference/compatibility-policy).
   No binary-compatibility baseline yet (https://github.com/llm4s/llm4s/issues/1281).
@@ -147,8 +147,7 @@ Support policy: fixes ship in the latest release only. No published cadence, sup
   no SLA, no commercial support (SUPPORT.md).
 Security: SECURITY.md; reports handled by the Security Committee and maintainers, best
   effort, no response-time commitment. Threat model: https://llm4s.org/reference/security.
-  No published advisories; one public report about the built-in tools is open
-  (https://github.com/llm4s/llm4s/issues/1408). Private vulnerability reporting not yet
+  No published advisories. Private vulnerability reporting not yet
   enabled (https://github.com/llm4s/llm4s/issues/1465).
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
   dependency changes. Maven Central artifacts PGP-signed. No build provenance
