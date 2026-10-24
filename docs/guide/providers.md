@@ -453,7 +453,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Provider | Its own keys |
 |---|---|
 | OpenAI, Requesty, OpenRouter | `organization` |
-| Azure OpenAI | `endpoint` (required), `apiVersion` |
+| Azure OpenAI | `endpoint` (required), `apiVersion`, `authentication`, `clientId` |
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 
@@ -602,6 +602,8 @@ llm4s {
 | `endpoint` | yes | The Azure OpenAI resource endpoint |
 | `apiKey` | no | The resource key; default `AZURE_OPENAI_API_KEY` |
 | `apiVersion` | no | Azure API version, wire form or constant name |
+| `authentication` | no | `api-key` (default) or `entra-id`: keyless [Microsoft Entra ID](#azure-openai-with-microsoft-entra-id) |
+| `clientId` | no | With `entra-id`, the client id of a user-assigned managed identity |
 
 ### Available Models
 
@@ -1871,6 +1873,95 @@ Things to know:
 - **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
 - The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
   provider was called while writing this.
+
+---
+
+## Enterprise authentication
+
+Many organisations forbid long-lived API keys for cloud models and require the platform's own
+identity instead: a managed identity, a workload identity or an IAM role. Each of the three clouds
+works that way in llm4s, with no key in `application.conf`.
+
+| Cloud | Provider | How it authenticates without a key |
+|---|---|---|
+| Microsoft Azure | `azure` (`llm4s-openai` + `llm4s-azure-identity`) | `authentication = "entra-id"`: Microsoft Entra ID tokens from `DefaultAzureCredential` |
+| AWS | `bedrock` (`llm4s-bedrock`) | The AWS default credentials chain: environment, `~/.aws` profile, an instance, task or IRSA role |
+| Google Cloud | `vertexai` (`llm4s-gemini`) | Application Default Credentials: `GOOGLE_APPLICATION_CREDENTIALS`, gcloud's login, the metadata server |
+
+### Azure OpenAI with Microsoft Entra ID
+
+Azure Policy can disable key ("local") authentication on an Azure OpenAI resource. Such a
+resource takes Microsoft Entra ID tokens instead, and so does llm4s
+([#2274](https://github.com/llm4s/llm4s/issues/2274)). Add `llm4s-azure-identity` beside
+`llm4s-openai`:
+
+```scala
+// build.sbt - same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-azure-identity" % llm4sVersion
+```
+
+and set `authentication = "entra-id"` in the section, with no `apiKey`:
+
+```hocon
+llm4s.providers {
+  provider = "azure-prod"
+  azure-prod {
+    provider       = "azure"
+    endpoint       = "https://my-resource.openai.azure.com"
+    model          = "gpt-4o"              # the deployment name
+    authentication = "entra-id"
+    # clientId     = ${?AZURE_CLIENT_ID}   # a user-assigned managed identity
+  }
+}
+```
+
+The token comes from Azure's `DefaultAzureCredential`, which tries, in turn, environment
+credentials (`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and a secret or certificate), workload identity
+on AKS, a managed identity, and a developer's `az login`. It is requested for the
+`https://cognitiveservices.azure.com/.default` scope, cached, and fetched again five minutes before
+it expires, so no request carries an expired token; one the service rejects with a 401 is
+dropped, and the next request fetches a new one. The identity needs the **Cognitive Services
+OpenAI User** role on the resource.
+
+Such a section takes no API key: setting `apiKey` as well is an error, and the shared
+`AZURE_OPENAI_API_KEY` is not used. Without `llm4s-azure-identity` on the classpath, loading the
+section fails with a configuration error naming it. `llm4s-azure-identity` brings Azure's
+`azure-identity` (with `azure-core`, MSAL4J, Netty and Reactor), which is why it is a module of its
+own: `llm4s-openai` alone puts no Azure SDK on your classpath.
+
+In code, any `AccessTokenProvider` authenticates a config, and `AzureEntraId` makes one from Azure's
+`DefaultAzureCredential` or from any other `TokenCredential`:
+
+```scala
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.auth.azure.AzureEntraId
+import org.llm4s.llmconnect.config.AzureConfig
+import org.llm4s.model.ModelRegistryService
+
+def azureClient(using ModelRegistryService) =
+  val tokens = AzureEntraId.defaultCredential() // or AzureEntraId.tokenProvider(anyTokenCredential)
+  LLMConnect.getClient(AzureConfig.keyless("https://my-resource.openai.azure.com", "gpt-4o", tokens))
+```
+
+Embeddings take the same tokens: `OpenAIEmbeddingProvider.fromConfig(config, tokens)`, with the
+resource's v1 API as the base URL (`https://my-resource.openai.azure.com/openai/v1`) and the
+embedding deployment's name as the model. From Java, `Llm4s.azureOpenAi().entraId()` (or
+`.entraId(clientId)`, or `.tokenProvider(tokens)`) replaces `.apiKey(...)`. With the Spring Boot
+starter, the properties are the section's keys: `llm4s.providers.azure-prod.authentication=entra-id`
+and `llm4s.providers.azure-prod.client-id=...`.
+
+### AWS Bedrock with IAM roles
+
+A `bedrock` section that sets no `accessKeyId` uses the AWS SDK's default credentials chain: the
+`AWS_*` environment variables, a `profile` in `~/.aws`, and the role of the EC2 instance, ECS task
+or EKS service account (IRSA) the application runs as. See the
+[installation guide](../getting-started/installation#for-aws-bedrock).
+
+### Vertex AI with Application Default Credentials
+
+A `vertexai` section with no `apiKey` uses Application Default Credentials:
+`GOOGLE_APPLICATION_CREDENTIALS`, then gcloud's `application_default_credentials.json`, then the
+metadata server of the GCE, GKE or Cloud Run workload. See [Google Vertex AI](#google-vertex-ai).
 
 ---
 

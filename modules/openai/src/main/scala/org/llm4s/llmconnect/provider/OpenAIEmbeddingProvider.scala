@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -89,7 +90,28 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @param cfg embedding provider configuration with API key and base URL
    * @return configured EmbeddingProvider instance
    */
-  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
+  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
+    provider(cfg, () => requireApiKey(cfg).map(_ => cfg.apiKey), _ => ())
+
+  /**
+   * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key
+   * (#2274): Azure OpenAI with Microsoft Entra ID, whose `baseUrl` is the resource's unified v1 API -
+   * `https://<resource>.openai.azure.com/openai/v1` - and whose model is the embedding deployment's name.
+   * `cfg.apiKey` is not used. `AzureEntraId.defaultCredential()` in `llm4s-azure-identity` gives a
+   * provider that caches the token and refreshes it before it expires; a token the service rejects with a
+   * 401 is reported to `tokenProvider`, so the next call fetches a new one.
+   */
+  def fromConfig(cfg: EmbeddingProviderConfig, tokenProvider: AccessTokenProvider): EmbeddingProvider =
+    provider(cfg, () => tokenProvider.token(), tokenProvider.invalidate)
+
+  /**
+   * The provider; `bearer` gives the token for each request, and `rejected` hears of one the service refused.
+   */
+  private def provider(
+    cfg: EmbeddingProviderConfig,
+    bearer: () => Result[String],
+    rejected: String => Unit
+  ): EmbeddingProvider = new EmbeddingProvider {
     private val httpClient = Llm4sHttpClient.create()
     private val logger     = LoggerFactory.getLogger(getClass)
 
@@ -104,16 +126,20 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       val url = embeddingsUrl(cfg.baseUrl)
       logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
-      val headers = Map("Authorization" -> s"Bearer ${cfg.apiKey}", "Content-Type" -> "application/json")
-
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
       // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
       // failure is an EmbeddingError.
       // A blank key would be sent as `Authorization: Bearer `: refused before any request.
+      val token = bearer()
       val respEither: Result[org.llm4s.http.HttpResponse] =
-        requireApiKey(cfg).flatMap(_ =>
+        token.flatMap(value =>
           httpClient
-            .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+            .post(
+              url,
+              Map("Authorization" -> s"Bearer $value", "Content-Type" -> "application/json"),
+              payload.render(),
+              timeout = cfg.timeouts.requestOr(2.minutes)
+            )
             .left
             .map {
               // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
@@ -147,6 +173,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
               }
           case status =>
+            if (status == 401) token.foreach(rejected)
             val body = Redaction.safeBody(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
             Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))

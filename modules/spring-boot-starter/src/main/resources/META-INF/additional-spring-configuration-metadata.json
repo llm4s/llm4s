@@ -100,7 +100,7 @@
     {
       "name": "llm4s.providers",
       "type": "java.util.Map<java.lang.String,java.util.Map<java.lang.String,java.lang.String>>",
-      "description": "Provider sections, llm4s.providers.<name>.<key>, for any provider on the classpath: provider (the provider id, for example gemini, azure, mistral, openai-compatible), model, api-key, base-url, headers.<Header-Name> and the keys the provider declares (for example endpoint and api-version for azure). kebab-case names are read as the camelCase names of the HOCON block. When any key is set here the flat llm4s.provider, llm4s.model ... are ignored."
+      "description": "Provider sections, llm4s.providers.<name>.<key>, for any provider on the classpath: provider (the provider id, for example gemini, azure, mistral, openai-compatible), model, api-key, base-url, headers.<Header-Name> and the keys the provider declares (for example endpoint, api-version, and authentication = entra-id with client-id, for azure). kebab-case names are read as the camelCase names of the HOCON block. When any key is set here the flat llm4s.provider, llm4s.model ... are ignored."
     },
     {
       "name": "llm4s.credentials",

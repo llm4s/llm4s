@@ -110,6 +110,7 @@ map_file_to_project() {
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
+    modules/azure-identity/*)             echo "azureIdentity" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
     modules/testkit/*)                    echo "testkit" ;;
@@ -265,6 +266,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
@@ -380,6 +382,7 @@ propagate_downstream() {
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -413,6 +416,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    azureIdentity)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     jev)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE it
@@ -423,6 +432,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       ;;
     openai)
+      set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
@@ -521,6 +531,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE anthropic
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE voyage
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx

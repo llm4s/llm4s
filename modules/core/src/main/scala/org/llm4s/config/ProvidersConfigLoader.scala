@@ -71,6 +71,10 @@ final private[config] case class ProviderSections(
           // reporting it as authenticated would hide that from the policy check.
           if raw.auth.isDefined && descriptor.configSpec.supportsAuth then
             ApiKeySource.WorkloadIdentity(s"llm4s.providers.${name.asName}.auth")
+          else if descriptor.configSpec.isKeyless(raw.extras) then
+            ApiKeySource.WorkloadIdentity(
+              s"llm4s.providers.${name.asName}.${descriptor.configSpec.keylessWhen.fold("")(_._1)}"
+            )
           else if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
           else ApiKeySource.Credentials(SharedCredentials.apiKeyPath(descriptor.id))
         name -> source

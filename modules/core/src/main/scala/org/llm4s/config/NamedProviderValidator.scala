@@ -113,9 +113,12 @@ private[llm4s] object NamedProviderSectionValidator:
       .filter(alias =>
         ProviderConfigSpec.BuiltinKeys.contains(alias) && !ProviderConfigSpec.BuiltinAliasKeys.contains(alias)
       )
-    val reservedAuth = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
+    val reservedAuth      = spec.authExtras.map(_.name).filter(AuthConfig.ReservedKeys.contains)
+    val undeclaredKeyless = spec.keylessWhen.map(_._1).filterNot(key => spec.extra(key).isDefined)
     val problems =
-      Option.when(reservedAuth.nonEmpty)(
+      undeclaredKeyless.map(key =>
+        s"names $key in keylessWhen but does not declare it in its ProviderConfigSpec.extras"
+      ) ++ Option.when(reservedAuth.nonEmpty)(
         s"declares auth key(s) ${reservedAuth.mkString(", ")}, which are the identity-token keys core reads itself; " +
           "rename them in its ProviderConfigSpec.authExtras"
       ) ++ Option.when(clashing.nonEmpty)(
@@ -135,7 +138,9 @@ private[llm4s] object NamedProviderSectionValidator:
     val spec    = descriptor.configSpec
     val missing = Seq.newBuilder[String]
 
-    if spec.requiresApiKey && normalized.apiKey.isEmpty && normalized.auth.isEmpty then
+    val keyless = spec.isKeyless(normalized.extras)
+
+    if spec.requiresApiKey && normalized.apiKey.isEmpty && normalized.auth.isEmpty && !keyless then
       // By now the section has already fallen back to the vendor's shared key, so both places are
       // empty. Name the variable the provider's module binds to that shared key - declared by the
       // provider, never guessed from its id - and the section's own key, for a second account.
@@ -313,19 +318,35 @@ private[llm4s] object NamedProviderConfigValidator:
         )
       )
       descriptor <- registry.resolve(normalized.provider, Some(s"$sectionPath.provider"))
+      // A keyless authentication the provider declares (Azure's `authentication = "entra-id"`, #2274)
+      // is one way to authenticate, as `auth` is: a key of the section's own is refused, not ignored.
+      keyless = descriptor.configSpec.isKeyless(normalized.extras)
+      _ <- Either.cond(
+        !keyless || normalized.apiKey.isEmpty,
+        (),
+        ConfigurationError(
+          s"$sectionPath sets both apiKey and ${keylessSetting(descriptor)}; a section authenticates one way - " +
+            "remove one"
+        )
+      )
       // `normalized.provider` is already canonical - an alias such as `google` has become
       // `gemini` - so an aliased section finds its vendor's shared key. A section that authenticates
-      // with workload identity uses no key at all, so the shared one is not consulted: exporting
-      // OPENAI_API_KEY must not turn a section that uses `auth` into an error.
+      // with workload identity, or keylessly, uses no key at all, so the shared one is not consulted:
+      // exporting OPENAI_API_KEY must not turn a section that uses `auth` into an error.
+      noKey = normalized.auth.isDefined || keyless
       resolved <-
-        if normalized.auth.isDefined then Right(None)
+        if noKey then Right(None)
         else credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,
-        if normalized.auth.isDefined then normalized
+        if noKey then normalized
         else normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))
       validated
+
+  /** The provider's keyless setting as a section writes it, e.g. `authentication = "entra-id"`. */
+  private def keylessSetting(descriptor: ProviderDescriptor): String =
+    descriptor.configSpec.keylessWhen.fold("a keyless authentication")((key, value) => s"$key = \"$value\"")

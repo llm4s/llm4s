@@ -64,6 +64,7 @@ guide/providers.md | eefc81026e | skip | sbt build definition, not Scala source
 guide/providers.md | afa57b6d42 | skip | sbt build definition, not Scala source
 guide/providers.md | 5b738f4a9e | skip | sbt build definition, not Scala source
 guide/providers.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
+guide/providers.md | 212673b3ef | skip | sbt build definition, not Scala source
 guide/providers.md | 3aaf5d6233 | skip | uses ConfigPolicy from llm4s-config-policy, the unpublished config-check CLI module, which samples does not depend on
 guide/basic-usage.md | 26fea8f0c8 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
 guide/basic-usage.md | 54302bfb43 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result

@@ -407,7 +407,8 @@ jobs:
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService, examplesHttp]
+                      azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
                       llm4sPekko]
@@ -742,6 +743,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: bedrock
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload azure-identity coverage to Codecov
+        if: contains(matrix.modules, 'azureIdentity')
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/azure-identity/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: azure-identity
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

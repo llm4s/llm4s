@@ -10,7 +10,8 @@ import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
 import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, StreamResponse }
-import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException }
+import com.openai.credential.BearerTokenCredential
+import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException, UnauthorizedException }
 import com.openai.models.chat.completions.{
   ChatCompletion,
   ChatCompletionAssistantMessageParam,
@@ -33,7 +34,7 @@ import org.llm4s.error.{ LLMError, UnknownError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.auth.{ IdentitySource, IdentityTokenSource }
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, IdentityTokenSource }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
   OpenAIConfig,
@@ -866,7 +867,7 @@ object OpenAIClient {
             case IdentitySource.File(_)        => Nil
           })
       }
-    case azure: AzureConfig => Seq(azure.apiKey)
+    case azure: AzureConfig => Seq(azure.apiKey).filter(_.nonEmpty)
     case _                  => Nil
   }
 
@@ -1053,7 +1054,7 @@ private[provider] object OpenAIClientTransport {
   }
 
   /**
-   * Azure OpenAI: an `api-key` header, and requests to
+   * Azure OpenAI: an `api-key` header - or, with `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
    * `<endpoint>/openai/deployments/<model>/chat/completions?api-version=<apiVersion>`,
    * where `model` is the deployment name - the URL the Azure SDK built.
    *
@@ -1070,11 +1071,55 @@ private[provider] object OpenAIClientTransport {
     val builder = OpenAIOkHttpClient
       .builder()
       .baseUrl(config.endpoint)
-      .credential(AzureApiKeyCredential.create(config.apiKey))
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
-    sdk(builder.build(), config.timeouts)
+    config.tokenProvider match {
+      case None => sdk(builder.credential(AzureApiKeyCredential.create(config.apiKey)).build(), config.timeouts)
+      case Some(tokens) =>
+        val bearer = new EntraIdBearer(tokens)
+        bearer.invalidatingOnRejection(
+          sdk(builder.credential(BearerTokenCredential.create(bearer)).build(), config.timeouts)
+        )
+    }
+  }
+
+  /**
+   * Microsoft Entra ID's bearer token for each request (#2274), from `tokens`, which caches and refreshes
+   * it. A failure to get one rides through the SDK in an [[IdentityTokenException]], so it reaches the
+   * caller as the `LLMError` it was. When the service answers 401 the token it rejected is reported
+   * to `tokens`, so the next request fetches a new one rather than sending it again.
+   */
+  final private[provider] class EntraIdBearer(tokens: AccessTokenProvider) extends java.util.function.Supplier[String] {
+    private val lastIssued = new java.util.concurrent.atomic.AtomicReference[String]()
+
+    override def get(): String = {
+      val token = tokens.token().fold(error => throw new IdentityTokenException(error), identity)
+      lastIssued.set(token)
+      token
+    }
+
+    private def rejected[A](call: => A): A =
+      Try(call).fold(
+        {
+          case unauthorized: UnauthorizedException =>
+            Option(lastIssued.get()).foreach(tokens.invalidate)
+            throw unauthorized
+          case other => throw other
+        },
+        identity
+      )
+
+    def invalidatingOnRejection(underlying: OpenAIClientTransport): OpenAIClientTransport =
+      new OpenAIClientTransport {
+        override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
+          rejected(underlying.createChatCompletion(params))
+        override def createChatCompletionStream(
+          params: ChatCompletionCreateParams
+        ): StreamResponse[ChatCompletionChunk] =
+          rejected(underlying.createChatCompletionStream(params))
+        override def close(): Unit = underlying.close()
+      }
   }
 
   private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =

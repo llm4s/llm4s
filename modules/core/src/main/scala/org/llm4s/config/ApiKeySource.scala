@@ -30,10 +30,12 @@ enum ApiKeySource:
   case Credentials(path: String)
 
   /**
-   * The section authenticates with workload identity - an `auth` block - so it uses no API key,
-   * its own or shared.
+   * The section authenticates with workload identity - an `auth` block, or a keyless authentication
+   * its provider declares (`ProviderConfigSpec.keylessWhen`, such as Azure OpenAI's
+   * `authentication = "entra-id"`) - so it uses no API key, its own or shared.
    *
-   * @param path the block's path, e.g. `llm4s.providers.databricks-main.auth`
+   * @param path the block's or the setting's path, e.g. `llm4s.providers.databricks-main.auth` or
+   *             `llm4s.providers.azure-prod.authentication`
    */
   case WorkloadIdentity(path: String)
 

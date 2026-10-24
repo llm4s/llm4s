@@ -1,0 +1,7 @@
+# llm4s-azure-identity: Microsoft Entra ID for Azure OpenAI sections with
+# authentication = "entra-id" (#2274). Found by llm4s-openai's AzureProvider.
+#
+# If you bundle llm4s into a fat jar, this file must be CONCATENATED with other
+# services files, not overwritten (sbt-assembly: MergeStrategy.filterDistinctLines;
+# maven-shade: ServicesResourceTransformer). In code, AzureEntraId needs no entry.
+org.llm4s.llmconnect.auth.azure.DefaultAzureEntraIdSupport

@@ -32,6 +32,8 @@ object PomDescriptions {
       "Built-in tools for LLM4S agents: core utilities, file system, HTTP, shell and web search.",
     "llm4s-anthropic" ->
       "Anthropic Claude chat provider for LLM4S, built on the Anthropic Java SDK.",
+    "llm4s-azure-identity" ->
+      "Microsoft Entra ID for LLM4S's Azure OpenAI provider: keyless DefaultAzureCredential or any TokenCredential.",
     "llm4s-bedrock" ->
       "AWS Bedrock chat provider for LLM4S, using the Converse and ConverseStream APIs.",
     "llm4s-cohere" ->

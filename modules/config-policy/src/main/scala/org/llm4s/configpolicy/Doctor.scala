@@ -334,6 +334,9 @@ object Doctor {
   ): DoctorCheck =
     if (!descriptor.configSpec.requiresApiKey) {
       DoctorCheck.pass(Key, s"'${descriptor.id.asString}' needs no API key")
+    } else if (descriptor.configSpec.isKeyless(section.extras)) {
+      val setting = descriptor.configSpec.keylessWhen.fold("")((key, value) => s"$key = $value")
+      DoctorCheck.pass(Key, s"section '$name' authenticates with $setting and needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
       SharedCredentials.read(source).resolve(section.apiKey, ownPath, descriptor.id) match {

@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.StringJoiner;
+import org.llm4s.llmconnect.auth.AccessTokenProvider;
 import org.llm4s.metrics.MetricsCollector;
 import org.llm4s.util.Redaction;
 
@@ -16,7 +17,8 @@ import org.llm4s.util.Redaction;
 final class ClientSettings {
 
   static final ClientSettings EMPTY =
-      new ClientSettings(null, null, null, null, null, null, null, null, null, null, Map.of(), null);
+      new ClientSettings(
+          null, null, null, null, null, null, null, null, null, null, Map.of(), null, false, null, null);
 
   final String apiKey;
   final String model;
@@ -32,6 +34,12 @@ final class ClientSettings {
   final Map<String, String> headers;
   /** Where the client reports every call; {@code null} records nothing. */
   final MetricsCollector metrics;
+  /** Azure: authenticate with Microsoft Entra ID's {@code DefaultAzureCredential} instead of an API key (#2274). */
+  final boolean entraId;
+  /** Azure, with {@link #entraId}: the user-assigned managed identity's client id; {@code null} for the default. */
+  final String entraIdClientId;
+  /** Azure: the bearer tokens to authenticate with instead of an API key (#2274); {@code null} for none. */
+  final AccessTokenProvider tokenProvider;
 
   private ClientSettings(
       String apiKey,
@@ -45,7 +53,10 @@ final class ClientSettings {
       Duration requestTimeout,
       Duration streamTimeout,
       Map<String, String> headers,
-      MetricsCollector metrics) {
+      MetricsCollector metrics,
+      boolean entraId,
+      String entraIdClientId,
+      AccessTokenProvider tokenProvider) {
     this.apiKey = apiKey;
     this.model = model;
     this.baseUrl = baseUrl;
@@ -58,61 +69,87 @@ final class ClientSettings {
     this.streamTimeout = streamTimeout;
     this.headers = headers;
     this.metrics = metrics;
+    this.entraId = entraId;
+    this.entraIdClientId = entraIdClientId;
+    this.tokenProvider = tokenProvider;
   }
 
   ClientSettings apiKey(String value) {
     return new ClientSettings(value, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings model(String value) {
     return new ClientSettings(apiKey, value, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings baseUrl(String value) {
     return new ClientSettings(apiKey, model, value, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings organization(String value) {
     return new ClientSettings(apiKey, model, baseUrl, value, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings endpoint(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, value, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings apiVersion(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, value, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings contextWindow(int value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, value,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId,
+        tokenProvider);
   }
 
   ClientSettings reserveCompletion(int value) {
-    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        value, requestTimeout, streamTimeout, headers, metrics);
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow, value,
+        requestTimeout, streamTimeout, headers, metrics, entraId, entraIdClientId, tokenProvider);
   }
 
   ClientSettings requestTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, value, streamTimeout, headers, metrics);
+        reserveCompletion, value, streamTimeout, headers, metrics, entraId, entraIdClientId, tokenProvider);
   }
 
   ClientSettings streamTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, value, headers, metrics);
+        reserveCompletion, requestTimeout, value, headers, metrics, entraId, entraIdClientId, tokenProvider);
   }
 
   ClientSettings metrics(MetricsCollector value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, value);
+        reserveCompletion, requestTimeout, streamTimeout, headers, value, entraId, entraIdClientId,
+        tokenProvider);
+  }
+
+  /**
+   * Entra ID through {@code DefaultAzureCredential}, with {@code clientId} ({@code null} for the default); clears a
+   * token provider.
+   */
+  ClientSettings entraId(String clientId) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, true, clientId, null);
+  }
+
+  /** Bearer tokens from {@code value}; clears {@link #entraId}. */
+  ClientSettings tokenProvider(AccessTokenProvider value) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, false, null, value);
   }
 
   /** {@code name} set to {@code value}, or removed when {@code value} is {@code null}. */
@@ -124,7 +161,8 @@ final class ClientSettings {
       next.put(name, value);
     }
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, Collections.unmodifiableMap(next), metrics);
+        reserveCompletion, requestTimeout, streamTimeout, Collections.unmodifiableMap(next), metrics, entraId,
+        entraIdClientId, tokenProvider);
   }
 
   /**
@@ -146,6 +184,10 @@ final class ClientSettings {
     if (streamTimeout != null) fields.add("streamTimeout=" + streamTimeout);
     if (!headers.isEmpty()) fields.add("headers=" + headers.keySet());
     if (metrics != null) fields.add("metrics=" + metrics.getClass().getName());
+    if (entraId) {
+      fields.add(entraIdClientId == null ? "auth=entra-id" : "auth=entra-id(clientId=" + entraIdClientId + ")");
+    }
+    if (tokenProvider != null) fields.add("auth=token-provider");
     return fields.toString();
   }
 }

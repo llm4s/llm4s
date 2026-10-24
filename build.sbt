@@ -325,6 +325,7 @@ lazy val llm4s = (project in file("."))
     gemini,
     anthropic,
     openai,
+    azureIdentity,
     openaiCompatible,
     voyage,
     bedrock,
@@ -1321,6 +1322,28 @@ lazy val openai = (project in file("modules/openai"))
     )
   )
 
+// Microsoft Entra ID for Azure OpenAI (#2274): `DefaultAzureCredential` - managed identity, workload identity, the
+// Azure CLI's login - as an `AccessTokenProvider`, for a section with `authentication = "entra-id"` and for code.
+// `azure-identity` brings azure-core, MSAL4J, Netty and Reactor, so it is a module of its own rather than a
+// dependency of the frozen `llm4s-openai`, which `frozenDependencyCheck` keeps off `com.azure`; `llm4s-openai`
+// finds it through `META-INF/services`. It depends on `openai` for that SPI and for the client its specs drive.
+lazy val azureIdentity = (project in file("modules/azure-identity"))
+  .dependsOn(core % "compile->compile;test->test", openai, providerTestkit % Test)
+  .settings(
+    name := "llm4s-azure-identity",
+    commonSettings,
+    // Measured 95.16% statement coverage (`sbt coverage azureIdentity/test azureIdentity/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.azureIdentity,
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -1520,6 +1543,7 @@ lazy val samples = (project in file("modules//samples"))
     gemini,
     anthropic,
     openai,
+    azureIdentity,
     openaiCompatible,
     voyage,
     bedrock,
@@ -1596,7 +1620,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible, bedrock, watsonx)
+  .dependsOn(core, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -1950,6 +1974,7 @@ lazy val it = (project in file("modules/it"))
     gemini,
     anthropic,
     openai,
+    azureIdentity,
     openaiCompatible,
     voyage,
     bedrock,
@@ -2041,6 +2066,7 @@ lazy val docs = (project in file("modules/docs"))
     gemini,
     anthropic,
     openai,
+    azureIdentity,
     openaiCompatible,
     voyage,
     bedrock,
@@ -2096,6 +2122,7 @@ lazy val docs = (project in file("modules/docs"))
         (gemini / Compile / sources).value ++
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
+        (azureIdentity / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
@@ -2210,13 +2237,15 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // `observabilityMicrometer` is provided, like Actuator: `LlmMetricsAutoConfiguration` records into the
   // application's MeterRegistry only when the application adds `llm4s-observability-micrometer` itself, so the
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
-  // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820).
+  // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820), and
+  // `azureIdentity` for an Azure section with `authentication = entra-id` read from properties (#2274).
   .dependsOn(
     javaApi,
     observabilityMicrometer % "provided",
     core                    % "test->test",
     providerTestkit         % Test,
-    bedrock                 % Test
+    bedrock                 % Test,
+    azureIdentity           % Test
   )
   .settings(
     name := "llm4s-spring-boot-starter",
@@ -2250,7 +2279,8 @@ lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/
     observabilityMicrometer,
     core            % "test->test",
     providerTestkit % Test,
-    bedrock         % Test
+    bedrock         % Test,
+    azureIdentity   % Test
   )
   .settings(
     name := "llm4s-spring-boot-starter-boot4-tests",

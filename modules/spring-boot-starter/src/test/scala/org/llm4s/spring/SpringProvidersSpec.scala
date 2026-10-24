@@ -291,6 +291,26 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "read an Azure section that authenticates with Microsoft Entra ID, with no api-key (#2274)" in {
+    val config = SpringProviderSource
+      .resolve(
+        env(
+          "llm4s.providers.provider"          -> "az",
+          "llm4s.providers.az.provider"       -> "azure",
+          "llm4s.providers.az.model"          -> "dep",
+          "llm4s.providers.az.endpoint"       -> "https://r.openai.azure.com",
+          "llm4s.providers.az.authentication" -> "entra-id",
+          "llm4s.providers.az.client-id"      -> "00000000-0000-0000-0000-000000000001"
+        ),
+        ""
+      )
+      .get()
+      .config
+    config shouldBe an[AzureConfig]
+    config.asInstanceOf[AzureConfig].tokenProvider should not be empty
+    config.asInstanceOf[AzureConfig].apiKey shouldBe ""
+  }
+
   // ---- how the default section is chosen ----------------------------------------------------------
 
   "the default section" should "be the one llm4s.providers.provider names, not the flat llm4s.provider" in {

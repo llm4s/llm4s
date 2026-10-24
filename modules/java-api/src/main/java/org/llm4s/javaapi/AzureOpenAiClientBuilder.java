@@ -1,6 +1,7 @@
 package org.llm4s.javaapi;
 
 import java.time.Duration;
+import org.llm4s.llmconnect.auth.AccessTokenProvider;
 import org.llm4s.metrics.MetricsCollector;
 
 /**
@@ -15,7 +16,21 @@ import org.llm4s.metrics.MetricsCollector;
  *     .build();
  * }</pre>
  *
- * <p>{@code endpoint}, {@code apiKey} and {@code model} (the deployment name) are required; everything else has the default the library's own configuration gives
+ * <p>A resource that forbids keys authenticates with Microsoft Entra ID instead (#2274): {@link #entraId()} uses
+ * Azure's {@code DefaultAzureCredential} - a managed identity, workload identity or the Azure CLI's login - and needs
+ * {@code org.llm4s:llm4s-azure-identity} on the classpath; {@link #tokenProvider(AccessTokenProvider)} takes tokens from
+ * any provider, such as {@code AzureEntraId.tokenProvider(credential)} over another {@code TokenCredential}.
+ *
+ * <pre>{@code
+ * LlmResult<JLlmClient> client = Llm4s.azureOpenAi()
+ *     .endpoint("https://my-resource.openai.azure.com")
+ *     .entraId()
+ *     .model("my-gpt-4o-deployment")
+ *     .build();
+ * }</pre>
+ *
+ * <p>{@code endpoint}, {@code model} (the deployment name) and one credential - {@code apiKey}, {@code entraId} or
+ * {@code tokenProvider} - are required; everything else has the default the library's own configuration gives
  * it. Immutable: every method returns a new builder, so one can be shared, and forked into several clients. A
  * setter never throws: a value that is missing or out of range makes {@link #build()} return a failed result of
  * kind {@code VALIDATION} that names the field.
@@ -42,6 +57,33 @@ public final class AzureOpenAiClientBuilder {
    */
   public AzureOpenAiClientBuilder apiKey(String apiKey) {
     return new AzureOpenAiClientBuilder(settings.apiKey(apiKey));
+  }
+
+  /**
+   * Authenticates with Microsoft Entra ID through Azure's {@code DefaultAzureCredential} instead of an API key: a
+   * system-assigned managed identity, workload identity, environment credentials or a developer's Azure CLI login.
+   * Needs {@code org.llm4s:llm4s-azure-identity} on the classpath; without it {@link #build()} fails with kind
+   * {@code CONFIGURATION}. Replaces an earlier {@link #tokenProvider(AccessTokenProvider)}.
+   */
+  public AzureOpenAiClientBuilder entraId() {
+    return new AzureOpenAiClientBuilder(settings.entraId(null));
+  }
+
+  /**
+   * {@link #entraId()} with the client id of the user-assigned managed identity (or workload identity) to use; a
+   * {@code null} or blank id is the default identity.
+   */
+  public AzureOpenAiClientBuilder entraId(String clientId) {
+    return new AzureOpenAiClientBuilder(settings.entraId(clientId));
+  }
+
+  /**
+   * Authenticates with bearer tokens from {@code tokenProvider} instead of an API key, such as
+   * {@code AzureEntraId.tokenProvider(credential)} from {@code llm4s-azure-identity} over any Azure
+   * {@code TokenCredential}. Replaces an earlier {@link #entraId()}; {@code null} is the same as none.
+   */
+  public AzureOpenAiClientBuilder tokenProvider(AccessTokenProvider tokenProvider) {
+    return new AzureOpenAiClientBuilder(settings.tokenProvider(tokenProvider));
   }
 
   /** The model to call, such as {@code my-gpt-4o-deployment} - required; a {@code null} or blank model is the same as none. */

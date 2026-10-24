@@ -256,6 +256,20 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       check(report, "API key").detail should include("llm4s.providers.main.apiKey")
     }
 
+    "need no key for an Azure section that authenticates with Entra ID (#2274)" in {
+      val hocon =
+        """llm4s.providers {
+          |  provider = "az"
+          |  az {
+          |    provider = "azure", model = "gpt-4o", endpoint = "https://r.openai.azure.com"
+          |    authentication = "entra-id"
+          |  }
+          |}""".stripMargin
+      val key = check(run(hocon), "API key")
+      key.status shouldBe CheckStatus.Pass
+      key.detail should include("authenticates with authentication = entra-id and needs no API key")
+    }
+
     "need no key for a provider that takes none" in {
       check(run(localOllama), "API key").detail should include("needs no API key")
     }

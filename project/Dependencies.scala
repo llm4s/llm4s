@@ -27,16 +27,18 @@ object Versions {
   val pureconfig = "0.17.10"
 
   val openaiJava = "4.69.3"
-  val anthropic  = "2.65.0"
-  val jtokkit    = "1.1.0"
-  val websocket  = "1.6.0"
-  val ujson      = "4.4.3"
-  val pdfbox     = "3.0.7"
-  val tika       = "3.3.1"
-  val poi        = "5.5.1"
-  val jsoup      = "1.22.2"
-  val jna        = "5.19.1"
-  val vosk       = "0.3.45"
+  // MIT. Only llm4s-azure-identity (#2274); no frozen module may resolve com.azure.
+  val azureIdentity = "1.18.7"
+  val anthropic     = "2.65.0"
+  val jtokkit       = "1.1.0"
+  val websocket     = "1.6.0"
+  val ujson         = "4.4.3"
+  val pdfbox        = "3.0.7"
+  val tika          = "3.3.1"
+  val poi           = "5.5.1"
+  val jsoup         = "1.22.2"
+  val jna           = "5.19.1"
+  val vosk          = "0.3.45"
 
   // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask = "0.10.2"
@@ -135,17 +137,18 @@ object Deps {
   val hikariCP    = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
   val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
-  val openaiJava = "com.openai"         % "openai-java"    % Versions.openaiJava
-  val anthropic  = "com.anthropic"      % "anthropic-java" % Versions.anthropic
-  val jtokkit    = "com.knuddels"       % "jtokkit"        % Versions.jtokkit
-  val websocket  = "org.java-websocket" % "Java-WebSocket" % Versions.websocket
-  val ujson      = "com.lihaoyi"       %% "ujson"          % Versions.ujson
-  val pdfbox     = "org.apache.pdfbox"  % "pdfbox"         % Versions.pdfbox
-  val tika       = "org.apache.tika"    % "tika-core"      % Versions.tika
-  val poi        = "org.apache.poi"     % "poi-ooxml"      % Versions.poi
-  val jsoup      = "org.jsoup"          % "jsoup"          % Versions.jsoup
-  val jna        = "net.java.dev.jna"   % "jna"            % Versions.jna
-  val vosk       = "com.alphacephei"    % "vosk"           % Versions.vosk
+  val openaiJava    = "com.openai"         % "openai-java"    % Versions.openaiJava
+  val azureIdentity = "com.azure"          % "azure-identity" % Versions.azureIdentity
+  val anthropic     = "com.anthropic"      % "anthropic-java" % Versions.anthropic
+  val jtokkit       = "com.knuddels"       % "jtokkit"        % Versions.jtokkit
+  val websocket     = "org.java-websocket" % "Java-WebSocket" % Versions.websocket
+  val ujson         = "com.lihaoyi"       %% "ujson"          % Versions.ujson
+  val pdfbox        = "org.apache.pdfbox"  % "pdfbox"         % Versions.pdfbox
+  val tika          = "org.apache.tika"    % "tika-core"      % Versions.tika
+  val poi           = "org.apache.poi"     % "poi-ooxml"      % Versions.poi
+  val jsoup         = "org.jsoup"          % "jsoup"          % Versions.jsoup
+  val jna           = "net.java.dev.jna"   % "jna"            % Versions.jna
+  val vosk          = "com.alphacephei"    % "vosk"           % Versions.vosk
 
   val cask = "com.lihaoyi" %% "cask" % Versions.cask
 

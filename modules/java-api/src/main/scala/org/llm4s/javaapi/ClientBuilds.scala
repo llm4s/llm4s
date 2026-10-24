@@ -14,7 +14,8 @@ import org.llm4s.llmconnect.config.{
   ProviderConfig,
   ProviderTimeouts
 }
-import org.llm4s.llmconnect.provider.OpenAICompatibleProvider
+import org.llm4s.llmconnect.auth.AccessTokenProvider
+import org.llm4s.llmconnect.provider.{ AzureEntraIdSupport, OpenAICompatibleProvider }
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
@@ -130,18 +131,29 @@ private[javaapi] object ClientBuilds {
   def azureOpenAiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
       endpoint <- required("endpoint", s.endpoint)
-      apiKey   <- required("apiKey", s.apiKey)
       model    <- required("model", s.model)
       resolver <- resolver
-      config <- AzureConfig.fromValues(
-        model,
-        endpoint,
-        apiKey,
-        present(s.apiVersion).getOrElse(AzureConfig.DEFAULT_API_VERSION)
-      )(using resolver)
+      apiVersion = present(s.apiVersion).getOrElse(AzureConfig.DEFAULT_API_VERSION)
+      config <- azureCredential(s) match {
+        case Left(apiKey) =>
+          apiKey.flatMap(AzureConfig.fromValues(model, endpoint, _, apiVersion)(using resolver))
+        case Right(tokens) =>
+          tokens.flatMap(AzureConfig.fromTokenProvider(model, endpoint, _, apiVersion)(using resolver))
+      }
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
     } yield config.withContextWindow(sized._1).withReserveCompletion(sized._2).withTimeouts(timeouts)
+
+  /**
+   * The Azure builder's credential: an API key (`Left`), or bearer tokens (`Right`) from its token provider or, for
+   * `entraId()`, from `llm4s-azure-identity`'s `DefaultAzureCredential` (#2274). With neither, the API key is required.
+   */
+  private def azureCredential(s: ClientSettings): Either[Result[String], Result[AccessTokenProvider]] =
+    Option(s.tokenProvider) match {
+      case Some(tokens)      => Right(Right(tokens))
+      case None if s.entraId => Right(AzureEntraIdSupport.tokenProvider(present(s.entraIdClientId)))
+      case None              => Left(required("apiKey", s.apiKey))
+    }
 
   /** The client for `config`, reporting to the builder's collector, or the first thing wrong with what it was told. */
   private def client(config: Result[ProviderConfig], s: ClientSettings): LlmResult[JLlmClient] =

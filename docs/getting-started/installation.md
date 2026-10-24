@@ -420,6 +420,21 @@ OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format with no SDK, and are 
 needs this module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
 unchanged; see the [migration note](../reference/migration#slice-5-llm4s-openai).
 
+### For Azure OpenAI with Microsoft Entra ID
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-azure-identity" % llm4sVersion
+```
+
+Keyless authentication for Azure OpenAI ([#2274](https://github.com/llm4s/llm4s/issues/2274)): an
+`azure` section with `authentication = "entra-id"` takes Microsoft Entra ID tokens from Azure's
+`DefaultAzureCredential` (a managed identity, workload identity or `az login`) instead of an API key,
+and `AzureEntraId` turns any `TokenCredential` into the tokens a config or embedding provider takes.
+It brings Azure's `azure-identity` (MIT, with `azure-core`, MSAL4J, Netty and Reactor), which is why
+it is not part of `llm4s-openai`. See
+[Enterprise authentication](../guide/providers#azure-openai-with-microsoft-entra-id).
+
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 ```scala

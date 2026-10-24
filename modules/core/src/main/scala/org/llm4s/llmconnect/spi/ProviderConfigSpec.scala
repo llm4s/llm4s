@@ -132,6 +132,12 @@ object ProviderConfigKey:
  *                             itself). Non-empty means the provider supports workload-identity
  *                             authentication, and a section with an `auth` block then needs no
  *                             `apiKey`; required and default keys are validated as for `extras`.
+ * @param keylessWhen          a provider-specific key and the value of it that selects an authentication
+ *                             needing no API key - Azure OpenAI's `authentication = "entra-id"` (#2274).
+ *                             A section that sets that value is validated without an `apiKey`, does not
+ *                             take the vendor's shared key, and may not set one of its own. The key must be
+ *                             one of `extras`; the value is compared ignoring case and surrounding blanks.
+ *                             `None`, the default, when every section of the provider needs a key.
  *
  * == The API key ==
  * A section's key is its own `apiKey` when it sets one, and otherwise the vendor's shared
@@ -148,7 +154,8 @@ final case class ProviderConfigSpec private (
   baseUrlEnv: Option[String],
   extras: Seq[ProviderConfigKey],
   apiKeyEnv: Seq[String],
-  authExtras: Seq[ProviderConfigKey]
+  authExtras: Seq[ProviderConfigKey],
+  keylessWhen: Option[(String, String)]
 ):
   def withRequiresApiKey(requiresApiKey: Boolean): ProviderConfigSpec   = copy(requiresApiKey = requiresApiKey)
   def withRequiresBaseUrl(requiresBaseUrl: Boolean): ProviderConfigSpec = copy(requiresBaseUrl = requiresBaseUrl)
@@ -160,12 +167,22 @@ final case class ProviderConfigSpec private (
   def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec         = copy(extras = extras)
   def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec              = copy(apiKeyEnv = apiKeyEnv)
   def withAuthExtras(authExtras: Seq[ProviderConfigKey]): ProviderConfigSpec = copy(authExtras = authExtras)
+  def withKeylessWhen(key: String, value: String): ProviderConfigSpec        = copy(keylessWhen = Some(key -> value))
+  def withKeylessWhen(keylessWhen: Option[(String, String)]): ProviderConfigSpec =
+    copy(keylessWhen = keylessWhen)
 
   /** The declared provider-specific key called `name`, if any. */
   def extra(name: String): Option[ProviderConfigKey] = extras.find(_.name == name)
 
   /** Whether a section for this provider may carry an `auth` block. */
   private[llm4s] def supportsAuth: Boolean = authExtras.nonEmpty
+
+  /**
+   * Whether a section whose provider-specific keys are `extras` authenticates without an API key, by
+   * [[keylessWhen]]; the key's value as the section wrote it, before defaults.
+   */
+  private[llm4s] def isKeyless(extras: Map[String, String]): Boolean =
+    keylessWhen.exists((key, value) => extras.get(key).exists(_.trim.equalsIgnoreCase(value.trim)))
 
 object ProviderConfigSpec:
 
@@ -178,7 +195,8 @@ object ProviderConfigSpec:
     baseUrlEnv: Option[String] = None,
     extras: Seq[ProviderConfigKey] = Seq.empty,
     apiKeyEnv: Seq[String] = Seq.empty,
-    authExtras: Seq[ProviderConfigKey] = Seq.empty
+    authExtras: Seq[ProviderConfigKey] = Seq.empty,
+    keylessWhen: Option[(String, String)] = None
   ): ProviderConfigSpec =
     new ProviderConfigSpec(
       requiresApiKey,
@@ -188,7 +206,31 @@ object ProviderConfigSpec:
       baseUrlEnv,
       extras,
       apiKeyEnv,
-      authExtras
+      authExtras,
+      keylessWhen
+    )
+
+  /** The shape before `keylessWhen` (#2274), with no keyless authentication. */
+  def apply(
+    requiresApiKey: Boolean,
+    requiresBaseUrl: Boolean,
+    defaultBaseUrl: Option[String],
+    baseUrlExample: String,
+    baseUrlEnv: Option[String],
+    extras: Seq[ProviderConfigKey],
+    apiKeyEnv: Seq[String],
+    authExtras: Seq[ProviderConfigKey]
+  ): ProviderConfigSpec =
+    apply(
+      requiresApiKey,
+      requiresBaseUrl,
+      defaultBaseUrl,
+      baseUrlExample,
+      baseUrlEnv,
+      extras,
+      apiKeyEnv,
+      authExtras,
+      None
     )
 
   /**
