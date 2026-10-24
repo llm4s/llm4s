@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT`) or `new ConsoleTracing(captureContent = true)`; see the new
   [data protection guide](docs/guide/data-protection.md);
   [migration](docs/reference/migration.md#console-tracing-prints-no-content-by-default-2311).
+- OpenTelemetry spans of model calls follow the GenAI conventions: `LLM Completion` is `chat <model>` and
+  `Embedding Usage - <op>` is `embeddings <model>`, and no span carries message content unless
+  `llm4s.tracing.opentelemetry.captureContent = true`; positional patterns on four `TraceEvent`s break;
+  [migration](docs/reference/migration.md#opentelemetry-spans-follow-the-genai-conventions-content-is-opt-in-2275).
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
@@ -122,6 +126,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads them itself; [migration](docs/reference/migration.md#the-embeddings-samples-settings-left-llm4sconfig-2265).
 - `ServiceError`'s extractor binds five fields (`retryAfter` added) and `ServiceError.ServiceErrorOps` is gone
   (`isRecoverableStatus` is a method of `ServiceError`): four-field patterns and the import break; [migration](docs/reference/migration.md#serviceerror-extractor-and-isrecoverablestatus-2266).
+
+### Observability
+
+- **Added** OpenTelemetry GenAI semantic conventions (`1.37.0`) for plain and streamed completions and embeddings:
+  `CLIENT` spans `chat <model>` / `embeddings <model>` with `gen_ai.provider.name`, request and response attributes and
+  `error.type`; `TracingLLMClient` traces a client's calls; content capture is opt-in and redacted; agent spans gain
+  `gen_ai.provider.name` ([#2275](https://github.com/llm4s/llm4s/issues/2275)).
 
 ### Agent subagents (Phase 4)
 

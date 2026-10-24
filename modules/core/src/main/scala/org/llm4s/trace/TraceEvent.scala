@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
-import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage, UsageSummary }
+import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, TokenUsage, UsageSummary }
 
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
@@ -75,28 +75,84 @@ object TraceEvent {
       new AgentInitialized(query, tools, timestamp)
   }
 
+  /**
+   * A model returned a completion. A client wrapped in [[TracingLLMClient]] fills in the call's details as well, which
+   * a backend that follows the OpenTelemetry GenAI conventions reports on the call's `chat <model>` span (#2275).
+   *
+   * @param id            the completion's id (`gen_ai.response.id`)
+   * @param model         the requested model (`gen_ai.request.model`)
+   * @param toolCalls     how many tool calls the completion asked for
+   * @param content       the completion's text: message content, which backends record only when told to
+   * @param provider      the canonical id of the provider called (`openai`, `anthropic`, ...), when known
+   * @param serverAddress the host the request went to, when known
+   * @param streamed      whether the completion was streamed (`streamComplete`)
+   * @param duration      how long the call took; the event's `timestamp` is its end
+   * @param responseModel the model that answered, when the provider reported it
+   * @param finishReasons why the model stopped, as the provider reported it
+   * @param usage         the call's token usage, when the provider reported it
+   * @param options       the options the request was sent with
+   * @param input         the request's messages: message content, which backends record only when told to; not
+   *                      included in [[toJson]]
+   */
   final case class CompletionReceived private (
     id: String,
     model: String,
     toolCalls: Int,
     content: String,
-    timestamp: Instant
+    timestamp: Instant,
+    provider: Option[String],
+    serverAddress: Option[String],
+    streamed: Boolean,
+    duration: Option[FiniteDuration],
+    responseModel: Option[String],
+    finishReasons: Seq[String],
+    usage: Option[TokenUsage],
+    options: Option[CompletionOptions],
+    input: Seq[Message]
   ) extends TraceEvent {
-    def withId(id: String): CompletionReceived                = copy(id = id)
-    def withModel(model: String): CompletionReceived          = copy(model = model)
-    def withToolCalls(toolCalls: Int): CompletionReceived     = copy(toolCalls = toolCalls)
-    def withContent(content: String): CompletionReceived      = copy(content = content)
-    def withTimestamp(timestamp: Instant): CompletionReceived = copy(timestamp = timestamp)
+    def withId(id: String): CompletionReceived                               = copy(id = id)
+    def withModel(model: String): CompletionReceived                         = copy(model = model)
+    def withToolCalls(toolCalls: Int): CompletionReceived                    = copy(toolCalls = toolCalls)
+    def withContent(content: String): CompletionReceived                     = copy(content = content)
+    def withTimestamp(timestamp: Instant): CompletionReceived                = copy(timestamp = timestamp)
+    def withProvider(provider: String): CompletionReceived                   = copy(provider = Some(provider))
+    def withProvider(provider: Option[String]): CompletionReceived           = copy(provider = provider)
+    def withServerAddress(serverAddress: String): CompletionReceived         = copy(serverAddress = Some(serverAddress))
+    def withServerAddress(serverAddress: Option[String]): CompletionReceived = copy(serverAddress = serverAddress)
+    def withStreamed(streamed: Boolean): CompletionReceived                  = copy(streamed = streamed)
+    def withDuration(duration: FiniteDuration): CompletionReceived           = copy(duration = Some(duration))
+    def withDuration(duration: Option[FiniteDuration]): CompletionReceived   = copy(duration = duration)
+    def withResponseModel(responseModel: String): CompletionReceived         = copy(responseModel = Some(responseModel))
+    def withResponseModel(responseModel: Option[String]): CompletionReceived = copy(responseModel = responseModel)
+    def withFinishReasons(finishReasons: Seq[String]): CompletionReceived    = copy(finishReasons = finishReasons)
+    def withUsage(usage: TokenUsage): CompletionReceived                     = copy(usage = Some(usage))
+    def withUsage(usage: Option[TokenUsage]): CompletionReceived             = copy(usage = usage)
+    def withOptions(options: CompletionOptions): CompletionReceived          = copy(options = Some(options))
+    def withOptions(options: Option[CompletionOptions]): CompletionReceived  = copy(options = options)
+    def withInput(input: Seq[Message]): CompletionReceived                   = copy(input = input)
 
     def eventType: String = "completion_received"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type"    -> eventType,
-      "timestamp"     -> timestamp.toString,
-      "completion_id" -> id,
-      "model"         -> model,
-      "tool_calls"    -> toolCalls,
-      "content"       -> content
-    )
+    def toJson: ujson.Value = {
+      val json = ujson.Obj(
+        "event_type"    -> eventType,
+        "timestamp"     -> timestamp.toString,
+        "completion_id" -> id,
+        "model"         -> model,
+        "tool_calls"    -> toolCalls,
+        "content"       -> content
+      )
+      provider.foreach(p => json("provider") = p)
+      serverAddress.foreach(a => json("server_address") = a)
+      if (streamed) json("streamed") = true
+      duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
+      responseModel.foreach(m => json("response_model") = m)
+      if (finishReasons.nonEmpty) json("finish_reasons") = ujson.Arr(finishReasons.map(ujson.Str(_)): _*)
+      usage.foreach { u =>
+        json("prompt_tokens") = u.promptTokens
+        json("completion_tokens") = u.completionTokens
+      }
+      json
+    }
   }
 
   object CompletionReceived {
@@ -105,9 +161,36 @@ object TraceEvent {
       model: String,
       toolCalls: Int,
       content: String,
-      timestamp: Instant = Instant.now()
+      timestamp: Instant = Instant.now(),
+      provider: Option[String] = None,
+      serverAddress: Option[String] = None,
+      streamed: Boolean = false,
+      duration: Option[FiniteDuration] = None,
+      responseModel: Option[String] = None,
+      finishReasons: Seq[String] = Seq.empty,
+      usage: Option[TokenUsage] = None,
+      options: Option[CompletionOptions] = None,
+      input: Seq[Message] = Seq.empty
     ): CompletionReceived =
-      new CompletionReceived(id, model, toolCalls, content, timestamp)
+      new CompletionReceived(
+        id,
+        model,
+        toolCalls,
+        content,
+        timestamp,
+        provider,
+        serverAddress,
+        streamed,
+        duration,
+        responseModel,
+        finishReasons,
+        usage,
+        options,
+        input
+      )
+
+    def apply(id: String, model: String, toolCalls: Int, content: String, timestamp: Instant): CompletionReceived =
+      apply(id, model, toolCalls, content, timestamp, None)
   }
 
   final case class ToolExecuted private (
@@ -149,30 +232,61 @@ object TraceEvent {
       new ToolExecuted(name, input, output, duration, success, timestamp)
   }
 
+  /**
+   * An error. When it is a failed model call - a [[TracingLLMClient]]'s, or an [[org.llm4s.llmconnect.EmbeddingClient]]'s -
+   * `operation` names the call (`chat`, `embeddings`) and the call's details are set, which a backend that follows the
+   * OpenTelemetry GenAI conventions reports as the call's own span with `error.type` (#2275).
+   *
+   * @param operation the GenAI operation that failed (`chat`, `embeddings`); `None` for any other error
+   * @param model     the requested model of the failed call
+   * @param provider  the canonical id of the provider called
+   * @param errorType a short, low-cardinality name of the failure (the `LLMError`'s type, e.g. `RateLimitError`);
+   *                  `None` takes the exception's class name
+   * @param duration  how long the failed call took; the event's `timestamp` is its end
+   */
   final case class ErrorOccurred private (
     error: Throwable,
     context: String,
     timestamp: Instant,
-    override val span: Option[TraceSpan]
+    override val span: Option[TraceSpan],
+    operation: Option[String],
+    model: Option[String],
+    provider: Option[String],
+    errorType: Option[String],
+    duration: Option[FiniteDuration]
   ) extends TraceEvent {
-    def withError(error: Throwable): ErrorOccurred       = copy(error = error)
-    def withContext(context: String): ErrorOccurred      = copy(context = context)
-    def withTimestamp(timestamp: Instant): ErrorOccurred = copy(timestamp = timestamp)
-    def withSpan(span: TraceSpan): ErrorOccurred         = copy(span = Some(span))
-    def withSpan(span: Option[TraceSpan]): ErrorOccurred = copy(span = span)
+    def withError(error: Throwable): ErrorOccurred                    = copy(error = error)
+    def withContext(context: String): ErrorOccurred                   = copy(context = context)
+    def withTimestamp(timestamp: Instant): ErrorOccurred              = copy(timestamp = timestamp)
+    def withSpan(span: TraceSpan): ErrorOccurred                      = copy(span = Some(span))
+    def withSpan(span: Option[TraceSpan]): ErrorOccurred              = copy(span = span)
+    def withOperation(operation: String): ErrorOccurred               = copy(operation = Some(operation))
+    def withOperation(operation: Option[String]): ErrorOccurred       = copy(operation = operation)
+    def withModel(model: String): ErrorOccurred                       = copy(model = Some(model))
+    def withModel(model: Option[String]): ErrorOccurred               = copy(model = model)
+    def withProvider(provider: String): ErrorOccurred                 = copy(provider = Some(provider))
+    def withProvider(provider: Option[String]): ErrorOccurred         = copy(provider = provider)
+    def withErrorType(errorType: String): ErrorOccurred               = copy(errorType = Some(errorType))
+    def withErrorType(errorType: Option[String]): ErrorOccurred       = copy(errorType = errorType)
+    def withDuration(duration: FiniteDuration): ErrorOccurred         = copy(duration = Some(duration))
+    def withDuration(duration: Option[FiniteDuration]): ErrorOccurred = copy(duration = duration)
 
     def eventType: String = "error_occurred"
-    def toJson: ujson.Value = TraceSpan.annotate(
-      ujson.Obj(
+    def toJson: ujson.Value = {
+      val json = ujson.Obj(
         "event_type"    -> eventType,
         "timestamp"     -> timestamp.toString,
-        "error_type"    -> error.getClass.getSimpleName,
+        "error_type"    -> errorType.getOrElse(error.getClass.getSimpleName),
         "error_message" -> error.getMessage,
         "context"       -> context,
         "stack_trace"   -> error.getStackTrace.take(5).mkString("\n")
-      ),
-      span
-    )
+      )
+      operation.foreach(o => json("operation") = o)
+      model.foreach(m => json("model") = m)
+      provider.foreach(p => json("provider") = p)
+      duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
+      TraceSpan.annotate(json, span)
+    }
   }
 
   object ErrorOccurred {
@@ -180,9 +294,17 @@ object TraceEvent {
       error: Throwable,
       context: String,
       timestamp: Instant = Instant.now(),
-      span: Option[TraceSpan] = None
+      span: Option[TraceSpan] = None,
+      operation: Option[String] = None,
+      model: Option[String] = None,
+      provider: Option[String] = None,
+      errorType: Option[String] = None,
+      duration: Option[FiniteDuration] = None
     ): ErrorOccurred =
-      new ErrorOccurred(error, context, timestamp, span)
+      new ErrorOccurred(error, context, timestamp, span, operation, model, provider, errorType, duration)
+
+    def apply(error: Throwable, context: String, timestamp: Instant, span: Option[TraceSpan]): ErrorOccurred =
+      apply(error, context, timestamp, span, None)
   }
 
   final case class TokenUsageRecorded private (
@@ -246,6 +368,8 @@ object TraceEvent {
    * @param parentRunId for a delegated child run, the parent run that started it; `None` for a top-level run
    * @param span     the run's own span (design 4.58): its context, its parent - a child run's is the `task` tool call
    *                 that started it, a continued run's the context it continued - and when the run started
+   * @param provider the canonical id of the provider of the run's model calls (the first call's, when they used
+   *                 several), when its client reported one; OpenTelemetry's `gen_ai.provider.name`
    */
   final case class AgentRunEnded private (
     threadId: String,
@@ -257,7 +381,8 @@ object TraceEvent {
     timestamp: Instant,
     parentThreadId: Option[String],
     parentRunId: Option[String],
-    override val span: Option[TraceSpan]
+    override val span: Option[TraceSpan],
+    provider: Option[String]
   ) extends TraceEvent {
     def withThreadId(threadId: String): AgentRunEnded                     = copy(threadId = threadId)
     def withRunId(runId: String): AgentRunEnded                           = copy(runId = runId)
@@ -272,6 +397,8 @@ object TraceEvent {
     def withParentRunId(parentRunId: Option[String]): AgentRunEnded       = copy(parentRunId = parentRunId)
     def withSpan(span: TraceSpan): AgentRunEnded                          = copy(span = Some(span))
     def withSpan(span: Option[TraceSpan]): AgentRunEnded                  = copy(span = span)
+    def withProvider(provider: String): AgentRunEnded                     = copy(provider = Some(provider))
+    def withProvider(provider: Option[String]): AgentRunEnded             = copy(provider = provider)
 
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
@@ -289,6 +416,7 @@ object TraceEvent {
       )
       parentThreadId.foreach(id => json("parent_thread_id") = id)
       parentRunId.foreach(id => json("parent_run_id") = id)
+      provider.foreach(p => json("provider") = p)
       TraceSpan.annotate(json, span)
     }
   }
@@ -304,9 +432,36 @@ object TraceEvent {
       timestamp: Instant = Instant.now(),
       parentThreadId: Option[String] = None,
       parentRunId: Option[String] = None,
-      span: Option[TraceSpan] = None
+      span: Option[TraceSpan] = None,
+      provider: Option[String] = None
     ): AgentRunEnded =
-      new AgentRunEnded(threadId, runId, agent, status, messages, usage, timestamp, parentThreadId, parentRunId, span)
+      new AgentRunEnded(
+        threadId,
+        runId,
+        agent,
+        status,
+        messages,
+        usage,
+        timestamp,
+        parentThreadId,
+        parentRunId,
+        span,
+        provider
+      )
+
+    def apply(
+      threadId: String,
+      runId: String,
+      agent: String,
+      status: String,
+      messages: Seq[Message],
+      usage: UsageSummary,
+      timestamp: Instant,
+      parentThreadId: Option[String],
+      parentRunId: Option[String],
+      span: Option[TraceSpan]
+    ): AgentRunEnded =
+      apply(threadId, runId, agent, status, messages, usage, timestamp, parentThreadId, parentRunId, span, None)
   }
 
   final case class CustomEvent private (
@@ -344,36 +499,50 @@ object TraceEvent {
   }
 
   /**
-   * Tracks embedding token usage for cost analysis.
+   * Tracks embedding token usage for cost analysis. An [[org.llm4s.llmconnect.EmbeddingClient]] emits one per call, which
+   * a backend that follows the OpenTelemetry GenAI conventions reports as the call's `embeddings <model>` span (#2275).
    *
    * @param usage Token usage statistics from embedding operation
    * @param model Embedding model name (e.g., "text-embedding-3-small")
    * @param operation Type of operation: "indexing", "query", "evaluation"
    * @param inputCount Number of texts embedded in this operation
+   * @param provider the canonical id of the provider called (`openai`, `voyage`, ...), when known
+   * @param duration how long the call took; the event's `timestamp` is its end
    */
   final case class EmbeddingUsageRecorded private (
     usage: EmbeddingUsage,
     model: String,
     operation: String,
     inputCount: Int,
-    timestamp: Instant
+    timestamp: Instant,
+    provider: Option[String],
+    duration: Option[FiniteDuration]
   ) extends TraceEvent {
-    def withUsage(usage: EmbeddingUsage): EmbeddingUsageRecorded  = copy(usage = usage)
-    def withModel(model: String): EmbeddingUsageRecorded          = copy(model = model)
-    def withOperation(operation: String): EmbeddingUsageRecorded  = copy(operation = operation)
-    def withInputCount(inputCount: Int): EmbeddingUsageRecorded   = copy(inputCount = inputCount)
-    def withTimestamp(timestamp: Instant): EmbeddingUsageRecorded = copy(timestamp = timestamp)
+    def withUsage(usage: EmbeddingUsage): EmbeddingUsageRecorded               = copy(usage = usage)
+    def withModel(model: String): EmbeddingUsageRecorded                       = copy(model = model)
+    def withOperation(operation: String): EmbeddingUsageRecorded               = copy(operation = operation)
+    def withInputCount(inputCount: Int): EmbeddingUsageRecorded                = copy(inputCount = inputCount)
+    def withTimestamp(timestamp: Instant): EmbeddingUsageRecorded              = copy(timestamp = timestamp)
+    def withProvider(provider: String): EmbeddingUsageRecorded                 = copy(provider = Some(provider))
+    def withProvider(provider: Option[String]): EmbeddingUsageRecorded         = copy(provider = provider)
+    def withDuration(duration: FiniteDuration): EmbeddingUsageRecorded         = copy(duration = Some(duration))
+    def withDuration(duration: Option[FiniteDuration]): EmbeddingUsageRecorded = copy(duration = duration)
 
     def eventType: String = "embedding_usage_recorded"
-    def toJson: ujson.Value = ujson.Obj(
-      "event_type"    -> eventType,
-      "timestamp"     -> timestamp.toString,
-      "model"         -> model,
-      "operation"     -> operation,
-      "input_count"   -> inputCount,
-      "prompt_tokens" -> usage.promptTokens,
-      "total_tokens"  -> usage.totalTokens
-    )
+    def toJson: ujson.Value = {
+      val json = ujson.Obj(
+        "event_type"    -> eventType,
+        "timestamp"     -> timestamp.toString,
+        "model"         -> model,
+        "operation"     -> operation,
+        "input_count"   -> inputCount,
+        "prompt_tokens" -> usage.promptTokens,
+        "total_tokens"  -> usage.totalTokens
+      )
+      provider.foreach(p => json("provider") = p)
+      duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
+      json
+    }
   }
 
   object EmbeddingUsageRecorded {
@@ -382,9 +551,20 @@ object TraceEvent {
       model: String,
       operation: String,
       inputCount: Int,
-      timestamp: Instant = Instant.now()
+      timestamp: Instant = Instant.now(),
+      provider: Option[String] = None,
+      duration: Option[FiniteDuration] = None
     ): EmbeddingUsageRecorded =
-      new EmbeddingUsageRecorded(usage, model, operation, inputCount, timestamp)
+      new EmbeddingUsageRecorded(usage, model, operation, inputCount, timestamp, provider, duration)
+
+    def apply(
+      usage: EmbeddingUsage,
+      model: String,
+      operation: String,
+      inputCount: Int,
+      timestamp: Instant
+    ): EmbeddingUsageRecorded =
+      apply(usage, model, operation, inputCount, timestamp, None)
   }
 
   /**

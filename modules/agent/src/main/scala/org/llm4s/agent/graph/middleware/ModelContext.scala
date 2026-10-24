@@ -23,6 +23,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.slf4j.LoggerFactory
 
 import scala.util.Try
@@ -56,18 +57,19 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
 
   /** Records usage that arrived without a client call, as one request to `model`. */
   def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit =
-    record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage)
+    record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage, provider = None)
 
   /**
    * Records a completed model call of `request`, sent with `definitions` (its tool and response-format schemas, as
    * [[ModelContext.definitions]] renders them): attempt `attempt` of the agent's model step, or 0 for a hook's own
-   * call. A completion without usage is charged an estimate (#2084).
+   * call. A completion without usage is charged an estimate (#2084). `provider` is the called provider's id, when known.
    */
   private[agent] def recordCall(
     completion: Completion,
     attempt: Int,
     request: Seq[Message],
-    definitions: => Seq[String]
+    definitions: => Seq[String],
+    provider: Option[String]
   ): Unit =
     record(
       completion.model,
@@ -75,7 +77,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       completion.estimatedCost,
       attempt,
       Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
-      completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions))
+      completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions)),
+      provider
     )
 
   /**
@@ -103,7 +106,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     cost: Option[Double],
     attempt: Int,
     toolCalls: Int,
-    charged: TokenUsage
+    charged: TokenUsage,
+    provider: Option[String]
   ): Unit =
     run.usage.add(model, charged, cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
@@ -116,7 +120,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
         attempt,
         toolCalls,
         usage.map(events.CallUsage.fromTokenUsage),
-        cost
+        cost,
+        provider
       )
     )
 
@@ -203,9 +208,10 @@ object ModelContext:
     ): Result[Completion] =
       context.admitted(recorded(conversation, options, client.streamComplete(conversation, options, onChunk)))
 
-    def getContextWindow(): Int           = client.getContextWindow()
-    def getReserveCompletion(): Int       = client.getReserveCompletion()
-    override def validate(): Result[Unit] = client.validate()
+    def getContextWindow(): Int                 = client.getContextWindow()
+    def getReserveCompletion(): Int             = client.getReserveCompletion()
+    override def validate(): Result[Unit]       = client.validate()
+    override def providerId: Option[ProviderId] = client.providerId
 
     private def recorded(
       conversation: Conversation,
@@ -213,6 +219,12 @@ object ModelContext:
       result: Result[Completion]
     ): Result[Completion] =
       result.foreach(
-        context.recordCall(_, attempt = 0, conversation.messages, definitions(options.tools, options.responseFormat))
+        context.recordCall(
+          _,
+          attempt = 0,
+          conversation.messages,
+          definitions(options.tools, options.responseFormat),
+          client.providerId.map(_.asString)
+        )
       )
       result

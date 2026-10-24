@@ -39,6 +39,18 @@ class OpenTelemetryTracingConfigSpec extends AnyWordSpec with Matchers with Eith
       otel("", env) shouldBe OpenTelemetryConfig("svc-from-env", "http://collector:4317")
     }
 
+    "leave content capture off, and bind OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT to it (#2275)" in {
+      otel("", Map("TRACING_MODE" -> "opentelemetry")).captureContent shouldBe false
+      otel(
+        "",
+        Map("TRACING_MODE" -> "opentelemetry", "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT" -> "true")
+      ).captureContent shouldBe true
+      otel(
+        "llm4s.tracing.opentelemetry.captureContent = true",
+        Map("TRACING_MODE" -> "otel")
+      ).captureContent shouldBe true
+    }
+
     "load the headers map from llm4s.tracing.opentelemetry.headers" in {
       val hocon =
         """

@@ -60,6 +60,8 @@ final private[agent] class AgentTracing(
   private val disconnected = new AtomicBoolean(false)
   // this run's own usage, from its ModelCallCompleted events; the thread's LoopKeys.usage spans every run
   private val usage = new AtomicReference(UsageSummary())
+  // the provider of the run's first model call that reported one: the run span's gen_ai.provider.name (#2275)
+  private val provider = new AtomicReference[Option[String]](None)
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
   private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())
@@ -82,6 +84,7 @@ final private[agent] class AgentTracing(
       trace(AgentTracing.toTrace(record).withSpan(placement(event, record)))
       event match
         case AgentEvents.ModelCallCompleted(m) =>
+          if m.provider.isDefined then provider.compareAndSet(None, m.provider): Unit
           usage.updateAndGet(
             _.add(m.model, m.usage.map(_.toTokenUsage).getOrElse(TokenUsage(0, 0, 0)), m.estimatedCost)
           ): Unit
@@ -158,7 +161,8 @@ final private[agent] class AgentTracing(
         at,
         parentThreadId = parent.map(_._1.value),
         parentRunId = parent.map(_._2.value),
-        span = Some(TraceSpan(runSpan, continues, startedAt.get.getOrElse(attachedAt)))
+        span = Some(TraceSpan(runSpan, continues, startedAt.get.getOrElse(attachedAt))),
+        provider = provider.get
       )
     )
 

@@ -778,6 +778,7 @@ OpenTelemetry tracing needs the `llm4s-observability-otel` module on the classpa
 | `llm4s.tracing.opentelemetry.serviceName` | `OTEL_SERVICE_NAME` | `llm4s-agent` | Service name for trace identification |
 | `llm4s.tracing.opentelemetry.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OpenTelemetry Collector endpoint |
 | `llm4s.tracing.opentelemetry.headers` | (none) | (empty) | Headers sent with every export |
+| `llm4s.tracing.opentelemetry.captureContent` | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `false` | Record prompts and completions, redacted, as `gen_ai.input.messages` / `gen_ai.output.messages` |
 
 llm4s builds the OTLP exporter itself, so the OpenTelemetry SDK's own
 `OTEL_EXPORTER_OTLP_HEADERS` variable is **not** read. Set headers in `application.conf`,
@@ -907,6 +908,7 @@ also set in `application.conf` or with `-D`.
 | `TRACING_MODE` | `llm4s.tracing.mode` (`console` - the default - or `none`, both built in; `langfuse`, `opentelemetry`, or the mode of any other `TracingBackend` on the classpath) | `llm4s-core` |
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `llm4s.tracing.opentelemetry.captureContent` (`false` by default: spans carry no prompt or completion content) | `llm4s-observability-otel` |
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
 | `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |

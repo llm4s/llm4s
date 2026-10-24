@@ -42,12 +42,14 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
-    name shouldBe "LLM Completion"
+    name shouldBe "chat gpt-4"
     attributes.get(TraceAttributes.EventType) shouldBe "generation-create"
+    attributes.get(AttributeKey.stringKey("gen_ai.operation.name")) shouldBe "chat"
     attributes.get(AttributeKey.stringKey("gen_ai.request.model")) shouldBe "gpt-4"
-    attributes.get(AttributeKey.stringKey("completion_id")) shouldBe "comp-123"
-    attributes.get(AttributeKey.longKey("tool_calls")) shouldBe 2L
-    attributes.get(AttributeKey.stringKey("content")) shouldBe "Hello world"
+    attributes.get(AttributeKey.stringKey("gen_ai.response.id")) shouldBe "comp-123"
+    attributes.get(AttributeKey.longKey("llm4s.model_call.tool_calls")) shouldBe 2L
+    // content is opt-in (#2275)
+    attributes.get(AttributeKey.stringKey("gen_ai.output.messages")) shouldBe null
   }
 
   it should "map TokenUsageRecorded parameters to OpenTelemetry Semantic Conventions" in {
@@ -86,14 +88,16 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "truncate excessive content in attributes" in {
+    val capturing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty, captureContent = true)
     val longContent = "a" * 2000
     val event       = TraceEvent.CompletionReceived("id", "model", 0, longContent)
 
-    val (_, attributes) = tracing.mapEventToAttributes(event)
-    val storedContent   = attributes.get(AttributeKey.stringKey("content"))
+    val (_, attributes)  = capturing.mapEventToAttributes(event)
+    val messages: String = attributes.get(AttributeKey.stringKey("gen_ai.output.messages"))
+    val storedContent    = ujson.read(messages)(0)("parts")(0)("content").str
 
-    storedContent.length shouldBe 1000
     storedContent shouldBe longContent.take(1000)
+    capturing.shutdown()
   }
 
   it should "initialize without errors" in {

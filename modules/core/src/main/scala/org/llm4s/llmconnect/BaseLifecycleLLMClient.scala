@@ -5,6 +5,7 @@ import org.llm4s.error.{ CancelledError, ConfigurationError }
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.provider.MetricsRecording
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -39,6 +40,9 @@ trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
    * Called at most once, inside `close()`. The default is a no-op.
    */
   protected def releaseResources(): Unit = ()
+
+  /** This client's [[providerName]], as the provider id tracing reports. */
+  override def providerId: Option[ProviderId] = Some(ProviderId(providerName))
 
   private val closed: AtomicBoolean = new AtomicBoolean(false)
 
