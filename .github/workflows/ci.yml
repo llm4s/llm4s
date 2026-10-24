@@ -120,6 +120,11 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # The cited-issue check itself needs the network and runs weekly and on docs pull requests
+      # (docs-cited-issues.yml); its tests run it against a fake `gh`.
+      - name: Test the cited-issue check
+        run: scripts/test-check-cited-issues.sh
+
       # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
       # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that
       # pages.yml, release.yml and the script agree on the run's title and the tag pattern, and that no workflow input
@@ -258,6 +263,18 @@ jobs:
 
       - name: Compile
         run: sbt --client compile
+
+      # docs/_data/capabilities.yml (from the provider descriptors discovery finds) and docs/_data/tested-versions.yml
+      # (from Versions, Common and this workflow) are generated, and docs/reference/compatibility-matrix.md renders them
+      # (#2290). Fails when the committed copies differ from what the code says now, so a new provider module or a
+      # dependency bump cannot ship with a stale matrix.
+      - name: Check the generated compatibility matrix is up to date
+        run: |
+          sbt --client generateCompatibilityMatrix
+          if ! git diff --exit-code -- docs/_data/capabilities.yml docs/_data/tested-versions.yml; then
+            echo "::error::The compatibility matrix is stale: run 'sbt generateCompatibilityMatrix' and commit docs/_data."
+            exit 1
+          fi
 
       # Builds the CycloneDX SBOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
       # change that breaks their generation fails here and not on release day. It also fails when a published module has

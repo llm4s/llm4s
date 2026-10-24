@@ -21,24 +21,29 @@ LLM4S supports multiple LLM providers out of the box. Choose your provider, conf
 
 ## Supported Providers
 
-LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI chat-completions API:
+LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI chat-completions API. What each one
+supports with LLM4S - chat, streaming, tool calling, embeddings, API key or workload identity, live smoke suites - is in
+the [compatibility matrix](../reference/compatibility-matrix), generated from the provider modules' code and checked in
+CI, so this table does not repeat it:
 
-| Provider | Type | Best For | Setup |
-|----------|------|----------|-------|
-| **OpenAI** | Cloud | GPT-4, o1 reasoning, most popular | Medium |
-| **Anthropic** | Cloud | Claude Opus, best for reasoning | Medium |
-| **Google Gemini** | Cloud | Free tier, Gemini 2.0 models | Medium |
-| **Google Vertex AI** | Cloud Enterprise | Gemini models in your own GCP project | Medium |
-| **Azure OpenAI** | Cloud Enterprise | Enterprise deployments, VPC isolation | Hard |
-| **DeepSeek** | Cloud | Cost-effective, reasoning models | Easy |
-| **OpenRouter** | Cloud gateway | Many vendors' models behind one key | Easy |
-| **Z.ai** | Cloud | GLM models | Easy |
-| **OpenAI-compatible** | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
-| **Mistral** | Cloud | Mistral and Magistral models | Easy |
-| **Cohere** | Cloud | Command models, RAG | Easy |
-| **xAI** | Cloud | Grok models, reasoning | Easy |
-| **Ollama** | Local | Private, no API key, offline | Easy |
-| **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
+| Provider | `provider` id | Type | Models | Setup |
+|----------|---------------|------|--------|-------|
+| **OpenAI** | `openai` | Cloud | GPT and o-series models | Medium |
+| **Anthropic** | `anthropic` | Cloud | Claude models | Medium |
+| **Google Gemini** | `gemini` | Cloud | Gemini models, with a free tier | Medium |
+| **Google Vertex AI** | `vertexai` | Cloud Enterprise | Gemini models in your own GCP project | Medium |
+| **Azure OpenAI** | `azure` | Cloud Enterprise | OpenAI models in your Azure deployment | Hard |
+| **DeepSeek** | `deepseek` | Cloud | DeepSeek models | Easy |
+| **OpenRouter** | `openrouter` | Cloud gateway | Many vendors' models behind one key | Easy |
+| **Z.ai** | `zai` | Cloud | GLM models | Easy |
+| **OpenAI-compatible** | `openai-compatible` | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
+| **Mistral** | `mistral` | Cloud | Mistral and Magistral models | Easy |
+| **Cohere** | `cohere` | Cloud | Command models | Easy |
+| **xAI** | `xai` | Cloud | Grok models | Easy |
+| **Ollama** | `ollama` | Local | Open models on your machine, no API key | Easy |
+| **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
+| **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
+| **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider) to publish your own provider module.
 
