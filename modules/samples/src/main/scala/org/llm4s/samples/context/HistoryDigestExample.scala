@@ -62,7 +62,7 @@ object HistoryDigestExample {
     // Add adversarial content with IDs, URLs, constraints, errors, decisions
     val adversarialMessages = createAdversarialMessages()
     val baseConversation    = ConversationFixtures.largeRealistic
-    val conversation        = baseConversation.copy(messages = adversarialMessages ++ baseConversation.messages)
+    val conversation        = baseConversation.withMessages(adversarialMessages ++ baseConversation.messages)
 
     val originalTokens = tokenCounter.countConversation(conversation)
     logger.info(s"Enhanced conversation: ${conversation.messages.length} messages, $originalTokens tokens")

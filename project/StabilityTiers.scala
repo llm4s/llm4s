@@ -425,103 +425,31 @@ object StabilityTiers {
       "a fixed accuracy case holding only its description"
     ),
     GrowthExempt(
-      "org.llm4s.error.AssistantError.CommandParseError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.DisplayError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.EOFError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.FileError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.IOError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.SerializationError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.error.AssistantError.SessionError",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
       "org.llm4s.http.MultipartPart.FilePart",
       "a multipart file part is exactly a name, a path and a filename"
     ),
     GrowthExempt("org.llm4s.http.MultipartPart.TextField", "a multipart text field is exactly a name and a value"),
     GrowthExempt("org.llm4s.identity.TokenizerId", "a single-name identifier"),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.AudioInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.Conversation",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.EmbeddingVector",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ImageInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.MultimediaEmbeddingRequest",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.RawMediaInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ResponseFormat.JsonSchema",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.SystemMessage",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.llmconnect.model.TextChunkInput", "a single-value wrapper over the text chunks"),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.ToolCall",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.llmconnect.model.VideoInput",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
     GrowthExempt("org.llm4s.metrics.Outcome.Error", "an outcome case holding only its ErrorKind"),
     GrowthExempt("org.llm4s.toolapi.NullableSchema", "a single-value wrapper over the schema it makes nullable"),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.Cancelled", "an error case holding only the tool name"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.ExecutionError",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and the exception it threw"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.HandlerError",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and its handler's error message"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.InvalidArguments",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and its parameter errors, which carry the detail"
     ),
     GrowthExempt("org.llm4s.toolapi.ToolCallError.NullArguments", "an error case holding only the tool name"),
     GrowthExempt(
       "org.llm4s.toolapi.ToolCallError.Timeout",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.ToolCallError.UnknownFunction",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case holding only the tool name and the timeout it exceeded"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolExecutionStrategy.ParallelWithLimit",
@@ -529,11 +457,7 @@ object StabilityTiers {
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.InvalidNesting",
-      "TODO(#2369): predates the check; convert to a private constructor"
-    ),
-    GrowthExempt(
-      "org.llm4s.toolapi.ToolParameterError.MissingParameter",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming the parameter, its parent path and the parent type found"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.MultipleErrors",
@@ -541,11 +465,11 @@ object StabilityTiers {
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.NullParameter",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming only the null parameter and its expected type"
     ),
     GrowthExempt(
       "org.llm4s.toolapi.ToolParameterError.TypeMismatch",
-      "TODO(#2369): predates the check; convert to a private constructor"
+      "an error case naming only the parameter, its expected type and the type received"
     ),
     GrowthExempt("org.llm4s.trace.TracingMode.Named", "a TracingMode case holding only the backend name")
   )

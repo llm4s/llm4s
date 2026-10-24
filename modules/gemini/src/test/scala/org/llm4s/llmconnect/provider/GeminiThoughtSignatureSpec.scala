@@ -415,7 +415,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       val (client, wire) = make("gemini-2.0-flash")
       wire.body = response(call("get_weather", city, Some("SIG-CALL")))
       val first   = client.complete(firstTurn, CompletionOptions()).value.message
-      val changed = first.withToolCalls(first.toolCalls.map(tc => tc.copy(arguments = ujson.Obj("city" -> "Berlin"))))
+      val changed = first.withToolCalls(first.toolCalls.map(tc => tc.withArguments(ujson.Obj("city" -> "Berlin"))))
 
       wire.body = response(text("Sunny."))
       client.complete(continuation(changed), CompletionOptions()).value
