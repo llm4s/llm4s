@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.Result
@@ -83,14 +83,24 @@ private[llm4s] object NamedProviderSectionValidator:
 
             if problems.nonEmpty then
               Left(
-                ConfigurationError(
-                  s"Provider '$name' (provider = $id) is missing required fields:\n" + problems.mkString("\n")
-                )
+                ConfigurationError(missingFieldsMessage(name, id, problems))
               )
             else
               val withAuth =
                 auth.fold(normalized)((a, resolved) => normalized.withAuth(a.withExtras(resolved.values)))
               Right((withAuth.withExtras(extras.values), extras.warnings ++ auth.toSeq.flatMap(_._2.warnings)))
+
+  /**
+   * The "missing required fields" message: one line per field, then the troubleshooting link when the
+   * API key is among them, then the doctor pointer (#2285).
+   */
+  private def missingFieldsMessage(name: String, id: String, problems: Seq[String]): String =
+    val message = s"Provider '$name' (provider = $id) is missing required fields:\n" + problems.mkString("\n")
+    if problems.exists(_.startsWith(MissingApiKeyPrefix)) then
+      TroubleshootingLinks.configuration(message, TroubleshootingLinks.Entry.MissingApiKey)
+    else TroubleshootingLinks.withDoctor(message)
+
+  private val MissingApiKeyPrefix = "  - apiKey: "
 
   /**
    * A descriptor bug rather than a user one: an extra key may not shadow a built-in field, and a
@@ -129,7 +139,7 @@ private[llm4s] object NamedProviderSectionValidator:
       // By now the section has already fallen back to the vendor's shared key, so both places are
       // empty. Name the variable the provider's module binds to that shared key - declared by the
       // provider, never guessed from its id - and the section's own key, for a second account.
-      missing += s"  - apiKey: ${SharedCredentials.missingKeyHint(spec.apiKeyEnv, descriptor.id, s"llm4s.providers.$name")}"
+      missing += s"$MissingApiKeyPrefix${SharedCredentials.missingKeyHint(spec.apiKeyEnv, descriptor.id, s"llm4s.providers.$name")}"
 
     if spec.requiresBaseUrl && normalized.baseUrl.isEmpty then
       // Name an environment variable only when the provider says one is actually read (#1215). This

@@ -1,6 +1,8 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.error.TroubleshootingLinks
+import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.testutil.FixtureChatConfig
 import org.scalatest.matchers.should.Matchers
@@ -143,9 +145,13 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
     "still fail every lookup when the default names a section that does not exist" in {
       val source = config(unsetApiKey, selected = "missing-one")
       Llm4sConfig.defaultProvider(source).left.map(_.message) shouldBe
-        Left("Configured provider 'missing-one' was not found")
+        Left(
+          TroubleshootingLinks.configuration("Configured provider 'missing-one' was not found", Entry.ProviderNotFound)
+        )
       Llm4sConfig.defaultProviderName(source).left.map(_.message) shouldBe
-        Left("Configured provider 'missing-one' was not found")
+        Left(
+          TroubleshootingLinks.configuration("Configured provider 'missing-one' was not found", Entry.ProviderNotFound)
+        )
     }
 
     "still fail when the providers block itself is not an object" in {

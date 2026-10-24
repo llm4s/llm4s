@@ -45,6 +45,10 @@ final case class RateLimitError private (
   /** The provider's `retryAfter` hint when it gave one, else [[RateLimitError.DefaultRetryDelay]]. */
   override def retryDelay: Option[FiniteDuration] = retryAfter.orElse(Some(RateLimitError.DefaultRetryDelay))
 
+  /** This error with `sentence` and a troubleshooting link appended to its message (#2285). */
+  private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): RateLimitError =
+    copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
+
   override val context: Map[String, String] = Map(
     "provider" -> provider
   ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d))

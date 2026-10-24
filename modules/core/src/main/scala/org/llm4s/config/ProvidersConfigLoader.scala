@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
@@ -33,9 +33,9 @@ final private[config] case class ProviderSections(
   def defaultProviderName: Result[ProviderName] =
     selectedProvider match
       case None =>
-        Left(ConfigurationError("No default provider configured under llm4s.providers.provider"))
+        Left(ConfigurationError(ProviderSections.noDefaultMessage))
       case Some(name) if !sections.contains(name) =>
-        Left(ConfigurationError(s"Configured provider '${name.asName}' was not found"))
+        Left(ConfigurationError(ProviderSections.notFoundMessage(name)))
       case Some(name) => Right(name)
 
   /**
@@ -47,7 +47,7 @@ final private[config] case class ProviderSections(
   def validated(name: ProviderName)(using ProviderRegistry): Result[NamedProviderConfig] =
     sections
       .get(name)
-      .toRight(ConfigurationError(s"Configured provider '${name.asName}' was not found"))
+      .toRight(ConfigurationError(ProviderSections.notFoundMessage(name)))
       .flatMap(identity)
       .flatMap(NamedProviderConfigValidator.validate(name, _, credentials))
 
@@ -75,6 +75,23 @@ final private[config] case class ProviderSections(
           else ApiKeySource.Credentials(SharedCredentials.apiKeyPath(descriptor.id))
         name -> source
     }.toMap
+
+/** The messages of the default-provider errors, each linking its troubleshooting entry (#2285). */
+private[config] object ProviderSections:
+
+  /** No `llm4s.providers.provider` is set. */
+  val noDefaultMessage: String =
+    TroubleshootingLinks.configuration(
+      "No default provider configured under llm4s.providers.provider",
+      TroubleshootingLinks.Entry.NoDefaultProvider
+    )
+
+  /** `name` names no section under `llm4s.providers`. */
+  def notFoundMessage(name: ProviderName): String =
+    TroubleshootingLinks.configuration(
+      s"Configured provider '${name.asName}' was not found",
+      TroubleshootingLinks.Entry.ProviderNotFound
+    )
 
 /** Loads and validates the full providers configuration from a PureConfig source. */
 private[config] object ProvidersConfigLoader:
@@ -136,6 +153,6 @@ private[config] object ProvidersConfigLoader:
   ): Result[Unit] =
     selectedProvider match
       case Some(providerName) if !namedProviders.contains(providerName) =>
-        Left(ConfigurationError(s"Configured provider '${providerName.asName}' was not found"))
+        Left(ConfigurationError(ProviderSections.notFoundMessage(providerName)))
       case _ =>
         Right(())

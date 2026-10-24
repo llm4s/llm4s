@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.llm4s.error.AuthenticationError
 import org.llm4s.error.LLMError
+import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -515,7 +516,8 @@ class GeminiClient(
   ): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
-    if statusCode == 400 && isInvalidApiKey(details) then Left(AuthenticationError(providerName, details))
+    if statusCode == 400 && isInvalidApiKey(details) then
+      Left(TroubleshootingLinks.annotate(AuthenticationError(providerName, details)))
     else HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
   }
 

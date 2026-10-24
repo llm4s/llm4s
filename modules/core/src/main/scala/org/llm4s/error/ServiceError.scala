@@ -36,6 +36,10 @@ final case class ServiceError private (
   /** This error, carrying the delay the provider asked for before retrying. */
   def withRetryAfter(delay: FiniteDuration): ServiceError = copy(retryAfter = Some(delay))
 
+  /** This error with `sentence` and a troubleshooting link appended to its message (#2285). */
+  private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): ServiceError =
+    copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
+
   override val context: Map[String, String] = Map(
     "httpStatus" -> httpStatus.toString,
     "provider"   -> provider

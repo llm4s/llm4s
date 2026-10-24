@@ -20,6 +20,11 @@ final case class NetworkError private (
   endpoint: String
 ) extends LLMError
     with RecoverableError {
+
+  /** This error with `sentence` and a troubleshooting link appended to its message (#2285). */
+  private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): NetworkError =
+    copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
+
   override val context: Map[String, String] = Map("endpoint" -> endpoint) ++
     cause.map(c => Map("exceptionType" -> c.getClass.getSimpleName)).getOrElse(Map.empty)
 }

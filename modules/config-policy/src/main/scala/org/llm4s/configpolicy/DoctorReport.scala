@@ -1,5 +1,6 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.util.Redaction
 
 import scala.concurrent.duration.*
@@ -43,7 +44,9 @@ final case class DoctorCheck private (name: String, status: CheckStatus, detail:
 
 object DoctorCheck {
 
-  private[configpolicy] def clean(text: String): String = Redaction.redact(DoctorUrls.scrubText(text))
+  // An error's "Run the doctor" line is dropped: this is the doctor's own output (#2285).
+  private[configpolicy] def clean(text: String): String =
+    Redaction.redact(DoctorUrls.scrubText(TroubleshootingLinks.withoutDoctorLine(text)))
 
   def apply(name: String, status: CheckStatus, detail: String): DoctorCheck =
     new DoctorCheck(name, status, clean(detail), None)
@@ -62,10 +65,14 @@ private[configpolicy] object DoctorUrls {
 
   private val InText = """[A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>]+""".r
 
-  /** `url` without its user info, query and fragment. */
+  /**
+   * `url` without its user info, query and fragment. A link to the troubleshooting page keeps its fragment,
+   * which names the entry: it is the library's own text, never configuration.
+   */
   def display(url: String): String = {
     val schemeEnd = url.indexOf("://")
-    if (schemeEnd < 0) cutQuery(url)
+    if (url.startsWith(TroubleshootingLinks.PageUrl + "#")) url
+    else if (schemeEnd < 0) cutQuery(url)
     else {
       val start = schemeEnd + 3
       val rest  = url.substring(start)

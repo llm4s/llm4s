@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.ProviderConfigSpec
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
@@ -170,7 +170,12 @@ private[config] object RawProvidersConfigLoader:
         selectedProvider = raw.selectedProvider,
         sections = raw.sections.map { case (name, section) =>
           name -> section.left.map { failures =>
-            ConfigurationError(s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}")
+            ConfigurationError(
+              TroubleshootingLinks.configuration(
+                s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}",
+                TroubleshootingLinks.Entry.ApplicationConf
+              )
+            )
           }
         },
         credentials = SharedCredentials.read(source)
@@ -181,7 +186,12 @@ private[config] object RawProvidersConfigLoader:
     source.at("llm4s.providers").load[RawSections].left.map(loadError)
 
   private def loadError(failures: ConfigReaderFailures): ConfigurationError =
-    ConfigurationError(s"Failed to load raw providers config via PureConfig: ${describe(failures)}")
+    ConfigurationError(
+      TroubleshootingLinks.configuration(
+        s"Failed to load raw providers config via PureConfig: ${describe(failures)}",
+        TroubleshootingLinks.Entry.ApplicationConf
+      )
+    )
 
   // A failure's description alone ("Expected type NUMBER. Found STRING instead.") does not say
   // which key it is about, so the path is shown when there is one.
