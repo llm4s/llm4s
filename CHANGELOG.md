@@ -258,7 +258,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [Java guide](docs/guide/java.md#the-kotlin-dsl).
 - **Fixed** `JLlmClient.streamAsPublisher` (and so `llm4s-reactor`'s `Streams.toFlux`) delivering a failed call's
   `onError` ahead of pieces still buffered: every piece streamed before the failure now reaches the subscriber, in
-  order, before the error, with any demand and with a full buffer [#2198](https://github.com/llm4s/llm4s/issues/2198).
+  order, before the error, with any demand and with a full buffer, and a subscriber that cancels gets no signal after it
+  [#2198](https://github.com/llm4s/llm4s/issues/2198), [#2394](https://github.com/llm4s/llm4s/issues/2394).
 - **Added** the call's id and idempotency key for Java tools run by an agent: `JToolArgs.toolCallId()` and
   `JToolArgs.idempotencyKey()` (`Optional<String>`, empty outside an agent run), read by a `JTool.builder` lambda from
   its `args` and by a `@Tool` method from a `JToolArgs` parameter the model does not see, and by a Kotlin DSL tool's

@@ -82,8 +82,13 @@ final private[javaapi] class CompletionPublisher(
 
 private[javaapi] object CompletionPublisher {
 
-  /** `subscriber`, whose subscription sets `cancelled` when it is cancelled, so the call can be interrupted. */
-  final private class Cancellable(subscriber: Flow.Subscriber[? >: String], cancelled: AtomicBoolean)
+  /**
+   * `subscriber`, whose subscription sets `cancelled` when it is cancelled, so the call can be interrupted. Nothing
+   * reaches `subscriber` once it has cancelled: the provider's thread sees `cancelled` and closes the publisher, which
+   * can happen before `SubmissionPublisher` has processed the cancel, and would otherwise deliver the call's error to a
+   * subscriber that has gone (#2394).
+   */
+  final private[javaapi] class Cancellable(subscriber: Flow.Subscriber[? >: String], cancelled: AtomicBoolean)
       extends Flow.Subscriber[String] {
     def onSubscribe(subscription: Flow.Subscription): Unit =
       subscriber.onSubscribe(new Flow.Subscription {
@@ -93,9 +98,9 @@ private[javaapi] object CompletionPublisher {
           subscription.cancel()
         }
       })
-    def onNext(item: String): Unit      = subscriber.onNext(item)
-    def onError(error: Throwable): Unit = subscriber.onError(error)
-    def onComplete(): Unit              = subscriber.onComplete()
+    def onNext(item: String): Unit      = if (!cancelled.get) subscriber.onNext(item)
+    def onError(error: Throwable): Unit = if (!cancelled.get) subscriber.onError(error)
+    def onComplete(): Unit              = if (!cancelled.get) subscriber.onComplete()
   }
 
   /** Pieces of text a subscriber may fall behind by before the provider's thread waits for it. */

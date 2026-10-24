@@ -9,7 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, Flow, TimeUnit }
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import scala.jdk.CollectionConverters.*
 
 /** `JLlmClient.stream` and `streamAsPublisher` (#1485): a reply's text streamed to Java. */
@@ -362,6 +362,27 @@ class JCompletionStreamSpec extends AnyFlatSpec with TestTimeLimit with Matchers
     f.thread.get.join(java.time.Duration.ofSeconds(DeadlineSeconds)) shouldBe true
     s.items.asScala.toList shouldBe List("1", "2")
     s.error.get shouldBe null
+  }
+
+  it should "signal nothing to a subscriber after it cancels, even when the publisher closes first (#2394)" in {
+    // The race of #2394 made deterministic: the provider's thread closes the publisher between the subscriber's
+    // cancel and SubmissionPublisher processing it, so the upstream subscription still delivers the signals.
+    val cancelled = new AtomicBoolean(false)
+    val s         = new Collecting(batch = 0)
+    val wrapped   = new CompletionPublisher.Cancellable(s, cancelled)
+    wrapped.onSubscribe(new Flow.Subscription {
+      def request(n: Long): Unit = ()
+      def cancel(): Unit         = ()
+    })
+    wrapped.onNext("1")
+    s.sub.cancel()
+    cancelled.get shouldBe true
+    wrapped.onNext("2")
+    wrapped.onError(new LlmException(NetworkError("down", None, "http://x")))
+    wrapped.onComplete()
+    s.items.asScala.toList shouldBe List("1")
+    s.error.get shouldBe null
+    s.done.getCount shouldBe 1L
   }
 
   it should "interrupt the call when the subscription is cancelled" in {
