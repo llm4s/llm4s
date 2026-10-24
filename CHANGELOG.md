@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `HTTPS_PROXY` and `NO_PROXY` are now honoured by every provider client (`llm4s.http.proxy`), `http` is a built-in
+  section key, and `BedrockConfig`, `WatsonXConfig`, `EmbeddingProviderConfig` and `OpenAICompatibleClient.Settings`
+  gain a `network` field; [migration](docs/reference/migration.md#one-proxy-and-tls-setting-for-every-provider-client-2273).
 - `LLM4STemplate.completeAsync` refused by its executor fails with an `LlmException` of kind `OTHER` wrapping the
   `RejectedExecutionException`; [migration](docs/reference/migration.md#the-spring-boot-starters-refused-completeasync-fails-with-an-llmexception-2276).
 - The Postgres stores take a `javax.sql.DataSource`, not a `com.zaxxer.hikari.HikariDataSource`: `PgVectorStore.create`
@@ -224,6 +227,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Added** one proxy and custom-CA setting honoured by every provider client - the JDK client, `openai-java`,
+  `anthropic-java` and the AWS SDK: `llm4s.http` (`HTTPS_PROXY`, `NO_PROXY`, a trust store, an mTLS key store), a
+  section's `http` override, the Java builders' `proxy`/`trustStore` and the Spring `llm4s.http.*` properties;
+  [Corporate networks](docs/getting-started/configuration.md#corporate-networks-a-proxy-and-a-custom-ca) [#2273](https://github.com/llm4s/llm4s/issues/2273).
 - **Changed** first-run configuration errors and provider 401/403, 429 and 404 errors (and a refused Ollama connection)
   now say the next step and link their [First-Run Troubleshooting](docs/getting-started/troubleshooting.md) entry; configuration errors also name the doctor [#2285](https://github.com/llm4s/llm4s/issues/2285).
 - **Removed** `OpenAIToolHelper` from the public API (now `private[llm4s]`), so no openai-java type is part of

@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -83,6 +84,24 @@ trait ProviderConfig {
    * overrides this with its own return type.
    */
   def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig = this
+
+  /**
+   * The proxy and TLS settings this provider's HTTP calls use: `llm4s.http`, overridden key by key by the
+   * section's own `http` block.
+   *
+   * The default is [[org.llm4s.http.HttpNetworkSettings.default]] - no proxy, no extra TLS material - so a
+   * config that does not carry the setting, such as one supplied by another module, behaves as before.
+   */
+  def network: HttpNetworkSettings = HttpNetworkSettings.default
+
+  /**
+   * The same config with the given proxy and TLS settings.
+   *
+   * The loader calls this on every config a descriptor builds, as it does [[withTimeouts]], so a descriptor
+   * does not read the `http` block itself. The default returns `this`: a config that does not carry the
+   * setting ignores it. A config that does overrides this with its own return type.
+   */
+  def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
 }
 
 object ProviderConfig {

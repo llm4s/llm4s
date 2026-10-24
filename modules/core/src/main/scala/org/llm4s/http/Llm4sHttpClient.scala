@@ -437,7 +437,10 @@ trait Llm4sHttpClient extends AutoCloseable {
 
 object Llm4sHttpClient {
 
-  /** Creates the default JDK-backed HTTP client. */
+  /**
+   * Creates the default JDK-backed HTTP client. It uses the JVM's default proxy selector and trust store,
+   * not `llm4s.http`: pass the settings `Llm4sConfig.httpNetwork()` loads to [[create(network*]] to honour them.
+   */
   def create(): Llm4sHttpClient = new JdkHttpClient(None)
 
   /**
@@ -445,6 +448,43 @@ object Llm4sHttpClient {
    * from every request's own `timeout`.
    */
   def create(connectTimeout: FiniteDuration): Llm4sHttpClient = new JdkHttpClient(Some(connectTimeout))
+
+  /**
+   * Creates the JDK-backed HTTP client routed and trusting as `network` says: through its proxy (except to
+   * the hosts it bypasses, answering only the proxy's own authentication challenge) and with its extra
+   * trust and client certificate. [[HttpNetworkSettings.default]] gives the same client as [[create()*]].
+   *
+   * TLS material that cannot be read (`Llm4sConfig.httpNetwork()` checks it when it loads) makes every
+   * request a `Left(ConfigurationError)` naming the store, never a thrown exception.
+   *
+   * The JDK sends Basic proxy credentials on a plain-`http` request, but on an `https` tunnel only when
+   * the JVM is started with `-Djdk.http.auth.tunneling.disabledSchemes=""` (its default disables Basic
+   * there).
+   *
+   * @param network the proxy and TLS settings
+   */
+  def create(network: HttpNetworkSettings): Llm4sHttpClient = new JdkHttpClient(None, network)
+
+  /**
+   * [[create(network*]] with a limit on establishing each connection, separate from every request's own
+   * `timeout`.
+   *
+   * @param network        the proxy and TLS settings
+   * @param connectTimeout the limit on establishing a connection
+   */
+  def create(network: HttpNetworkSettings, connectTimeout: FiniteDuration): Llm4sHttpClient =
+    new JdkHttpClient(Some(connectTimeout), network)
+
+  /**
+   * The default of a provider client's `httpClient` constructor parameter, meaning "build one from the
+   * config's proxy and TLS settings": a parameter's default cannot read the `config` beside it.
+   * [[resolve]] turns it into that client.
+   */
+  private[llm4s] lazy val FromConfig: Llm4sHttpClient = create()
+
+  /** `client`, or a client for `network` when `client` is [[FromConfig]]. */
+  private[llm4s] def resolve(client: Llm4sHttpClient, network: HttpNetworkSettings): Llm4sHttpClient =
+    if (client eq FromConfig) create(network) else client
 }
 
 /**
@@ -549,18 +589,39 @@ private[llm4s] object HttpFailures {
  * Never fails on non-2xx responses — the caller is responsible for
  * checking `statusCode`.
  */
-private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) extends Llm4sHttpClient {
-  private val client =
-    connectTimeout.fold(JHttpClient.newHttpClient())(t =>
-      JHttpClient.newBuilder().connectTimeout(java.time.Duration.ofNanos(t.toNanos)).build()
-    )
+private[llm4s] class JdkHttpClient(
+  connectTimeout: Option[FiniteDuration],
+  network: HttpNetworkSettings = HttpNetworkSettings.default
+) extends Llm4sHttpClient {
+
+  // Unreadable TLS material fails every request with the same ConfigurationError rather than throwing here.
+  private val built: Result[JHttpClient] =
+    HttpNetwork.tlsMaterial(network.tls).map { tls =>
+      val builder = JHttpClient.newBuilder()
+      connectTimeout.foreach(t => builder.connectTimeout(java.time.Duration.ofNanos(t.toNanos)))
+      // Without a proxy the builder keeps the JVM's default selector, as before the setting existed.
+      network.proxy.foreach { proxy =>
+        builder.proxy(HttpNetwork.proxySelector(proxy))
+        HttpNetwork.authenticator(proxy).foreach(builder.authenticator)
+      }
+      tls.foreach(material => builder.sslContext(material.sslContext))
+      builder.build()
+    }
 
   /** Closes the JDK client where the running JDK supports it (21+): its pool and executor. */
   override def close(): Unit =
-    (client: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
+    built.foreach { client =>
+      (client: Any) match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
+
+  /** Runs `send` on the client, or returns why there is none, mapping a transport failure as every method does. */
+  private def withClient[A](method: String, url: String, timeout: FiniteDuration)(
+    send: JHttpClient => A
+  ): Result[A] =
+    built.flatMap(client => HttpFailures.attempt(method, url, timeout)(send(client)))
 
   override def get(
     url: String,
@@ -632,7 +693,7 @@ private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) exten
     body: String,
     timeout: FiniteDuration
   ): Result[HttpRawResponse] =
-    HttpFailures.attempt("POST", url, timeout) {
+    withClient("POST", url, timeout) { client =>
       val request = buildRequest(url, headers, timeout)
         .POST(HttpRequest.BodyPublishers.ofString(body))
         .build()
@@ -646,7 +707,7 @@ private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) exten
     body: String,
     timeout: FiniteDuration
   ): Result[StreamingHttpResponse] =
-    HttpFailures.attempt("POST", url, timeout) {
+    withClient("POST", url, timeout) { client =>
       val request = buildRequest(url, headers, timeout)
         .POST(HttpRequest.BodyPublishers.ofString(body))
         .build()
@@ -679,7 +740,7 @@ private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) exten
   private def sendString(method: String, url: String, timeout: FiniteDuration)(
     request: => HttpRequest
   ): Result[HttpResponse] =
-    HttpFailures.attempt(method, url, timeout) {
+    withClient(method, url, timeout) { client =>
       val response = client.send(request, JHttpResponse.BodyHandlers.ofString())
       HttpResponse(
         statusCode = response.statusCode(),

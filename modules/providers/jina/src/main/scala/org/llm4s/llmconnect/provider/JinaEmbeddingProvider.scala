@@ -93,7 +93,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    create(cfg, None, Llm4sHttpClient.create())
+    create(cfg, None, Llm4sHttpClient.create(cfg.network))
 
   /**
    * Creates an [[EmbeddingProvider]] backed by Jina AI that sends `task` with every request, whatever the
@@ -101,7 +101,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
    * one the purpose cannot express, such as [[JinaTask.TextMatching]].
    */
   def fromConfig(cfg: EmbeddingProviderConfig, task: JinaTask): EmbeddingProvider =
-    create(cfg, Some(task), Llm4sHttpClient.create())
+    create(cfg, Some(task), Llm4sHttpClient.create(cfg.network))
 
   private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
     create(cfg, None, httpClient)

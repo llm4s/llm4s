@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.util.Redaction
 
 /**
@@ -12,6 +13,8 @@ import org.llm4s.util.Redaction
  * @param timeouts how long an embedding request may take: the section's `timeouts.request`. Absent
  *                 means the provider's own default (two minutes). `timeouts.stream` has no meaning for
  *                 an embedding call.
+ * @param network  the proxy and TLS settings its HTTP calls use: `llm4s.http`. The default,
+ *                 [[org.llm4s.http.HttpNetworkSettings.default]], is no proxy and the JDK's trust.
  *
  * Build one with [[EmbeddingProviderConfig.apply]] and change it with the `with*` setters; the constructor and `copy`
  * are private, so a new field never breaks callers.
@@ -21,7 +24,8 @@ final case class EmbeddingProviderConfig private (
   baseUrl: String,
   model: String,
   apiKey: String,
-  timeouts: ProviderTimeouts
+  timeouts: ProviderTimeouts,
+  network: HttpNetworkSettings
 ) {
 
   /** Sets the base URL of the embedding service. */
@@ -36,6 +40,9 @@ final case class EmbeddingProviderConfig private (
   /** Sets how long an embedding request may take. */
   def withTimeouts(timeouts: ProviderTimeouts): EmbeddingProviderConfig = copy(timeouts = timeouts)
 
+  /** Sets the proxy and TLS settings its HTTP calls use. */
+  def withNetwork(network: HttpNetworkSettings): EmbeddingProviderConfig = copy(network = network)
+
   override def toString: String =
     s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=${Redaction.secret(apiKey)})"
 }
@@ -44,13 +51,18 @@ object EmbeddingProviderConfig {
 
   /**
    * Creates an [[EmbeddingProviderConfig]]. `timeouts` defaults to [[ProviderTimeouts.default]], the provider's own
-   * default.
+   * default, and `network` to [[org.llm4s.http.HttpNetworkSettings.default]], no proxy.
    */
   def apply(
     baseUrl: String,
     model: String,
     apiKey: String,
-    timeouts: ProviderTimeouts = ProviderTimeouts.default
+    timeouts: ProviderTimeouts = ProviderTimeouts.default,
+    network: HttpNetworkSettings = HttpNetworkSettings.default
   ): EmbeddingProviderConfig =
-    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts)
+    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network)
+
+  /** The signature before `network` was added, kept so code compiled against it still links. */
+  def apply(baseUrl: String, model: String, apiKey: String, timeouts: ProviderTimeouts): EmbeddingProviderConfig =
+    new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, HttpNetworkSettings.default)
 }

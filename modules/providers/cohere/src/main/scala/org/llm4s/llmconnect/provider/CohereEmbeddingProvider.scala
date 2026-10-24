@@ -99,7 +99,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Cohere whose `input_type` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    create(cfg, None, Llm4sHttpClient.create())
+    create(cfg, None, Llm4sHttpClient.create(cfg.network))
 
   /**
    * Creates an [[EmbeddingProvider]] backed by Cohere that sends `inputType` with every request, whatever the
@@ -107,7 +107,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
    * be one the purpose cannot express, such as [[CohereInputType.Classification]].
    */
   def fromConfig(cfg: EmbeddingProviderConfig, inputType: CohereInputType): EmbeddingProvider =
-    create(cfg, Some(inputType), Llm4sHttpClient.create())
+    create(cfg, Some(inputType), Llm4sHttpClient.create(cfg.network))
 
   private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
     create(cfg, None, httpClient)

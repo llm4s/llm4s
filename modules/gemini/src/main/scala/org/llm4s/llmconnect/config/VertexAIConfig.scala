@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -44,11 +45,13 @@ final case class VertexAIConfig private (
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   wellKnownCredentialPath: Option[String],
-  googleSearch: Boolean
+  googleSearch: Boolean,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                   = ProviderId("vertexai")
-  override def withModel(model: String): VertexAIConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                    = ProviderId("vertexai")
+  override def withModel(model: String): VertexAIConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): VertexAIConfig = copy(network = network)
 
   def withProjectId(projectId: String): VertexAIConfig                  = copy(projectId = projectId)
   def withLocation(location: String): VertexAIConfig                    = copy(location = location)
@@ -113,7 +116,8 @@ object VertexAIConfig:
       reserveCompletion,
       timeouts,
       wellKnownCredentialPath,
-      googleSearch
+      googleSearch,
+      network = HttpNetworkSettings.default
     )
 
   /**

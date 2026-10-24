@@ -1,5 +1,6 @@
 package org.llm4s.javaapi;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import org.llm4s.metrics.MetricsCollector;
 
@@ -85,6 +86,46 @@ public final class AzureOpenAiClientBuilder {
    */
   public AzureOpenAiClientBuilder metrics(MetricsCollector metrics) {
     return new AzureOpenAiClientBuilder(settings.metrics(metrics));
+  }
+
+  /**
+   * The HTTP proxy every request goes through, such as {@code http://proxy.corp:3128}, as {@code llm4s.http.proxy.url}
+   * sets it for a configured provider: an {@code http} proxy, with its port; {@code null}, the default, for none. A
+   * {@code user:password@} in the URL is the proxy's credentials. Checked at {@link #build()}, which returns a failed
+   * result of kind {@code VALIDATION} for a URL it cannot use.
+   */
+  public AzureOpenAiClientBuilder proxy(String url) {
+    return new AzureOpenAiClientBuilder(settings.network(settings.network.proxy(url)));
+  }
+
+  /**
+   * The proxy's Basic credentials, answered only to the proxy's own challenge. Never logged: this builder's
+   * {@code toString} prints the password as {@code ***}.
+   */
+  public AzureOpenAiClientBuilder proxyCredentials(String username, String password) {
+    return new AzureOpenAiClientBuilder(settings.network(settings.network.proxyCredentials(username, password)));
+  }
+
+  /**
+   * The hosts reached directly, not through the proxy: a name ({@code localhost}), a domain suffix
+   * ({@code *.internal}), a prefix ({@code 10.*}) or {@code *}. Replaces the default, the loopback addresses.
+   */
+  public AzureOpenAiClientBuilder nonProxyHosts(String... hosts) {
+    return new AzureOpenAiClientBuilder(settings.network(settings.network.nonProxyHosts(hosts)));
+  }
+
+  /**
+   * A trust store (PKCS12 or JKS) of CA certificates to trust in addition to the JDK's, such as the corporate CA that
+   * re-signs traffic behind TLS inspection; {@code password} may be {@code null}. A store that cannot be read makes
+   * {@link #build()} return a failed result of kind {@code VALIDATION} naming it.
+   */
+  public AzureOpenAiClientBuilder trustStore(Path path, String password) {
+    return new AzureOpenAiClientBuilder(settings.network(settings.network.trustStore(path, password)));
+  }
+
+  /** A key store (PKCS12 or JKS) holding the client certificate a gateway requiring mutual TLS asks for. */
+  public AzureOpenAiClientBuilder keyStore(Path path, String password) {
+    return new AzureOpenAiClientBuilder(settings.network(settings.network.keyStore(path, password)));
   }
 
   /**

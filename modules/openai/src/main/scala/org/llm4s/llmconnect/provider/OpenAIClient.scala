@@ -9,7 +9,7 @@ import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
 import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
-import com.openai.core.http.{ HttpClient => SdkHttpClient, StreamResponse }
+import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
   ChatCompletion,
@@ -30,6 +30,7 @@ import com.openai.models.chat.completions.{
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
 import org.llm4s.error.{ LLMError, UnknownError }
+import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -1008,7 +1009,35 @@ private[provider] object OpenAIClientTransport {
       case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
       case None     => builder.apiKey(config.apiKey)
     }
-    sdk(customize(builder).build(), config.timeouts)
+    sdk(customize(withNetwork(builder, config.network, config.baseUrl)).build(), config.timeouts)
+  }
+
+  /**
+   * Routes the SDK's OkHttp client as `network` says: through its proxy unless `baseUrl`'s host bypasses it,
+   * answering the proxy's challenge with its Basic credentials, and trusting its extra CAs (with the JDK's) and
+   * presenting its client certificate. [[HttpNetworkSettings.default]] leaves the builder as it was.
+   *
+   * TLS material that cannot be read is thrown as an `IllegalArgumentException`, which `OpenAIClient.apply`
+   * returns as a `Left`; `Llm4sConfig` has already opened the stores of a config it loaded.
+   */
+  private[provider] def withNetwork(
+    builder: OpenAIOkHttpClient.Builder,
+    network: HttpNetworkSettings,
+    baseUrl: String
+  ): OpenAIOkHttpClient.Builder = {
+    HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
+      builder.proxy(proxy)
+      network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
+        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+      }
+    }
+    HttpNetwork
+      .tlsMaterial(network.tls)
+      .fold(
+        error => throw new IllegalArgumentException(error.message),
+        _.foreach(tls => builder.sslSocketFactory(tls.sslContext.getSocketFactory).trustManager(tls.trustManager))
+      )
+    builder
   }
 
   /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */
@@ -1074,7 +1103,7 @@ private[provider] object OpenAIClientTransport {
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
-    sdk(builder.build(), config.timeouts)
+    sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
   }
 
   private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =

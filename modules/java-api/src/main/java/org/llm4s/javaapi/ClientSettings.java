@@ -16,7 +16,8 @@ import org.llm4s.util.Redaction;
 final class ClientSettings {
 
   static final ClientSettings EMPTY =
-      new ClientSettings(null, null, null, null, null, null, null, null, null, null, Map.of(), null);
+      new ClientSettings(null, null, null, null, null, null, null, null, null, null, Map.of(), null,
+          ClientNetwork.EMPTY);
 
   final String apiKey;
   final String model;
@@ -32,6 +33,8 @@ final class ClientSettings {
   final Map<String, String> headers;
   /** Where the client reports every call; {@code null} records nothing. */
   final MetricsCollector metrics;
+  /** The proxy and TLS settings; never {@code null}. */
+  final ClientNetwork network;
 
   private ClientSettings(
       String apiKey,
@@ -45,7 +48,8 @@ final class ClientSettings {
       Duration requestTimeout,
       Duration streamTimeout,
       Map<String, String> headers,
-      MetricsCollector metrics) {
+      MetricsCollector metrics,
+      ClientNetwork network) {
     this.apiKey = apiKey;
     this.model = model;
     this.baseUrl = baseUrl;
@@ -58,61 +62,67 @@ final class ClientSettings {
     this.streamTimeout = streamTimeout;
     this.headers = headers;
     this.metrics = metrics;
+    this.network = network;
   }
 
   ClientSettings apiKey(String value) {
     return new ClientSettings(value, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings model(String value) {
     return new ClientSettings(apiKey, value, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings baseUrl(String value) {
     return new ClientSettings(apiKey, model, value, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings organization(String value) {
     return new ClientSettings(apiKey, model, baseUrl, value, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings endpoint(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, value, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings apiVersion(String value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, value, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings contextWindow(int value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, value,
-        reserveCompletion, requestTimeout, streamTimeout, headers, metrics);
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings reserveCompletion(int value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        value, requestTimeout, streamTimeout, headers, metrics);
+        value, requestTimeout, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings requestTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, value, streamTimeout, headers, metrics);
+        reserveCompletion, value, streamTimeout, headers, metrics, network);
   }
 
   ClientSettings streamTimeout(Duration value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, value, headers, metrics);
+        reserveCompletion, requestTimeout, value, headers, metrics, network);
   }
 
   ClientSettings metrics(MetricsCollector value) {
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, headers, value);
+        reserveCompletion, requestTimeout, streamTimeout, headers, value, network);
+  }
+
+  ClientSettings network(ClientNetwork value) {
+    return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
+        reserveCompletion, requestTimeout, streamTimeout, headers, metrics, value);
   }
 
   /** {@code name} set to {@code value}, or removed when {@code value} is {@code null}. */
@@ -124,7 +134,7 @@ final class ClientSettings {
       next.put(name, value);
     }
     return new ClientSettings(apiKey, model, baseUrl, organization, endpoint, apiVersion, contextWindow,
-        reserveCompletion, requestTimeout, streamTimeout, Collections.unmodifiableMap(next), metrics);
+        reserveCompletion, requestTimeout, streamTimeout, Collections.unmodifiableMap(next), metrics, network);
   }
 
   /**
@@ -146,6 +156,7 @@ final class ClientSettings {
     if (streamTimeout != null) fields.add("streamTimeout=" + streamTimeout);
     if (!headers.isEmpty()) fields.add("headers=" + headers.keySet());
     if (metrics != null) fields.add("metrics=" + metrics.getClass().getName());
+    network.describe(fields);
     return fields.toString();
   }
 }

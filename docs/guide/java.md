@@ -224,6 +224,27 @@ the application has a `MeterRegistry`.
 
 A [client builder](#configure-in-code) takes the collector too: `Llm4s.ollama().model("llama3.2").metrics(metrics).build()`.
 
+### Behind a proxy or a corporate CA
+
+Every client builder takes the proxy and TLS settings that `llm4s.http` gives a configured provider
+([Corporate networks](../getting-started/configuration#corporate-networks-a-proxy-and-a-custom-ca)): an HTTP proxy,
+its Basic credentials, the hosts reached directly, a trust store whose CAs are trusted in addition to the JDK's, and,
+for a gateway that requires mutual TLS, a key store with the client certificate (`keyStore(path, password)`):
+
+```java
+LlmResult<JLlmClient> corporate = Llm4s.openAi()
+    .apiKey(apiKey)
+    .model("gpt-4o")
+    .proxy("http://proxy.corp:3128")
+    .proxyCredentials(proxyUser, proxyPassword)
+    .nonProxyHosts("localhost", "*.internal")
+    .trustStore(java.nio.file.Path.of("/etc/pki/corp-ca.p12"), trustStorePassword)
+    .build();
+```
+
+A proxy URL the builder cannot use, or a store it cannot open, makes `build()` return a failed result of kind
+`VALIDATION` naming the field; `toString` prints every password as `***`.
+
 ## Your first call
 
 ```java

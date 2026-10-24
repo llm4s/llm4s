@@ -90,7 +90,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create()
+    private val httpClient = Llm4sHttpClient.create(cfg.network)
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {

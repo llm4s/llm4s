@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -35,12 +36,14 @@ final case class WatsonXConfig(
   iamUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  override val network: HttpNetworkSettings = HttpNetworkSettings.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("watsonx")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): WatsonXConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                   = ProviderId("watsonx")
+  override def endpointUrl: Option[String]                              = Some(baseUrl)
+  override def withModel(model: String): WatsonXConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
   override def toString: String =
     s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +

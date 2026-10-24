@@ -6,6 +6,7 @@ package org.llm4s.spring
 import com.typesafe.config.ConfigValueFactory
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -44,6 +45,7 @@ private[spring] object SpringProviderSource {
 
   final val ProvidersPrefix   = "llm4s.providers"
   final val CredentialsPrefix = "llm4s.credentials"
+  final val HttpPrefix        = "llm4s.http"
   private val DefaultPointer  = List("llm4s", "providers", "provider")
 
   /** The provider llm4s resolved from the properties, and the secret values to keep out of reports: those the properties held and the resolved config's own. */
@@ -59,12 +61,47 @@ private[spring] object SpringProviderSource {
    */
   def resolve(env: ConfigurableEnvironment, flatProvider: String): LlmResult[Resolved] = {
     val outcome: Either[LLMError, Resolved] = for {
-      entries <- collect(env)
+      entries <- collect(env).map(joinIndexed)
       prepared = withDefaultPointer(entries, flatProvider)
       source <- toSource(prepared)
       config <- Llm4sConfig.providerFrom(source)(using ProviderRegistry.default)
     } yield Resolved(config, (secrets(prepared) ++ configSecrets(config)).distinct)
     outcome.fold(error => LlmResult.failure[Resolved](error), resolved => LlmResult.success(resolved))
+  }
+
+  /**
+   * The proxy and TLS settings of the `llm4s.http.*` properties, laid over llm4s's defaults (so `HTTPS_PROXY` and the
+   * other variables `reference.conf` binds still apply): what the flat `llm4s.provider` form's client uses. The
+   * `llm4s.providers.*` form reads them with its section, as HOCON's `llm4s.http` is.
+   */
+  def network(env: ConfigurableEnvironment): Either[LLMError, HttpNetworkSettings] =
+    for {
+      entries <- collect(env).map(all => joinIndexed(all.filter(_._1.take(2) == HttpPath)))
+      source  <- toSource(entries)
+      network <- Llm4sConfig.httpNetwork(source)
+    } yield network
+
+  private val HttpPath = List("llm4s", "http")
+
+  private val Indexed = """(.+)\[(\d+)\]""".r
+
+  /**
+   * A list property Spring holds one element per key (`non-proxy-hosts[0]`, `non-proxy-hosts[1]`, as YAML's lists are
+   * flattened) as one comma-separated value, in index order: the form `llm4s.http.proxy.nonProxyHosts` also takes.
+   */
+  private[spring] def joinIndexed(entries: Vector[(List[String], String)]): Vector[(List[String], String)] = {
+    val element: ((List[String], String)) => Option[(List[String], Long, String)] = { case (path, value) =>
+      path.lastOption.collect { case Indexed(name, index) =>
+        (path.init :+ name, index.toLongOption.getOrElse(Long.MaxValue), value)
+      }
+    }
+    val plain = entries.filter(element(_).isEmpty)
+    val joined = entries
+      .flatMap(element(_))
+      .groupBy(_._1)
+      .toVector
+      .map { case (path, items) => path -> items.sortBy(_._2).map(_._3).mkString(",") }
+    plain ++ joined
   }
 
   /** `api-key` and `api_key` are `apiKey`; a name with neither separator is left as written. */
@@ -83,11 +120,13 @@ private[spring] object SpringProviderSource {
         Right(List("llm4s", "providers", section, name) ++ (if (name == "headers") rest else rest.map(camel)))
       case "llm4s" :: "credentials" :: vendor :: first :: rest =>
         Right(List("llm4s", "credentials", vendor, camel(first)) ++ rest.map(camel))
+      case "llm4s" :: "http" :: first :: rest =>
+        Right(List("llm4s", "http", camel(first)) ++ rest.map(camel))
       case _ =>
         Left(
           ConfigurationError(
             s"$key is not a provider property: expected $ProvidersPrefix.<section>.<name>, " +
-              s"$ProvidersPrefix.provider or $CredentialsPrefix.<vendor>.<name>",
+              s"$ProvidersPrefix.provider, $CredentialsPrefix.<vendor>.<name> or $HttpPrefix.<block>.<name>",
             List(key)
           )
         )
@@ -99,7 +138,10 @@ private[spring] object SpringProviderSource {
         case source: EnumerablePropertySource[_] => source.getPropertyNames.toVector
         case _                                   => Vector.empty
       }
-      .filter(name => name.startsWith(ProvidersPrefix + ".") || name.startsWith(CredentialsPrefix + "."))
+      .filter(name =>
+        name.startsWith(ProvidersPrefix + ".") || name.startsWith(CredentialsPrefix + ".") ||
+          name.startsWith(HttpPrefix + ".")
+      )
       .distinct
 
   /**
@@ -156,7 +198,7 @@ private[spring] object SpringProviderSource {
       Left(ConfigurationError(s"$key is set both as a value and as a section of values", List(key)))
     }
 
-    // A path always has the four segments hoconPath builds, so init and last are safe.
+    // A path always has at least the three segments hoconPath builds, so init and last are safe.
     def put(path: List[String], value: String): Either[LLMError, Unit] =
       path.init
         .foldLeft[Either[LLMError, JMap[String, AnyRef]]](Right(root)) { (parent, name) =>

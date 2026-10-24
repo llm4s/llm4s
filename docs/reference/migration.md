@@ -249,6 +249,22 @@ yield (files, ExecuteTool(sandbox))
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
 
+### One proxy and TLS setting for every provider client (#2273)
+
+Every provider client now honours `llm4s.http` ([Corporate networks](../getting-started/configuration.md#corporate-networks-a-proxy-and-a-custom-ca)):
+
+- Core's `reference.conf` binds `llm4s.http.proxy.url` to `HTTPS_PROXY` and `nonProxyHosts` to `NO_PROXY`. An
+  application whose environment sets `HTTPS_PROXY` now sends provider traffic through that proxy (loopback hosts stay
+  direct). To keep the old direct route, set `llm4s.http.proxy.url = ""`, or list the hosts in `NO_PROXY`. A value
+  that is not `http://host:port` fails the load, naming `llm4s.http.proxy.url`.
+- `http` is a built-in key of a provider section, like `timeouts`: a provider declaring an extra named `http` must
+  rename it.
+- `BedrockConfig` and `WatsonXConfig` (public case classes) gain a last field, `network`, with a default: a pattern
+  match on all their fields gains one `_`. `EmbeddingProviderConfig` and `OpenAICompatibleClient.Settings` gain
+  `network` too; their previous `apply` signatures remain.
+- `Llm4sHttpClient.create()` is unchanged and ignores `llm4s.http`; `Llm4sHttpClient.create(network)` takes the settings
+  `Llm4sConfig.httpNetwork()` loads.
+
 ### The embeddings sample's settings left `Llm4sConfig` (#2265)
 
 `Llm4sConfig` exposed settings only the embeddings sample (`EmbeddingExample` in `modules/samples`) read, and

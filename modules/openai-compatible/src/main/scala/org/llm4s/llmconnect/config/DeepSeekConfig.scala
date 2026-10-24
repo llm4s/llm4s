@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -33,12 +34,14 @@ final case class DeepSeekConfig private (
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                   = ProviderId("deepseek")
-  override def endpointUrl: Option[String]                              = Some(baseUrl)
-  override def withModel(model: String): DeepSeekConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                    = ProviderId("deepseek")
+  override def endpointUrl: Option[String]                               = Some(baseUrl)
+  override def withModel(model: String): DeepSeekConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
 
   def withApiKey(apiKey: String): DeepSeekConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
@@ -72,7 +75,15 @@ object DeepSeekConfig {
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
   ): DeepSeekConfig =
-    new DeepSeekConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+    new DeepSeekConfig(
+      apiKey,
+      model,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      timeouts,
+      network = HttpNetworkSettings.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

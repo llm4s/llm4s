@@ -36,8 +36,6 @@ import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.document.Document
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException
-import software.amazon.awssdk.http.Protocol
-import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
 import software.amazon.awssdk.core.exception.SdkClientException
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.bedrockruntime.{ BedrockRuntimeAsyncClient, BedrockRuntimeClient }
@@ -74,7 +72,13 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
   ValidationException
 }
 
+import org.llm4s.http.{ HttpNetwork, TlsMaterial }
+import software.amazon.awssdk.http.Protocol
+import software.amazon.awssdk.http.apache5.{ Apache5HttpClient, ProxyConfiguration => Apache5ProxyConfiguration }
+import software.amazon.awssdk.http.nio.netty.{ NettyNioAsyncHttpClient, ProxyConfiguration => NettyProxyConfiguration }
+
 import java.net.URI
+import javax.net.ssl.TrustManager
 import java.time.Instant
 import java.util.concurrent.{ LinkedBlockingQueue, TimeUnit }
 import scala.annotation.tailrec
@@ -138,6 +142,7 @@ class BedrockClient(
       .region(Region.of(config.region))
       .credentialsProvider(credentialsProvider)
     config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url)))
+    BedrockNetwork.syncHttpClient(config).foreach(builder.httpClientBuilder)
     // Without a configured request timeout the SDK keeps its own defaults.
     requestTimeout.foreach { timeout =>
       builder.overrideConfiguration(
@@ -153,14 +158,8 @@ class BedrockClient(
       .builder()
       .region(Region.of(config.region))
       .credentialsProvider(credentialsProvider)
-    config.endpointUrl.foreach { url =>
-      builder.endpointOverride(URI.create(url))
-      // The SDK's async client speaks HTTP/2, which over a cleartext URL means h2c with prior
-      // knowledge: an HTTP/1.1-only proxy or stub server cannot answer it. TLS endpoints
-      // negotiate the protocol, so only a plain `http` override is pinned to HTTP/1.1.
-      if (url.regionMatches(true, 0, "http://", 0, 7))
-        builder.httpClientBuilder(NettyNioAsyncHttpClient.builder().protocol(Protocol.HTTP1_1))
-    }
+    config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url)))
+    BedrockNetwork.asyncHttpClient(config).foreach(builder.httpClientBuilder)
     builder.build()
   }
 
@@ -924,4 +923,79 @@ object BedrockClient {
     }
     doc.accept(visitor)
   }
+}
+
+/**
+ * The AWS SDK HTTP clients for a [[BedrockConfig]]'s `network`: its proxy and TLS material on the
+ * synchronous Apache client `Converse` uses and the Netty client `ConverseStream` uses.
+ *
+ * With no proxy and no TLS material the SDK keeps its own default clients, which read the JVM's proxy
+ * properties and the `HTTPS_PROXY` variables themselves, as before the setting existed. Once llm4s
+ * configures a proxy, the SDK's own proxy discovery is turned off, so the llm4s setting - including a
+ * `nonProxyHosts` entry that sends the endpoint direct - is the only one in force. The endpoint is the
+ * configured `endpointUrl`, else `bedrock-runtime.<region>.amazonaws.com`.
+ *
+ * The AWS credential providers (instance metadata, STS) build their own clients and are not routed here.
+ */
+private[provider] object BedrockNetwork {
+
+  /** The host the client calls: the endpoint override's, else the regional Bedrock runtime endpoint. */
+  def endpointHost(config: BedrockConfig): String =
+    config.endpointUrl
+      .flatMap(url => Try(URI.create(url.trim)).toOption.flatMap(u => Option(u.getHost)))
+      .getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
+
+  private def isPlainHttp(config: BedrockConfig): Boolean =
+    config.endpointUrl.exists(_.trim.regionMatches(true, 0, "http://", 0, 7))
+
+  private def tls(config: BedrockConfig): Option[TlsMaterial] =
+    HttpNetwork.tlsMaterial(config.network.tls).fold(e => throw new IllegalArgumentException(e.message), identity)
+
+  /** The synchronous client for `config`, or `None` to keep the SDK's default. */
+  def syncHttpClient(config: BedrockConfig): Option[Apache5HttpClient.Builder] =
+    if (config.network.isDefault) None
+    else {
+      val builder = Apache5HttpClient.builder()
+      config.network.proxy.foreach { _ =>
+        val proxy =
+          Apache5ProxyConfiguration.builder().useSystemPropertyValues(false).useEnvironmentVariableValues(false)
+        config.network.proxyFor(endpointHost(config)).foreach { p =>
+          proxy.endpoint(URI.create(s"http://${p.host}:${p.port}"))
+          p.credentials.foreach { case (user, password) => proxy.username(user).password(password) }
+        }
+        builder.proxyConfiguration(proxy.build())
+      }
+      tls(config).foreach { material =>
+        builder.tlsTrustManagersProvider(() => Array[TrustManager](material.trustManager))
+        if (material.keyManagers.nonEmpty) builder.tlsKeyManagersProvider(() => material.keyManagers.toArray)
+      }
+      Some(builder)
+    }
+
+  /**
+   * The streaming client for `config`, or `None` to keep the SDK's default.
+   *
+   * The SDK's async client speaks HTTP/2, which over a cleartext URL means h2c with prior knowledge: an
+   * HTTP/1.1-only proxy or stub server cannot answer it. TLS endpoints negotiate the protocol, so only a
+   * plain `http` override is pinned to HTTP/1.1.
+   */
+  def asyncHttpClient(config: BedrockConfig): Option[NettyNioAsyncHttpClient.Builder] =
+    if (config.network.isDefault && !isPlainHttp(config)) None
+    else {
+      val builder = NettyNioAsyncHttpClient.builder()
+      if (isPlainHttp(config)) builder.protocol(Protocol.HTTP1_1)
+      config.network.proxy.foreach { _ =>
+        val proxy = NettyProxyConfiguration.builder().useSystemPropertyValues(false).useEnvironmentVariableValues(false)
+        config.network.proxyFor(endpointHost(config)).foreach { p =>
+          proxy.scheme("http").host(p.host).port(p.port)
+          p.credentials.foreach { case (user, password) => proxy.username(user).password(password) }
+        }
+        builder.proxyConfiguration(proxy.build())
+      }
+      tls(config).foreach { material =>
+        builder.tlsTrustManagersProvider(() => Array[TrustManager](material.trustManager))
+        if (material.keyManagers.nonEmpty) builder.tlsKeyManagersProvider(() => material.keyManagers.toArray)
+      }
+      Some(builder)
+    }
 }

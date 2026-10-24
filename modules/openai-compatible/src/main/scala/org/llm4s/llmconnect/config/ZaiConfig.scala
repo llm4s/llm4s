@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -31,12 +32,14 @@ final case class ZaiConfig private (
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                              = ProviderId("zai")
-  override def endpointUrl: Option[String]                         = Some(baseUrl)
-  override def withModel(model: String): ZaiConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                               = ProviderId("zai")
+  override def endpointUrl: Option[String]                          = Some(baseUrl)
+  override def withModel(model: String): ZaiConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): ZaiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): ZaiConfig = copy(network = network)
 
   def withApiKey(apiKey: String): ZaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): ZaiConfig                  = copy(baseUrl = baseUrl)
@@ -69,7 +72,15 @@ object ZaiConfig {
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
   ): ZaiConfig =
-    new ZaiConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+    new ZaiConfig(
+      apiKey,
+      model,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      timeouts,
+      network = HttpNetworkSettings.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

@@ -122,6 +122,46 @@
       "name": "llm4s.credentials",
       "type": "java.util.Map<java.lang.String,java.lang.String>",
       "description": "Shared vendor keys, llm4s.credentials.<provider>.api-key, used by a section that sets no api-key of its own."
+    },
+    {
+      "name": "llm4s.http.proxy.url",
+      "type": "java.lang.String",
+      "description": "HTTP proxy every provider client goes through, http://host:port (an http proxy, with its port); a user:password@ in it is the proxy's credentials. Mirrors llm4s.http.proxy.url of the HOCON configuration, which reads HTTPS_PROXY. Empty for none."
+    },
+    {
+      "name": "llm4s.http.proxy.username",
+      "type": "java.lang.String",
+      "description": "User name for the proxy's Basic authentication."
+    },
+    {
+      "name": "llm4s.http.proxy.password",
+      "type": "java.lang.String",
+      "description": "Password for the proxy's Basic authentication; never logged."
+    },
+    {
+      "name": "llm4s.http.proxy.non-proxy-hosts",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Hosts reached directly, not through the proxy: a name (localhost), a domain suffix (*.internal), a prefix (10.*) or *. Replaces the default, the loopback addresses."
+    },
+    {
+      "name": "llm4s.http.tls.trust-store",
+      "type": "java.lang.String",
+      "description": "Path of a trust store (PKCS12 or JKS) of CA certificates trusted in addition to the JDK's, such as a corporate CA behind TLS inspection."
+    },
+    {
+      "name": "llm4s.http.tls.trust-store-password",
+      "type": "java.lang.String",
+      "description": "Password of the trust store; never logged."
+    },
+    {
+      "name": "llm4s.http.tls.key-store",
+      "type": "java.lang.String",
+      "description": "Path of a key store (PKCS12 or JKS) holding the client certificate for a gateway that requires mutual TLS."
+    },
+    {
+      "name": "llm4s.http.tls.key-store-password",
+      "type": "java.lang.String",
+      "description": "Password of the key store and its key; never logged."
     }
   ],
   "hints": [

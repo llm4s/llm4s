@@ -3,6 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ValidationError
+import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.{
   AnthropicConfig,
   AzureConfig,
@@ -145,7 +146,34 @@ private[javaapi] object ClientBuilds {
 
   /** The client for `config`, reporting to the builder's collector, or the first thing wrong with what it was told. */
   private def client(config: Result[ProviderConfig], s: ClientSettings): LlmResult[JLlmClient] =
-    config.fold(LlmResult.failure, Llm4s.createClient(_, s.metrics))
+    config.flatMap(c => network(s.network).map(c.withNetwork)).fold(LlmResult.failure, Llm4s.createClient(_, s.metrics))
+
+  /**
+   * The proxy and TLS settings the builder was given, as `llm4s.http` gives them to a configured provider: a proxy URL
+   * it cannot use, or a store it cannot read, is a `ValidationError` naming the builder's field.
+   */
+  private[javaapi] def network(n: ClientNetwork): Result[HttpNetworkSettings] =
+    for {
+      proxy <- present(n.proxyUrl).fold[Result[Option[HttpProxy]]](Right(None)) { url =>
+        HttpProxy.fromUrl(url).left.map(e => ValidationError.invalid("proxy", e.message)).map { parsed =>
+          Some(
+            parsed
+              .withUsername(present(n.proxyUsername).orElse(parsed.username))
+              .withPassword(Option(n.proxyPassword).orElse(parsed.password))
+              .withNonProxyHosts(Option(n.nonProxyHosts).fold(parsed.nonProxyHosts)(_.asScala.toSeq))
+          )
+        }
+      }
+      tls = HttpTls(
+        Option(n.trustStore),
+        Option(n.trustStorePassword),
+        Option(n.keyStore),
+        Option(n.keyStorePassword)
+      )
+      _ <- HttpNetwork.tlsMaterial(tls).left.map { e =>
+        ValidationError.invalid(if (e.message.startsWith("tls.keyStore")) "keyStore" else "trustStore", e.message)
+      }
+    } yield HttpNetworkSettings(proxy, tls)
 
   /** The model catalogue's view of context windows, as a configured provider's section is read with. */
   private def resolver: Result[ContextWindowResolver] =

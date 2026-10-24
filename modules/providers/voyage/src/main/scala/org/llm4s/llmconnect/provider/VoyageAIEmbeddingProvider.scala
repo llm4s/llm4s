@@ -82,7 +82,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    create(cfg, Llm4sHttpClient.create())
+    create(cfg, Llm4sHttpClient.create(cfg.network))
 
   private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
     create(cfg, httpClient)

@@ -104,7 +104,7 @@ Target: after the stable spine · **ESoC mentorship track**.
 | More providers: Vertex AI, AWS Bedrock, IBM watsonx.ai, Jina and Voyage embeddings | **Landed** | Broader cloud and embedding coverage. |
 | Typed capability model + fake-provider contract servers | **Planned (ESoC)** | Behavior comparable without live keys. |
 | Generated provider capability docs | **Landed** ([#2290](https://github.com/llm4s/llm4s/issues/2290)) | The [compatibility matrix](compatibility-matrix) is generated from the descriptors and the build, and CI fails when it drifts. Structured output, vision, reasoning and stream usage are not declared by descriptors yet. |
-| Standardized provider options (base URL, headers, proxy, request IDs, retry-after, errors) | **In progress** | Consistent integrations: base URL, headers and `Retry-After` are handled in one place; proxy and request-ID options are not yet exposed. |
+| Standardized provider options (base URL, headers, proxy, request IDs, retry-after, errors) | **In progress** | Consistent integrations: base URL, headers, `Retry-After` and the proxy and TLS settings (`llm4s.http`, [#2273](https://github.com/llm4s/llm4s/issues/2273)) are handled in one place; request-ID options are not yet exposed. |
 
 ### Phase 3: JVM Interop And Adoption
 

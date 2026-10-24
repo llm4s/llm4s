@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -52,11 +53,13 @@ final case class BedrockConfig(
   credentials: Option[BedrockCredentials] = None,
   profile: Option[String] = None,
   endpointUrl: Option[String] = None,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  override val network: HttpNetworkSettings = HttpNetworkSettings.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("bedrock")
-  override def withModel(model: String): BedrockConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                   = ProviderId("bedrock")
+  override def withModel(model: String): BedrockConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): BedrockConfig = copy(network = network)
 
   override def toString: String =
     s"BedrockConfig(region=$region, model=$model, contextWindow=$contextWindow, " +

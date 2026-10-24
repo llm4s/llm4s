@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -39,12 +40,14 @@ final case class AzureConfig private (
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                = ProviderId("azure")
-  override def endpointUrl: Option[String]                           = Some(endpoint)
-  override def withModel(model: String): AzureConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                 = ProviderId("azure")
+  override def endpointUrl: Option[String]                            = Some(endpoint)
+  override def withModel(model: String): AzureConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
 
   def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
   def withApiKey(apiKey: String): AzureConfig                    = copy(apiKey = apiKey)
@@ -77,7 +80,16 @@ object AzureConfig {
     reserveCompletion: Int,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
   ): AzureConfig =
-    new AzureConfig(endpoint, apiKey, model, apiVersion, contextWindow, reserveCompletion, timeouts)
+    new AzureConfig(
+      endpoint,
+      apiKey,
+      model,
+      apiVersion,
+      contextWindow,
+      reserveCompletion,
+      timeouts,
+      network = HttpNetworkSettings.default
+    )
 
   /**
    * The endpoint, API key and deployment name, every other field at its default: the entry point

@@ -3,6 +3,7 @@ package org.llm4s.testutil
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ DiscoveredModel, ProviderModelLister }
 import org.llm4s.error.ValidationError
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -68,12 +69,14 @@ final case class FixtureChatConfig(
   baseUrl: String = FixtureChatProvider.DefaultBaseUrl,
   contextWindow: Int = 8192,
   reserveCompletion: Int = 1024,
-  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
+  override val network: HttpNetworkSettings = HttpNetworkSettings.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                      = FixtureChatProvider.id
-  override def endpointUrl: Option[String]                                 = Some(baseUrl)
-  override def withModel(model: String): FixtureChatConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                       = FixtureChatProvider.id
+  override def endpointUrl: Option[String]                                  = Some(baseUrl)
+  override def withModel(model: String): FixtureChatConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): FixtureChatConfig = copy(network = network)
 
 object FixtureChatConfig:
 

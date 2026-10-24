@@ -70,9 +70,12 @@ class GeminiClient(
   config: GeminiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
+
+  // The injected client, or one routed by the config's proxy and TLS settings when none was given.
+  private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -123,7 +126,7 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
+        http.post(url, headers, requestText, timeout = requestTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) =>
@@ -172,7 +175,7 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
+        http.postStream(url, headers, requestText, timeout = streamTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
@@ -572,7 +575,7 @@ class GeminiClient(
       .tapLeft(e => recordExchange(startedAt, requestBody, failureResponse, Left(e)))
 
   override protected def releaseResources(): Unit =
-    (httpClient: Any) match {
+    (http: Any) match {
       case c: AutoCloseable => c.close()
       case _                => ()
     }

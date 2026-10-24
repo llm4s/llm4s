@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
@@ -18,12 +19,25 @@ import pureconfig.ConfigSource
  *  @param sections         each section as read, or the error reading it
  *  @param credentials      the `llm4s.credentials` block, which a section without an `apiKey`
  *                          of its own falls back to
+ *  @param http             the `llm4s.http` block, which a section's own `http` block overrides
  */
 final private[config] case class ProviderSections(
   selectedProvider: Option[ProviderName],
   sections: Map[ProviderName, Result[RawNamedProviderSection]],
-  credentials: SharedCredentials = SharedCredentials.empty
+  credentials: SharedCredentials = SharedCredentials.empty,
+  http: Option[com.typesafe.config.ConfigObject] = None
 ):
+
+  /**
+   * The proxy and TLS settings section `name` uses: its own `http` block's keys over `llm4s.http`'s.
+   * A section that cannot be read uses `llm4s.http` alone; its read error is reported by [[validated]].
+   */
+  def network(name: ProviderName): Result[HttpNetworkSettings] =
+    HttpNetworkReader.forSection(
+      sections.get(name).flatMap(_.toOption).flatMap(_.http),
+      http,
+      name.asName
+    )
 
   /**
    * The default section's name, if one is set and a section of that name exists.

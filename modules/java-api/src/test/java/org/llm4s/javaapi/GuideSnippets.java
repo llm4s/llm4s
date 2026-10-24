@@ -83,6 +83,21 @@ final class GuideSnippets {
         return measured;
     }
 
+    /** The "Behind a proxy or a corporate CA" block: a client routed through a proxy, trusting a corporate CA. */
+    static LlmResult<JLlmClient> behindAProxy(
+            String apiKey, String proxyUser, String proxyPassword, String trustStorePassword) {
+        LlmResult<JLlmClient> corporate = Llm4s.openAi()
+            .apiKey(apiKey)
+            .model("gpt-4o")
+            .proxy("http://proxy.corp:3128")
+            .proxyCredentials(proxyUser, proxyPassword)
+            .nonProxyHosts("localhost", "*.internal")
+            .trustStore(java.nio.file.Path.of("/etc/pki/corp-ca.p12"), trustStorePassword)
+            .build();
+
+        return corporate;
+    }
+
     /** The "A conversation" block. */
     static void conversation(JLlmClient client) {
         Conversation conversation = ConversationBuilder.create()

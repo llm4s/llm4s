@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.spi.ProviderConfigSpec
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
 import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
+import com.typesafe.config.ConfigObject
 import pureconfig.{ ConfigObjectCursor, ConfigReader => PureConfigReader, ConfigSource }
 
 import scala.jdk.CollectionConverters.*
@@ -57,6 +58,12 @@ private[config] object RawProvidersConfigLoader:
           .map(Some(_))
       }
 
+  /** The section's `http` block as read; [[HttpNetworkReader]] checks its keys when the section is loaded. */
+  private def readHttp(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[ConfigObject]] =
+    val httpCursor = objCursor.atKeyOrUndefined("http")
+    if httpCursor.isUndefined || httpCursor.isNull then Right(None)
+    else httpCursor.asObjectCursor.map(c => Some(c.objValue))
+
   /**
    * The built-in fields, plus every other key as a string in `extras`.
    *
@@ -99,7 +106,8 @@ private[config] object RawProvidersConfigLoader:
             yield value.fold(acc)(acc.updated(key, _))
         }
         auth <- readAuth(objCursor)
-      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth)
+        http <- readHttp(objCursor)
+      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http)
     }
 
   /** The block as read, each section's read failure kept to that section. */
@@ -165,7 +173,7 @@ private[config] object RawProvidersConfigLoader:
    *  @return `Right` with each section read or failed on its own, or `Left` when the block itself is unreadable
    */
   def loadSections(source: ConfigSource): Result[ProviderSections] =
-    read(source).map { raw =>
+    read(source).flatMap(raw => HttpNetworkReader.globalBlock(source).map(raw -> _)).map { (raw, http) =>
       ProviderSections(
         selectedProvider = raw.selectedProvider,
         sections = raw.sections.map { case (name, section) =>
@@ -178,7 +186,8 @@ private[config] object RawProvidersConfigLoader:
             )
           }
         },
-        credentials = SharedCredentials.read(source)
+        credentials = SharedCredentials.read(source),
+        http = http
       )
     }
 

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -43,12 +44,14 @@ final case class AnthropicConfig private (
   reserveCompletion: Int,
   workloadIdentity: Option[AnthropicWorkloadIdentity],
   override val timeouts: ProviderTimeouts,
-  webSearch: Boolean
+  webSearch: Boolean,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                    = ProviderId("anthropic")
-  override def endpointUrl: Option[String]                               = Some(baseUrl)
-  override def withModel(model: String): AnthropicConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                     = ProviderId("anthropic")
+  override def endpointUrl: Option[String]                                = Some(baseUrl)
+  override def withModel(model: String): AnthropicConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
 
   def withApiKey(apiKey: String): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
@@ -96,7 +99,8 @@ object AnthropicConfig {
       reserveCompletion,
       workloadIdentity,
       ProviderTimeouts.default,
-      webSearch = false
+      webSearch = false,
+      network = HttpNetworkSettings.default
     )
 
   /**

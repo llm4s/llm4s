@@ -137,10 +137,13 @@ class WatsonXClient(
   config: WatsonXConfig,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig,
   private[provider] val nowSeconds: () => Long = () => System.currentTimeMillis() / 1000L
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
+
+  // The injected client, or one routed by the config's proxy and TLS settings when none was given.
+  private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   import WatsonXClient.*
 
@@ -206,7 +209,7 @@ class WatsonXClient(
     val body =
       s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey, "UTF-8")}"
     val headers = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
-    httpClient.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
+    http.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
       if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body)
       else
         Left(
@@ -243,7 +246,7 @@ class WatsonXClient(
       createRequestBody(conversation, options).flatMap(body => bearerToken().map(_ -> body)).flatMap { (token, body) =>
         val requestText = body.render()
         val startedAt   = Instant.now()
-        httpClient
+        http
           .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
           .flatMap { response =>
             noteStatus(response.statusCode, token)
@@ -273,7 +276,7 @@ class WatsonXClient(
       val startedAt   = Instant.now()
       val raw         = new StringBuilder
 
-      val result = httpClient
+      val result = http
         .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
         .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300)
@@ -584,7 +587,7 @@ class WatsonXClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override protected def releaseResources(): Unit = httpClient.close()
+  override protected def releaseResources(): Unit = http.close()
 }
 
 object WatsonXClient {

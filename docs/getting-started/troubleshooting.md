@@ -38,6 +38,7 @@ Two tools help before you read on:
 12. [Rate limited (429)](#rate-limited)
 13. [Timeouts](#timeouts)
 14. [Model not found (404)](#model-not-found)
+15. [Behind a proxy or TLS inspection](#corporate-network)
 
 ## 1. The API key is missing {#missing-api-key}
 
@@ -258,7 +259,8 @@ POST https://example.com/v1/chat/completions: connection timed out after 10 seco
 (`connection timed out`), often a wrong `baseUrl`, a proxy or a firewall. A slow local model on a CPU can also exceed
 the default.
 
-**Fix.** Check the endpoint is reachable, and if the model is just slow raise the timeout in the section's
+**Fix.** Check the endpoint is reachable - behind an outbound proxy, configure it ([problem 15](#corporate-network)) -
+and if the model is just slow raise the timeout in the section's
 `timeouts` block (`timeouts { request = 5m, stream = 20m }`). The defaults differ by provider, and the OpenAI,
 Azure, Requesty and Anthropic clients use their SDK's own timeouts, which retry; see [Timeouts](configuration#timeouts).
 
@@ -277,6 +279,26 @@ endpoint itself is not found. A local Ollama that has not pulled the model answe
 **Fix.** Check the section's `model` against the provider's model list: `Llm4sConfig.listModels()` lists the models
 of the default section's provider, and `Llm4sConfig.listModels("<name>")` those of a named section. If the model is
 right, check `baseUrl` (an OpenAI-compatible server's usually ends in `/v1`).
+
+
+## 15. Behind a proxy or TLS inspection {#corporate-network}
+
+**Symptom** (a `TimeoutError` or a `NetworkError`):
+
+```text
+POST https://api.openai.com/v1/chat/completions: connection timed out after 10 seconds
+POST https://api.openai.com/v1/chat/completions: I/O error: PKIX path building failed: unable to find valid certification path to requested target
+```
+
+**Cause.** The network reaches the internet only through an outbound HTTP proxy, which llm4s is not using, or a proxy
+inspects TLS and re-signs traffic with a corporate CA the JVM does not trust. A proxy that needs a login answers
+`407 Proxy Authentication Required`.
+
+**Fix.** Set `HTTPS_PROXY` (and `NO_PROXY` for hosts reached directly), or the `llm4s.http.proxy` block, with
+`LLM4S_PROXY_USER` / `LLM4S_PROXY_PASSWORD` for an authenticating proxy; point `llm4s.http.tls.trustStore` (or
+`LLM4S_TRUSTSTORE`) at a PKCS12 or JKS store holding the corporate CA. Every provider client honours them; see
+[Corporate networks](configuration#corporate-networks-a-proxy-and-a-custom-ca), which also lists what is not covered
+(PAC files, Kerberos/NTLM).
 
 ---
 

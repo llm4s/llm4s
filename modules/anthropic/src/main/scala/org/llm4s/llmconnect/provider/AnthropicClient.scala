@@ -10,6 +10,7 @@ import com.anthropic.config.{
   ProfileConfig
 }
 import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
+import com.anthropic.core.http.ProxyAuthenticator
 import com.anthropic.models.messages.{
   Base64ImageSource,
   Base64PdfSource,
@@ -56,6 +57,7 @@ import org.llm4s.error.{
 }
 import org.llm4s.error.ThrowableOps.*
 import org.llm4s.util.{ BoundedJson, Redaction }
+import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*
@@ -162,7 +164,7 @@ class AnthropicClient(
         wi.workspaceId.foreach(profile.workspaceId)
         builder.configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
     }
-    builder.build()
+    AnthropicClient.withNetwork(builder, config.network, config.baseUrl).build()
   }
 
   // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
@@ -898,6 +900,34 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  /**
+   * Routes the SDK's OkHttp client as `network` says: through its proxy unless `baseUrl`'s host bypasses it,
+   * answering the proxy's challenge with its Basic credentials, and trusting its extra CAs (with the JDK's) and
+   * presenting its client certificate. [[HttpNetworkSettings.default]] leaves the builder as it was.
+   *
+   * TLS material that cannot be read is thrown as an `IllegalArgumentException`, as the constructor's other
+   * refusals are; `Llm4sConfig` has already opened the stores of a config it loaded.
+   */
+  private[provider] def withNetwork(
+    builder: AnthropicOkHttpClient.Builder,
+    network: HttpNetworkSettings,
+    baseUrl: String
+  ): AnthropicOkHttpClient.Builder = {
+    HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
+      builder.proxy(proxy)
+      network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
+        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+      }
+    }
+    HttpNetwork
+      .tlsMaterial(network.tls)
+      .fold(
+        error => throw new IllegalArgumentException(error.message),
+        _.foreach(tls => builder.sslSocketFactory(tls.sslContext.getSocketFactory).trustManager(tls.trustManager))
+      )
+    builder
+  }
 
   // ---- content parts ----
 
