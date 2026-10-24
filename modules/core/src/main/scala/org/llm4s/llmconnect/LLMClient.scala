@@ -168,7 +168,7 @@ trait LLMClient extends AutoCloseable {
   /**
    * The canonical id of the provider this client calls (e.g. `openai`), when it is known. Tracing reports it as the
    * OpenTelemetry GenAI conventions' `gen_ai.provider.name` (#2275). `None` by default; a provider client built on
-   * [[BaseLifecycleLLMClient]] reports its own, and a client that wraps another forwards the wrapped client's.
+   * [[org.llm4s.llmconnect.BaseLifecycleLLMClient]] reports its own, and a client that wraps another forwards the wrapped client's.
    */
   def providerId: Option[ProviderId] = None
 

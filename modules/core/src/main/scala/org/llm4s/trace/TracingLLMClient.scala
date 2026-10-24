@@ -14,7 +14,7 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 import scala.util.Try
 
 /**
- * An [[LLMClient]] that traces each of its calls (#2275): a completion - plain or streamed - as one
+ * An [[org.llm4s.llmconnect.LLMClient]] that traces each of its calls (#2275): a completion - plain or streamed - as one
  * [[TraceEvent.CompletionReceived]] carrying the call's provider, request model, server address, options, duration,
  * finish reasons, usage and messages, and a failed call as one [[TraceEvent.ErrorOccurred]] naming the operation
  * (`chat`), model, provider and error type. A backend that follows the OpenTelemetry GenAI conventions turns each into

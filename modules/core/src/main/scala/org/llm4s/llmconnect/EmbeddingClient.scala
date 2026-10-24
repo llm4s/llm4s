@@ -14,7 +14,7 @@ import org.slf4j.LoggerFactory
 import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 
 /**
- * Embeds text through an [[EmbeddingProvider]]. With a tracer, each call is traced: a completed call as one
+ * Embeds text through an [[org.llm4s.llmconnect.provider.EmbeddingProvider]]. With a tracer, each call is traced: a completed call as one
  * [[org.llm4s.trace.TraceEvent.EmbeddingUsageRecorded]] (with the call's provider and duration) and, when its model's
  * pricing is known, a cost; a failed call as one [[org.llm4s.trace.TraceEvent.ErrorOccurred]] naming the `embeddings`
  * operation (#2275).

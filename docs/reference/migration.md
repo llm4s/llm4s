@@ -403,6 +403,8 @@ provider. `TraceEvent.CompletionReceived`, `ErrorOccurred`, `EmbeddingUsageRecor
 (provider, duration and the call's details), so a positional pattern on one of them no longer compiles: match on the
 type and read the fields (`case e: TraceEvent.CompletionReceived => e.model`). `LLMClient` gained
 `providerId: Option[ProviderId]` (default `None`), which a client that wraps another should forward.
+`EmbeddingClient` takes `providerId` as its fourth parameter, before the `ModelRegistryService`: Java and Kotlin
+callers of the constructor pass `Option.empty()` there.
 
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
