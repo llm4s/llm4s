@@ -279,6 +279,9 @@ The snippets below leave out their imports. Together they use these:
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Flow;
 
 import org.llm4s.javaapi.CompletionStream;
@@ -444,6 +447,52 @@ How firmly the schema binds the model is the provider's: OpenAI-style providers 
 Anthropic adds it to the system prompt, and watsonx and Bedrock ignore it, so the answer is still checked when it comes
 back. See [Structured output](structured-output) for each provider.
 
+## Asynchronous calls
+
+Every blocking call has an `*Async` variant that returns a `CompletableFuture` at once and makes the call on another
+thread: `completeAsync` and `completionAsync` on `JLlmClient` (with the same arguments as `complete` and `completion`,
+a record class for structured output included), `runAsync`, `continueConversationAsync`, `resumeAsync` and
+`recoverAsync` on `JAgent`, and `embedAsync` on `JEmbeddingClient`. Fan several calls out and wait for all of them
+with `allOf`, or bound one with `orTimeout`:
+
+```java
+CompletableFuture<String> first = client.completeAsync("Summarise the first report");
+CompletableFuture<String> second = client.completeAsync("Summarise the second report");
+CompletableFuture<JAgentResult> turn = agent.runAsync("Plan the release");
+
+CompletableFuture.allOf(first, second, turn).join();
+System.out.println(first.join() + " / " + second.join() + " / " + turn.join().answer().orElse(""));
+
+CompletableFuture<String> answer = client.completeAsync("A long question").orTimeout(30, TimeUnit.SECONDS);
+```
+
+A failed call completes its future exceptionally with the `LlmException` that the blocking call's `LlmResult` would
+hold, of the same `LlmErrorKind`, so `join()` throws a `CompletionException` and `get()` an `ExecutionException` whose
+cause is that `LlmException`. A future you cancel throws `CancellationException`, as any `CompletableFuture` does.
+
+`cancel(true)` interrupts the call in flight, which is how llm4s providers stop; an agent turn cancelled this way ends
+as the blocking call interrupted does: cancelled, the conversation of a continued, resumed or recovered turn left for
+`recover`. Completing the future yourself - `orTimeout`,
+`completeOnTimeout`, `complete` - interrupts the call too, since its answer can no longer be delivered. `cancel(false)`
+lets the call finish and discards its answer. Cancel the future the method returned: a future derived from it with
+`thenApply` does not pass its cancellation back.
+
+By default each call runs on a new virtual thread. A `JLlmClient` has an executor of its own for that, which
+`close()` shuts down: a call still running is then interrupted, and one made after it fails with kind `OTHER`.
+`withAsyncExecutor` runs the calls on an executor of yours instead - a bounded pool, a container's managed executor:
+
+```java
+ExecutorService pool = Executors.newFixedThreadPool(8);
+JLlmClient pooled = client.withAsyncExecutor(pool);   // shares client's connection; never shuts pool down
+```
+
+The pooled client shares the connection of the client it came from, so closing either closes it, and it never shuts
+the pool down. `JAgent` and `JEmbeddingClient` have `withAsyncExecutor` too. Any executor works, a `ForkJoinPool`
+included: cancelling a future interrupts the thread running its call whatever the executor. An executor that refuses
+a call - shut down, or its queue full - fails that call's future at once with kind `OTHER`, the executor's
+`RejectedExecutionException` its cause. The [threading guide](java-threading-and-cancellation) says which thread runs
+what.
+
 ## Reading a result
 
 Every `complete` call returns an `LlmResult<String>`, and every `completion` call an `LlmResult<JCompletion>`. There
@@ -462,7 +511,7 @@ CompletableFuture<String> future = result.toCompletableFuture();
 `isSuccess()` and `isFailure()` test it, `getError()` returns the `LlmException` of a failure (or `null`), and `map`
 transforms a success and passes a failure through. `toCompletableFuture()` returns a future that is already complete: it
 makes a result fit an API that expects a future, and does not make the call asynchronous (see
-[What is not here yet](#what-is-not-here-yet)).
+[Asynchronous calls](#asynchronous-calls)).
 
 ## Handling a failure
 
@@ -824,7 +873,6 @@ available from Java yet, each with the issue that tracks it:
 
 | You may expect | State today |
 |---|---|
-| An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
 | Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools are defined from Java in [Tools](#tools) |
 
 ## Where next

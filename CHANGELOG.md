@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `LLM4STemplate.completeAsync` refused by its executor fails with an `LlmException` of kind `OTHER` wrapping the
+  `RejectedExecutionException`; [migration](docs/reference/migration.md#the-spring-boot-starters-refused-completeasync-fails-with-an-llmexception-2276).
 - The Postgres stores take a `javax.sql.DataSource`, not a `com.zaxxer.hikari.HikariDataSource`: `PgVectorStore.create`
   and `PgVectorStore.apply(dataSource, tableName)`, and `PgKeywordIndex.apply(dataSource, ...)`. Source-compatible for
   callers passing a Hikari pool; recompile against the new signatures. `PgSearchIndex.close()` no longer closes a pool it
@@ -253,6 +255,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
+  included), `JAgent.runAsync`/`continueConversationAsync`/`resumeAsync`/`recoverAsync` and `embedAsync`, failing with
+  `LlmException`, `cancel(true)` interrupting the call, on a virtual thread or a `withAsyncExecutor` executor;
+  `LLM4STemplate.completeAsync` delegates to it [#2276](https://github.com/llm4s/llm4s/issues/2276).
 - **Added** a Kotlin DSL to `llm4s-kotlin-api` over the Java facade's builders: `tool`/`tools` with `param<T>`,
   `optionalParam<T>` and a `suspend` `handler` whose `ToolArgs` reads typed arguments and the call's `idempotencyKey`
   and `toolCallId` (the Kotlin half of [#1740](https://github.com/llm4s/llm4s/issues/1740)), `completionOptions { ... }`
