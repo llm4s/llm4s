@@ -13,7 +13,7 @@ import scala.util.Using
  * The provider capability matrix of `docs/reference/compatibility-matrix.md`, read from the code (#2290).
  *
  * Every row comes from what the provider modules declare, never from prose: the chat and embedding descriptors that
- * [[ProviderRegistry.discover]] finds through each in-repo module's `META-INF/services` entry, their
+ * `ProviderRegistry.discover` finds through each in-repo module's `META-INF/services` entry, their
  * `ProviderFeatures` (streaming, tool calling), their config specs (whether a section needs an API key, and whether it accepts workload identity), and
  * the `@Cloud` smoke suites of `modules/it`. Capabilities that `ProviderFeatures` cannot express yet are written as
  * [[NotDeclared]] until a module declares them.
