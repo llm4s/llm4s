@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, TroubleshootingLinks, ValidationError }
 import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -32,6 +32,9 @@ object HttpErrorMapper {
    * | 400         | [[org.llm4s.error.ValidationError]]                                   |
    * | other       | [[org.llm4s.error.ServiceError]]                                      |
    *
+   * A 401, 403, 429 or 404 message ends with the next step to take and a link to its entry on the
+   * First-Run Troubleshooting page.
+   *
    * A 429's `Retry-After` header (delta-seconds or an HTTP-date, name matched
    * case-insensitively) becomes the error's `retryAfter` duration; an absent,
    * unparseable or negative value leaves it unset, so the error's default backoff applies.
@@ -60,7 +63,7 @@ object HttpErrorMapper {
     clock: Clock
   ): Result[Nothing] = {
     val details = extractErrorDetails(body, statusCode, provider)
-    statusCode match {
+    val mapped: Result[Nothing] = statusCode match {
       case 401 | 403 => Left(AuthenticationError(provider, details, statusCode.toString))
       case 429 =>
         retryAfter(headers, clock) match {
@@ -72,6 +75,8 @@ object HttpErrorMapper {
         val error = ServiceError(s, provider, details)
         Left(retryAfter(headers, clock).fold(error)(error.withRetryAfter))
     }
+    // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
+    mapped.left.map(TroubleshootingLinks.annotate)
   }
 
   /** The delay a `Retry-After` header asks for; see `HttpHeaders.retryAfter`, which parses it. */

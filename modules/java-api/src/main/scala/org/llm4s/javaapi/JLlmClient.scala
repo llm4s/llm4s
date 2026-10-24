@@ -6,6 +6,9 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, UserMessage }
 import org.llm4s.types.Result
 
+import java.util.Objects
+import java.util.concurrent.{ CompletableFuture, Executor, ExecutorService }
+
 /**
  * Java-friendly wrapper around [[org.llm4s.llmconnect.LLMClient LLMClient]].
  *
@@ -27,6 +30,18 @@ import org.llm4s.types.Result
  * }
  * }}}
  *
+ * Each blocking call has an `*Async` variant - `completeAsync`, `completionAsync` - that returns a `CompletableFuture`
+ * at once and makes the call on another thread: by default a virtual thread of this client's own
+ * virtual-thread-per-task executor, which `close()` shuts down; [[withAsyncExecutor]] names another executor. The
+ * future completes with the value, or exceptionally with the [[LlmException]] the blocking call's result would hold.
+ * `cancel(true)` - and any other completion from outside, such as `orTimeout` - interrupts the call:
+ *
+ * {{{
+ * CompletableFuture<String> a = client.completeAsync("Summarise the first report");
+ * CompletableFuture<String> b = client.completeAsync("Summarise the second report");
+ * CompletableFuture.allOf(a, b).join();
+ * }}}
+ *
  * Obtain instances via [[Llm4s.createDefaultClient]] or [[Llm4s.createClient]], or wrap a Scala `LLMClient` you
  * built yourself with [[Llm4s.wrapClient]]; the constructor is the package's own (#1666).
  *
@@ -35,10 +50,20 @@ import org.llm4s.types.Result
  * r.ifSuccess(System.out::println).ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] val underlying: LLMClient)
-    extends AutoCloseable {
+final class JLlmClient private[javaapi] (
+  token: FacadeToken,
+  private[javaapi] val underlying: LLMClient,
+  supplied: Executor = null // null: the client's own executor
+) extends AutoCloseable {
 
   FacadeToken.check(token, "JLlmClient")
+
+  /** The default executor of the `*Async` methods, this client's own and shut down by `close()`; none when one is supplied. */
+  private val owned: Option[ExecutorService] = if (supplied == null) Some(FacadeAsync.ownExecutor()) else None
+
+  /** Where the `*Async` methods run their call. */
+  private[javaapi] val asyncExecutor: Executor =
+    Option(supplied).orElse(owned).getOrElse(FacadeAsync.virtualThreadPerCall)
 
   /**
    * Sends a single user query and returns the assistant's text response. A `null` query yields a
@@ -263,6 +288,82 @@ final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] va
         } yield record
       }
 
+  /**
+   * `complete(String)` on another thread: returns at once with a future of the text. The future completes
+   * exceptionally with the [[LlmException]] the blocking call's failed result would hold - of the same
+   * [[LlmErrorKind]] - and never with another exception, except the `CancellationException` of a future cancelled
+   * yourself. `cancel(true)` interrupts the call, which the provider answers by stopping; `cancel(false)` lets it run
+   * and discards its answer. Completing the future yourself - `orTimeout`, `completeOnTimeout`, `complete` - also
+   * interrupts the call. Cancel this future, not one derived from it with `thenApply`: a derived future's
+   * cancellation does not reach the call.
+   *
+   * The call runs on this client's executor: by default a new virtual thread for each call, from an executor that
+   * `close()` shuts down - a call still running then is interrupted, and a call made after it fails with kind
+   * `OTHER`; see [[withAsyncExecutor]].
+   */
+  def completeAsync(query: String): CompletableFuture[String] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(query))
+
+  /** `complete(Conversation)` on another thread, as `completeAsync(String)`. */
+  def completeAsync(conversation: Conversation): CompletableFuture[String] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(conversation))
+
+  /** `complete(Conversation, JCompletionOptions)` on another thread, as `completeAsync(String)`. */
+  def completeAsync(conversation: Conversation, options: JCompletionOptions): CompletableFuture[String] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(conversation, options))
+
+  /** `completion(String)` on another thread - the whole reply - as `completeAsync(String)`. */
+  def completionAsync(query: String): CompletableFuture[JCompletion] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completionAsync")(completion(query))
+
+  /** `completion(Conversation)` on another thread, as `completeAsync(String)`. */
+  def completionAsync(conversation: Conversation): CompletableFuture[JCompletion] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completionAsync")(completion(conversation))
+
+  /** `completion(Conversation, JCompletionOptions)` on another thread, as `completeAsync(String)`. */
+  def completionAsync(conversation: Conversation, options: JCompletionOptions): CompletableFuture[JCompletion] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completionAsync")(completion(conversation, options))
+
+  /**
+   * Structured output, `complete(String, Class)`, on another thread, as `completeAsync(String)`: a future of the
+   * record.
+   *
+   * {{{
+   * CompletableFuture<City> city = client.completeAsync("The largest city in Japan", City.class);
+   * }}}
+   */
+  def completeAsync[T](query: String, `type`: Class[T]): CompletableFuture[T] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(query, `type`))
+
+  /** `complete(Conversation, Class)` on another thread, as `completeAsync(String)`. */
+  def completeAsync[T](conversation: Conversation, `type`: Class[T]): CompletableFuture[T] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(conversation, `type`))
+
+  /** `complete(Conversation, JCompletionOptions, Class)` on another thread, as `completeAsync(String)`. */
+  def completeAsync[T](
+    conversation: Conversation,
+    options: JCompletionOptions,
+    `type`: Class[T]
+  ): CompletableFuture[T] =
+    FacadeAsync.run(asyncExecutor, "JLlmClient.completeAsync")(complete(conversation, options, `type`))
+
+  /**
+   * This client with its `*Async` calls run on `executor` - a Spring `TaskExecutor`, a bounded pool, a Quarkus or
+   * Micronaut managed executor - rather than a virtual thread of the client's own. It is a view: it shares this
+   * client's provider connection, so closing either closes it, and it never shuts `executor` down. Any `Executor`
+   * works, a `ForkJoinPool` too: cancelling a future interrupts the thread running its call, whatever the executor.
+   * An executor that refuses a call - shut down, its queue full - fails that call's future at once with kind `OTHER`,
+   * the executor's exception as its cause.
+   *
+   * @throws NullPointerException when `executor` is `null`
+   */
+  def withAsyncExecutor(executor: Executor): JLlmClient =
+    new JLlmClient(
+      FacadeToken.INSTANCE,
+      underlying,
+      Objects.requireNonNull(executor, "executor must not be null")
+    )
+
   private def nullArgument[A](name: String): LlmResult[A] =
     LlmResult.failure(ValidationError.required(name))
 
@@ -277,5 +378,12 @@ final class JLlmClient private[javaapi] (token: FacadeToken, private[javaapi] va
   private def guarded[A](operation: String)(call: => Result[A]): LlmResult[A] =
     FacadeInternals.result(CancelledError.attempt(operation)(Safety.safely(call).flatMap(identity)))
 
-  override def close(): Unit = underlying.close()
+  /**
+   * Closes the provider client and shuts down this client's own async executor, interrupting any `*Async` call still
+   * running; a supplied executor ([[withAsyncExecutor]]) is left alone.
+   */
+  override def close(): Unit = {
+    owned.foreach(_.shutdownNow())
+    underlying.close()
+  }
 }

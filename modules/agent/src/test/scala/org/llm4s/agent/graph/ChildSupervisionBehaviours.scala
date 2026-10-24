@@ -135,6 +135,14 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       ToolOutcome.Success(ToolContent.Json(ujson.Str("hung")))
     }
 
+  /** Waits for `latch`, ignoring interrupts, as a tool that will not be stopped does. */
+  private def awaitIgnoringInterrupts(latch: CountDownLatch): Unit = {
+    var waiting = true
+    while (waiting)
+      try waiting = !latch.await(30, TimeUnit.SECONDS)
+      catch { case _: InterruptedException => () }
+  }
+
   private def eventually(what: String)(condition: => Boolean): Unit = {
     val deadline = System.nanoTime() + 10.seconds.toNanos
     var held     = condition
@@ -865,24 +873,54 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val stubborn = SpecTools.tool("stubborn") { (_, _) =>
       if (calls.getAndIncrement() == 0) {
         entered.countDown()
-        var waiting = true
-        while (waiting)
-          try waiting = !release.await(30, TimeUnit.SECONDS)
-          catch { case _: InterruptedException => () }
+        awaitIgnoringInterrupts(release)
       }
       ToolOutcome.Success(ToolContent.Json(ujson.Str("done")))
     }
-    val setup = new Setup(
-      ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
-      ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")),
-      childTools = Seq(stubborn),
-      delegateTimeout = Some(300.millis)
-    )
     val runtime = new GraphRuntime(open())
-    val parent  = family(runtime, setup)._1
-    val thread  = ThreadId("timed-out-busy")
-    val run     = parent.start(thread, "go").ok
-    entered.await(10, TimeUnit.SECONDS) shouldBe true
+    val child = Agent
+      .builder("worker", ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")))
+      .withRuntime(runtime)
+      .withTools(SpecTools.set(stubborn))
+      .build()
+      .ok
+    // The call's 300 ms timeout is wall time, and a slow runner may not admit the child and reach `stubborn` within it
+    // (#2385). So the child runs on a thread of its own, and the call's thread passes the timeout's interrupt on to it
+    // only once the child holds `stubborn`: the timeout always lands while the child is in its tool.
+    val delegate = AgentTool(SpecTools.spec("delegate").withTimeout(300.millis)) { (args, ctx) =>
+      val origin = RunOrigin(ctx.run.position.threadId, ctx.idempotencyKey, child.id, Instant.now(), 1)
+      val ended  = new AtomicReference[Result[ChildEnd]]()
+      val runner = new Thread(() =>
+        ended.set(ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, true))
+      )
+      runner.start()
+      var relayed = false
+      while (runner.isAlive)
+        try runner.join()
+        catch {
+          case _: InterruptedException if !relayed =>
+            relayed = true
+            awaitIgnoringInterrupts(entered)
+            runner.interrupt()
+          case _: InterruptedException => ()
+        }
+      if (relayed) Thread.currentThread().interrupt()
+      ended.get match {
+        case Right(ChildEnd.Ended(r, _))  => ToolOutcome.Success(ToolContent.Json(ujson.Str(r.answer.getOrElse(""))))
+        case Right(ChildEnd.Failed(e, _)) => ToolOutcome.Error(e.message)
+        case Left(e)                      => ToolOutcome.Fatal(e)
+      }
+    }
+    val parent = Agent
+      .builder("lead", ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")))
+      .withRuntime(runtime)
+      .withTools(SpecTools.set(delegate))
+      .build()
+      .ok
+    val thread = ThreadId("timed-out-busy")
+    val run    = parent.start(thread, "go").ok
+    entered.await(30, TimeUnit.SECONDS) shouldBe true
+    // ends once the call's timeout has cancelled the child and waited AgentRun.Drain for it: `stubborn` outlasts that
     val failed = run.await()
     release.countDown()
     // the timed-out call committed nothing: its child is still unsettled, for recover to reattach

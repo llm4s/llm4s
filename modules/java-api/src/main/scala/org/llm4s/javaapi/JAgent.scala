@@ -8,6 +8,9 @@ import org.llm4s.types.Result
 
 import scala.jdk.CollectionConverters.*
 
+import java.util.Objects
+import java.util.concurrent.{ CompletableFuture, Executor }
+
 /**
  * Java-friendly wrapper around [[org.llm4s.agent.Agent Agent]].
  *
@@ -43,6 +46,12 @@ import scala.jdk.CollectionConverters.*
  * to an [[AgentStreamListener]] as they happen, returning an [[AgentStream]] at once - to await the
  * turn's result, or to cancel it. From Java a thread id is a `String`.
  *
+ * `runAsync`, `continueConversationAsync`, `resumeAsync` and `recoverAsync` return a `CompletableFuture` at once and
+ * run the turn on another thread - a new virtual thread per turn, or the executor [[withAsyncExecutor]] names. The
+ * future completes with the [[JAgentResult]], or exceptionally with the [[LlmException]] the blocking call's result
+ * would hold. `cancel(true)` interrupts the turn, which then ends as the blocking call interrupted does: cancelled, the
+ * thread of a continued, resumed or recovered conversation left for `recover`.
+ *
  * Obtain instances via [[Llm4s.createAgent]].
  *
  * {{{
@@ -52,7 +61,11 @@ import scala.jdk.CollectionConverters.*
  *       .ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JAgent private[javaapi] (token: FacadeToken, underlying: Result[Agent]) {
+final class JAgent private[javaapi] (
+  token: FacadeToken,
+  underlying: Result[Agent],
+  asyncExecutor: Executor = FacadeAsync.virtualThreadPerCall
+) {
 
   FacadeToken.check(token, "JAgent")
 
@@ -163,6 +176,38 @@ final class JAgent private[javaapi] (token: FacadeToken, underlying: Result[Agen
   def recover(threadId: String): LlmResult[JAgentResult] =
     if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
     else turn("JAgent.recover")(_.recover(ThreadId(threadId)))
+
+  /**
+   * `run(query)` on another thread: returns at once with a future of the turn's result. The future completes
+   * exceptionally with the [[LlmException]] the blocking call's failed result would hold - of the same
+   * [[LlmErrorKind]] - and never with another exception, except the `CancellationException` of a future cancelled
+   * yourself. `cancel(true)`, or completing the future yourself (`orTimeout`), interrupts the turn: it is cancelled as
+   * an interrupted `run` is. `cancel(false)` lets the turn finish and discards its result.
+   */
+  def runAsync(query: String): CompletableFuture[JAgentResult] =
+    FacadeAsync.run(asyncExecutor, "JAgent.runAsync")(run(query))
+
+  /** `continueConversation(previous, query)` on another thread, as [[runAsync]]. */
+  def continueConversationAsync(previous: JAgentResult, query: String): CompletableFuture[JAgentResult] =
+    FacadeAsync.run(asyncExecutor, "JAgent.continueConversationAsync")(continueConversation(previous, query))
+
+  /** `resume(threadId, answers)` on another thread, as [[runAsync]]. */
+  def resumeAsync(threadId: String, answers: java.util.List[Answer]): CompletableFuture[JAgentResult] =
+    FacadeAsync.run(asyncExecutor, "JAgent.resumeAsync")(resume(threadId, answers))
+
+  /** `recover(threadId)` on another thread, as [[runAsync]]. */
+  def recoverAsync(threadId: String): CompletableFuture[JAgentResult] =
+    FacadeAsync.run(asyncExecutor, "JAgent.recoverAsync")(recover(threadId))
+
+  /**
+   * This agent with its `*Async` turns run on `executor` rather than a new virtual thread each. It is the same agent -
+   * its conversations are shared - and never shuts `executor` down. Cancelling a future interrupts the thread running
+   * its turn, whatever the executor; an executor that refuses a turn fails its future at once with kind `OTHER`.
+   *
+   * @throws NullPointerException when `executor` is `null`
+   */
+  def withAsyncExecutor(executor: Executor): JAgent =
+    new JAgent(FacadeToken.INSTANCE, underlying, Objects.requireNonNull(executor, "executor must not be null"))
 
   /** `answers` by interrupt id, the last answer to an id winning; or the first answer that is not one. */
   private def decoded(answers: java.util.List[Answer]): Result[Map[InterruptId, ujson.Value]] =

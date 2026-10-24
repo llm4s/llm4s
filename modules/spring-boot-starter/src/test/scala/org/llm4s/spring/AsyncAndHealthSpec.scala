@@ -1,7 +1,7 @@
 package org.llm4s.spring
 
 import org.llm4s.error.APIError
-import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmException }
+import org.llm4s.javaapi.{ JLlmClient, JLlmClientTestFactory, LlmErrorKind, LlmException }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -227,7 +227,10 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
       val queued   = template.completeAsync("2")
       val rejected = template.completeAsync("3")
       rejected.isCompletedExceptionally shouldBe true
-      intercept[ExecutionException](rejected.get()).getCause shouldBe a[RejectedExecutionException]
+      val refused = intercept[ExecutionException](rejected.get()).getCause
+      refused shouldBe a[LlmException]
+      refused.asInstanceOf[LlmException].getKind shouldBe LlmErrorKind.OTHER
+      refused.getCause shouldBe a[RejectedExecutionException]
       blocker.release.countDown()
       running.get(secs, TimeUnit.SECONDS) shouldBe "x"
       queued.get(secs, TimeUnit.SECONDS) shouldBe "x"

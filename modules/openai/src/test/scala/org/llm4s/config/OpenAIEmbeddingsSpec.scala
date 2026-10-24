@@ -194,7 +194,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     "be reported against the variable and the block" in {
       val error = EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map.empty)).left.value.message
 
-      error shouldBe "Missing openai embeddings apiKey: set OPENAI_API_KEY, or set apiKey under " +
+      error.linesIterator.next() shouldBe "Missing openai embeddings apiKey: set OPENAI_API_KEY, or set apiKey under " +
         "llm4s.embeddings.openai in application.conf"
       // Not the removed legacy chat path.
       (error should not).include("llm4s.openai.apiKey")

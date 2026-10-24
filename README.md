@@ -124,7 +124,8 @@ sets it beside LangChain4j, Spring AI, Koog and Embabel, with a source and a dat
 OpenAI, Anthropic, Azure OpenAI, Google Gemini and Vertex AI, Ollama, DeepSeek, AWS Bedrock, Mistral, Cohere,
 OpenRouter, Requesty, Z.ai, xAI, IBM watsonx.ai, and any OpenAI-compatible `/chat/completions` endpoint by
 configuration alone (Groq, Together, Fireworks, vLLM, LM Studio, llama.cpp, ...). Embeddings from OpenAI, Voyage,
-Jina, Cohere and Ollama. See [providers](https://llm4s.org/guide/providers) for each one's module and
+Jina, Cohere and Ollama. See [providers](https://llm4s.org/guide/providers) for each one's module, the
+[capability and tested-versions matrix](https://llm4s.org/reference/compatibility-matrix) generated from the code, and
 [writing a provider](https://llm4s.org/guide/writing-a-provider) to add your own.
 
 ## Status

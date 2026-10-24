@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.testutil.FixtureChatProvider
 import org.llm4s.types.ProviderModelTypes.*
@@ -66,7 +66,8 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     val message =
       errorFrom(validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model")))
 
-    (message should not).include("llm4s.conf")
+    // the doctor's command names its package, org.llm4s.configpolicy: not a file
+    (TroubleshootingLinks.withoutDoctorLine(message) should not).include("llm4s.conf")
     (message should not).include(" providers.my-fixture")
     message should include("set apiKey under llm4s.providers.my-fixture in application.conf")
   }

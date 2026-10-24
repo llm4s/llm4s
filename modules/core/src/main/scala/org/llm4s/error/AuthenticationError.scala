@@ -20,6 +20,11 @@ final case class AuthenticationError private (
   override val code: Option[String]
 ) extends LLMError
     with NonRecoverableError {
+
+  /** This error with `sentence` and a troubleshooting link appended to its message (#2285). */
+  private[llm4s] def withHint(sentence: String, entry: TroubleshootingLinks.Entry): AuthenticationError =
+    copy(message = TroubleshootingLinks.withAction(message, sentence, entry))
+
   override val context: Map[String, String] = Map("provider" -> provider) ++
     code.map("code" -> _).toMap
 }

@@ -6,10 +6,14 @@ import org.llm4s.agent.service.*
 import scala.concurrent.duration.*
 
 /** An example service over a fresh in-memory store, with a worker that polls fast. Shut it down with [[stop]]. */
-final class ServiceFixture(toolDelay: FiniteDuration = 50.millis, startWorker: Boolean = true) {
+final class ServiceFixture(
+  toolDelay: FiniteDuration = 50.millis,
+  startWorker: Boolean = true,
+  eventsWait: FiniteDuration = 200.millis
+) {
 
   val config: AgentServiceConfig =
-    AgentServiceConfig.default.copy(toolDelay = toolDelay, eventsWait = 200.millis, pageSize = 3)
+    AgentServiceConfig.default.copy(toolDelay = toolDelay, eventsWait = eventsWait, pageSize = 3)
 
   val store: InMemoryCheckpointer = new InMemoryCheckpointer()
 

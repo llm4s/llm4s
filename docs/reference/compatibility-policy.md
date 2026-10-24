@@ -9,7 +9,9 @@ nav_order: 14
 
 What you can rely on when you upgrade LLM4S, and how the project changes an API without breaking you.
 Which packages and modules fall under which tier is defined in [1.0 Scope](v1-scope); how binary
-compatibility is checked is in [API Stability](api-stability). This page is the promise those two serve.
+compatibility is checked is in [API Stability](api-stability). This page is the promise those two serve. Which
+providers support what, and which JDK, Scala, Spring Boot and other versions each release is built and tested with, is
+in the generated [Compatibility Matrix](compatibility-matrix).
 
 ---
 
