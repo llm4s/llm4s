@@ -310,6 +310,14 @@ jobs:
       - name: Check no frozen module resolves a dependency the modularisation moved out
         run: sbt --client frozenDependencyCheck
 
+      # Fails when a runtime dependency of a published module has a licence LicencePolicy denies (GPL, AGPL, LGPL
+      # without exception, SSPL, BUSL, Commons Clause) or does not recognise, naming the module and the path that pulled
+      # it in (#2308, docs/reference/licences.md). The second command runs the policy's own tests in the meta-build.
+      - name: Check every runtime dependency licence is allowed
+        run: |
+          sbt --client licenseCheck
+          sbt --client "reload plugins; test; reload return"
+
       # Fails when an integration suite in modules/it declares no tier, i.e. when no command
       # and no CI job below would run it. Eleven of eighteen suites were in that state.
       - name: Check every integration suite declares a test tier

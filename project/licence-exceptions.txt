@@ -1,0 +1,8 @@
+# Reviewed licence decisions for runtime dependencies of published llm4s-* modules (#2308).
+#
+# One entry per line: group:artifact | SPDX id | justification
+# The SPDX id is the licence a review established, and must itself be on LicencePolicy.allowed: an entry records
+# a licence the dependency's POM omits or names in a way the policy does not recognise; it never admits a denied one.
+# It applies to every version of the artifact. An entry that matches no dependency fails `sbt licenseCheck`.
+
+org.json:json | LicenseRef-Public-Domain | JSON-java (via Jedis, llm4s-vectorstore-redis) is dedicated to the public domain since release 20231013 (its LICENSE file and POM say "Public Domain"); earlier releases carry the JSON licence, which the policy denies, so never pin one

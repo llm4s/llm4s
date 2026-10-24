@@ -475,6 +475,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** a per-module dependency licence report (`sbt licenseReport`, SPDX ids, attached to each GitHub Release) and
+  `sbt licenseCheck`, a CI quick check that fails on a denied or unknown runtime licence [#2308](https://github.com/llm4s/llm4s/issues/2308); [Dependency licences](docs/reference/licences.md).
 - **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
   frozen module (top-level or nested) whose constructor is not `private` / `private[x]`, and for a public `copy` on
   one, naming the file, line and type. Case classes with no fields are exempt; `GrowthExempted` in
