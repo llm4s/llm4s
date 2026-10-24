@@ -35,7 +35,7 @@ import org.llm4s.util.Redaction
  *                 `Authorization: Bearer <token>` from it instead of the `api-key` header, and `apiKey`
  *                 is unused (empty). A section with `authentication = "entra-id"` gets one from
  *                 `llm4s-azure-identity`; in code, build one with that module's `AzureEntraId`, or
- *                 implement [[org.llm4s.llmconnect.auth.AccessTokenProvider]] directly. Use [[keyless]]
+ *                 implement [[org.llm4s.llmconnect.auth.AccessTokenProvider]] directly. Use [[AzureConfig.keyless]]
  *                 or [[withTokenProvider]].
  */
 @Stable
