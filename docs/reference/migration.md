@@ -251,7 +251,7 @@ Changes too small for a section of their own. Each is listed under Breaking chan
 
 ### One proxy and TLS setting for every provider client (#2273)
 
-Every provider client now honours `llm4s.http` ([Corporate networks](../getting-started/configuration.md#corporate-networks-a-proxy-and-a-custom-ca)):
+Every provider client now honours `llm4s.http` ([Corporate networks](../getting-started/configuration#corporate-networks-a-proxy-and-a-custom-ca)):
 
 - Core's `reference.conf` binds `llm4s.http.proxy.url` to `HTTPS_PROXY` and `nonProxyHosts` to `NO_PROXY`. An
   application whose environment sets `HTTPS_PROXY` now sends provider traffic through that proxy (loopback hosts stay
