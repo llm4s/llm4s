@@ -3,15 +3,18 @@ package org.llm4s.deploy
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.service.*
-import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.concurrent.{ Callable, Executors }
 import java.util.{ Base64, Locale }
-import scala.util.Try
+import scala.concurrent.duration.FiniteDuration
+import scala.jdk.CollectionConverters.*
+import scala.util.{ Try, Using }
 
 /** An HTTP answer before it is written: a status and a JSON body. */
 final case class Reply(status: Int, body: ujson.Value)
@@ -164,16 +167,41 @@ final class AgentService(
         )
 
   /**
-   * One read of entry `entryId`'s events after thread event `after`, waiting up to the configured bound for a commit:
-   * see `RunSubmitter.follow`. For [[AgentRoutes]]'s event stream.
+   * One read of entry `entryId`'s events after thread event `after`, waiting up to the configured bound for a commit or
+   * for the entry to close, whichever is first. For [[AgentRoutes]]'s event stream.
+   *
+   * `RunSubmitter.follow` waits only for a commit (`awaitEventsAfter`), and closing an entry commits no event, so on its
+   * own the read during which the entry closed would wait out its whole bound before the page said it was finished
+   * (#2396). So two waits race, each on a virtual thread of its own and each bounded by `eventsWait`: `follow`, and
+   * `RunSubmitter.await` (`RunQueue.awaitClosed`) followed, once the entry is closed, by a `follow` that reads without
+   * waiting. The first to answer is the page; the other is interrupted, which ends its wait at once, and is waited for
+   * before this returns, so no thread outlives the call. A read discarded this way is read again from the same cursor.
+   * Interrupting the calling thread ends the call with `Left(CancelledError)`, its interrupt flag set again.
    */
   def follow(
     tenant: Option[TenantId],
     entryId: EntryId,
     after: Long,
     settings: AgentServiceConfig
-  ): Result[FollowedRun] =
-    submitter.follow(tenant, entryId, after, settings.pageSize, settings.eventsWait)
+  ): Result[FollowedRun] = {
+    def read(wait: FiniteDuration): Result[FollowedRun] =
+      submitter.follow(tenant, entryId, after, settings.pageSize, wait)
+    val events: Callable[Result[FollowedRun]] = () => read(settings.eventsWait)
+    val closed: Callable[Result[FollowedRun]] = () =>
+      submitter.await(tenant, entryId, settings.eventsWait).flatMap { entry =>
+        // still open when the wait ran out: nothing new, as `follow` answers after its own wait finds no commit
+        if (entry.isOpen) Right(FollowedRun(entry, Vector.empty, after, finished = false))
+        else read(settings.eventsWait)
+      }
+    Using.resource(Executors.newVirtualThreadPerTaskExecutor()) { executor =>
+      CancelledError.catchInterrupt(executor.invokeAny(List(events, closed).asJava)) match {
+        case Right(page) => page
+        case Left(interrupted) =>
+          Thread.currentThread().interrupt()
+          Left(CancelledError(s"following queue entry ${entryId.value}", Some(interrupted)))
+      }
+    }
+  }
 
   /** The `Reply` for `result`, mapping an error to its status. */
   private def answer(result: Result[Reply]): Reply = result.fold(errorReply, identity)

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ LLMError, NetworkError, ServiceError, TroubleshootingLinks, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -113,7 +113,7 @@ class OllamaClient(
     val startedAt   = Instant.now()
     httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
       case Left(error) =>
-        recordingExchange(startedAt, requestText, "")(Left(error))
+        recordingExchange(startedAt, requestText, "")(Left(OllamaClient.notRunningHint(error)))
       case Right(response) =>
         val result =
           if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -147,6 +147,15 @@ class OllamaClient(
             s"(the server said: ${OllamaClient.serverMessage(body)}). " +
             "Use a model whose Ollama page lists the 'tools' capability, or send no tools."
         )
+      )
+    else if (status == 404)
+      // Ollama answers 404 for a model it has not pulled: say which command fetches it (#2285).
+      Left(
+        ServiceError(404, providerName, HttpErrorMapper.extractErrorDetails(body, status, providerName))
+          .withHint(
+            TroubleshootingLinks.ollamaModelMissingAction(config.model),
+            TroubleshootingLinks.Entry.OllamaModelMissing
+          )
       )
     else HttpErrorMapper.mapHttpError(status, body, providerName, headers)
 
@@ -201,7 +210,7 @@ class OllamaClient(
 
     httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
       case Left(error) =>
-        recordingExchange(startedAt, requestText, "")(Left(error))
+        recordingExchange(startedAt, requestText, "")(Left(OllamaClient.notRunningHint(error)))
       case Right(response) if response.statusCode != 200 =>
         val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
         recordingExchange(startedAt, requestText, err)(
@@ -397,6 +406,16 @@ class OllamaClient(
 }
 
 object OllamaClient {
+
+  /**
+   * A refused connection - nothing listening at the section's `baseUrl` - with the command that starts the
+   * server and its troubleshooting link (#2285). Any other error is returned unchanged.
+   */
+  private[provider] def notRunningHint(error: LLMError): LLMError = error match {
+    case network: NetworkError if network.message.contains(": connection failed:") =>
+      network.withHint(TroubleshootingLinks.OllamaNotRunningAction, TroubleshootingLinks.Entry.OllamaNotRunning)
+    case other => other
+  }
 
   /**
    * The user-message parts Ollama's `/api/chat` takes: text, joined into `content`, and inline images,

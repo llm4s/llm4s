@@ -4,11 +4,13 @@ import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.{ Checkpointer, EventRecord, GraphError, GraphRuntime, RunConfig, TenantId, ThreadId }
 import org.llm4s.agent.metrics.QueueMetrics
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 
+import java.util.concurrent.LinkedBlockingQueue
+import scala.annotation.tailrec
 import scala.concurrent.duration.*
 
 /**
@@ -132,7 +134,9 @@ final class RunSubmitter(
   /**
    * The next page of entry `entryId`'s run events after thread event `after` (`0` from the thread's first), at most
    * `limit`, waiting up to `timeout` for a commit when there is nothing yet - through `Checkpointer.awaitEventsAfter`,
-   * so a run committed by a worker on another machine is followed as it lands. Pass each page's `next` to the next
+   * so a run committed by a worker on another machine is followed as it lands - or for the entry to close, through
+   * [[RunQueue.awaitClosed]], since a close commits no event: a follower is told it has `finished` as soon as the entry
+   * closes, not once `timeout` has passed. Pass each page's `next` to the next
    * call until `finished`. `limit` below 1 is a `ValidationError`. Errors are the queue's for the ticket and the store's for the thread's log
    * (`GraphError.ReplayUnavailable`, `GraphError.ThreadDeleted`).
    */
@@ -153,7 +157,7 @@ final class RunSubmitter(
               if after >= end then Right(Vector.empty) else checkpointer.eventsAfter(before.threadId, after, limit)
             read.map(page(before, after, limit, _))
           case None =>
-            checkpointer.awaitEventsAfter(before.threadId, after, limit, timeout).flatMap { read =>
+            awaitEventsOrClose(tenantId, before, after, limit, timeout).flatMap { read =>
               // read again after the events: an attempt is recorded before it commits, so these attempts cover every
               // event. If the entry closed meanwhile, its last events may have landed after `read`: read the log again,
               // now bounded by the close, before the page may say it is finished
@@ -165,6 +169,46 @@ final class RunSubmitter(
               }
             }
       }
+
+  /**
+   * The thread's events after `after`, at most `limit`, once there are some, or empty once `open` closes or `timeout`
+   * passes, whichever is first. The two waits run on threads of their own, and the first to answer interrupts the
+   * other, as `Checkpointer.awaitEventsAfter` and [[RunQueue.awaitClosed]] both allow; the calling thread is never
+   * interrupted. Interrupting the calling thread ends both waits with `Left(CancelledError)`, its flag set again.
+   */
+  private def awaitEventsOrClose(
+    tenantId: Option[TenantId],
+    open: QueueEntry,
+    after: Long,
+    limit: Int,
+    timeout: FiniteDuration
+  ): Result[Vector[EventRecord]] =
+    // Left: the queue's answer; Right: the store's. `offer` never blocks, so an interrupted waiter still reports
+    val answers = new LinkedBlockingQueue[Either[Result[QueueEntry], Result[Vector[EventRecord]]]]()
+    val name    = s"llm4s-follow-${open.id.value}"
+    val reader = Thread.ofVirtual().name(s"$name-events").start { () =>
+      answers.offer(Right(checkpointer.awaitEventsAfter(open.threadId, after, limit, timeout))): Unit
+    }
+    val closer = Thread.ofVirtual().name(s"$name-close").start { () =>
+      answers.offer(Left(queue.awaitClosed(tenantId, open.id, timeout))): Unit
+    }
+    @tailrec def first(): Result[Vector[EventRecord]] =
+      CancelledError.catchInterrupt(answers.take()) match
+        case Left(interrupted) =>
+          reader.interrupt()
+          closer.interrupt()
+          Thread.currentThread().interrupt()
+          Left(CancelledError(s"following queue entry ${open.id.value}", Some(interrupted)))
+        case Right(Right(read)) =>
+          closer.interrupt()
+          read
+        // the queue's wait timed out with the entry open: the store's answer is due within its own bound
+        case Right(Left(Right(still))) if still.isOpen => first()
+        // closed (or gone): the caller reads the entry and the log again, bounded by the close
+        case Right(Left(closed)) =>
+          reader.interrupt()
+          closed.map(_ => Vector.empty)
+    first()
 
   /** The page `raw` - the thread's events after `after`, at most `limit` - makes for `entry`. */
   private def page(entry: QueueEntry, after: Long, limit: Int, raw: Vector[EventRecord]): FollowedRun =

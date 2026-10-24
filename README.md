@@ -359,7 +359,7 @@ The roadmap covers:
 
 | Goal | Current state | Next focus |
 |------|---------------|------------|
-| Single API access to multiple LLM providers | Implemented across many providers | Capability matrix, contract tests, parity for streaming/tools/structured output/timeouts/cost |
+| Single API access to multiple LLM providers | Implemented across many providers; a [capability and tested-versions matrix](https://llm4s.org/reference/compatibility-matrix) generated from the code | Contract tests, parity for streaming/tools/structured output/timeouts/cost |
 | Tooling for LLM applications | Tool calling, built-in tools, RAG, retrieval, evaluation, tracing, metrics, and reliability primitives exist | Stable APIs, security policies, runnable docs, and production examples |
 | Agentic framework | Single-agent workflows, handoffs, memory, guardrails, streaming events, async tools, reasoning modes, and serialization exist | API freeze, replay/debugging, maintained reference apps |
 | RAG and retrieval | Vector stores, hybrid search, reranking, permission-aware RAG, RAGAS-style evaluation, and benchmarking exist | Cost/latency tracking, deployment patterns, compile-tested golden paths |

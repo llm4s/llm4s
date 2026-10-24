@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `LLM4STemplate.completeAsync` refused by its executor fails with an `LlmException` of kind `OTHER` wrapping the
+  `RejectedExecutionException`; [migration](docs/reference/migration.md#the-spring-boot-starters-refused-completeasync-fails-with-an-llmexception-2276).
 - The Postgres stores take a `javax.sql.DataSource`, not a `com.zaxxer.hikari.HikariDataSource`: `PgVectorStore.create`
   and `PgVectorStore.apply(dataSource, tableName)`, and `PgKeywordIndex.apply(dataSource, ...)`. Source-compatible for
   callers passing a Hikari pool; recompile against the new signatures. `PgSearchIndex.close()` no longer closes a pool it
@@ -222,6 +224,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Changed** first-run configuration errors and provider 401/403, 429 and 404 errors (and a refused Ollama connection)
+  now say the next step and link their [First-Run Troubleshooting](docs/getting-started/troubleshooting.md) entry; configuration errors also name the doctor [#2285](https://github.com/llm4s/llm4s/issues/2285).
 - **Removed** `OpenAIToolHelper` from the public API (now `private[llm4s]`), so no openai-java type is part of
   `llm4s-openai`'s Stable surface [#2360](https://github.com/llm4s/llm4s/issues/2360).
 - **Added** an xAI (Grok) provider (Beta), `provider = "xai"` in `llm4s-openai-compatible`: Chat Completions at
@@ -264,6 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
+  included), `JAgent.runAsync`/`continueConversationAsync`/`resumeAsync`/`recoverAsync` and `embedAsync`, failing with
+  `LlmException`, `cancel(true)` interrupting the call, on a virtual thread or a `withAsyncExecutor` executor;
+  `LLM4STemplate.completeAsync` delegates to it [#2276](https://github.com/llm4s/llm4s/issues/2276).
 - **Added** a Kotlin DSL to `llm4s-kotlin-api` over the Java facade's builders: `tool`/`tools` with `param<T>`,
   `optionalParam<T>` and a `suspend` `handler` whose `ToolArgs` reads typed arguments and the call's `idempotencyKey`
   and `toolCallId` (the Kotlin half of [#1740](https://github.com/llm4s/llm4s/issues/1740)), `completionOptions { ... }`
@@ -331,6 +339,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
+  versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
+  the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and

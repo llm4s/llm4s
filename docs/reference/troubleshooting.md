@@ -9,7 +9,10 @@ nav_order: 11
 
 This guide addresses common errors and issues you might encounter when building with the LLM4S framework.
 
-## Configuration Errors
+## Configuration Errors {#configuration-errors}
+
+A configuration error, and a provider's 401, 403, 404 or 429, ends with a link to its entry in
+[First-Run Troubleshooting](/getting-started/troubleshooting), which has the symptom, cause and fix of each.
 
 **Q: Something is wrong with my setup and I do not know which part**
 A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"`. It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
@@ -34,7 +37,7 @@ Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A 
 **Q: My application configuration isn't overriding the defaults**
 A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory (or point at it with `-Dconfig.file=...`), and load providers with `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("<section name>")` - the name of a section under `llm4s.providers`, not the provider type. `-D` system properties override `application.conf`.
 
-## Authentication Errors
+## Authentication Errors {#authentication-errors}
 
 **Q: I get "AuthenticationError: 401 Unauthorized"**
 A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `sk-ant-...`. Ensure the environment variable you set is the one the section's `apiKey = ${?VAR}` binding names, and that the section's `provider` matches the key's vendor.

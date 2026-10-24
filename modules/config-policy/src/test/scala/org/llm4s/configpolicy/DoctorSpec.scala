@@ -381,6 +381,18 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     }
   }
 
+  "Doctor printing an error that links its troubleshooting entry" should {
+    "keep the link's anchor, and drop the line telling the user to run the doctor" in {
+      val message = org.llm4s.error.TroubleshootingLinks.configuration(
+        "No default provider configured under llm4s.providers.provider",
+        org.llm4s.error.TroubleshootingLinks.Entry.NoDefaultProvider
+      )
+      val check = DoctorCheck.fail("Default provider", message)
+      check.detail shouldBe "No default provider configured under llm4s.providers.provider\n" +
+        "See https://llm4s.org/getting-started/troubleshooting#no-default-provider"
+    }
+  }
+
   "Doctor printing a URL whose password holds a slash" should {
 
     val slashed = "http://u:SLASH/PASS-secret@gw.example.com/v1?k=QV-value-123#FR-frag"

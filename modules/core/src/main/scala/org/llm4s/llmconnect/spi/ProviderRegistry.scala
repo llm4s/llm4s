@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -136,10 +136,13 @@ final class ProviderRegistry private (
     val scan      = if discovery.isEmpty then "" else s" $discovery"
     val known     = if registered.isEmpty then "none" else registered.mkString(", ")
     ConfigurationError(
-      s"$what '${id.asString}'$origin is not registered. " +
-        s"Registered ${what.toLowerCase}s: $known. " +
-        s"If you expected '${id.asString}', add the dependency that supplies it, " +
-        s"or register it explicitly with $remedy." + scan
+      TroubleshootingLinks.configuration(
+        s"$what '${id.asString}'$origin is not registered. " +
+          s"Registered ${what.toLowerCase}s: $known. " +
+          s"If you expected '${id.asString}', add the dependency that supplies it, " +
+          s"or register it explicitly with $remedy." + scan,
+        TroubleshootingLinks.Entry.ProviderNotRegistered
+      )
     )
 
   /**

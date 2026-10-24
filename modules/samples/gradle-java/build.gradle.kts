@@ -35,3 +35,11 @@ application {
     mainClass.set("org.llm4s.samples.HelloLLM4S")
     applicationName = "hello-llm4s"
 }
+
+// `gradle runAsyncCalls` runs AsyncCalls: async calls against FakeLlmClient, so it needs no API key (#2276).
+tasks.register<JavaExec>("runAsyncCalls") {
+    group = "application"
+    description = "Runs the AsyncCalls sample, which needs no API key."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.llm4s.samples.AsyncCalls")
+}

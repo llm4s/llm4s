@@ -259,15 +259,13 @@ CompletableFuture<String> reply = llm.completeAsync("Translate to French: " + te
 reply.thenAccept(answer -> System.out.println(answer));
 ```
 
-A failed call completes the future exceptionally with the `LlmException`. `reply.cancel(true)` interrupts the provider call. The
+It is [`JLlmClient.completeAsync`](java#asynchronous-calls) on that executor. A failed call completes the future
+exceptionally with the `LlmException`. `reply.cancel(true)` interrupts the provider call. The
 default executor is a bounded pool of daemon threads named `llm4s-async-N`, sized by `llm4s.async.*`; when its queue is full the
-returned future fails with `RejectedExecutionException` and the call does not block. It is shut down with `shutdownNow` when the
-context closes, which interrupts calls still running. A `llm4sTaskExecutor` bean of your own replaces it and must be an
-`ExecutorService` whose `submit(..).cancel(true)` interrupts the task. The `ThreadPoolExecutor` pools
-(`Executors.newFixedThreadPool`, `newCachedThreadPool`, `newSingleThreadExecutor`, `newScheduledThreadPool`)
-do that. A `ForkJoinPool` — including `Executors.newWorkStealingPool()` and the common pool — does not:
-its `cancel(true)` reports the task cancelled but never interrupts a running worker, so a provider call
-would keep running to completion behind a future that claims to be cancelled.
+returned future fails with an `LlmException` of kind `OTHER` whose cause is the `RejectedExecutionException`, and the call does
+not block. It is shut down with `shutdownNow` when the context closes, which interrupts calls still running. A
+`llm4sTaskExecutor` bean of your own replaces it and can be any `ExecutorService`, a `ForkJoinPool` included: the future
+interrupts the thread running its call itself, rather than relying on the executor's `Future.cancel(true)`.
 
 ### A web endpoint
 

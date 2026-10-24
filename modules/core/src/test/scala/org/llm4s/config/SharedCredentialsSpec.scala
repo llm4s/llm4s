@@ -4,6 +4,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName }
+import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -259,7 +260,8 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
         .value
         .message shouldBe
         s"Missing fixtureembedding embeddings apiKey: set ${FixtureEmbeddingProvider.ApiKeyEnv}, or set apiKey " +
-        "under llm4s.embeddings.fixtureembedding in application.conf"
+        "under llm4s.embeddings.fixtureembedding in application.conf\n" +
+        s"${TroubleshootingLinks.forId(TroubleshootingLinks.Entry.MissingApiKey)}\n${TroubleshootingLinks.DoctorLine}"
     }
 
     "log the source path and not the value" in {

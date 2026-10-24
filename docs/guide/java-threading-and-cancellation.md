@@ -28,24 +28,31 @@ The Java snippets below are compiled by
 
 ## Which calls block
 
-`JLlmClient.complete(...)`, `JAgent.run(...)`, `JAgent.continueConversation(...)`, `JAgent.resume(...)` and
-`JAgent.recover(...)` block the calling thread until the answer is back. The only asynchronous variants in the
-Java API are `JAgent.stream`, `streamResume` and `streamRecover`, which return an `AgentStream` at once. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it
-returns a future that is already complete, so `cancel(true)` on it returns `false` and changes nothing.
+`JLlmClient.complete(...)`, `JAgent.run(...)`, `JAgent.continueConversation(...)`, `JAgent.resume(...)`,
+`JAgent.recover(...)` and `JEmbeddingClient.embed(...)` block the calling thread until the answer is back. Each has an
+`*Async` variant - `completeAsync`, `completionAsync`, `runAsync`, `continueConversationAsync`, `resumeAsync`,
+`recoverAsync`, `embedAsync` - that returns a `CompletableFuture` at once and makes the same call on another thread
+(see [Asynchronous calls](java#asynchronous-calls)). `JAgent.stream`, `streamResume` and `streamRecover` return an
+`AgentStream` at once too. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it returns a future that
+is already complete, so `cancel(true)` on it returns `false` and changes nothing.
 
-To run a call off your own thread, submit it to an executor:
+To run a call off your own thread, use its `*Async` variant:
 
 ```java
-ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor();
-Future<LlmResult<String>> answer = pool.submit(() -> client.complete("Summarise this."));
-LlmResult<String> result = answer.get();   // waits on your thread; answer.cancel(true) interrupts the call
+CompletableFuture<String> answer = client.completeAsync("Summarise this.");
+String text = answer.join();   // waits on your thread; answer.cancel(true) interrupts the call
 ```
+
+The call runs on a new virtual thread, named `llm4s-async-N`, of an executor the client owns and `close()` shuts down,
+or on the executor that `withAsyncExecutor` names. `JAgent` and `JEmbeddingClient`, which have no `close()`, start a
+virtual thread of their own for each call unless `withAsyncExecutor` names an executor.
 
 ## Which thread runs the call
 
 | Call | The provider call runs on |
 |------|---------------------------|
 | `JLlmClient.complete` | your thread, whether it is a platform thread or a virtual thread |
+| `JLlmClient.completeAsync` | a virtual thread of the client's own executor, or a thread of the executor `withAsyncExecutor` names |
 | `JAgent.run` | a virtual thread of the library's, never yours: your thread waits in `run`, and the model call runs on a virtual thread of its own |
 
 The library drives an agent run from a virtual thread it starts with `Thread.ofVirtual()`
@@ -91,8 +98,12 @@ if (result.isFailure() && result.getError().error() instanceof CancelledError) {
 }
 ```
 
-`Future.cancel(true)` on a task that wraps a call interrupts the thread running it, which cancels the provider
-call in the same way. The Spring Boot starter's `completeAsync` is built on this.
+`cancel(true)` on the future of an `*Async` call interrupts the thread running it, which cancels the provider call in
+the same way; the future knows that thread, so this works on any executor, a `ForkJoinPool` included, and the
+executor's thread is handed back with its interrupt flag cleared. Completing the future yourself (`orTimeout`,
+`completeOnTimeout`) interrupts the call too. `Future.cancel(true)` on a task you submitted yourself interrupts the call
+as well, on an executor whose `cancel(true)` interrupts. The Spring Boot starter's `completeAsync` is
+`JLlmClient.completeAsync` on its `llm4sTaskExecutor`.
 
 ### `InterruptedException` is never thrown, so Java cannot catch it
 
@@ -133,7 +144,8 @@ follow at once. It waits up to 5 seconds for the turn to end (with tracing, deli
 events can add to that): a provider that ignores the interrupt for longer is logged at WARN and left to finish on its
 own, and until it does the thread is busy (`ThreadBusy`). A thread that is already
 interrupted when it calls one of them starts no turn. To stop a turn from Java, interrupt the thread that called it -
-for example `Future.cancel(true)` on the task that called it.
+for example `cancel(true)` on the future of `runAsync`, `continueConversationAsync`, `resumeAsync` or `recoverAsync`,
+which ends the turn as an interrupted blocking call does.
 
 A turn that had already begun committing its outcome when the interrupt came cannot be cancelled: the call returns
 that outcome - a completed or suspended turn - with the interrupt flag still set. `run(query)` starts a conversation
@@ -174,7 +186,8 @@ tracks making it configurable.
 ## Shutting down
 
 `JLlmClient` implements `AutoCloseable` and `close()` closes the provider client, so use it in a
-try-with-resources block. The agent's run and task threads are virtual and so are daemon threads, and its graph writer
+try-with-resources block. It also shuts down the client's own executor of `*Async` calls, interrupting a call still
+running; an executor you supplied with `withAsyncExecutor` is yours to shut down. The agent's run and task threads are virtual and so are daemon threads, and its graph writer
 thread is a daemon thread
 ([`GraphRuntime.scala`](https://github.com/llm4s/llm4s/blob/main/modules/agent/src/main/scala/org/llm4s/agent/graph/GraphRuntime.scala)).
 In a one-off check on JDK 21, a call through the Ollama provider left only daemon threads (the JDK

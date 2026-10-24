@@ -106,18 +106,18 @@ records `llm4s.*` meters in that registry with no wiring, so they are on `/actua
 
 ## `completeAsync`
 
-`completeAsync` never blocks the calling thread. The blocking provider call runs on the
+`completeAsync` never blocks the calling thread. It is `JLlmClient.completeAsync` with the provider call on the
 `llm4sTaskExecutor` bean; the returned `CompletableFuture` completes from there and fails with
 `LlmException` (the original error is kept). `future.cancel(true)` interrupts the provider call,
 which is how llm4s cancels work.
 
 The default executor is a bounded pool of daemon threads named `llm4s-async-N` (idle threads time
 out) with a bounded queue; when the queue is full the returned future fails with
-`RejectedExecutionException` instead of growing without limit. It is shut down with
+an `LlmException` of kind `OTHER`, its cause the `RejectedExecutionException`, instead of growing without limit. It is shut down with
 `shutdownNow` when the context closes, interrupting calls still running. It is a plain pool rather
 than virtual threads. The starter needs JDK 21 like the rest of llm4s, because it depends on `llm4s-agent`
-(see [supported JDKs](../../docs/reference/v1-scope.md#scala-and-jdk-support)). Your own `llm4sTaskExecutor` must be an
-`ExecutorService` whose `submit(..).cancel(true)` interrupts the task (every JDK pool does).
+(see [supported JDKs](../../docs/reference/v1-scope.md#scala-and-jdk-support)). Your own `llm4sTaskExecutor` can be any
+`ExecutorService`: cancelling the future interrupts the thread running its call, whatever the pool.
 
 | Property | Default | |
 |----------|---------|---|

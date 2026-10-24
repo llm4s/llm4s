@@ -7,7 +7,8 @@ import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, InputPurpose }
 import org.llm4s.types.Result
 
-import java.util.OptionalInt
+import java.util.{ Objects, OptionalInt }
+import java.util.concurrent.{ CompletableFuture, Executor }
 import scala.jdk.CollectionConverters.*
 
 /**
@@ -31,13 +32,15 @@ import scala.jdk.CollectionConverters.*
  * `401` and `403` as `AUTHENTICATION`, `429` as `RATE_LIMIT`, `400` as `VALIDATION`, any other as `SERVICE`; a
  * provider that cannot be reached reads as `NETWORK`, and one that does not answer in time as `TIMEOUT`.
  * Interrupting the blocked thread returns a failed result whose kind is `CANCELLED`, with the thread's interrupt flag
- * still set; `InterruptedException` is never thrown.
+ * still set; `InterruptedException` is never thrown. `embedAsync` makes the same request on another thread and returns
+ * a `CompletableFuture` at once.
  */
 final class JEmbeddingClient private[javaapi] (
   token: FacadeToken,
   client: EmbeddingClient,
   configured: String,
-  declared: OptionalInt
+  declared: OptionalInt,
+  asyncExecutor: Executor = FacadeAsync.virtualThreadPerCall
 ) {
 
   FacadeToken.check(token, "JEmbeddingClient")
@@ -81,6 +84,34 @@ final class JEmbeddingClient private[javaapi] (
         case i                   => LlmResult.failure(ValidationError.invalid(s"texts[$i]", "must not be null"))
       }
     }
+
+  /**
+   * `embed(texts)` on another thread - a new virtual thread per call, or the executor [[withAsyncExecutor]] names:
+   * returns at once with a future of the vectors. The future completes exceptionally with the [[LlmException]] the
+   * blocking call's failed result would hold, of the same [[LlmErrorKind]]; `cancel(true)`, or completing the future
+   * yourself (`orTimeout`), interrupts the request.
+   */
+  def embedAsync(texts: java.util.List[String]): CompletableFuture[JEmbeddings] =
+    FacadeAsync.run(asyncExecutor, "JEmbeddingClient.embedAsync")(embed(texts))
+
+  /** `embed(texts, purpose)` on another thread, as `embedAsync(texts)`. */
+  def embedAsync(texts: java.util.List[String], purpose: JEmbeddingPurpose): CompletableFuture[JEmbeddings] =
+    FacadeAsync.run(asyncExecutor, "JEmbeddingClient.embedAsync")(embed(texts, purpose))
+
+  /**
+   * This client with its `embedAsync` calls run on `executor` rather than a new virtual thread each; it never shuts
+   * `executor` down. An executor that refuses a call fails its future at once with kind `OTHER`.
+   *
+   * @throws NullPointerException when `executor` is `null`
+   */
+  def withAsyncExecutor(executor: Executor): JEmbeddingClient =
+    new JEmbeddingClient(
+      FacadeToken.INSTANCE,
+      client,
+      configured,
+      declared,
+      Objects.requireNonNull(executor, "executor must not be null")
+    )
 
   private def request(input: Vector[String], purpose: JEmbeddingPurpose): LlmResult[JEmbeddings] = {
     val sent = EmbeddingRequest(input = input, model = modelConfig, purpose = JEmbeddingClient.toCore(purpose))

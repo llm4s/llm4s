@@ -162,6 +162,14 @@ AWS SDK's exceptions: throttling or an exceeded quota to `RateLimitError`, an in
 `ValidationError`, access denied, a 401 or 403, or missing credentials to `AuthenticationError`, any other
 service status to `ServiceError`, and any other client failure to `NetworkError`.
 
+**The next step, in the message.** A 401 or 403, a 429 or a 404 from `HttpErrorMapper` or the Anthropic client ends
+its message with one sentence saying what to do and a link to its entry in
+[First-Run Troubleshooting](/getting-started/troubleshooting), for example
+`... See https://llm4s.org/getting-started/troubleshooting#rate-limited`. The first-run configuration errors (a
+missing API key, no default provider, an unknown section, a provider that is not registered, an unreadable
+`application.conf`) end with their link and the [doctor](/reference/doctor)'s command. Only the text changes: match on
+the error's type and fields, never on its message.
+
 ### Errors defined by other modules
 
 Some modules add their own `LLMError` subtypes. The errors below carry **neither** marker, so
