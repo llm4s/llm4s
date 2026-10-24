@@ -55,7 +55,19 @@ The same results on Scala **2.13.16** and **2.13.18**, Scala CLI 1.4.1, JDK 21.
 | Implementing `LLMClient` (a fake client, a custom provider) | `H_subclass_client` | **does not compile** | `can't find term required by object upickle.core.Types.ReadWriter: upickle.core.Types.this.ReadWriter; perhaps it is missing from the classpath.` |
 | Naming an opaque id: `ThreadId("...")` | `I_opaque_ids` | **does not compile** | `object ThreadId is not a member of package org.llm4s.agent.graph` |
 
-`scala-2.13-interop/results.md` is the raw output of `scala-2.13-interop/run-probes.sh`.
+`scala-2.13-interop/results.md` is the raw output of `scala-2.13-interop/run-probes.sh` against 0.5.1.
+
+**Added by [#2301](https://github.com/llm4s/llm4s/issues/2301)**, against the build of `main` (2026-10-25; the two APIs
+are not in 0.5.1), the second follow-up below:
+
+| Entry point | Probe | From Scala 2.13 | Evidence (verbatim) |
+|---|---|---|---|
+| `llm4s-java-api`'s `JTool.builder` (#1484), called by an agent from `Llm4s.createAgentWithTools` | `J_java_api_tool` | compiles and runs | `add(2, 3) = 5, answer: The sum is 5.` |
+| `llm4s-java-api`'s `JLlmClient.complete(prompt, Record.class)` (#1486) into a Java record declared in the 2.13 project's Java sources | `K_java_api_structured` | compiles and runs | `City[name=Tokyo, country=Japan, population=14000000]` |
+
+So the Java facade covers blocker 1's `ToolBuilder` and `completeStructured` from Scala 2.13, and its
+`FakeLlmClient` stands in for a hand-written `LLMClient` in tests. `H_subclass_client` was updated for
+`Completion.created`, now an `Instant`, so that it still fails on the uPickle `ReadWriter` it records.
 
 ## The blockers
 
@@ -96,10 +108,11 @@ output into Scala types), and the Java facade may cover enough of those that #87
 
 ## Follow-ups
 
-- A "Using LLM4S from Scala 2.13" section in the getting-started docs, with the setup and the four caveats above
-  (and a pointer to the Spark guide, [#1461](https://github.com/llm4s/llm4s/issues/1461)).
-- Re-run the probes against `llm4s-java-api` once #1484 and #1486 land, adding a tool and a structured-output
-  probe through the Java facade.
+- Done in [#2301](https://github.com/llm4s/llm4s/issues/2301): the getting-started page
+  [Using LLM4S from Scala 2.13](../getting-started/scala-2-13.md), with the setup, the four caveats and their
+  workarounds, and a pointer to the Spark guide ([#1461](https://github.com/llm4s/llm4s/issues/1461)).
+- Done in #2301: the probes through `llm4s-java-api` (`J_java_api_tool`, `K_java_api_structured`), and the probes run
+  as a regression check (below).
 - Decide, before the freeze, whether the agent runtime's id companions should move into an enclosing object
   (blocker 2). Only worth it if 2.13 callers are a target.
 
@@ -107,8 +120,17 @@ output into Scala types), and the Java facade may cover enough of those that #87
 
 ```bash
 cd docs/design/scala-2.13-interop
-./run-probes.sh               # 2.13.16 and 2.13.18; or ./run-probes.sh 2.13.18
+./run-probes.sh                         # the latest release, on 2.13.16 and the latest 2.13; or ./run-probes.sh 2.13.18
+./run-probes.sh --local 0.0.0-probes --check expected.md   # after a publishLocal at that version, as CI runs it
 ```
 
-`common/project.scala` pins the artifacts, `-Ytasty-reader` and the Scala version; each file in `probes/` is one
-entry point and prints `PASS: ...` when it compiles and runs.
+`common/project.scala` holds `-Ytasty-reader`, the JDK and the default Scala version; `run-probes.sh` adds the llm4s
+artifacts, at the latest release (`--release`, the default) or at a locally published version (`--local`). Each
+file or directory in `probes/` is one entry point and prints `PASS: ...` when it compiles and runs.
+
+Since [#2301](https://github.com/llm4s/llm4s/issues/2301) the `Scala 2.13 probes` workflow
+(`.github/workflows/scala-213-probes.yml`) publishes the build locally and runs
+`run-probes.sh --local ... --check expected.md` on 2.13.16 and the latest 2.13, nightly and on every change to the
+frozen modules, `llm4s-java-api`, the build or the probes. It fails when an outcome differs from
+[`expected.md`](scala-2.13-interop/expected.md) in either direction, or when a probe that should not compile stops
+compiling for a reason other than the one its row records.

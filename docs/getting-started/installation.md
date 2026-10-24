@@ -25,6 +25,7 @@ Before installing LLM4S, ensure you have:
 
 - **Java Development Kit (JDK) 21**
 - **Scala 3.7.x** (llm4s {{ site.data.project.latest_release }} is built with 3.7.1)
+  - Scala 2.13: call-only, via the TASTy reader; see [Using LLM4S from Scala 2.13](scala-2-13)
 - **sbt 1.10.6** or higher
 - An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, ...), or a local [Ollama](ollama-quickstart) server, which needs none
 

@@ -339,6 +339,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with
+  `llm4s-java-api` workarounds; a CI workflow runs the 2.13 probes against the build and fails on any outcome change ([#2301](https://github.com/llm4s/llm4s/issues/2301)).
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
   versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).

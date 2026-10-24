@@ -6,6 +6,8 @@
 project/.bloop/
 .env.local
 /.bsp/
+# Scala CLI writes one beside the Scala 2.13 probes it runs
+docs/design/scala-2.13-interop/**/.bsp/
 target/
 .aider*
 .metals
