@@ -60,6 +60,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Before setup-java: it installs a JVM of its own and points JAVA_HOME at it. The probes pick JDK 21 themselves
+      # (`//> using jvm 21` in common/project.scala); sbt runs on the JDK 21 setup-java installs next.
+      - uses: VirtusLab/scala-cli-setup@v1
+
       - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
@@ -68,15 +72,11 @@ jobs:
 
       - uses: sbt/setup-sbt@v1
 
-      - uses: VirtusLab/scala-cli-setup@v1
-
       - name: Publish the probed modules to the runner's ~/.ivy2/local
         # A fixed version, so the probes need not chase sbt-dynver's. llm4s-java-api's dependencies (the provider
-        # modules it builds clients for) are published too, or its ivy.xml would not resolve. Scaladoc is skipped:
-        # the probes read TASTy from the class jars.
+        # modules it builds clients for) are published too, or its ivy.xml would not resolve.
         run: >-
           sbt 'set ThisBuild / version := "0.0.0-probes"'
-          'set every Compile / packageDoc / publishArtifact := false'
           media/publishLocal core/publishLocal openaiCompatible/publishLocal openai/publishLocal
           anthropic/publishLocal gemini/publishLocal ollama/publishLocal agent/publishLocal javaApi/publishLocal
 
