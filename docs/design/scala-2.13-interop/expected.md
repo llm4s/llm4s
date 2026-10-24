@@ -20,7 +20,7 @@ for another reason (an API it uses was renamed) is not mistaken for the blocker 
 | E_tools | does not compile | `upickle.core.Types.ReadWriter` | `ToolBuilder` (uPickle `ReadWriter` in the signature) |
 | E2_tool_registry | compiles and runs |  | `ToolRegistry.execute` |
 | F_structured | does not compile | `upickle.core.Types.Reader` | `completeStructured[A]` (uPickle `Reader[A]`) |
-| G_agent | does not compile |  | `Agent.builder(...).build()`, `run`, `continueConversation` |
+| G_agent | compiles and runs |  | `Agent.builder(...).build()`, `run`, `continueConversation` |
 | H_subclass_client | does not compile | `upickle.core.Types.ReadWriter` | implementing `LLMClient` |
 | I_opaque_ids | does not compile | `object ThreadId is not a member of package org.llm4s.agent.graph` | naming an opaque id: `ThreadId("...")` |
 | J_java_api_tool | compiles and runs |  | `llm4s-java-api`'s `JTool.builder`, run by an agent from `Llm4s.createAgentWithTools` |
