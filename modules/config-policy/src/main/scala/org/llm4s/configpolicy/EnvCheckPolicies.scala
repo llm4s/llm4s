@@ -13,6 +13,9 @@ import java.util.Locale
  * ([[DefaultPolicies]]) and reports Pass/Warn/Skip/Fail.
  *
  * Usage: `--env=<name> --preset=<preset> [--verbose]`.
+ *
+ * Exit codes: `0` when every evaluated policy passes, `1` when any policy fails, and `2` when the
+ * preset is unknown or every policy in it is skipped for the chosen env, so nothing was checked.
  */
 object EnvCheckPolicies {
   final case class Options(
@@ -68,7 +71,12 @@ object EnvCheckPolicies {
         val snapshot = snapshotFromEnv(getEnv)
         val result   = ConfigPolicyRunner.evaluate(snapshot, options.env, policies)
         println(ConfigPolicyRunner.formatReport(result, options.verbose))
-        if (result.passed) 0 else 1
+        val nothingChecked = result.results.nonEmpty && result.skipped.size == result.results.size
+        if (nothingChecked) {
+          println(s"No policy in preset '${options.preset}' applies to env '${options.env}'; nothing was checked.")
+          2
+        } else if (result.passed) 0
+        else 1
     }
 
   def main(args: Array[String]): Unit = {
