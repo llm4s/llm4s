@@ -16,7 +16,7 @@ It is for people who *use* llm4s. If you are writing a provider module, see [Wri
 libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
 ```
 
-The module depends on `llm4s-core` only and has no test framework in its API, so it works with whichever one you use. The examples below use ScalaTest.
+The module depends on `llm4s-core` only and has no test framework in its API, so it works with whichever one you use. The examples below use ScalaTest; [Other test frameworks](#other-test-frameworks) shows the same test in MUnit, munit-cats-effect, weaver and ZIO Test.
 
 ## A first test
 
@@ -154,6 +154,27 @@ error.message should include("Capital of France?")
 
 Inside an agent, that error arrives wrapped in the same `NodeFailed` as any provider error. It is a `NonRecoverableError`, so a `ReliableClient` does not retry it.
 
+## Check that every reply was used
+
+The opposite mistake is quieter: the code makes fewer calls than you scripted, usually because it took a wrong branch, and the test still passes. `assertExhausted()` returns `Right(())` when every reply of a `sequence` script was used, and otherwise a `Left` whose message names each unused reply and its position:
+
+```scala
+val client = ScriptedLLMClient.sequence(Reply.text("Paris"), Reply.text("Rome"))
+client.complete(conversation, options)
+
+client.remaining shouldBe 1
+client.assertExhausted().left.value should include("""reply 2: text "Rome"""")
+```
+
+The message reads:
+
+```text
+1 of 2 scripted replies was not used (the code under test made 1 call):
+  reply 2: text "Rome"
+```
+
+End a test with `client.assertExhausted() shouldBe Right(())`, or let a fixture do it for every test, as the next sections show. `remaining` and `unusedReplies` give the same information as values. A `respondingTo` or `always` client has no fixed script, so for it nothing is ever unused.
+
 ## From llm4s-effect and llm4s-zio
 
 The scripted client is an ordinary `LLMClient`, so it drives an agent run through `AgentIO` (cats-effect, `llm4s-effect`) or `AgentZ` (ZIO, `llm4s-zio`) exactly as through `Agent`. Both examples use the same agent as above, built by a small helper:
@@ -208,6 +229,156 @@ for {
 ```
 
 A call the script has no reply for fails the effect like any provider error: `AgentIO` raises an `LLMException` whose `error` is the `NodeFailed` around the `UnscriptedCallError`, and `AgentZ` fails with that `NodeFailed`. These examples are the `ScriptedAgentIOSpec` and `ScriptedAgentZSpec` tests of `llm4s-effect` and `llm4s-zio`, which depend on the testkit `% Test` as your build would.
+
+## Other test frameworks
+
+The testkit has no test framework in its API, so each framework needs a few lines of glue: a fixture that gives each test a fresh scripted client and fails the test when a scripted reply was not used. Each example below tests the same packing assistant as above, and is a suite in `modules/samples` that CI runs. They reuse `temperatureTool` and `packingAdvice` from [An agent with a tool, end to end](#an-agent-with-a-tool-end-to-end).
+
+### MUnit
+
+```sbt
+libraryDependencies += "org.scalameta" %% "munit" % "1.0.0" % Test
+```
+
+A `FunFixture` whose teardown fails the test:
+
+```scala
+def scripted(replies: Reply*): FunFixture[ScriptedLLMClient] =
+  FunFixture(
+    setup = _ => ScriptedLLMClient.sequence(replies*),
+    teardown = client => client.assertExhausted().left.foreach(unused => fail(unused))
+  )
+```
+
+```scala
+scripted(
+  Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+  Reply.text("It is 21 degrees in Oslo: pack light layers.")
+).test("the packing assistant calls the tool, then answers") { client =>
+  assertEquals(packingAdvice(client, "Oslo"), Right("It is 21 degrees in Oslo: pack light layers."))
+  assertEquals(client.calls.head.options.tools.map(_.name), Seq("get_temperature"))
+}
+```
+
+### munit-cats-effect
+
+```sbt
+libraryDependencies += "org.typelevel" %% "munit-cats-effect" % "2.0.0" % Test
+```
+
+With cats-effect, the fixture is a `Resource` whose release fails when a reply was not used. The same resource serves munit-cats-effect and weaver:
+
+```scala
+def scripted(replies: Reply*): Resource[IO, ScriptedLLMClient] =
+  Resource.make(IO(ScriptedLLMClient.sequence(replies*)))(client =>
+    // `defer`: check when the release runs, after the test, not when the release is built
+    IO.defer(IO.fromEither(client.assertExhausted().left.map(unused => new AssertionError(unused))))
+  )
+```
+
+`IO.defer` matters: `ResourceFunFixture` builds the release as soon as the resource is acquired, and without it the check would run then, before the test made any call. The test builds its agent through `LLMClientIO`:
+
+```scala
+import cats.effect.{ IO, Resource }
+import munit.CatsEffectSuite
+import org.llm4s.effect.cats.{ LLMClientIO, LLMException }
+```
+
+```scala
+val packing = ResourceFunFixture(
+  scripted(
+    Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+    Reply.text("It is 21 degrees in Oslo: pack light layers.")
+  )
+)
+
+packing.test("the packing assistant calls the tool, then answers") { client =>
+  for {
+    tool  <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
+    agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+    run   <- agent.run("What should I pack for Oslo today?")
+  } yield {
+    assertEquals(run.answer, Some("It is 21 degrees in Oslo: pack light layers."))
+    assertEquals(client.calls.head.options.tools.map(_.name), Seq("get_temperature"))
+  }
+}
+```
+
+### weaver
+
+```sbt
+libraryDependencies += "com.disneystreaming" %% "weaver-cats" % "0.8.4" % Test
+testFrameworks += new TestFramework("weaver.framework.CatsEffect")
+```
+
+From 0.9.0 weaver is published as `"org.typelevel" %% "weaver-cats"` and needs cats-effect 3.6; the code is the same. A script belongs to one test, so each test `use`s its own `scripted` resource (the one above) rather than a suite-wide `SharedResource`:
+
+```scala
+test("the packing assistant calls the tool, then answers") {
+  scripted(
+    Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+    Reply.text("It is 21 degrees in Oslo: pack light layers.")
+  ).use { client =>
+    for {
+      tool  <- IO.fromEither(temperatureTool.left.map(new LLMException(_)))
+      agent <- LLMClientIO[IO](client).agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool))))
+      run   <- agent.run("What should I pack for Oslo today?")
+    } yield expect.all(
+      run.answer.contains("It is 21 degrees in Oslo: pack light layers."),
+      client.calls.head.options.tools.map(_.name) == Seq("get_temperature")
+    )
+  }
+}
+```
+
+### ZIO Test
+
+```sbt
+libraryDependencies ++= Seq(
+  "dev.zio" %% "zio-test"     % zioVersion % Test,
+  "dev.zio" %% "zio-test-sbt" % zioVersion % Test
+)
+```
+
+A `ZLayer` provides the scripted client and the `LLMClientZ` over it. Its finalizer fails the test when the test succeeded but left a reply unused; a test that already failed keeps its own error:
+
+```scala
+import org.llm4s.zio.LLMClientZ
+import zio.{ Exit, ZIO, ZLayer }
+import zio.test.*
+```
+
+```scala
+def scripted(replies: Reply*): ZLayer[Any, Nothing, ScriptedLLMClient & LLMClientZ] =
+  ZLayer.scoped(
+    ZIO.acquireReleaseExit(ZIO.succeed(ScriptedLLMClient.sequence(replies*))) {
+      case (client, Exit.Success(_)) =>
+        ZIO.fromEither(client.assertExhausted()).orDieWith(unused => new AssertionError(unused))
+      case _ => ZIO.unit // the test already failed: keep its own error
+    }
+  ) >+> ZLayer.fromFunction((client: ScriptedLLMClient) => LLMClientZ(client))
+```
+
+```scala
+test("the packing assistant calls the tool, then answers") {
+  for {
+    client <- ZIO.service[ScriptedLLMClient]
+    tool   <- ZIO.fromEither(temperatureTool)
+    agent  <- ZIO.serviceWithZIO[LLMClientZ](_.agent("packing-assistant")(_.withTools(new ToolRegistry(Seq(tool)))))
+    run    <- agent.run("What should I pack for Oslo today?")
+  } yield assertTrue(
+    run.answer.contains("It is 21 degrees in Oslo: pack light layers."),
+    client.calls.head.options.tools.map(_.name) == Seq("get_temperature")
+  )
+}.provide(
+  scripted(
+    Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+    Reply.text("It is 21 degrees in Oslo: pack light layers.")
+  )
+)
+```
+
+Each suite also has a test that proves its fixture fails a test that leaves a reply unused: `TestkitMUnitSuite`, `TestkitMUnitCatsEffectSuite`, `TestkitWeaverSuite` and `TestkitZioSpec`, in `modules/samples/src/test/scala/org/llm4s/samples/guides`.
 
 ## Choose the reply from the conversation
 

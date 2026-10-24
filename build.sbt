@@ -1566,7 +1566,19 @@ lazy val samples = (project in file("modules//samples"))
       Deps.playJson   % Test,
       Deps.zioJson    % Test,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
-      Deps.doobieHikari % Test
+      Deps.doobieHikari % Test,
+      // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
+      // a suite in src/test/scala/org/llm4s/samples/guides, so the fixtures the page shows compile and run.
+      Deps.munit             % Test,
+      Deps.munitCatsEffect   % Test,
+      Deps.weaverCats        % Test,
+      Deps.zioTestSamples    % Test,
+      Deps.zioTestSbtSamples % Test
+    ),
+    testFrameworks ++= Seq(
+      new TestFramework("munit.Framework"),
+      new TestFramework("weaver.framework.CatsEffect"),
+      new TestFramework("zio.test.sbt.ZTestFramework")
     ),
     appLogging,
     // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer

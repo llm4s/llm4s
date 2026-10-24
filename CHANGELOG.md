@@ -408,6 +408,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Added** `ScriptedLLMClient.assertExhausted()`, `remaining` and `unusedReplies` (a scripted reply never asked for), and
+  [testing guide](docs/guide/testing-with-the-testkit.md#other-test-frameworks) fixtures for MUnit, munit-cats-effect,
+  weaver and ZIO Test, each a suite CI runs [#2335](https://github.com/llm4s/llm4s/issues/2335).
 
 ### Embeddings & RAG
 

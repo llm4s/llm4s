@@ -1,9 +1,5 @@
 import sbt._
 
-object Dependencies {
-  lazy val munit = "org.scalameta" %% "munit" % "0.7.29"
-}
-
 object Versions {
   val cats                    = "2.13.0"
   val upickle                 = "4.4.3"
@@ -48,6 +44,17 @@ object Versions {
   // doobie, Test scope in the unpublished samples only, for the compiled doobie snippet of docs/guide/vector-store.md
   // (#2300). 1.0.0-RC5 is the last release built on the cats-effect above and on HikariCP 5.1.0 (RC8 takes HikariCP 6).
   val doobie = "1.0.0-RC5"
+
+  // Test frameworks other than ScalaTest, Test scope in the unpublished samples only: the tested examples of
+  // docs/guide/testing-with-the-testkit.md (#2335). Each is the last release built on the cats-effect above:
+  // munit-cats-effect 2.0.0 (2.1.0 needs cats-effect 3.6) on MUnit 1.0.0, and weaver 0.8.4, the last release under
+  // `com.disneystreaming` (from 0.9.0 it is `org.typelevel`, on cats-effect 3.6; its API is the same).
+  val munit           = "1.0.0"
+  val munitCatsEffect = "2.0.0"
+  val weaver          = "0.8.4"
+  // ZIO Test for those examples: the zio that zio-json above brings onto the samples' Test classpath (2.1.26, not
+  // `zio` below), since zio-test's macros must match the zio they run with.
+  val zioTestSamples = "2.1.26"
 
   // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
   // cats-effect and fs2 versions above.
@@ -174,6 +181,13 @@ object Deps {
   val ujsonCirce = "com.lihaoyi"       %% "ujson-circe" % Versions.ujson
   val playJson   = "org.playframework" %% "play-json"   % Versions.playJson
   val zioJson    = "dev.zio"           %% "zio-json"    % Versions.zioJson
+
+  // Test frameworks (unpublished samples' Test scope only; see Versions)
+  val munit             = "org.scalameta"       %% "munit"             % Versions.munit
+  val munitCatsEffect   = "org.typelevel"       %% "munit-cats-effect" % Versions.munitCatsEffect
+  val weaverCats        = "com.disneystreaming" %% "weaver-cats"       % Versions.weaver
+  val zioTestSamples    = "dev.zio"             %% "zio-test"          % Versions.zioTestSamples
+  val zioTestSbtSamples = "dev.zio"             %% "zio-test-sbt"      % Versions.zioTestSamples
 
   // ZIO
   val zio        = "dev.zio" %% "zio"          % Versions.zio
