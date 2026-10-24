@@ -406,9 +406,10 @@ object StabilityTiers {
    * `@Stable` case classes that keep a public constructor. RFC 0002 makes a growth-prone data type
    * `final case class X private (...)` with a companion `apply` and `with*` setters, because adding a field to a
    * public constructor or `copy` breaks binary compatibility once the MiMa baseline exists. An entry here is a type
-   * that is deliberately closed (a single-value wrapper, a fixed record); one marked `TODO(#2369)` predates the check
-   * and should be converted before the baseline, then removed from this list. An entry that matches no failing type
-   * fails the check, so a converted type cannot leave its entry behind.
+   * that is deliberately closed (a single-value wrapper, a fixed record, an error case whose fields are exactly what
+   * went wrong), with the reason it stays closed. The types that predated the check were converted or given a reason
+   * before the baseline (#2377-#2384). An entry that matches no failing type fails the check, so a converted type
+   * cannot leave its entry behind.
    */
   val GrowthExempted: Seq[GrowthExempt] = Seq(
     GrowthExempt("org.llm4s.context.tokens.Token", "a single token id"),

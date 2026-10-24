@@ -15,7 +15,14 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
 [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346),
 [core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356)
-and [the `TraceEvent` cases](#traceevent-cases-are-growth-safe-2377);
+[the `TraceEvent` cases](#traceevent-cases-are-growth-safe-2377),
+[the `llmconnect.model` types](#llmconnectmodel-types-are-growth-safe-2378),
+[the provider SPI, caching, streaming and exchange-sink types](#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379),
+[the context types](#context-types-are-growth-safe-2380),
+[the tool schemas and tool-call types](#tool-schemas-and-tool-call-types-are-growth-safe-2381),
+[two `ToolCallError` and `ToolParameterError` cases](#toolcallerror-and-toolparametererror-cases-2382),
+[the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383)
+and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
 ## Multimodal content parts (#1913)

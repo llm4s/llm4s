@@ -96,7 +96,7 @@ To add a field after the baseline, add it to the constructor and, with a default
 `apply` as an overload without defaults that forwards to the new one; and add a `withX` setter. Never re-expose
 `copy`. A case class with no fields is exempt. A type that is deliberately closed (a single-value wrapper, a fixed
 record) goes on the allow-list, `GrowthExempted` in `project/StabilityTiers.scala`, by fully qualified name with a
-one-line reason; the entries marked `TODO(#2369)` predate the check and are to be converted before the baseline.
+one-line reason. Every type that predated the check has been converted or given its reason (#2377 to #2384).
 An entry that no longer matches a failing type fails the check, so a converted type cannot leave its entry behind.
 The scanner does not look at the cases of a `@Stable` `enum`.
 
