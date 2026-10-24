@@ -283,6 +283,23 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
     }
   }
 
+  "The asynchronous-calls blocks" should {
+
+    "run two calls and a turn together, print their answers, then return the time-limited answer" in {
+      val agent  = Llm4s.createAgent(FakeLlmClient.replying("plan").client())
+      var answer = ""
+      val printed = captured {
+        answer = GuideSnippets.asynchronous(FakeLlmClient.replying("summary", "summary", "long").client(), agent)
+      }
+      printed shouldBe Printed("summary / summary / plan\n", "")
+      answer shouldBe "long"
+    }
+
+    "run the call on the supplied pool" in {
+      GuideSnippets.asynchronousOnAPool(FakeLlmClient.replying("4").client()) shouldBe "4"
+    }
+  }
+
   "The handling-a-failure block" should {
 
     "print the answer and nothing else when the call succeeds" in {
@@ -355,6 +372,9 @@ class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
         "ConversationBuilder.create()",
         "JCompletionOptions.builder()",
         "result.toCompletableFuture()",
+        "client.completeAsync(",
+        "agent.runAsync(",
+        "client.withAsyncExecutor(pool)",
         "catch (LlmException e)",
         "e.getKind()",
         "client.completion(conversation)",

@@ -1417,10 +1417,11 @@ jobs:
             gpg --batch --verify "$f.asc" "$f"
           done
 
-      # Compiles the Java sample against the library just published, so it cannot drift from the API it shows.
+      # Compiles the Java sample against the library just published, so it cannot drift from the API it shows, and runs
+      # AsyncCalls, which answers from FakeLlmClient and needs no API key.
       - name: Build the Java sample
         working-directory: modules/samples/gradle-java
-        run: gradle build installDist
+        run: gradle build installDist runAsyncCalls
 
       # The Maven sample (docs/getting-started/maven.md), compiled the same way, with its enforcer rules.
       - name: Build the Maven sample

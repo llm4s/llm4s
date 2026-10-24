@@ -2,9 +2,7 @@ package org.llm4s.javaapi;
 
 import org.llm4s.error.CancelledError;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The Java snippets of docs/guide/java-threading-and-cancellation.md, as code that is compiled with the
@@ -14,13 +12,11 @@ final class ThreadingGuideSnippets {
 
   private ThreadingGuideSnippets() {}
 
-  /** "Which calls block": run a call on a virtual thread and wait for it. */
-  static String onVirtualThread(JLlmClient client) throws Exception {
-    try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
-      Future<LlmResult<String>> answer = pool.submit(() -> client.complete("Summarise this."));
-      LlmResult<String> result = answer.get();
-      return result.get();
-    }
+  /** "Which calls block": run a call off the caller's thread with its async variant, and wait for it. */
+  static String onVirtualThread(JLlmClient client) {
+    CompletableFuture<String> answer = client.completeAsync("Summarise this.");
+    String text = answer.join();   // waits on your thread; answer.cancel(true) interrupts the call
+    return text;
   }
 
   /** "Interrupting a call": was this failure a cancellation? */

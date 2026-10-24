@@ -283,6 +283,14 @@ which binds them itself; no llm4s library module reads them any more. Their defa
 value that is set but cannot be read (`CHUNK_SIZE=abc`) is now a `ConfigurationError` instead of silently falling back to
 the default.
 
+### The Spring Boot starter's refused `completeAsync` fails with an `LlmException` (#2276)
+
+`LLM4STemplate.completeAsync` now delegates to `JLlmClient.completeAsync`
+([#2276](https://github.com/llm4s/llm4s/issues/2276)), whose futures fail only with an `LlmException`. When the
+`llm4sTaskExecutor` refuses a call (its queue full, or shut down), the future's cause is an `LlmException` of kind
+`OTHER` whose own cause is the `RejectedExecutionException`; it was the `RejectedExecutionException` itself. Code that
+tests `e.getCause() instanceof RejectedExecutionException` tests `e.getCause().getCause()` instead.
+
 ### Postgres stores take a `javax.sql.DataSource` (#2300)
 
 The Postgres stores accept a connection pool the application already has, of any kind

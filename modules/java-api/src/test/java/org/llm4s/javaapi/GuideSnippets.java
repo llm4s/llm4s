@@ -5,6 +5,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Flow;
 
 import org.llm4s.javaapi.CompletionStream;
@@ -246,6 +249,30 @@ final class GuideSnippets {
         public void onNext(String piece) { }
         public void onError(Throwable error) { }
         public void onComplete() { }
+    }
+
+    /** The "Asynchronous calls" block (#2276). */
+    static String asynchronous(JLlmClient client, JAgent agent) {
+        CompletableFuture<String> first = client.completeAsync("Summarise the first report");
+        CompletableFuture<String> second = client.completeAsync("Summarise the second report");
+        CompletableFuture<JAgentResult> turn = agent.runAsync("Plan the release");
+
+        CompletableFuture.allOf(first, second, turn).join();
+        System.out.println(first.join() + " / " + second.join() + " / " + turn.join().answer().orElse(""));
+
+        CompletableFuture<String> answer = client.completeAsync("A long question").orTimeout(30, TimeUnit.SECONDS);
+
+        return answer.join();
+    }
+
+    /** The executor block of "Asynchronous calls" (#2276). */
+    static String asynchronousOnAPool(JLlmClient client) {
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        JLlmClient pooled = client.withAsyncExecutor(pool);   // shares client's connection; never shuts pool down
+
+        String answer = pooled.completeAsync("What is 2+2?").join();
+        pool.shutdown();
+        return answer;
     }
 
     /** The "Structured output" block (#1486). */
