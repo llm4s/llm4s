@@ -1,0 +1,41 @@
+name: Docs Cited Issues
+
+# Fails when a docs page cites an llm4s issue as open and it has closed, or as done and it is open (#2290):
+# docs/guide/comparison.md described six closed issues as missing features before this existed. Each page declares
+# how it cites each issue in its front matter (cites_open_issues, cites_closed_issues); see
+# scripts/check-cited-issues.sh. An issue can close at any time, so this runs weekly as well as on docs changes.
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'   # weekly: Monday 06:23 UTC
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'scripts/check-cited-issues.sh'
+      - 'scripts/test-check-cited-issues.sh'
+      - '.github/workflows/docs-cited-issues.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs-cited-issues-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  cited-issues:
+    name: Cited issues are in their stated state
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test the check
+        run: scripts/test-check-cited-issues.sh
+
+      - name: Check the issues the comparison page cites
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/check-cited-issues.sh docs/guide/comparison.md

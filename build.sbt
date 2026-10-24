@@ -242,6 +242,13 @@ lazy val listPublishedArtifacts = taskKey[Unit](
 )
 // The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
 // as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
+// docs/_data/capabilities.yml and docs/_data/tested-versions.yml, rendered by docs/reference/compatibility-matrix.md
+// (#2290): the first from the provider descriptors discovery finds (org.llm4s.samples.docs.CapabilityMatrix), the
+// second from `Versions`, `Common` and the CI workflow (project/CompatibilityMatrix.scala). CI runs it and fails when the
+// committed files differ.
+lazy val generateCompatibilityMatrix = taskKey[Unit](
+  "Write docs/_data/capabilities.yml (from the discovered provider descriptors) and docs/_data/tested-versions.yml (from the build)"
+)
 lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
@@ -438,6 +445,11 @@ lazy val llm4s = (project in file("."))
       val paths = Def.spaceDelimited("<pom files>").parsed
       if (paths.isEmpty) sys.error("pomMetadataCheckFiles needs at least one POM file")
       PomMetadata.check(paths.map(file), streams.value.log)
+    },
+    generateCompatibilityMatrix / aggregate := false,
+    generateCompatibilityMatrix := {
+      CompatibilityMatrix.write((ThisBuild / baseDirectory).value, streams.value.log)
+      (samples / Compile / runMain).toTask(" org.llm4s.samples.docs.CapabilityMatrixMain").value
     },
     bomCheck / aggregate := false,
     bomCheck := {
