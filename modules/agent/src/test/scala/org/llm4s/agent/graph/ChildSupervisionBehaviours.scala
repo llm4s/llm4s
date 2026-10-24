@@ -856,6 +856,16 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     unsettled(open(), onlyChild(runtime, thread).threadId)
   }
 
+  /**
+   * The timeout of the delegating call whose child is still busy after the drain. The case needs the child inside its
+   * stubborn tool when the call times out: a child cancelled before it gets there stops at once, drains in time and is
+   * settled, so the parent moves on and the tool is never entered. The timeout is wall-clock time (see
+   * [[RetriedCallTimeout]]), so it must outlast the child's admission, model call and commit on the slowest runner. At
+   * 300 ms it did not (on Windows, over SQLite: #2385). The tool is entered long before it fires, and holds the call
+   * past it whatever the timeout is, so a longer one changes nothing else.
+   */
+  private val BusyCallTimeout: FiniteDuration = 3.seconds
+
   it should "fail the parent run when the child is still busy after the drain, and settle it on recover (#2098)" in {
     val open    = storage()
     val entered = new CountDownLatch(1)
@@ -876,7 +886,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       ScriptedLLMClient.of(calling(call("c1", "delegate")), CompletionFixture.simple("moved on")),
       ScriptedLLMClient.of(calling(call("k1", "stubborn")), CompletionFixture.simple("report")),
       childTools = Seq(stubborn),
-      delegateTimeout = Some(300.millis)
+      delegateTimeout = Some(BusyCallTimeout)
     )
     val runtime = new GraphRuntime(open())
     val parent  = family(runtime, setup)._1
