@@ -23,6 +23,7 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [two `ToolCallError` and `ToolParameterError` cases](#toolcallerror-and-toolparametererror-cases-2382),
 [the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
+[`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
 ## Multimodal content parts (#1913)
@@ -702,6 +703,18 @@ are private:
   of the constructor, and chain the setters.
 
 Pattern matching (`case SecretMatch(secretType, value, start, end)`) and the fields are unchanged.
+
+### `OpenAIToolHelper` is internal (#2360)
+
+`org.llm4s.toolapi.OpenAIToolHelper` (`llm4s-openai`) is now `private[llm4s]`
+([#2360](https://github.com/llm4s/llm4s/issues/2360)). Its methods took and returned openai-java's
+`ChatCompletionCreateParams.Builder` and `ChatCompletionTool`, which would have tied `llm4s-openai`'s 1.x
+compatibility to that SDK's. `OpenAIClient` still uses it. If you built openai-java requests yourself, take the
+tool definitions as JSON and hand them to the SDK:
+
+```scala
+val tools: ujson.Arr = new ToolRegistry(myTools).getOpenAITools()
+```
 
 ### `ToolCallError` and `ToolParameterError` cases (#2382)
 
@@ -3037,6 +3050,8 @@ val params = OpenAIToolHelper
 
 If you called the Azure SDK yourself alongside llm4s, add `com.azure:azure-ai-openai` to your
 own build: `llm4s-openai` no longer brings it.
+
+After 0.5.1 `OpenAIToolHelper` is internal too: see [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360).
 
 ### Behaviour changes
 

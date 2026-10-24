@@ -69,8 +69,7 @@ AWS SDKs (`com.openai`, `com.anthropic`, `software.amazon`), written fully quali
 imports (including a renaming import such as `import com.typesafe.config.{Config => TsConfig}`). Use an llm4s or
 Scala type instead, or keep the member out of the Stable surface. A third-party type that is API on purpose
 goes on the allow-list, `ThirdPartyAllowed` in `project/StabilityTiers.scala`, with its reason: today upickle
-and ujson (the API's JSON values and codecs), and `OpenAIToolHelper`'s openai-java types, pending
-[#2360](https://github.com/llm4s/llm4s/issues/2360). Being a source scanner, it does not resolve a name that
+and ujson (the API's JSON values and codecs). Being a source scanner, it does not resolve a name that
 arrives through a wildcard import or an `export`, expand a type alias declared elsewhere, or see an inferred
 result type; the limits are listed in the scanner's Scaladoc. Its fixtures include one violating signature per
 deny-listed package, so dropping one from the check fails the build.

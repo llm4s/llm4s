@@ -101,6 +101,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SecretPatterns.SecretMatch` are growth-prone types: build them with `X(...)` and change them with `with*`; `new` and
   `.copy` are private, and `TransformationResult` is `final`;
   [migration](docs/reference/migration.md#config-model-and-util-types-are-growth-safe-2384).
+- `OpenAIToolHelper` (`llm4s-openai`) is `private[llm4s]`: its signatures named openai-java types; use
+  `ToolRegistry.getOpenAITools()`; [migration](docs/reference/migration.md#openaitoolhelper-is-internal-2360).
 - `RunEvent.RunFailed`, `RunCancelled` and `RunTimedOut` gain `steps` (a failed attempt's agent model steps): positional
   patterns need another binder; [migration](docs/reference/migration.md#explicit-inheritance-2049).
 - `AgentStatus.TokenLimitReached` (Java `AgentStatusKind.TOKEN_LIMIT_REACHED`) and `RunBudgets.maxTokens`: exhaustive
@@ -209,6 +211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Removed** `OpenAIToolHelper` from the public API (now `private[llm4s]`), so no openai-java type is part of
+  `llm4s-openai`'s Stable surface [#2360](https://github.com/llm4s/llm4s/issues/2360).
 - **Added** an xAI (Grok) provider (Beta), `provider = "xai"` in `llm4s-openai-compatible`: Chat Completions at
   `https://api.x.ai/v1` with `XAI_API_KEY` bound to `llm4s.credentials.xai.apiKey`; `reasoning_content` as thinking,
   reasoning tokens, `CompletionOptions.reasoning` as `reasoning_effort` on the Grok models that take it, and model
@@ -456,8 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose signature names a type from fansi, `cats`, pureconfig, `com.typesafe.config`, jtokkit, slf4j, OkHttp, Jackson,
   `com.openai`, `com.anthropic` or `software.amazon`, written fully qualified or through an imported (or renamed) name.
   `ThirdPartyAllowed` in `project/StabilityTiers.scala` lists the third-party types that are API on purpose, each with
-  its reason (upickle and ujson; `OpenAIToolHelper`'s openai-java types until
-  [#2360](https://github.com/llm4s/llm4s/issues/2360) decides its tier), and `StabilityTiers.selfTest` has a violating
+  its reason (upickle and ujson), and `StabilityTiers.selfTest` has a violating
   fixture for every deny-listed package [#2357](https://github.com/llm4s/llm4s/issues/2357);
   [API stability](docs/reference/api-stability.md#tiers-in-the-code).
 - **Added** CI time limits: every job of the workflows that run on pull requests has a `timeout-minutes` of about twice
