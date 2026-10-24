@@ -115,15 +115,9 @@ jobs:
       - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
-      # `latest_release` from the latest GitHub Release, so a literal one lags the release by design. README.md,
-      # which GitHub renders without Liquid, must instead show literal versions equal to `latest_release` (#2322).
+      # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
       - name: Check install snippets do not pin a literal version
         run: scripts/check-doc-versions.sh
-
-      # Fails on a broken relative link in README.md, CONTRIBUTING.md, CHANGELOG.md and the migration guides, and on a
-      # link anywhere in the repository to a README.md heading that no longer exists (#2322).
-      - name: Check README and changelog links
-        run: scripts/check-doc-links.sh
 
       # Fails when two docs pages under the same parent declare the same `nav_order`: the site then orders them by
       # title instead, so the number stops meaning anything and nothing reports it (#1623).

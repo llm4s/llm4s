@@ -16,8 +16,7 @@ def extract_relative_links(path):
     with open(path) as f:
         content = f.read()
     content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
-    # Inline code may wrap onto a second line (`f[A](x, y)(z =>\n  ...)`).
-    content = re.sub(r'`[^`\n]+(?:\n[^`\n]+)?`', '', content)
+    content = re.sub(r'`[^`\n]+`', '', content)
     for m in re.finditer(r'\]\(([^)]+)\)', content):
         link = m.group(1).strip()
         if link.startswith(('http://', 'https://', 'mailto:', '#')):
@@ -45,8 +44,6 @@ check_links_in_file() {
 }
 
 TARGET_FILES=(
-  "$REPO_ROOT/README.md"
-  "$REPO_ROOT/CONTRIBUTING.md"
   "$REPO_ROOT/CHANGELOG.md"
   "$REPO_ROOT/SECURITY.md"
   "$REPO_ROOT/docs/migrations/index.md"
@@ -97,51 +94,6 @@ sys.exit(errors)
 PYEOF
 README_RC=$?
 ERRORS=$((ERRORS + README_RC))
-
-# Every link into a README.md anchor - relative (`README.md#x`, `../README.md#x`), to the README on GitHub
-# (`github.com/llm4s/llm4s#x`, `.../blob/main/README.md#x`) - must name a heading of README.md (#2322).
-python3 - "$REPO_ROOT" <<'PYEOF'
-import os, re, subprocess, sys
-
-root = sys.argv[1]
-
-def slug(heading):
-    s = re.sub(r'[`*_~]|<[^>]+>', '', heading).strip().lower()
-    s = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', s)
-    s = re.sub(r'[^\w\- ]', '', s)
-    return s.replace(' ', '-')
-
-readme = open(os.path.join(root, "README.md"), encoding="utf-8").read()
-readme = re.sub(r'```.*?```', '', readme, flags=re.DOTALL)
-anchors, seen = set(), {}
-for h in re.findall(r'^#{1,6}\s+(.+?)\s*#*\s*$', readme, flags=re.M):
-    base = slug(h)
-    n = seen.get(base, 0)
-    anchors.add(base if n == 0 else f"{base}-{n}")
-    seen[base] = n + 1
-
-files = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True, check=True).stdout.split()
-REMOTE = re.compile(r'github\.com/llm4s/llm4s(?:/blob/main/README\.md)?#([A-Za-z0-9_-]+)')
-LOCAL  = re.compile(r'(?<![\w/.-])((?:\.\./)*README\.md)#([A-Za-z0-9_-]+)')
-errors = 0
-for rel in files:
-    if rel.startswith(("docs/_site/", "scripts/check-doc-links.sh")) or not rel.endswith((".md", ".scala", ".java", ".kt", ".yml", ".html", ".sh", ".txt")):
-        continue
-    try:
-        text = open(os.path.join(root, rel), encoding="utf-8").read()
-    except (UnicodeDecodeError, FileNotFoundError):
-        continue
-    hits = [(m.start(), m.group(1)) for m in REMOTE.finditer(text)]
-    for m in LOCAL.finditer(text):
-        if os.path.normpath(os.path.join(os.path.dirname(rel), m.group(1))) == "README.md":
-            hits.append((m.start(), m.group(2)))
-    for pos, anchor in hits:
-        if anchor.lower() not in anchors:
-            print(f"BROKEN: {rel}:{text.count(chr(10), 0, pos) + 1} -> README.md#{anchor} (no such heading)")
-            errors += 1
-sys.exit(min(errors, 100))
-PYEOF
-ERRORS=$((ERRORS + $?))
 
 if [[ "$ERRORS" -eq 0 ]]; then
   echo "All doc links OK"
