@@ -25,8 +25,12 @@ import sbt._
  */
 object DocSnippets {
 
-  /** The pages whose snippets are compiled. Paths are relative to `docs/`. */
+  /**
+   * The pages whose snippets are compiled. Paths are relative to `docs/`; `../README.md` is the repository README, the
+   * landing page whose first call must keep compiling (#2322).
+   */
   val pages: Seq[String] = Seq(
+    "../README.md",
     "getting-started/configuration.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
@@ -56,7 +60,7 @@ object DocSnippets {
     }
 
     def objectName: String = {
-      val stem = page.stripSuffix(".md").replaceAll("[^A-Za-z0-9]+", "_")
+      val stem = page.stripPrefix("../").stripSuffix(".md").replaceAll("[^A-Za-z0-9]+", "_")
       s"Snippet_${stem}_L$firstLine"
     }
   }

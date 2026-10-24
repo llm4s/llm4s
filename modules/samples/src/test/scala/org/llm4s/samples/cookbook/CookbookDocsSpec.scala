@@ -13,8 +13,8 @@ import scala.jdk.CollectionConverters._
  * pull request with no network and no API key.
  *
  * Each recipe has a page, `docs/examples/cookbook/<id>.md`, whose program is the recipe's whole source file; the index
- * page `docs/examples/cookbook.md` links the pages in the order of [[Cookbook.recipes]], and so do the README and the
- * examples index. The checks fail when a page is missing, out of order or lacks a section, when a page's program is not
+ * page `docs/examples/cookbook.md` links the pages in the order of [[Cookbook.recipes]], and so do `CONTRIBUTING.md`'s
+ * "Running the Examples" (moved from the README, #2322) and the examples index. The checks fail when a page is missing, out of order or lacks a section, when a page's program is not
  * what the source file says, when a recipe file is not registered in [[Cookbook]], or when a recipe fails.
  */
 class CookbookDocsSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -131,8 +131,8 @@ class CookbookDocsSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
-  "The README and the examples index" should "link every recipe's page, in the order of the registry" in {
-    linkedIds(read("README.md"), "docs/examples/cookbook/") shouldBe Cookbook.recipes.map(_.id)
+  "CONTRIBUTING.md and the examples index" should "link every recipe's page, in the order of the registry" in {
+    linkedIds(read("CONTRIBUTING.md"), "docs/examples/cookbook/") shouldBe Cookbook.recipes.map(_.id)
     linkedIds(read("docs/examples/index.md"), "cookbook/") shouldBe Cookbook.recipes.map(_.id)
   }
 

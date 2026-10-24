@@ -11,7 +11,11 @@
 # Scala CLI `//> using dep org.llm4s::llm4s-...:<version>` lines are checked like the others.
 # A SNAPSHOT version is a locally built one, not a release, and is not checked.
 # Release notes, the migration guides and design documents name versions on purpose and are not checked.
-# Exit code 0 = no literal pin. Non-zero = file:line of each one.
+#
+# README.md is the exception: GitHub renders it without Liquid, so it shows a literal version (#2322). There every
+# install snippet's version, the starter kit's `--llm4s_version=`, the "latest release is **x**" line and the release
+# notes link must equal docs/_data/project.yml's `latest_release`, and at least one of them must be present.
+# Exit code 0 = no literal pin (and README matches latest_release). Non-zero = file:line of each one.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -29,7 +33,7 @@ MAVEN  = re.compile(r'<artifactId>llm4s-[a-z0-9_-]+</artifactId>\s*<version>(\d+
 CLI    = re.compile(r'//>\s*using\s+dep\s+org\.llm4s::llm4s-[a-z0-9-]+:(\d+\.\d+\.\d+[^\s"\')`]*)')
 
 bad = []
-files = [p for p in pathlib.Path("docs").rglob("*.md")] + [pathlib.Path("README.md")]
+files = [p for p in pathlib.Path("docs").rglob("*.md")]
 for p in files:
     rel = p.as_posix()
     if rel in SKIP_FILES or rel.startswith(SKIP_DIRS) or not p.exists():
@@ -42,6 +46,33 @@ for p in files:
             line = text.count("\n", 0, m.start(1)) + 1
             bad.append((rel, line, m.group(1)))
 
+# README.md: literal versions, all equal to latest_release.
+project = pathlib.Path("docs/_data/project.yml").read_text(encoding="utf-8")
+lr = re.search(r'^latest_release:\s*"?([^"\s]+)"?\s*$', project, re.M)
+if not lr:
+    print("docs/_data/project.yml has no latest_release")
+    sys.exit(1)
+latest = lr.group(1)
+G8      = re.compile(r'--llm4s_version=(\d+\.\d+\.\d+[^\s"\')`]*)')
+STATUS  = re.compile(r'latest release is \*\*(\d+\.\d+\.\d+[^*]*)\*\*')
+TAG     = re.compile(r'llm4s/llm4s/releases/tag/v(\d+\.\d+\.\d+[^\s)"]*)')
+readme  = pathlib.Path("README.md").read_text(encoding="utf-8")
+seen = 0
+stale = []
+for rx in (SBT, GRADLE, MAVEN, CLI, G8, STATUS, TAG):
+    for m in rx.finditer(readme):
+        seen += 1
+        if m.group(1) != latest:
+            stale.append((readme.count("\n", 0, m.start(1)) + 1, m.group(1)))
+if seen == 0:
+    print(f"README.md shows no llm4s version: expected its install snippets to name latest_release {latest}")
+    sys.exit(1)
+if stale:
+    print(f"README.md names an llm4s version other than latest_release {latest} (docs/_data/project.yml):")
+    for line, v in stale:
+        print(f"  README.md:{line}: {v}")
+    sys.exit(1)
+
 if bad:
     print("Literal llm4s version pinned in an install snippet:")
     for rel, line, v in sorted(bad):
@@ -49,5 +80,5 @@ if bad:
     print("Use {{ site.data.project.latest_release }} instead: pages.yml sets it from the latest GitHub Release,")
     print("so the snippet cannot lag the release. See scripts/check-doc-versions.sh.")
     sys.exit(1)
-print("No literal llm4s version pinned in an install snippet.")
+print(f"No literal llm4s version pinned in an install snippet; README.md's {seen} version(s) match latest_release {latest}.")
 PYEOF

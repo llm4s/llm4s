@@ -2,6 +2,7 @@
 layout: page
 title: Community
 nav_order: 8
+has_children: true
 ---
 
 # Community
