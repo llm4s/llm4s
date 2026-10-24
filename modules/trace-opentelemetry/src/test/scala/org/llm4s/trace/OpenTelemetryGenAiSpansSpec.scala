@@ -287,7 +287,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
           UsageSummary(),
           t0.plusSeconds(2),
           span = Some(TraceSpan(run, None, t0)),
-          provider = Some("bedrock")
+          provider = Some(ProviderId("bedrock"))
         )
       )
 

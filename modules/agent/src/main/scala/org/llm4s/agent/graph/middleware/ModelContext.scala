@@ -69,7 +69,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     attempt: Int,
     request: Seq[Message],
     definitions: => Seq[String],
-    provider: Option[String]
+    provider: Option[ProviderId]
   ): Unit =
     record(
       completion.model,
@@ -107,7 +107,7 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     attempt: Int,
     toolCalls: Int,
     charged: TokenUsage,
-    provider: Option[String]
+    provider: Option[ProviderId]
   ): Unit =
     run.usage.add(model, charged, cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
@@ -224,7 +224,7 @@ object ModelContext:
           attempt = 0,
           conversation.messages,
           definitions(options.tools, options.responseFormat),
-          client.providerId.map(_.asString)
+          client.providerId
         )
       )
       result

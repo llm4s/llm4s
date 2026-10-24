@@ -42,6 +42,7 @@ import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import upickle.default.ReadWriter
 
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
@@ -301,7 +302,7 @@ trait ModelStep:
    * The canonical id of the provider this step calls, when it is known: recorded on each `ModelCallCompleted`, for
    * tracing's `gen_ai.provider.name` (#2275). `None` by default; [[ModelStep.fromClient]] gives its client's.
    */
-  def providerId: Option[String] = None
+  def providerId: Option[ProviderId] = None
 
 object ModelStep:
 
@@ -323,7 +324,7 @@ object ModelStep:
     streaming: Boolean = false,
     output: Option[ResponseFormat] = None
   ): ModelStep = new ModelStep:
-    override def providerId: Option[String] = client.providerId.map(_.asString)
+    override def providerId: Option[ProviderId] = client.providerId
 
     override def responseFormat(tools: ToolSet): Option[ResponseFormat] =
       if output.isEmpty then options.responseFormat else output.filter(_ => tools.toolFunctions.isEmpty)

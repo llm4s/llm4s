@@ -66,8 +66,6 @@ final class TracingLLMClient private (
   override def close(): Unit                  = underlying.close()
   override def providerId: Option[ProviderId] = underlying.providerId
 
-  private def provider: Option[String] = providerId.map(_.asString)
-
   private def elapsed(startedAt: Long): FiniteDuration =
     FiniteDuration(math.max(0L, System.nanoTime() - startedAt), NANOSECONDS)
 
@@ -88,7 +86,7 @@ final class TracingLLMClient private (
           toolCalls = Option(completion.message).map(_.toolCalls.size).getOrElse(completion.toolCalls.size),
           content = completion.content,
           timestamp = at,
-          provider = provider,
+          provider = providerId,
           serverAddress = serverAddress,
           streamed = streamed,
           duration = Some(duration),
@@ -105,7 +103,7 @@ final class TracingLLMClient private (
           timestamp = at,
           operation = Some(TraceAttributeNames.Chat),
           model = requestModel,
-          provider = provider,
+          provider = providerId,
           errorType = Some(error.getClass.getSimpleName),
           duration = Some(duration)
         )

@@ -401,8 +401,11 @@ or pass `OpenTelemetryConfig(captureContent = true)`. Plain and streamed complet
 `TracingLLMClient(client, tracing, providerConfig)`; an `EmbeddingClient` built by `EmbeddingClient.from` reports its
 provider. `TraceEvent.CompletionReceived`, `ErrorOccurred`, `EmbeddingUsageRecorded` and `AgentRunEnded` gained fields
 (provider, duration and the call's details), so a positional pattern on one of them no longer compiles: match on the
-type and read the fields (`case e: TraceEvent.CompletionReceived => e.model`). `LLMClient` gained
-`providerId: Option[ProviderId]` (default `None`), which a client that wraps another should forward.
+type and read the fields (`case e: TraceEvent.CompletionReceived => e.model`). Their `provider` is an
+`Option[ProviderId]`, and `withProvider` takes a `ProviderId` (`.withProvider(ProviderId("openai"))`); `toJson` still
+writes the plain id. `LLMClient` and `EmbeddingClient` gained `providerId: Option[ProviderId]` (default `None`), which a
+client that wraps another should forward, as did the agent's `ModelStep`; `AgentEvents.ModelCallCompleted` carries it
+as `provider: Option[ProviderId]`, stored as the plain id, so events stored before it still read.
 `EmbeddingClient` takes `providerId` as its fourth parameter, before the `ModelRegistryService`: Java and Kotlin
 callers of the constructor pass `Option.empty()` there.
 

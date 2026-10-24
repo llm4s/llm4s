@@ -215,7 +215,7 @@ class OpenTelemetryTracing private[trace] (
           .put(TraceAttributes.RequestModel, e.model)
           .put(TraceAttributes.ToolCalls, e.toolCalls.toLong)
         if (e.id.nonEmpty) builder.put(TraceAttributes.ResponseId, e.id)
-        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
+        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         e.responseModel.foreach(m => builder.put(TraceAttributes.ResponseModel, m))
         if (e.finishReasons.nonEmpty) builder.put(TraceAttributes.FinishReasons, e.finishReasons.asJava)
         e.usage.foreach { u =>
@@ -255,7 +255,7 @@ class OpenTelemetryTracing private[trace] (
           .put(TraceAttributes.OperationName, operation)
           .put(TraceAttributes.ErrorType, e.errorType.getOrElse(e.error.getClass.getName))
         if (model.nonEmpty) builder.put(TraceAttributes.RequestModel, model)
-        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
+        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         (TraceAttributes.spanName(operation, model), builder.build())
 
       case e: TraceEvent.ErrorOccurred =>
@@ -358,7 +358,7 @@ class OpenTelemetryTracing private[trace] (
           .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
         e.parentThreadId.foreach(id => attributes.put(TraceAttributes.ParentThreadId, id))
         e.parentRunId.foreach(id => attributes.put(TraceAttributes.ParentRunId, id))
-        e.provider.foreach(p => attributes.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
+        e.provider.foreach(p => attributes.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         (s"${TraceAttributes.InvokeAgent} ${e.agent}", attributes.build())
 
       case e: TraceEvent.EmbeddingUsageRecorded =>
@@ -371,7 +371,7 @@ class OpenTelemetryTracing private[trace] (
           .put("input_count", e.inputCount.toLong)
           .put(TraceAttributes.InputTokens, e.usage.promptTokens.toLong)
           .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
-        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
+        e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
         (TraceAttributes.spanName(TraceAttributes.Embeddings, e.model), builder.build())
 
       case e: TraceEvent.CostRecorded =>

@@ -58,7 +58,6 @@ class EmbeddingClient(
     startedAt: Long
   ): Result[EmbeddingResponse] = {
     val duration = Some(FiniteDuration(math.max(0L, System.nanoTime() - startedAt), NANOSECONDS))
-    val provider = providerId.map(_.asString)
     tracer.foreach { t =>
       result match {
         case Right(response) =>
@@ -69,7 +68,7 @@ class EmbeddingClient(
                 model = model,
                 operation = operation,
                 inputCount = inputCount,
-                provider = provider,
+                provider = providerId,
                 duration = duration
               )
             )
@@ -94,7 +93,7 @@ class EmbeddingClient(
               TraceAttributeNames.Embeddings,
               operation = Some(TraceAttributeNames.Embeddings),
               model = Some(model),
-              provider = provider,
+              provider = providerId,
               errorType = Some(error.getClass.getSimpleName),
               duration = duration
             )

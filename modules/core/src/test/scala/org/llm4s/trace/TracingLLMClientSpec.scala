@@ -74,7 +74,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.id shouldBe "c-1"
       e.model shouldBe "model"
       e.responseModel shouldBe Some("model-2026")
-      e.provider shouldBe Some("openai")
+      e.provider shouldBe Some(ProviderId("openai"))
       e.serverAddress shouldBe Some("api.example.com")
       e.streamed shouldBe false
       e.duration should not be empty
@@ -107,7 +107,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       val e = tracing.events.loneElement.asInstanceOf[TraceEvent.ErrorOccurred]
       e.operation shouldBe Some("chat")
       e.model shouldBe Some("model")
-      e.provider shouldBe Some("openai")
+      e.provider shouldBe Some(ProviderId("openai"))
       e.errorType shouldBe Some("RateLimitError")
       e.duration should not be empty
       e.toJson("error_type").str shouldBe "RateLimitError"
@@ -181,7 +181,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .embed(EmbeddingRequest(input = Seq("text"), model = model))
 
       val e = tracing.events.collect { case e: TraceEvent.EmbeddingUsageRecorded => e }.loneElement
-      e.provider shouldBe Some("voyage")
+      e.provider shouldBe Some(ProviderId("voyage"))
       e.operation shouldBe "query"
       e.duration should not be empty
       e.toJson("provider").str shouldBe "voyage"
@@ -196,7 +196,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       val e = tracing.events.loneElement.asInstanceOf[TraceEvent.ErrorOccurred]
       e.operation shouldBe Some("embeddings")
       e.model shouldBe Some("embed-1")
-      e.provider shouldBe Some("voyage")
+      e.provider shouldBe Some(ProviderId("voyage"))
       e.errorType shouldBe Some("RateLimitError")
     }
   }
@@ -206,7 +206,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
     "be set by their setters and written by toJson" in {
       val received = TraceEvent
         .CompletionReceived("id", "m", 0, "c", Instant.EPOCH)
-        .withProvider("openai")
+        .withProvider(ProviderId("openai"))
         .withServerAddress("host")
         .withStreamed(true)
         .withDuration(2.seconds)
@@ -239,7 +239,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
         .ErrorOccurred(new RuntimeException("x"), "ctx", Instant.EPOCH, None)
         .withOperation("chat")
         .withModel("m")
-        .withProvider("p")
+        .withProvider(ProviderId("p"))
         .withErrorType("E")
         .withDuration(1.second)
       error.toJson("model").str shouldBe "m"
@@ -255,7 +255,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
       val embedding = TraceEvent
         .EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "e", "op", 1, Instant.EPOCH)
-        .withProvider("p")
+        .withProvider(ProviderId("p"))
         .withDuration(3.millis)
       embedding.toJson("duration_ms").num shouldBe 3
       embedding
@@ -267,7 +267,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
 
       val ended = TraceEvent
         .AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary(), Instant.EPOCH, None, None, None)
-        .withProvider("anthropic")
+        .withProvider(ProviderId("anthropic"))
       ended.toJson("provider").str shouldBe "anthropic"
       ended.withProvider(None).provider shouldBe None
     }

@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.trace.{ TraceContext, TraceEvent, TraceSpan, Tracing }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
@@ -61,7 +62,7 @@ final private[agent] class AgentTracing(
   // this run's own usage, from its ModelCallCompleted events; the thread's LoopKeys.usage spans every run
   private val usage = new AtomicReference(UsageSummary())
   // the provider of the run's first model call that reported one: the run span's gen_ai.provider.name (#2275)
-  private val provider = new AtomicReference[Option[String]](None)
+  private val provider = new AtomicReference[Option[ProviderId]](None)
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
   private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())

@@ -2,6 +2,7 @@ package org.llm4s.trace
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ CompletionOptions, EmbeddingUsage, Message, TokenUsage, UsageSummary }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
@@ -100,7 +101,7 @@ object TraceEvent {
     toolCalls: Int,
     content: String,
     timestamp: Instant,
-    provider: Option[String],
+    provider: Option[ProviderId],
     serverAddress: Option[String],
     streamed: Boolean,
     duration: Option[FiniteDuration],
@@ -115,8 +116,8 @@ object TraceEvent {
     def withToolCalls(toolCalls: Int): CompletionReceived                    = copy(toolCalls = toolCalls)
     def withContent(content: String): CompletionReceived                     = copy(content = content)
     def withTimestamp(timestamp: Instant): CompletionReceived                = copy(timestamp = timestamp)
-    def withProvider(provider: String): CompletionReceived                   = copy(provider = Some(provider))
-    def withProvider(provider: Option[String]): CompletionReceived           = copy(provider = provider)
+    def withProvider(provider: ProviderId): CompletionReceived               = copy(provider = Some(provider))
+    def withProvider(provider: Option[ProviderId]): CompletionReceived       = copy(provider = provider)
     def withServerAddress(serverAddress: String): CompletionReceived         = copy(serverAddress = Some(serverAddress))
     def withServerAddress(serverAddress: Option[String]): CompletionReceived = copy(serverAddress = serverAddress)
     def withStreamed(streamed: Boolean): CompletionReceived                  = copy(streamed = streamed)
@@ -141,7 +142,7 @@ object TraceEvent {
         "tool_calls"    -> toolCalls,
         "content"       -> content
       )
-      provider.foreach(p => json("provider") = p)
+      provider.foreach(p => json("provider") = p.asString)
       serverAddress.foreach(a => json("server_address") = a)
       if (streamed) json("streamed") = true
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
@@ -162,7 +163,7 @@ object TraceEvent {
       toolCalls: Int,
       content: String,
       timestamp: Instant = Instant.now(),
-      provider: Option[String] = None,
+      provider: Option[ProviderId] = None,
       serverAddress: Option[String] = None,
       streamed: Boolean = false,
       duration: Option[FiniteDuration] = None,
@@ -251,7 +252,7 @@ object TraceEvent {
     override val span: Option[TraceSpan],
     operation: Option[String],
     model: Option[String],
-    provider: Option[String],
+    provider: Option[ProviderId],
     errorType: Option[String],
     duration: Option[FiniteDuration]
   ) extends TraceEvent {
@@ -264,8 +265,8 @@ object TraceEvent {
     def withOperation(operation: Option[String]): ErrorOccurred       = copy(operation = operation)
     def withModel(model: String): ErrorOccurred                       = copy(model = Some(model))
     def withModel(model: Option[String]): ErrorOccurred               = copy(model = model)
-    def withProvider(provider: String): ErrorOccurred                 = copy(provider = Some(provider))
-    def withProvider(provider: Option[String]): ErrorOccurred         = copy(provider = provider)
+    def withProvider(provider: ProviderId): ErrorOccurred             = copy(provider = Some(provider))
+    def withProvider(provider: Option[ProviderId]): ErrorOccurred     = copy(provider = provider)
     def withErrorType(errorType: String): ErrorOccurred               = copy(errorType = Some(errorType))
     def withErrorType(errorType: Option[String]): ErrorOccurred       = copy(errorType = errorType)
     def withDuration(duration: FiniteDuration): ErrorOccurred         = copy(duration = Some(duration))
@@ -283,7 +284,7 @@ object TraceEvent {
       )
       operation.foreach(o => json("operation") = o)
       model.foreach(m => json("model") = m)
-      provider.foreach(p => json("provider") = p)
+      provider.foreach(p => json("provider") = p.asString)
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
       TraceSpan.annotate(json, span)
     }
@@ -297,7 +298,7 @@ object TraceEvent {
       span: Option[TraceSpan] = None,
       operation: Option[String] = None,
       model: Option[String] = None,
-      provider: Option[String] = None,
+      provider: Option[ProviderId] = None,
       errorType: Option[String] = None,
       duration: Option[FiniteDuration] = None
     ): ErrorOccurred =
@@ -382,7 +383,7 @@ object TraceEvent {
     parentThreadId: Option[String],
     parentRunId: Option[String],
     override val span: Option[TraceSpan],
-    provider: Option[String]
+    provider: Option[ProviderId]
   ) extends TraceEvent {
     def withThreadId(threadId: String): AgentRunEnded                     = copy(threadId = threadId)
     def withRunId(runId: String): AgentRunEnded                           = copy(runId = runId)
@@ -397,8 +398,8 @@ object TraceEvent {
     def withParentRunId(parentRunId: Option[String]): AgentRunEnded       = copy(parentRunId = parentRunId)
     def withSpan(span: TraceSpan): AgentRunEnded                          = copy(span = Some(span))
     def withSpan(span: Option[TraceSpan]): AgentRunEnded                  = copy(span = span)
-    def withProvider(provider: String): AgentRunEnded                     = copy(provider = Some(provider))
-    def withProvider(provider: Option[String]): AgentRunEnded             = copy(provider = provider)
+    def withProvider(provider: ProviderId): AgentRunEnded                 = copy(provider = Some(provider))
+    def withProvider(provider: Option[ProviderId]): AgentRunEnded         = copy(provider = provider)
 
     def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = {
@@ -416,7 +417,7 @@ object TraceEvent {
       )
       parentThreadId.foreach(id => json("parent_thread_id") = id)
       parentRunId.foreach(id => json("parent_run_id") = id)
-      provider.foreach(p => json("provider") = p)
+      provider.foreach(p => json("provider") = p.asString)
       TraceSpan.annotate(json, span)
     }
   }
@@ -433,7 +434,7 @@ object TraceEvent {
       parentThreadId: Option[String] = None,
       parentRunId: Option[String] = None,
       span: Option[TraceSpan] = None,
-      provider: Option[String] = None
+      provider: Option[ProviderId] = None
     ): AgentRunEnded =
       new AgentRunEnded(
         threadId,
@@ -515,7 +516,7 @@ object TraceEvent {
     operation: String,
     inputCount: Int,
     timestamp: Instant,
-    provider: Option[String],
+    provider: Option[ProviderId],
     duration: Option[FiniteDuration]
   ) extends TraceEvent {
     def withUsage(usage: EmbeddingUsage): EmbeddingUsageRecorded               = copy(usage = usage)
@@ -523,8 +524,8 @@ object TraceEvent {
     def withOperation(operation: String): EmbeddingUsageRecorded               = copy(operation = operation)
     def withInputCount(inputCount: Int): EmbeddingUsageRecorded                = copy(inputCount = inputCount)
     def withTimestamp(timestamp: Instant): EmbeddingUsageRecorded              = copy(timestamp = timestamp)
-    def withProvider(provider: String): EmbeddingUsageRecorded                 = copy(provider = Some(provider))
-    def withProvider(provider: Option[String]): EmbeddingUsageRecorded         = copy(provider = provider)
+    def withProvider(provider: ProviderId): EmbeddingUsageRecorded             = copy(provider = Some(provider))
+    def withProvider(provider: Option[ProviderId]): EmbeddingUsageRecorded     = copy(provider = provider)
     def withDuration(duration: FiniteDuration): EmbeddingUsageRecorded         = copy(duration = Some(duration))
     def withDuration(duration: Option[FiniteDuration]): EmbeddingUsageRecorded = copy(duration = duration)
 
@@ -539,7 +540,7 @@ object TraceEvent {
         "prompt_tokens" -> usage.promptTokens,
         "total_tokens"  -> usage.totalTokens
       )
-      provider.foreach(p => json("provider") = p)
+      provider.foreach(p => json("provider") = p.asString)
       duration.foreach(d => json("duration_ms") = d.toMillis.toDouble)
       json
     }
@@ -552,7 +553,7 @@ object TraceEvent {
       operation: String,
       inputCount: Int,
       timestamp: Instant = Instant.now(),
-      provider: Option[String] = None,
+      provider: Option[ProviderId] = None,
       duration: Option[FiniteDuration] = None
     ): EmbeddingUsageRecorded =
       new EmbeddingUsageRecorded(usage, model, operation, inputCount, timestamp, provider, duration)
