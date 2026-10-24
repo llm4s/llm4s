@@ -283,14 +283,6 @@ object StabilityTiers {
       "upickle",
       "the API's JSON codecs are upickle ReadWriters (macroRW, DurationJson.millisRW); upickle and ujson are core's " +
         "one JSON dependency"
-    ),
-    // TODO(#2360): decide before the baseline whether OpenAIToolHelper stays Stable over openai-java types,
-    // becomes private[llm4s] or becomes @Experimental; then remove or reword this entry.
-    Allowed(
-      "com.openai.models.chat.completions",
-      "OpenAIToolHelper (llm4s-openai) converts a ToolRegistry to openai-java's ChatCompletionTool and sets it on a " +
-        "ChatCompletionCreateParams.Builder; it predates RFC 0004's check and is pending #2360",
-      Some("/org/llm4s/toolapi/OpenAIToolHelper\\.scala$".r)
     )
   )
 

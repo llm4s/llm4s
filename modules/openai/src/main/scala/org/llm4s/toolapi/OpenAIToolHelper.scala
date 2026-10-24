@@ -1,7 +1,5 @@
 package org.llm4s.toolapi
 
-import org.llm4s.annotation.Stable
-
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.{ ChatCompletionCreateParams, ChatCompletionTool }
 
@@ -14,9 +12,12 @@ import scala.jdk.CollectionConverters._
  * This replaces `AzureToolHelper`, whose methods took and returned types from Microsoft's
  * deprecated `com.azure:azure-ai-openai` SDK; `llm4s-openai` moved off that SDK in
  * [[https://github.com/llm4s/llm4s/issues/1132 #1132]].
+ *
+ * Internal: its signatures name openai-java types, which llm4s does not freeze into its API
+ * ([[https://github.com/llm4s/llm4s/issues/2360 #2360]]). Users get the same definitions as JSON from
+ * [[ToolRegistry.getOpenAITools]].
  */
-@Stable
-object OpenAIToolHelper {
+private[llm4s] object OpenAIToolHelper {
 
   /**
    * Sets the registry's tools on a chat-completions request builder.

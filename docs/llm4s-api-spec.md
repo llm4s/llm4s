@@ -303,8 +303,8 @@ trait ToolAdapter[T] {
   def convertTools(tools: Seq[ToolFunction[_, _]]): T
 }
 
-// Example adapter for OpenAI and Azure OpenAI. OpenAIToolHelper (org.llm4s.toolapi) ships in
-// the llm4s-openai module, with the openai-java SDK it targets - not in llm4s-core.
+// Example adapter for OpenAI and Azure OpenAI. OpenAIToolHelper (org.llm4s.toolapi) is internal
+// to the llm4s-openai module (private[llm4s], #2360), with the openai-java SDK it targets.
 // (It replaced AzureToolHelper when llm4s-openai left the deprecated Azure SDK, #1132.)
 class OpenAIToolAdapter extends ToolAdapter[java.util.List[ChatCompletionTool]] {
   def convertTools(tools: Seq[ToolFunction[_, _]]): java.util.List[ChatCompletionTool] =
