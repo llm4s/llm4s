@@ -201,7 +201,7 @@ object ProvidersConfigModel:
      */
     def defaultProviderName: Result[ProviderName] =
       selectedProvider.toRight(
-        ConfigurationError("No default provider configured under llm4s.providers.provider")
+        ConfigurationError(ProviderSections.noDefaultMessage)
       )
 
     /** Sets the default provider's name. */

@@ -289,7 +289,7 @@ class ProviderExchangeLoggingGuideSpec extends AnyFlatSpec with Matchers {
   it should "write a line of the shape the guide shows" in {
     // the line in the guide, copied from a real run (the ids and times differ from run to run)
     val example =
-      """{"exchange_id":"bd1e7d34-3c95-44e5-a9be-428bf3ca85f1","provider":"deepseek","model":"deepseek-chat","request_id":"","correlation_id":"","started_at":"2026-10-07T10:27:19.668236Z","completed_at":"2026-10-07T10:27:19.676649Z","duration_ms":"8","outcome":"Error","request_body":"{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"will fail\"}],\"temperature\":0.7,\"top_p\":1}","response_body":"{\"error\":\"Unauthorized\"}","error_message":"Authentication failed for deepseek: Unauthorized"}"""
+      """{"exchange_id":"bd1e7d34-3c95-44e5-a9be-428bf3ca85f1","provider":"deepseek","model":"deepseek-chat","request_id":"","correlation_id":"","started_at":"2026-10-07T10:27:19.668236Z","completed_at":"2026-10-07T10:27:19.676649Z","duration_ms":"8","outcome":"Error","request_body":"{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"will fail\"}],\"temperature\":0.7,\"top_p\":1}","response_body":"{\"error\":\"Unauthorized\"}","error_message":"Authentication failed for deepseek: Unauthorized. Check that the key is this provider's, and that its project or organisation has access to the model. See https://llm4s.org/getting-started/troubleshooting#authentication-failed"}"""
 
     val dir  = Files.createTempDirectory("exchange-guide-shape")
     val sink = ProviderExchangeSink.createRunScopedJsonl(dir).getOrElse(fail("could not create the sink"))

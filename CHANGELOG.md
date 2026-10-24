@@ -211,6 +211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Changed** first-run configuration errors and provider 401/403, 429 and 404 errors (and a refused Ollama connection)
+  now say the next step and link their [First-Run Troubleshooting](docs/getting-started/troubleshooting.md) entry; configuration errors also name the doctor [#2285](https://github.com/llm4s/llm4s/issues/2285).
 - **Removed** `OpenAIToolHelper` from the public API (now `private[llm4s]`), so no openai-java type is part of
   `llm4s-openai`'s Stable surface [#2360](https://github.com/llm4s/llm4s/issues/2360).
 - **Added** an xAI (Grok) provider (Beta), `provider = "xai"` in `llm4s-openai-compatible`: Chat Completions at

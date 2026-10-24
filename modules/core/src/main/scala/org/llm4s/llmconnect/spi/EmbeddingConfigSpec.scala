@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 
 import com.typesafe.config.ConfigUtil
 import org.llm4s.config.SharedCredentials
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -197,8 +197,11 @@ object EmbeddingConfigSpec:
       case None =>
         Left(
           ConfigurationError(
-            s"Missing ${id.asString} embeddings apiKey: " +
-              SharedCredentials.missingKeyHint(spec.apiKeyEnv, id, sectionPath(id))
+            TroubleshootingLinks.configuration(
+              s"Missing ${id.asString} embeddings apiKey: " +
+                SharedCredentials.missingKeyHint(spec.apiKeyEnv, id, sectionPath(id)),
+              TroubleshootingLinks.Entry.MissingApiKey
+            )
           )
         )
 

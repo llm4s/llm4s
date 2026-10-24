@@ -50,6 +50,7 @@ import org.llm4s.error.{
   ProcessingError,
   RateLimitError,
   ServiceError,
+  TroubleshootingLinks,
   UnknownError,
   ValidationError
 }
@@ -992,7 +993,11 @@ object AnthropicClient {
    * every message that becomes part of the error is scrubbed of `secrets` and of credential JSON fields,
    * passed through the general redactor and truncated.
    */
-  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError = {
+  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError =
+    // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
+    TroubleshootingLinks.annotate(mapSdkError(e, secrets))
+
+  private def mapSdkError(e: Throwable, secrets: Seq[String]): LLMError = {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
     e match {
       case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
@@ -1010,7 +1015,7 @@ object AnthropicClient {
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
-      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapError(io.getCause, secrets)
+      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause, secrets)
       case e =>
         e.toLLMError match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
