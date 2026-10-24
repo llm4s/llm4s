@@ -209,6 +209,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `RunContext.progress` from a node that keeps its context past its run reaching a later run's subscribers:
   once the run has released the thread it is a no-op, as it already was once the claim was lost [#1737](https://github.com/llm4s/llm4s/issues/1737).
 
+### Configuration
+
+- **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
+  (for example `--env=production` with `prod-safe`, whose policies apply only to `prod`): nothing was checked, so a
+  mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
+
 ### Providers
 
 - **Removed** `OpenAIToolHelper` from the public API (now `private[llm4s]`), so no openai-java type is part of

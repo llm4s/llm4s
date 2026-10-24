@@ -91,6 +91,29 @@ class EnvCheckPoliciesSpec extends AnyFunSpec with Matchers {
     }
   }
 
+  describe("When every policy is skipped") {
+    val env = Map(
+      "LLM_PROVIDER"   -> "some-unapproved-provider",
+      "LLM_MODEL"      -> "gpt-4o-mini",
+      "LLM_MAX_TOKENS" -> "1024"
+    )
+
+    it("should exit with 2 for --env=production with prod-safe") {
+      val code = EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "production", preset = "prod-safe"), env.get)
+      code shouldBe 2
+    }
+
+    it("should exit with 2 for --env=dev with prod-safe") {
+      val code = EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "dev", preset = "prod-safe"), env.get)
+      code shouldBe 2
+    }
+
+    it("should not exit with 2 when the preset's policies apply to any env") {
+      val code = EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "production", preset = "cost-controlled"), env.get)
+      code should not be 2
+    }
+  }
+
   describe("Report formatting") {
     it("should produce valid output structure") {
       val result = PolicyEvaluationResult(List(PolicyPass("test-policy")))
