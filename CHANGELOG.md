@@ -342,6 +342,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
   versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
+- **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
+  their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
 - **Changed** `README.md` into a landing page (pitch, links, dependency line and a compiled first call up front); its
   build, CI and module-history sections moved to `CONTRIBUTING.md` and `docs/contribute/project-history.md`, talks and
   GSoC to `docs/community/talks-and-sessions.md`, and its versions are checked against `latest_release` ([#2322](https://github.com/llm4s/llm4s/issues/2322)).

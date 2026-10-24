@@ -281,7 +281,7 @@ val ticket: Result[Ticket] = for {
       <li><strong>Pre-1.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
       <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>
-    <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/reference/roadmap' | relative_url }}">Read the roadmap</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/v1-scope' | relative_url }}">What 1.0 freezes</a></p>
+    <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/reference/roadmap' | relative_url }}">Read the roadmap</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/v1-scope' | relative_url }}">What 1.0 freezes</a> <a class="lp-btn lp-btn--ghost" href="{{ '/reference/enterprise-evaluation' | relative_url }}">Evaluating for your organisation?</a></p>
   </div>
 </section>
 

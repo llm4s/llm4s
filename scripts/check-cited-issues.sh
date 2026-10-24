@@ -17,7 +17,8 @@
 # pull requests that touch docs/ (.github/workflows/docs-cited-issues.yml). scripts/test-check-cited-issues.sh runs
 # it against a fake `gh`, with no network.
 #
-# Usage: scripts/check-cited-issues.sh [page.md ...]   (default: docs/guide/comparison.md)
+# Usage: scripts/check-cited-issues.sh [page.md ...]
+#   (default: docs/guide/comparison.md and docs/reference/enterprise-evaluation.md, whose "Known gaps" are open issues)
 #   GH        the gh executable (default: gh)
 #   REPO      the repository the issues belong to (default: llm4s/llm4s)
 set -euo pipefail
@@ -25,7 +26,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GH="${GH:-gh}"
 REPO="${REPO:-llm4s/llm4s}"
-if [ $# -eq 0 ]; then set -- "$REPO_ROOT/docs/guide/comparison.md"; fi
+if [ $# -eq 0 ]; then
+  set -- "$REPO_ROOT/docs/guide/comparison.md" "$REPO_ROOT/docs/reference/enterprise-evaluation.md"
+fi
 
 # The numbers of a front-matter list `key: [1, 2]`, one per line.
 front_matter_list() {

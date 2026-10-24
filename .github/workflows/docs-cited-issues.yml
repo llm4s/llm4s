@@ -35,7 +35,7 @@ jobs:
       - name: Test the check
         run: scripts/test-check-cited-issues.sh
 
-      - name: Check the issues the comparison page cites
+      - name: Check the issues the comparison and enterprise evaluation pages cite
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/check-cited-issues.sh docs/guide/comparison.md
+        run: scripts/check-cited-issues.sh docs/guide/comparison.md docs/reference/enterprise-evaluation.md
