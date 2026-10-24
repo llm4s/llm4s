@@ -104,6 +104,36 @@ class AgentRoutesHttpSpec extends AnyFlatSpec with TestTimeLimit with Matchers w
       frames(get(s"/runs/$entry/events?after=${seqs.last}").body()).map(_("event")) shouldBe Vector("end")
     }
 
+  it should "send end promptly after the entry closes, with the default events wait" in {
+    val slow = new ServiceFixture(toolDelay = 200.millis, eventsWait = AgentServiceConfig.default.eventsWait)
+    AgentServiceConfig.default.eventsWait shouldBe 15.seconds
+    val own    = new AgentRoutes(slow.service, slow.config, None)
+    val app    = new DeployApp(DeployServiceConfig("127.0.0.1", 0), () => LlmCheckOutcome.Ready("x"), Seq(own))
+    val server = Undertow.builder().addHttpListener(0, "127.0.0.1").setHandler(app.defaultHandler).build()
+    server.start()
+    val base = s"http://127.0.0.1:${server.getListenerInfo.get(0).getAddress.asInstanceOf[InetSocketAddress].getPort}"
+    def send(builder: HttpRequest.Builder): HttpResponse[String] =
+      client.send(builder.timeout(Duration.ofSeconds(30)).build(), HttpResponse.BodyHandlers.ofString())
+    val outcome = scala.util.Try {
+      val submitted = send(
+        HttpRequest
+          .newBuilder(URI.create(s"$base/threads/${thread()}/runs"))
+          .POST(HttpRequest.BodyPublishers.ofString("""{"query": "end on close"}"""))
+          .header("Content-Type", "application/json")
+      )
+      val entry   = ujson.read(submitted.body())("entryId").str
+      val started = System.nanoTime()
+      val stream  = send(HttpRequest.newBuilder(URI.create(s"$base/runs/$entry/events")).GET())
+      ((System.nanoTime() - started).nanos, frames(stream.body()))
+    }
+    server.stop()
+    slow.stop()
+    val (took, all) = outcome.get
+    all.last("event") shouldBe "end"
+    // the run takes about its tool delay; before the fix the stream waited out the full 15 s after the close
+    took should be < 5.seconds
+  }
+
   "GET /runs/{entry}/events" should "answer 404 for an unknown entry and 400 for a bad Last-Event-ID" in {
     get("/runs/987654/events").statusCode() shouldBe 404
     val entry = ujson.read(post(s"/threads/${thread()}/runs", """{"query": "x"}""").body())("entryId").str

@@ -253,6 +253,41 @@ class RunQueueSpec extends AnyFlatSpec with TestTimeLimit with Matchers with Eit
     page.next shouldBe 1L
   }
 
+  it should "finish a waiting follower as soon as the entry closes, though the close commits no event" in {
+    val store     = InMemoryCheckpointer()
+    val submitter = new RunSubmitter(store.runQueue, store)
+    val ticket    = submitter.submit(thread, agent, QueuedInput.query("q")).value
+    val leased    = store.runQueue.take(TakeRequest("w", Set(agent), 30.seconds)).value.get
+    store.runQueue.recordAttempt(leased.lease, RunId("queued-run")).value
+    val waiting = new java.util.concurrent.atomic.AtomicReference[FollowedRun]()
+    val follower =
+      Thread.ofVirtual().start(() => waiting.set(submitter.follow(None, ticket.entryId, 0L, 10, 1.minute).value))
+    Thread.sleep(50)
+    val closedAt = System.nanoTime()
+    store.runQueue.close(leased.lease, EntryOutcome.Done(None, None)).value
+    follower.join(10000)
+    (System.nanoTime() - closedAt).nanos should be < 5.seconds
+    waiting.get.finished shouldBe true
+    waiting.get.events shouldBe empty
+  }
+
+  it should "end a follower's wait with a CancelledError when its thread is interrupted" in {
+    val store     = InMemoryCheckpointer()
+    val submitter = new RunSubmitter(store.runQueue, store)
+    val ticket    = submitter.submit(thread, agent, QueuedInput.query("q")).value
+    val result    = new java.util.concurrent.atomic.AtomicReference[org.llm4s.types.Result[FollowedRun]]()
+    val flagged   = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val follower = Thread.ofVirtual().start { () =>
+      result.set(submitter.follow(None, ticket.entryId, 0L, 10, 1.minute))
+      flagged.set(Thread.currentThread().isInterrupted)
+    }
+    Thread.sleep(50)
+    follower.interrupt()
+    follower.join(10000)
+    result.get.left.value shouldBe a[org.llm4s.error.CancelledError]
+    flagged.get shouldBe true
+  }
+
   // ---- settings ----
 
   "RunQueueSettings" should "default to five attempts, a day's ticket lifetime and the claim's lease" in {

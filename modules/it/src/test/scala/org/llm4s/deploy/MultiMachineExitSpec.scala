@@ -97,9 +97,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
         "llm4s.agent.worker.drain.exitTimeout=2s",
         // the retention sweep every instance's worker runs (one at a time): tombstones are reclaimed 3 s after a delete
         "llm4s.agent.worker.sweep.every=1s",
-        "llm4s.agent.worker.sweep.tombstoneAge=3s",
-        // an event stream rereads its entry this often while no event lands, so it ends promptly when the entry closes
-        "llm4s.deploy-service.events.wait=500ms"
+        "llm4s.agent.worker.sweep.tombstoneAge=3s"
       ).map(s => s"-D$s")
       val command = Vector(java, "-Xmx256m") ++ settings ++
         Vector("-cp", System.getProperty("java.class.path"), "org.llm4s.deploy.DeployServiceMain")
