@@ -148,9 +148,7 @@ that used to be here are in [project history](docs/contribute/project-history.md
   setup, running the samples, CI) and the [open issues](https://github.com/llm4s/llm4s/issues). To report a
   vulnerability, follow [SECURITY.md](SECURITY.md); please do not use a public issue.
 - **Help and adopters**: [SUPPORT.md](SUPPORT.md) lists where to ask what; add your organisation to
-  [ADOPTERS.md](ADOPTERS.md) if you use LLM4S. Evaluating LLM4S for your organisation? The
-  [enterprise evaluation](https://llm4s.org/reference/enterprise-evaluation) page answers the usual intake questions,
-  with links to the evidence and the known gaps. Please read our
+  [ADOPTERS.md](ADOPTERS.md) if you use LLM4S. Please read our
   [Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md).
 - **Support the project** through the [LLM4S Foundation](https://llm4s.org/foundation/).
 
