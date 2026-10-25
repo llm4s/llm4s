@@ -80,6 +80,7 @@ guide/basic-usage.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 getting-started/installation.md | acebca2c40 | skip | sbt build definition, not Scala source
 getting-started/installation.md | f178be64a2 | skip | sbt build definition, not Scala source
+getting-started/installation.md | ec5eaa078c | skip | sbt build definition, not Scala source
 guide/vector-store.md | 82d7940cc0 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 1ec60e6ed3 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 0c5a836dc4 | with | import org.llm4s.vectorstore.elasticsearch._
