@@ -46,11 +46,9 @@ on:
         default: false
         type: boolean
 
-# Sets permissions of the GITHUB_TOKEN
+# Read-only by default; only the deploy job may write to Pages (#2306, OpenSSF Scorecard Token-Permissions).
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # Allow only one concurrent deployment. A build-only run gets a group of its own, per ref: GitHub keeps one pending run
 # per group, so a dry run sharing `pages` could displace (cancel) a real deploy waiting behind the current one.
@@ -61,6 +59,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read  # actions/configure-pages reads the site configuration
     steps:
       # Only a run on `main` can deploy (the `github-pages` environment allows that branch alone). A run started anywhere
       # else must say it is build-only, so it fails here, in seconds, instead of building for minutes and then being
@@ -90,32 +91,32 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The requested release tag, or else the ref this run was started on.
           ref: ${{ inputs.ref != '' && format('refs/tags/{0}', inputs.ref) || github.ref }}
           fetch-depth: 0  # needed for `git describe` to see release tags
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
         with:
           ruby-version: '3.2'
           bundler-cache: true
           working-directory: docs
 
       - name: Setup Java
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: 'sbt'
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@v1
+        uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Setup Pages
         id: pages
-        uses: actions/configure-pages@v6
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Extract version from sbt
         id: version
@@ -204,7 +205,7 @@ jobs:
           JEKYLL_ENV: production
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: docs/_site
 
@@ -216,7 +217,10 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      pages: write     # to deploy to GitHub Pages
+      id-token: write  # to verify the deployment originates from an appropriate source
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -349,9 +349,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
   versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
-- **Changed** `README.md` into a landing page (pitch, links, dependency line and a compiled first call up front); its
-  build, CI and module-history sections moved to `CONTRIBUTING.md` and `docs/contribute/project-history.md`, talks and
-  GSoC to `docs/community/talks-and-sessions.md`, and its versions are checked against `latest_release` ([#2322](https://github.com/llm4s/llm4s/issues/2322)).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
@@ -415,6 +412,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Added** `ScriptedLLMClient.assertExhausted()`, `remaining` and `unusedReplies` (a scripted reply never asked for), and
+  [testing guide](docs/guide/testing-with-the-testkit.md#other-test-frameworks) fixtures for MUnit, munit-cats-effect,
+  weaver and ZIO Test, each a suite CI runs [#2335](https://github.com/llm4s/llm4s/issues/2335).
 
 ### Embeddings & RAG
 
@@ -460,6 +460,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
+  actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
   (`sort -- -tNAME`): uutils coreutils, which the runner's Ubuntu-based image may ship, rewrites it on its unreleased
   main branch into

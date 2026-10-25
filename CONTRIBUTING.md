@@ -99,225 +99,18 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
 - **Dev Hour:** We host a contributor dev hour on Discord every Sunday at 09:00 London time (10:00 in Italy and Germany, 13:30 or 14:30 in India, 16:00 or 17:00 in Singapore, 04:00 in New York, 01:00 in San Francisco; the [full schedule](docs/community/index.md#llm4s-dev-hours) shows summer and winter times).
 - **Support guide:** [SUPPORT.md](SUPPORT.md) lists where to ask questions, report bugs and report vulnerabilities.
 
-## Working on the repository
-
-These sections, from the project layout to running CI locally, were in the README until it became a short landing
-page ([#2322](https://github.com/llm4s/llm4s/issues/2322)). To add llm4s to your own project instead, see the
-[README](README.md#getting-started) and the [installation guide](https://llm4s.org/getting-started/installation).
-
-### Project Structure
-
-- **modules/core**: Core LLM4S framework
-- **modules/workspace**: Workspace runner/client/shared
-- **modules/samples**: Usage examples
-- **docs**: Documentation site and references
-- **hooks**: Pre-commit hook installer
-
-### Setting Up Pre-commit Hooks
-
-To ensure code quality, we use a Git pre-commit hook that automatically checks code formatting and runs tests before allowing commits:
-
-```bash
-# Install the pre-commit hook
-./hooks/install.sh
-
-# The hook will automatically:
-# - Check code formatting with scalafmt
-# - Compile code
-# - Run tests
-
-# To skip the hook temporarily (not recommended):
-# git commit --no-verify
-```
-
-### Prerequisites
-
-- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
-- SBT
-- Docker
-
-#### Verify Java installation
-
-```bash
-java -version
-```
-
-#### Windows
-
-Set `JAVA_HOME` and update your `PATH`.
-
-#### macOS (Homebrew)
-
-```bash
-brew install openjdk@21
-echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
-```
-
-### Building the Project
-
-```bash
-sbt compile
-
-# Build and test
-sbt buildAll
-```
-### Setup your IDE
-> **See:** [docs/reference/contributing.md#IDE-Setup](docs/reference/contributing.md#IDE-Setup)
-
-
-### Setup your LLM Environment
-
-You will need an API key for at least one cloud provider, or a local Ollama installation for local models.
-
-llm4s reads providers from named sections under `llm4s.providers` in `application.conf`. Each
-provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...)
-to a shared key, so with the variable set a section needs only `provider` and `model` - a section
-for a second account sets its own `apiKey = ${?OTHER_VAR}`. Nothing reads `LLM_MODEL`:
-
-```hocon
-llm4s {
-  providers {
-    provider = "openai-main"          # the default: the name of a section below
-
-    openai-main {
-      provider = "openai"
-      model    = "gpt-4o-mini"
-    }
-  }
-}
-```
-
-The samples in this repository already have an `application.conf` whose default is a local Ollama
-section (`ollama-local`, model `llama3:latest`, overridable with `OLLAMA_MODEL` and
-`OLLAMA_BASE_URL`). Run `ollama pull llama3` once, or set `OLLAMA_MODEL` to a model you already
-have (`ollama list`). To run them against a cloud provider, put a section like the one above in
-`modules/samples/src/main/resources/application.local.conf` (ignored by git) and select it:
-
-```bash
-export OPENAI_API_KEY=<your_openai_api_key>
-export LLM4S_PROVIDER=openai-main   # bound by the samples' application.conf
-```
-
-Anthropic, Gemini, Azure, OpenRouter, Z.ai, DeepSeek, Mistral, Cohere, xAI and generic OpenAI-compatible
-endpoints work the same way with `provider = "anthropic"`, `"gemini"`, `"azure"`, `"openrouter"`,
-`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"`, `"xai"` or `"openai-compatible"`, and the vendor's own
-key variable (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`/`GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY`, ...);
-each provider module's `reference.conf` has an example section. See the
-[API keys table](docs/getting-started/configuration.md#api-keys), the
-[configuration guide](docs/getting-started/configuration.md#named-provider-sections) for all of them
-and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
-samples' own bindings.
-
-To check the whole setup in one run - the JDK, the provider section, its module, its API key (where it was found,
-never its value) and, with `--local`, whether Ollama is running and has the model - run the
-[doctor](docs/reference/doctor.md); each step that fails prints the fix:
-
-```bash
-sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config modules/samples/src/main/resources/application.conf --local"
-```
-
-No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
-
-### Running the Examples
-
-The quickest start is the [cookbook](docs/examples/cookbook.md): complete, runnable programs that need no API key
-(a scripted client stands in for the model; add `--live` for your configured provider), each run in CI. Recipes:
-[classify text into an enum](docs/examples/cookbook/structured-output.md), [extract data from an email](docs/examples/cookbook/email-extraction.md), [summarise a long document](docs/examples/cookbook/summarise.md), [answer questions over a folder of files](docs/examples/cookbook/folder-qa.md), [an agent that calls two tools](docs/examples/cookbook/tool-calling.md), [a guardrailed chatbot](docs/examples/cookbook/guardrails.md), [stream tokens](docs/examples/cookbook/streaming.md), [fall back between providers](docs/examples/cookbook/fallback.md), [cache repeated calls](docs/examples/cookbook/caching.md), [evaluate an answer with a judge](docs/examples/cookbook/judge.md), [keyword search](docs/examples/cookbook/document-qa.md), [memory](docs/examples/cookbook/memory.md), [several agents in one graph](docs/examples/cookbook/multi-agent-graph.md).
-
-```bash
-sbt "samples/runMain org.llm4s.samples.cookbook.StructuredOutputRecipe"
-```
-
-Every other sample:
-
-```bash
-# Using Scala 3
-sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
-```
-
-### Run containerized demo
-
-```bash
-sbt workspaceRunner/Docker/publishLocal
-sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
-```
-
-### Scala Version
-
-LLM4S now targets Scala 3.7.1 only. The build keeps compatibility-oriented aliases for Scala 3 verification:
-
-- `src/main/scala` - Common code for all versions
-- `src/main/scala-3` - Scala 3 specific code (add when needed)
-
-We've kept convenient build aliases:
-
-```bash
-# Compile the repo
-sbt compileAll
-
-# Test the repo
-sbt testAll
-
-# Clean, compile, and test
-sbt buildAll
-
-# Publish current Scala 3 artifacts
-sbt publishAll
-```
-
-### Continuous Integration (CI)
-
-LLM4S uses GitHub Actions for continuous integration to ensure code quality and compatibility across supported platforms.
-
-#### CI Workflows
-
-##### Main CI Pipeline (`ci.yml`)
-
-Our unified CI workflow runs on every push and pull request to main/master branches:
-
-- **Quick Checks**: formatting, scalafix, compilation and the build's policy checks, in one sbt server. It runs
-  alongside the test jobs rather than before them, and gates the merge through `All Tests Pass`
-- **Code Coverage**: per-module coverage floors, enforced in four parallel legs (`Code Coverage (<leg>)`)
-- **Cross-Platform Testing**: Tests run on Ubuntu and Windows with Scala 3.7.1
-- **Template Validation**: Verifies the g8 template works correctly
-- **Caching**: Optimized caching strategy with Coursier for faster builds
-
-##### Claude Code Review (`claude-code-review.yml`)
-
-Automated AI-powered code review for pull requests:
-
-- **Automatic Reviews**: Trusted PRs get automatic Claude reviews
-- **Security**: External PRs require manual trigger by maintainers
-- **Manual Trigger**: Maintainers can request reviews with `@claude` comment
-
-##### Release Pipeline (`release.yml`)
-
-Automated release process triggered by version tags (format: `v0.3.2`):
-
-- **Tag Format**: Must use `v` prefix (e.g., `v0.3.2`, not `0.3.2`)
-- **Pre-release Checks**: Runs full CI suite before publishing
-- **GPG Signing**: Artifacts are signed for security
-- **Maven Central**: Publishes to Sonatype/Maven Central
-
-See the [release guide](docs/reference/release.md) for detailed release instructions.
-
-#### Running CI Locally
-
-You can run the same checks locally before pushing:
-
-```bash
-# Check formatting
-sbt scalafmtCheckAll
-
-# Compile
-sbt compile
-
-# Run all tests
-sbt test
-
-# Full build (compile + test)
-sbt buildAll
-```
+#### Workflow security
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s) (`scorecard.yml`) scores the workflows,
+and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to two rules:
+
+- **Least-privilege permissions.** Every workflow declares a top-level `permissions:` block that grants no write
+  access (normally `contents: read`). A job that needs more (`pull-requests: write`, `id-token: write`, ...) declares
+  it on the job.
+- **Actions pinned by SHA.** Every third-party `uses:` names a full 40-character commit SHA with the version as a
+  comment, for example `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. Resolve the SHA
+  with `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. Dependabot keeps the pins and their comments current.
+  Local actions and reusable workflows (`./.github/...`) stay as they are.
 
 ## Pull Request Workflow
 
@@ -666,8 +459,8 @@ sbt scalafmtAll       # Format code
 
 ### Checked code blocks
 
-The fenced ```` ```scala ```` blocks of the pages listed in `DocSnippets.pages` (`project/DocSnippets.scala`),
-the repository `README.md` among them (listed as `../README.md`), compile as test sources of `samples`, so `sbt samples/Test/compile` (and `sbt test`) fails when a snippet no longer
+The fenced ```` ```scala ```` blocks of the pages listed in `DocSnippets.pages` (`project/DocSnippets.scala`)
+compile as test sources of `samples`, so `sbt samples/Test/compile` (and `sbt test`) fails when a snippet no longer
 matches the code. Which pages are checked, and the order to convert the rest in, is on the
 [conversion plan](https://llm4s.org/contribute/doc-snippets-plan) (`docs/contribute/doc-snippets-plan.md`).
 

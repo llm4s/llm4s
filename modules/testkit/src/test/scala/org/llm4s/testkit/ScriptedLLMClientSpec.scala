@@ -362,4 +362,94 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     client.callCount shouldBe total
     client.calls.map(_.conversation.messages.head.content).toSet.size shouldBe total
   }
+
+  "ScriptedLLMClient.unusedReplies" should "list the replies of the script no call has used yet, in order" in {
+    val second = Reply.text("two")
+    val third  = Reply.toolCall("get_weather", """{"city": "Oslo"}""")
+    val client = ScriptedLLMClient.sequence(Reply.text("one"), second, third)
+    client.unusedReplies shouldBe Vector(Reply.text("one"), second, third)
+    client.remaining shouldBe 3
+    ask(client, "a")
+    client.unusedReplies shouldBe Vector(second, third)
+    client.remaining shouldBe 2
+    ask(client, "b")
+    ask(client, "c")
+    client.unusedReplies shouldBe empty
+    client.remaining shouldBe 0
+  }
+
+  it should "count a streamed call and a call that returned a scripted failure as using their reply" in {
+    val client = ScriptedLLMClient.sequence(Reply.failure(RateLimitError("openai")), Reply.text("streamed"))
+    ask(client, "a").isLeft shouldBe true
+    client.streamComplete(conversation("b"), options, _ => ()).value.content shouldBe "streamed"
+    client.remaining shouldBe 0
+    client.assertExhausted() shouldBe Right(())
+  }
+
+  it should "stay empty after calls past the end of the script" in {
+    val client = ScriptedLLMClient.sequence(Reply.text("only"))
+    ask(client, "a")
+    ask(client, "b").isLeft shouldBe true
+    client.remaining shouldBe 0
+    client.assertExhausted() shouldBe Right(())
+  }
+
+  it should "be empty for a client without a fixed script" in {
+    val ruled = ScriptedLLMClient.respondingTo { case _ => Reply.text("x") }
+    val same  = ScriptedLLMClient.always(Reply.text("x"))
+    List(ruled, same).foreach { client =>
+      client.unusedReplies shouldBe empty
+      client.remaining shouldBe 0
+      client.assertExhausted() shouldBe Right(())
+    }
+  }
+
+  it should "start again from the whole script on a fresh client from a with* method" in {
+    val client = ScriptedLLMClient.sequence(Reply.text("one"), Reply.text("two"))
+    ask(client, "a")
+    client.remaining shouldBe 1
+    client.withContextWindow(1000).remaining shouldBe 2
+    client.withReserveCompletion(100).remaining shouldBe 2
+    client.withChunkSize(4).remaining shouldBe 2
+  }
+
+  "ScriptedLLMClient.assertExhausted" should "name every unused reply with its position in the script" in {
+    val client = ScriptedLLMClient.sequence(
+      Reply.text("first"),
+      Reply.toolCall("get_weather", """{"city": "Oslo"}"""),
+      Reply.text("It is 21 degrees in Oslo.")
+    )
+    ask(client, "a")
+    client.assertExhausted().left.value shouldBe
+      """2 of 3 scripted replies were not used (the code under test made 1 call):
+        |  reply 2: tool call get_weather({"city":"Oslo"})
+        |  reply 3: text "It is 21 degrees in Oslo."""".stripMargin
+  }
+
+  it should "say so when one reply was not used and no call was made" in {
+    ScriptedLLMClient.sequence(Reply.text("never")).assertExhausted().left.value shouldBe
+      """1 of 1 scripted replies was not used (the code under test made 0 calls):
+        |  reply 1: text "never"""".stripMargin
+  }
+
+  it should "describe a failure, an empty answer and a reply with text and several tool calls" in {
+    val client = ScriptedLLMClient.sequence(
+      Reply.text("used"),
+      Reply.text("used"),
+      Reply.failure(RateLimitError("openai")),
+      Reply(),
+      Reply.text("Checking.").withToolCall("get_weather", """{"city": "Oslo"}""").withToolCall("get_time")
+    )
+    ask(client, "a")
+    ask(client, "b")
+    val message = client.assertExhausted().left.value
+    message should startWith("3 of 5 scripted replies were not used (the code under test made 2 calls):")
+    message should include(
+      s"  reply 3: failure RateLimitError: ${ScriptedLLMClient.preview(RateLimitError("openai").message)}"
+    )
+    message should include("""  reply 4: text """"")
+    message should include(
+      """  reply 5: text "Checking.", tool call get_weather({"city":"Oslo"}), tool call get_time({})"""
+    )
+  }
 }

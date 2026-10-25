@@ -26,7 +26,7 @@ import scala.annotation.tailrec
  *
  * Every `scala` block of the page is a run of lines of THIS file, word for word (indentation aside), or of one of
  * the [[TestingWithTestkitGuideSpec.otherSpecs]] - the `llm4s-effect` and `llm4s-zio` examples, which run in those
- * modules' own tests: the last test reads the page and fails if a block is not found in any of them, so the page
+ * modules' own tests, and the MUnit, munit-cats-effect, weaver and ZIO Test suites beside this spec: the last test reads the page and fails if a block is not found in any of them, so the page
  * cannot show code that no longer compiles. Change the page and these specs together.
  */
 class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -82,6 +82,24 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
     error.message should include("Capital of France?")
   }
 
+  "The exhaustion check of the guide" should "name the reply the code never asked for" in {
+    val client = ScriptedLLMClient.sequence(Reply.text("Paris"), Reply.text("Rome"))
+    client.complete(conversation, options)
+
+    client.remaining shouldBe 1
+    client.assertExhausted().left.value should include("""reply 2: text "Rome"""")
+  }
+
+  it should "pass once every scripted reply was used" in {
+    val client = ScriptedLLMClient.sequence(
+      Reply.toolCall("get_temperature", """{"city": "Oslo"}"""),
+      Reply.text("It is 21 degrees in Oslo: pack light layers.")
+    )
+
+    packingAdvice(client, "Oslo")
+    client.assertExhausted() shouldBe Right(())
+  }
+
   "The respondingTo example of the guide" should "choose the answer from the conversation" in {
     val client = ScriptedLLMClient.respondingTo {
       case c if c.messages.lastOption.exists(_.content.contains("Oslo"))  => Reply.text("cold")
@@ -126,7 +144,11 @@ object TestingWithTestkitGuideSpec {
   /** The specs outside this module whose code the page also shows, relative to the checkout's root. */
   val otherSpecs: Seq[String] = Seq(
     "modules/llm4s-effect/src/test/scala/org/llm4s/effect/cats/ScriptedAgentIOSpec.scala",
-    "modules/llm4s-zio/src/test/scala/org/llm4s/zio/ScriptedAgentZSpec.scala"
+    "modules/llm4s-zio/src/test/scala/org/llm4s/zio/ScriptedAgentZSpec.scala",
+    "modules/samples/src/test/scala/org/llm4s/samples/guides/TestkitMUnitSuite.scala",
+    "modules/samples/src/test/scala/org/llm4s/samples/guides/TestkitMUnitCatsEffectSuite.scala",
+    "modules/samples/src/test/scala/org/llm4s/samples/guides/TestkitWeaverSuite.scala",
+    "modules/samples/src/test/scala/org/llm4s/samples/guides/TestkitZioSpec.scala"
   )
 
   final case class Temperature(city: String, celsius: Double) derives ReadWriter
