@@ -458,6 +458,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
   Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
   regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
+- **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
+  actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
   (`sort -- -tNAME`): uutils coreutils, which the runner's Ubuntu-based image may ship, rewrites it on its unreleased
   main branch into

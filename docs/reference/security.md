@@ -232,7 +232,35 @@ give the workspace credentials or network access that an escaped process could e
 
 **Recommended practice:** Review the Scala Steward pull requests promptly, run `sbt dependencyUpdates` (from `sbt-dependency-updates`) to see what is behind, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
 
-### 8. File Tool Path Policy
+### 8. Supply chain of the build (OpenSSF Scorecard)
+
+**Risk:** A compromised or retagged GitHub Action, or an over-privileged workflow token, can tamper with the build or
+the release, which holds the PGP and Sonatype secrets.
+
+**Mitigation (implemented,
+[#2306](https://github.com/llm4s/llm4s/issues/2306)):** `.github/workflows/scorecard.yml` runs
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s) on every push to `main`, weekly and when
+a branch-protection rule changes, publishes the result (the README badge) and uploads the findings to the repository's
+code scanning alerts. Every workflow declares a read-only top-level `permissions:` block, with wider grants only on
+the jobs that need them, and every third-party action is pinned by full commit SHA with its version as a comment,
+which Dependabot keeps current. `scripts/check-workflow-security.sh` (Quick Checks) fails a pull request that breaks
+either rule; see *Workflow security* in [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#workflow-security).
+
+The baseline is the first published run after #2306 merged, at the link above. Where each scored check stands:
+
+| Check | Status |
+|---|---|
+| Token-Permissions | Addressed: read-only top level in every workflow; writes only on jobs (release publishing, Pages deploy, the star-history commit, PR comments). |
+| Pinned-Dependencies | Actions addressed. Not yet: the `Ollama Integration` job (runs only on `main`) installs Ollama with `curl ... \| sh`; replacing it with a checksummed release download is a follow-up, since it can be verified only on `main`. |
+| Dangerous-Workflow, Dependency-Update-Tool, Security-Policy, License, Code-Review, Maintained, CI-Tests, Vulnerabilities | Already in place (the one `pull_request_target` workflow only comments and checks out no PR code; Dependabot and Scala Steward, `SECURITY.md`, MIT, reviewed PRs). |
+| Branch-Protection | Needs an admin (see *Repository settings* in `MAINTAINERS.md`): require pull-request reviews (one approval, dismiss stale approvals), the required status checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog Secret Scan`), no force pushes or deletions on `main`, and apply the rules to administrators. Scorecard reads the full settings only with a fine-grained admin token, which this repository does not give it, so some points stay unscored. |
+| Signed-Releases | Tracked separately (signed releases and provenance). Artifacts on Maven Central are PGP-signed; Scorecard looks for signatures or provenance attached to the GitHub Release. |
+| CII-Best-Practices | Tracked separately (the OpenSSF Best Practices badge). |
+| SAST | Not addressed: Scorecard counts CodeQL or a similar analyser on every PR; CodeQL's Scala support (via the Java extractor of compiled code) would add a full build to each PR. Scalafix and the review checklist below cover part of it. |
+| Fuzzing | Not addressed deliberately: Scorecard recognises OSS-Fuzz, ClusterFuzzLite or language-native fuzzers (Go, Rust, ...), none of which covers Scala. Parsers that take untrusted input (`Redaction`, the workspace command policy) are covered by their unit tests instead. |
+| Packaging | Not applicable as scored: Scorecard looks for a GitHub Packages or registry publishing workflow it recognises; llm4s publishes to Maven Central from `release.yml`. |
+
+### 9. File Tool Path Policy
 
 **Risk:** the built-in file tools (`read_file`, `list_directory`, `file_info`, `write_file`), and the shell tool's
 file arguments under `ShellConfig.readOnlyWithin`, could read credentials or system files outside what the agent

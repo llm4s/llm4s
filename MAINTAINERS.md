@@ -22,6 +22,11 @@ Required checks and the merge queue on `main` are admin settings; the workflows 
 reporting*). [SECURITY.md](SECURITY.md) names it as the preferred way to report, so it must stay enabled; check with
 `gh api repos/llm4s/llm4s/private-vulnerability-reporting`, which should return `{"enabled":true}`.
 
+**Branch protection on `main`** feeds OpenSSF Scorecard's Branch-Protection check (`scorecard.yml`, #2306): require a
+pull-request review (one approval, stale approvals dismissed), the required checks above, no force pushes or
+deletions, and include administrators. [Security reference](docs/reference/security.md#8-supply-chain-of-the-build-openssf-scorecard)
+lists where each Scorecard check stands.
+
 ## Handling security reports
 
 Reports reach the [Security Committee](docs/people.md#security-committee) and the maintainers, either as a private

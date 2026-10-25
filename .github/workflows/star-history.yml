@@ -10,14 +10,16 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   star-history:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # commits the refreshed chart to the default branch
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -33,7 +35,7 @@ jobs:
           fi
 
       - name: Generate Star History
-        uses: narayann7/star-history-action@v1
+        uses: narayann7/star-history-action@12543ab7352b91fb7c5eb0c4fbb39772baa0c168 # v1.0.6
         with:
           repos: ${{ github.repository }}
 

@@ -10,6 +10,10 @@ on:
   pull_request_review:
     types: [ submitted ]
 
+# Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   claude:
     if: |
@@ -28,7 +32,7 @@ jobs:
       DEFAULT_REVIEW_DOC: docs/reference/review-guidelines.md
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
@@ -153,7 +157,7 @@ jobs:
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
