@@ -193,7 +193,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "block /etc, /var, /sys, /proc and /dev by default, even when they are allowed" in {
     assume(!isWindows, "the default blocklist is made of POSIX paths")
-    FileConfig().blockedPaths shouldBe Seq("/etc", "/var", "/sys", "/proc", "/dev")
+    (FileConfig().blockedPaths should contain).allOf("/etc", "/var", "/sys", "/proc", "/dev")
     val tools = BuiltinTools
       .customSafe(fileConfig = Some(FileConfig(allowedPaths = Some(Seq("/etc")))))
       .value

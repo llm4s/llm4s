@@ -375,6 +375,27 @@ Public types of frozen modules that would otherwise have been frozen by mistake 
   `SessionSummary`) are `@Experimental`, matching their Beta tier in [1.0 Scope](v1-scope): MiMa does not freeze
   them, and they can change in a minor release with a migration note. Nothing about them changed in this release.
 
+### The file tools' default `blockedPaths` covers each platform (#1408)
+
+`FileConfig()`'s `blockedPaths` defaults to the new `FileConfig.DefaultBlockedPaths`, the system and credential
+locations of the platform the JVM runs on ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F6). It was
+`/etc`, `/var`, `/sys`, `/proc` and `/dev` everywhere, which on Windows blocked nothing. Now:
+
+- Linux and other POSIX systems add `/boot`, `/root` and `/run`; macOS adds `/private/etc`, `/private/var` and
+  `/Library/Keychains`; Windows has `C:\Windows`, `C:\ProgramData\Microsoft\Crypto` and `C:\ProgramData\ssh` instead
+  of the POSIX entries.
+- Every platform blocks the credential files under the user's home (`.ssh`, `.gnupg`, `.aws`, `.azure`,
+  `.config/gcloud`, `.kube`, `.docker`, `.config/gh`, `.netrc`, `.git-credentials`, `.pgpass`, `.password-store`,
+  `.npmrc`, `.pypirc`, `.m2/settings.xml`, `.m2/settings-security.xml`, `.ivy2/.credentials`, `.sbt/.credentials`),
+  plus the GNOME keyring on Linux, `~/Library/Keychains` on macOS, and on Windows `_netrc`, `NTUSER.DAT` and the
+  Credential Manager, DPAPI, gcloud, GnuPG, GitHub CLI and PostgreSQL stores under `AppData`.
+- A blocked entry is matched without regard to case, so `/ETC/hosts` is blocked by `/etc`.
+
+An agent that read one of these through the default config is now refused. To keep reading it, pass your own list,
+best built from the default: `FileConfig(blockedPaths = FileConfig.DefaultBlockedPaths.filterNot(_.endsWith(".npmrc")))`.
+The tool descriptions write the user's home directory as `~`. A config that sets `blockedPaths` itself is unchanged,
+apart from the case-insensitive match.
+
 ### Console tracing prints no content by default (#2311)
 
 The default tracing mode is still `console`, but `ConsoleTracing` now prints metadata only

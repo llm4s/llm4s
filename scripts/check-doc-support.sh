@@ -11,7 +11,12 @@
 #
 #   1. Scala  - every project has the same `scalaVersion`. A `Scala N[.N[.N]]` in the docs must agree with it
 #               as far as it goes, unless the same clause says it is not supported (`Scala 2.13 support is
-#               deferred`, `no Scala 2.13 artifact`). `scalaVersion := "..."` in a snippet must equal it, an
+#               deferred`, `no Scala 2.13 artifact`), or the version is a Scala 2.13 and the line names the TASTy
+#               reader (`Scala 2.13: call-only, via the TASTy reader`, #2301) or the page's front matter declares
+#               `scala_2_13: tasty-reader` (a page about that route): a 2.13 project calls the Scala 3 artifacts
+#               with `-Ytasty-reader`, which docs/design/scala-2.13-interop/run-probes.sh checks in CI.
+#               A Markdown link's target (`](scala-2-13)`) is a path, not a claim.
+#               `scalaVersion := "..."` in a snippet must equal it (or be a 2.13 on such a line), an
 #               `llm4s-*_<binary>` artifact must be the build's binary version, and `crossScalaVersions` or
 #               `sbt +task` may appear only if some project cross-builds. docs/reference/v1-scope.md must
 #               state the version.
@@ -190,6 +195,23 @@ DENIAL = re.compile(r"\b(?:not|no|never|nor|without|cannot|can't|don't|doesn't|i
                     r"|unsupported|planned|post-1\.0|after 1\.0)\b", re.I)
 
 
+# A Scala 2.13 caller reads the Scala 3 artifacts through the TASTy reader (#2301): a line that says so may name 2.13,
+# and so may a page whose front matter declares `scala_2_13: tasty-reader`.
+TASTY_READER = re.compile(r"TASTy reader|-Ytasty-reader|for2_13Use3", re.I)
+TASTY_READER_PAGE = re.compile(r"\A---\n(?:(?!---\n).*\n)*?scala_2_13:\s*tasty-reader\s*\n")
+
+
+def in_link_target(text, start):
+    """[start] is inside a Markdown link's target, `](scala-2-13)`: a page's path, not a claim."""
+    line, ls = line_at(text, start)
+    return line.rfind("](", 0, start - ls) > line.rfind(")", 0, start - ls)
+
+
+def via_tasty_reader(text, start, version):
+    return re.match(r"2\.13(\.|$)", version) is not None and (
+        TASTY_READER.search(line_at(text, start)[0]) is not None or TASTY_READER_PAGE.match(text) is not None)
+
+
 def denied(text, start, end):
     """The clause around [start, end) says the version is not supported."""
     line, ls = line_at(text, start)
@@ -210,10 +232,12 @@ for p, text in TEXTS.items() if SCALA else ():
             continue                                     # `the Scala 2.13 scala-library` Scala 3 runs on
         parts = m.group(1).split(".")
         agrees = all(x == "x" or (i < len(PARTS) and x == PARTS[i]) for i, x in enumerate(parts))
-        if not agrees and not denied(text, m.start(), m.end()):
+        if (not agrees and not denied(text, m.start(), m.end()) and not via_tasty_reader(text, m.start(), m.group(1))
+                and not in_link_target(text, m.start())):
             fail(rel, line_of(text, m.start()), f"documents Scala {m.group(1)}, but the build is Scala {SCALA}")
     for m in re.finditer(r'\bscalaVersion\s*:=\s*"([^"]+)"', text):
-        if m.group(1) != SCALA and not exempt(line_at(text, m.start())[0]):
+        if (m.group(1) != SCALA and not exempt(line_at(text, m.start())[0])
+                and not via_tasty_reader(text, m.start(), m.group(1))):
             fail(rel, line_of(text, m.start()), f"pins Scala {m.group(1)}, but the build is Scala {SCALA}")
     for m in re.finditer(r"\bllm4s[\w-]*_(\d+(?:\.\d+)?)(?![\w.])", text):
         if m.group(1) != BINARY and not exempt(line_at(text, m.start())[0]) and not denied(text, m.start(), m.end()):

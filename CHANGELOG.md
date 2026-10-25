@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `FileConfig()` blocks more by default: each platform's system and credential locations (`FileConfig.DefaultBlockedPaths`),
+  matched regardless of case; [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
 - `HTTPS_PROXY` and `NO_PROXY` are now honoured by every provider client (`llm4s.http.proxy`), `http` is a built-in
   section key, and `BedrockConfig`, `WatsonXConfig`, `EmbeddingProviderConfig` and `OpenAICompatibleClient.Settings`
   gain a `network` field; [migration](docs/reference/migration.md#one-proxy-and-tls-setting-for-every-provider-client-2273).
@@ -346,6 +348,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with
+  `llm4s-java-api` workarounds; a CI workflow runs the 2.13 probes against the build and fails on any outcome change ([#2301](https://github.com/llm4s/llm4s/issues/2301)).
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
   versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
@@ -460,6 +464,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
+  Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
+  regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
 - **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
   actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
@@ -484,6 +491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** a per-module dependency licence report (`sbt licenseReport`, SPDX ids, attached to each GitHub Release) and
+  `sbt licenseCheck`, a CI quick check that fails on a denied or unknown runtime licence [#2308](https://github.com/llm4s/llm4s/issues/2308); [Dependency licences](docs/reference/licences.md).
 - **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
   frozen module (top-level or nested) whose constructor is not `private` / `private[x]`, and for a public `copy` on
   one, naming the file, line and type. Case classes with no fields are exempt; `GrowthExempted` in
