@@ -11,6 +11,7 @@ more providers, with agents, tool calling, RAG, guardrails, memory and tracing.*
 [![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3?label=Maven%20Central)](https://central.sonatype.com/artifact/org.llm4s/llm4s-core_3)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/llm4s/llm4s/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg?token=WQSNRKV121)](https://codecov.io/gh/llm4s/llm4s)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/llm4s/llm4s/badge)](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)
 [![Discord](https://img.shields.io/static/v1?label=Chat%20on&message=Discord&color=blue&logo=Discord&style=flat-square)](https://discord.gg/4uvTPn6qww)
 
 ```scala
