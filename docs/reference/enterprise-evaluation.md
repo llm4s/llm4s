@@ -64,7 +64,7 @@ linked to its open issue.
 | Is there an SBOM? | Yes: a CycloneDX SBOM per published module on each GitHub Release, also built and validated on every pull request. See [Software Bill of Materials](sbom). |
 | Are dependencies scanned? | OSV-Scanner scans the SBOMs weekly and on pull requests that change dependencies; a pull request that adds a HIGH or CRITICAL advisory fails. See [Vulnerability scanning](sbom#vulnerability-scanning). |
 | Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`). There is no build provenance attestation, the SBOMs are not signed, and there is no guide to verifying a release yet: see [Known gaps](#known-gaps). |
-| OpenSSF Scorecard or Best Practices badge? | Neither yet: see [Known gaps](#known-gaps). |
+| OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet: see [Known gaps](#known-gaps). |
 
 ## Data protection
 
@@ -116,7 +116,7 @@ closes, so this list is updated when the gap is.
 | GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
 | No published support policy: release cadence, supported lines, long-term support, end-of-support notice | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
 | No build provenance or signed SBOMs, and no guide to verifying a release | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
-| No OpenSSF Scorecard | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
+| Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No per-module dependency licence report or licence check in CI | [#2308](https://github.com/llm4s/llm4s/issues/2308) |
 | No legal and IP FAQ | [#2309](https://github.com/llm4s/llm4s/issues/2309) |
@@ -150,9 +150,9 @@ Security: SECURITY.md; reports handled by the Security Committee and maintainers
   No published advisories. Private vulnerability reporting not yet
   enabled (https://github.com/llm4s/llm4s/issues/1465).
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
-  dependency changes. Maven Central artifacts PGP-signed. No build provenance
-  (https://github.com/llm4s/llm4s/issues/2305), no OpenSSF Scorecard
-  (https://github.com/llm4s/llm4s/issues/2306) or Best Practices badge
+  dependency changes. Maven Central artifacts PGP-signed. OpenSSF Scorecard on every push to
+  main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). No build provenance
+  (https://github.com/llm4s/llm4s/issues/2305) or Best Practices badge
   (https://github.com/llm4s/llm4s/issues/2307).
 Data protection: no telemetry; data goes only to the providers and stores you configure;
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).
