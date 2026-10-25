@@ -215,6 +215,13 @@
   speakers: [Kannupriya Kalra]
   url: https://luma.com/ossg
 
+- start: 2026-11-25
+  event: London Scala Users Group
+  title: "LLM4S 1.0: From Idea to Production AI in Scala/JVM"
+  location: London, UK 🇬🇧
+  speakers: [Kannupriya Kalra, Rory Graves]
+  url: https://www.meetup.com/london-scala/
+
 - start: 2026-11-26
   event: LLMday + Prompt Engineering Conference London Q4 2026
   title: "LLM4S 1.0: From Idea to Production AI in Scala/JVM"
