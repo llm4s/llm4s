@@ -222,7 +222,10 @@ input = (trig['workflow_dispatch'] || {}).dig('inputs', 'ref')
 errs << "workflow_dispatch has no `ref` input" if input.nil?
 errs << "the ref input must be an optional string" unless input && input['type'] == 'string' && input['required'] == false
 errs << "the push trigger changed (must still be main with the docs paths)" unless trig['push']['branches'] == ['main'] && trig['push']['paths'].include?('docs/**') && trig['push']['paths'].include?('.github/workflows/pages.yml')
-errs << "permissions changed" unless pages['permissions'] == { 'contents' => 'read', 'pages' => 'write', 'id-token' => 'write' }
+# Read-only at the top level (#2306); the deploy job alone may write to Pages, the build only reads its configuration.
+errs << "permissions changed" unless pages['permissions'] == { 'contents' => 'read' } &&
+  pages.dig('jobs', 'build', 'permissions') == { 'contents' => 'read', 'pages' => 'read' } &&
+  pages.dig('jobs', 'deploy', 'permissions') == { 'pages' => 'write', 'id-token' => 'write' }
 # A real deploy is in the one `pages` group; a build-only run is in a group of its own, so it can never displace a
 # pending deploy (GitHub keeps one pending run per group and cancels the older one).
 errs << "concurrency changed (a deploy must be in `pages`, a dry run in its own group)" unless pages['concurrency'] == {
