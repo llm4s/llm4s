@@ -301,6 +301,19 @@ Automated release process triggered by version tags (format: `v0.3.2`):
 
 See the [release guide](docs/reference/release.md) for detailed release instructions.
 
+#### Workflow security
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s) (`scorecard.yml`) scores the workflows,
+and `scripts/check-workflow-security.sh` (Quick Checks) holds a pull request to two rules:
+
+- **Least-privilege permissions.** Every workflow declares a top-level `permissions:` block that grants no write
+  access (normally `contents: read`). A job that needs more (`pull-requests: write`, `id-token: write`, ...) declares
+  it on the job.
+- **Actions pinned by SHA.** Every third-party `uses:` names a full 40-character commit SHA with the version as a
+  comment, for example `uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`. Resolve the SHA
+  with `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`. Dependabot keeps the pins and their comments current.
+  Local actions and reusable workflows (`./.github/...`) stay as they are.
+
 #### Running CI Locally
 
 You can run the same checks locally before pushing:
