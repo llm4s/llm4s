@@ -20,3 +20,6 @@ addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.7")
 
 // CycloneDX software bill of materials: `sbt publishedSboms`, attached to each GitHub release (docs/reference/sbom.md)
 addSbtPlugin("com.github.sbt" % "sbt-sbom" % "0.6.0")
+
+// Tests of the build's own policy code (project/src/test/scala): `sbt "reload plugins" test`, run by CI's quick checks
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % Test

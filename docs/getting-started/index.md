@@ -24,6 +24,7 @@ This section will guide you through:
     and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`
     {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
 11. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
+12. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 

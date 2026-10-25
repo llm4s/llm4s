@@ -190,7 +190,7 @@ not pass one.
 | Setting | `FileConfig` (read tools) | `WriteConfig` (`write_file`) |
 |---------|---------------------------|------------------------------|
 | `allowedPaths` | `None`: any path outside `blockedPaths` | **required**: no default |
-| `blockedPaths` | `/etc`, `/var`, `/sys`, `/proc`, `/dev` (wins over `allowedPaths`) | not a setting |
+| `blockedPaths` | `FileConfig.DefaultBlockedPaths`: the platform's system and credential locations (wins over `allowedPaths`; see below) | not a setting |
 | `maxFileSize` | 1 MB | 10 MB |
 | `followSymlinks` | `false` | not a setting |
 | `allowOverwrite` | not a setting | `false` |
@@ -223,6 +223,22 @@ the resolved path; a directory swapped for a link between the check and the open
 close. A hard link inside an allowed directory to a file elsewhere is not contained: no path check can tell it from the
 file itself. On macOS `/var` is a link to `/private/var`, so the default blocklist's `/var` also blocks the temporary
 directories under `/private/var/folders`.
+
+The default blocklist, `FileConfig.DefaultBlockedPaths`, depends on the platform the JVM runs on:
+
+| Platform | System locations | Under the user's home, besides the common entries |
+|----------|------------------|----------------------------------------------------|
+| Linux and other POSIX | `/etc`, `/var`, `/sys`, `/proc`, `/dev`, `/boot`, `/root`, `/run` | `.local/share/keyrings` |
+| macOS | `/etc`, `/var`, `/sys`, `/proc`, `/dev`, `/private/etc`, `/private/var`, `/Library/Keychains` | `Library/Keychains` |
+| Windows | `C:\Windows`, `C:\ProgramData\Microsoft\Crypto`, `C:\ProgramData\ssh` | `_netrc`, `NTUSER.DAT`, and under `AppData`: `Roaming\Microsoft\Credentials`, `Local\Microsoft\Credentials`, `Roaming\Microsoft\Protect`, `Roaming\Microsoft\Crypto`, `Roaming\gcloud`, `Roaming\gnupg`, `Roaming\GitHub CLI`, `Roaming\postgresql` |
+
+The common entries under the home directory (`user.home`) are `.ssh`, `.gnupg`, `.aws`, `.azure`, `.config/gcloud`,
+`.kube`, `.docker`, `.config/gh`, `.netrc`, `.git-credentials`, `.pgpass`, `.password-store`, `.npmrc`, `.pypirc`,
+`.m2/settings.xml`, `.m2/settings-security.xml`, `.ivy2/.credentials` and `.sbt/.credentials`. A blocked entry is
+matched without regard to case (`/ETC/hosts` is inside `/etc`), as a case-insensitive file system such as the macOS
+and Windows defaults requires. A Windows installed on a drive other than `C:` is not covered: add its directory, as
+in `FileConfig(blockedPaths = FileConfig.DefaultBlockedPaths :+ "D:\\Windows")`. A blocklist cannot name every
+sensitive file, so it is defence in depth: set `allowedPaths` to the directories the agent needs.
 
 `developmentSafe(workingDirectory, fileAllowedPaths)` reads only inside `workingDirectory` when you give one, and
 anywhere outside the blocklist when you do not. It writes inside `fileAllowedPaths` (default `/tmp`) and the working

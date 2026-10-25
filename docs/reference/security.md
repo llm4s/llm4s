@@ -260,6 +260,35 @@ The baseline is the first published run after #2306 merged, at the link above. W
 | Fuzzing | Not addressed deliberately: Scorecard recognises OSS-Fuzz, ClusterFuzzLite or language-native fuzzers (Go, Rust, ...), none of which covers Scala. Parsers that take untrusted input (`Redaction`, the workspace command policy) are covered by their unit tests instead. |
 | Packaging | Not applicable as scored: Scorecard looks for a GitHub Packages or registry publishing workflow it recognises; llm4s publishes to Maven Central from `release.yml`. |
 
+### 9. File Tool Path Policy
+
+**Risk:** the built-in file tools (`read_file`, `list_directory`, `file_info`, `write_file`), and the shell tool's
+file arguments under `ShellConfig.readOnlyWithin`, could read credentials or system files outside what the agent
+needs: through a symbolic link, a path that shares a name prefix with an allowed one, a differently cased spelling, or
+a platform whose sensitive locations the default blocklist did not name
+([#1408](https://github.com/llm4s/llm4s/issues/1408)).
+
+**Mitigation (implemented):**
+- A path is judged by its real location: every symbolic link resolved, `..` read both the POSIX and the Windows way,
+  and compared one path component at a time with each allowed and blocked entry, itself resolved the same way. The
+  tools open the location they judged.
+- The default `FileConfig.blockedPaths` is `FileConfig.DefaultBlockedPaths`, per platform: on Linux `/etc`, `/var`,
+  `/sys`, `/proc`, `/dev`, `/boot`, `/root` and `/run`; on macOS the first five, `/private/etc`, `/private/var` and
+  `/Library/Keychains`; on Windows `C:\Windows`, `C:\ProgramData\Microsoft\Crypto` and `C:\ProgramData\ssh`; and on
+  each the SSH, GnuPG, cloud CLI (AWS, Azure, Google Cloud, Kubernetes, Docker, GitHub), `.netrc`, git, PostgreSQL,
+  password-store and package-registry credentials under the user's home, the GNOME keyring on Linux, the login
+  keychains on macOS, and the Credential Manager and DPAPI stores and `NTUSER.DAT` on Windows. The full list is in
+  the [built-in tools guide](../guide/builtin-tools#files-fileconfig-and-writeconfig).
+- Blocked entries are matched without regard to case or Unicode normalisation, as the case-insensitive default file
+  systems of macOS and Windows require. Allowed entries are not, since matching more there would allow more.
+- Tool descriptions write the user's home directory as `~`, so the account name is not sent to the model provider.
+
+**Residual risk:** a blocklist cannot name every sensitive file, and `allowedPaths = None` (the default) still allows
+everything else the process can read. Set `allowedPaths` to the directories the agent needs, and run the process as a
+user, or in a container, that cannot read anything else. A Windows installed on a drive other than `C:` needs its
+directory added. A hard link is not contained, and a directory swapped for a link between the check and the open is
+a race the check narrows and does not close.
+
 ## Security Checklist for PR Authors
 
 Before merging code that touches provider clients, tool implementations, or memory stores:

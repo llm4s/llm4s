@@ -270,6 +270,22 @@ lazy val publishedSboms = taskKey[Seq[File]](
   "Write a CycloneDX SBOM for every published llm4s-* module into target/sboms and return the files"
 )
 
+// ---- licence report and policy (#2308) ----
+// One CSV per published `llm4s-*` module that ships a jar (the same set as the SBOMs) listing every runtime
+// dependency, transitive ones included, with its licence as an SPDX id, collected into `target/licences`. The
+// release workflow attaches them next to the SBOMs. `licenseCheck` fails when one of those licences is denied or
+// unknown, naming the module and the path that pulled it in. See project/LicencePolicy.scala and
+// docs/reference/licences.md.
+lazy val licenceRows = taskKey[Seq[(String, String, Seq[LicencePolicy.Row])]](
+  "The licence report rows of every published llm4s-* module: (name, version, rows)"
+)
+lazy val licenseReport = taskKey[Seq[File]](
+  "Write a licence report (CSV) for every published llm4s-* module into target/licences and return the files"
+)
+lazy val licenseCheck = taskKey[Unit](
+  "Fail the build if a published module's runtime dependency has a denied or unknown licence"
+)
+
 // ---- coverage policy check ----
 // Fails the build when a module has neither a coverage floor nor an explicit opt-out.
 // The absence of a decision must be an error, not a silent default.
@@ -435,6 +451,111 @@ lazy val llm4s = (project in file("."))
         written.map(_._1).sortBy(_.getName)
       }
     }.value,
+    licenceRows / aggregate := false,
+    licenceRows := Def.taskDyn {
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      val file = (ThisBuild / baseDirectory).value / "project" / "licence-exceptions.txt"
+      Def.task {
+        val exceptions = LicencePolicy.parseExceptions(IO.readLines(file)) match {
+          case Right(es) => es
+          case Left(bad) => throw new MessageOnlyException(s"Malformed $file:\n${bad.mkString("\n")}")
+        }
+        // `updateFull`, not `update`: only the full report records each module's callers, which give the path.
+        val reports = Def
+          .task(
+            (
+              name.value,
+              version.value,
+              CrossVersion(scalaVersion.value, scalaBinaryVersion.value)(projectID.value),
+              updateFull.value
+            )
+          )
+          .all(ScopeFilter(inProjects(refs: _*)))
+          .value
+        def key(m: ModuleID) = s"${m.organization}:${m.name}"
+        val modules = reports.sortBy(_._1).map { case (name, version, self, report) =>
+          val resolved = report
+            .configuration(ConfigRef("runtime"))
+            .map(_.modules)
+            .getOrElse(Vector.empty)
+            .filterNot(_.evicted)
+          val callers = resolved.map(m => key(m.module) -> m.callers.map(c => key(c.caller)).toSeq).toMap
+          // The module itself and other llm4s modules show as their names; a library as group:artifact.
+          val labels = resolved.collect {
+            case m if m.module.organization == "org.llm4s" => key(m.module) -> m.module.name
+          }.toMap + (key(self) -> name)
+          val deps = resolved
+            .filterNot(_.module.organization == "org.llm4s")
+            .map { m =>
+              val path = LicencePolicy.pathTo(key(m.module), callers, key(self)).map(k => labels.getOrElse(k, k))
+              LicencePolicy.Dependency(
+                m.module.organization,
+                m.module.name,
+                m.module.revision,
+                m.licenses.toSeq,
+                path
+              )
+            }
+          (name, version, deps)
+        }
+        val unused = LicencePolicy.unused(exceptions, modules.flatMap(_._3))
+        if (unused.nonEmpty)
+          throw new MessageOnlyException(
+            s"""${unused.size} entry(ies) in $file match no runtime dependency of a published module:
+               |${unused.map(e => s"  ${e.key}").mkString("\n")}
+               |Remove them, so a dependency added later is reviewed afresh.""".stripMargin
+          )
+        modules.map { case (name, version, deps) =>
+          (name, version, deps.map(LicencePolicy.classify(_, exceptions)))
+        }
+      }
+    }.value,
+    licenseReport / aggregate := false,
+    licenseReport := {
+      val outDir = target.value / "licences"
+      IO.delete(outDir)
+      IO.createDirectory(outDir)
+      val files = licenceRows.value.map { case (name, version, rows) =>
+        val f = outDir / s"$name-$version.licences.csv"
+        IO.write(f, LicencePolicy.csv(rows))
+        f
+      }
+      streams.value.log.info(s"Wrote ${files.size} licence reports to $outDir")
+      files.sortBy(_.getName)
+    },
+    licenseCheck / aggregate := false,
+    licenseCheck := {
+      val log     = streams.value.log
+      val modules = licenceRows.value
+      if (modules.isEmpty || modules.exists(_._3.isEmpty))
+        throw new MessageOnlyException(
+          s"No runtime dependencies resolved for: ${modules.filter(_._3.isEmpty).map(_._1).mkString(", ")}. " +
+            "The check read an empty update report."
+        )
+      val width = modules.map(_._1.length).max
+      log.info("Runtime dependency licences per published module:")
+      modules.foreach { case (name, _, rows) =>
+        val counts = rows.groupBy(_.licence).toSeq.sortBy(-_._2.size).map { case (l, rs) => s"$l ${rs.size}" }
+        log.info(s"  ${name.padTo(width, ' ')}  ${counts.mkString(", ")}")
+      }
+      val bad = LicencePolicy.failures(modules.map(m => (m._1, m._3)))
+      if (bad.nonEmpty)
+        throw new MessageOnlyException(
+          s"""${bad.size} runtime dependency(ies) with a licence the policy does not allow:
+             |${bad.mkString("\n")}
+             |A published module may bring only the licences in LicencePolicy.allowed onto its users' classpath
+             |(#2308, docs/reference/licences.md). Replace the dependency; or, if its POM is wrong or silent and a
+             |review establishes an allowed licence, add 'group:artifact | SPDX id | justification' to
+             |project/licence-exceptions.txt in the same commit. To see the full report: sbt licenseReport.""".stripMargin
+        )
+      log.info(s"All ${modules.map(_._3.size).sum} runtime dependency licences of ${modules.size} modules are allowed")
+    },
     pomMetadataCheck / aggregate := false,
     pomMetadataCheck := Def.taskDyn {
       val projects = Def.task((thisProjectRef.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
@@ -1590,7 +1711,19 @@ lazy val samples = (project in file("modules//samples"))
       Deps.playJson   % Test,
       Deps.zioJson    % Test,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
-      Deps.doobieHikari % Test
+      Deps.doobieHikari % Test,
+      // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
+      // a suite in src/test/scala/org/llm4s/samples/guides, so the fixtures the page shows compile and run.
+      Deps.munit             % Test,
+      Deps.munitCatsEffect   % Test,
+      Deps.weaverCats        % Test,
+      Deps.zioTestSamples    % Test,
+      Deps.zioTestSbtSamples % Test
+    ),
+    testFrameworks ++= Seq(
+      new TestFramework("munit.Framework"),
+      new TestFramework("weaver.framework.CatsEffect"),
+      new TestFramework("zio.test.sbt.ZTestFramework")
     ),
     appLogging,
     // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer

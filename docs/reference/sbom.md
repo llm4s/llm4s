@@ -105,6 +105,7 @@ scripts/osv-new-findings.sh target/osv.json        # the report; add a base repo
 ## What is not covered
 
 - The SBOMs are not signed and there is no build provenance attestation yet.
-- They list dependencies, not licences, and say nothing about vulnerabilities by themselves: a finding comes from
-  a scan of the BOM at a point in time.
+- They list dependencies, not licences: the licences are in a separate report per module, attached to the same
+  Release and checked against a policy on every pull request ([Dependency licences](licences)). Nor do they say
+  anything about vulnerabilities by themselves: a finding comes from a scan of the BOM at a point in time.
 - The container images (`workspace-runner`) have no SBOM.

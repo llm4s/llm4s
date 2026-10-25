@@ -76,7 +76,7 @@ object ReadFileTool {
     ToolBuilder[Map[String, Any], ReadFileResult](
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
-        s"Blocked paths: ${config.blockedPaths.mkString(", ")}. " +
+        s"Blocked paths: ${config.describedBlockedPaths}. " +
         config.allowedPaths.map(p => s"Allowed paths: ${p.mkString(", ")}").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>

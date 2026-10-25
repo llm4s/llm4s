@@ -26,6 +26,10 @@ import java.time.Instant
  * client.calls.head.lastUserText
  * }}}
  *
+ * A reply the code under test never asked for usually means it took a wrong branch. [[assertExhausted]] returns a
+ * `Left` naming every reply of a [[ScriptedLLMClient.sequence]] script that no call used, so a test (or a fixture of
+ * any test framework) can fail on it; [[unusedReplies]] and [[remaining]] give the same information as values.
+ *
  * Every request is recorded ([[calls]]), whether it came through `complete` or `streamComplete`. A call the script
  * has no reply for does not hang or throw: it returns a `Left(`[[UnscriptedCallError]]`)` that names the call and
  * shows the last message, so a test that makes more calls than it scripted fails with a message that says why.
@@ -40,6 +44,7 @@ import java.time.Instant
  */
 final class ScriptedLLMClient private (
   respond: (Int, Conversation) => Either[String, Reply],
+  script: Vector[Reply],
   contextWindow: Int,
   reserveCompletion: Int,
   val chunkSize: Int
@@ -57,17 +62,53 @@ final class ScriptedLLMClient private (
   /** The most recent request, if there was one. */
   def lastCall: Option[RecordedCall] = lock.synchronized(recorded.lastOption)
 
+  /**
+   * The replies of a [[ScriptedLLMClient.sequence]] script that no call has used yet, in script order. A client from
+   * [[ScriptedLLMClient.respondingTo]] or [[ScriptedLLMClient.always]] has no fixed script, so for it this is always
+   * empty.
+   */
+  def unusedReplies: Vector[Reply] = lock.synchronized(script.drop(recorded.size))
+
+  /** The number of [[unusedReplies]]: 0 once every scripted reply has been used. */
+  def remaining: Int = unusedReplies.size
+
+  /**
+   * `Right(())` when every reply of the script was used, otherwise a `Left` whose message names each unused reply:
+   *
+   * {{{
+   * 1 of 2 scripted replies was not used (the code under test made 1 call):
+   *   reply 2: text "It is 21 degrees in Oslo."
+   * }}}
+   *
+   * Call it at the end of a test, or from a test framework's fixture, to fail a test whose code under test asked
+   * for fewer replies than were scripted. Always `Right(())` for a client without a fixed script ([[unusedReplies]]).
+   */
+  def assertExhausted(): Either[String, Unit] = {
+    val (made, unused) = lock.synchronized((recorded.size, script.drop(recorded.size)))
+    if (unused.isEmpty) Right(())
+    else {
+      val verb  = if (unused.size == 1) "was" else "were"
+      val calls = if (made == 1) "call" else "calls"
+      val heading =
+        s"${unused.size} of ${script.size} scripted replies $verb not used (the code under test made $made $calls):"
+      val lines = unused.zipWithIndex.map { case (reply, offset) =>
+        s"  reply ${made + offset + 1}: ${ScriptedLLMClient.describe(reply)}"
+      }
+      Left((heading +: lines).mkString("\n"))
+    }
+  }
+
   /** A fresh client with the same script and no recorded calls, reporting another context window. */
   def withContextWindow(tokens: Int): ScriptedLLMClient =
-    new ScriptedLLMClient(respond, tokens, reserveCompletion, chunkSize)
+    new ScriptedLLMClient(respond, script, tokens, reserveCompletion, chunkSize)
 
   /** A fresh client with the same script and no recorded calls, reserving another number of tokens for the answer. */
   def withReserveCompletion(tokens: Int): ScriptedLLMClient =
-    new ScriptedLLMClient(respond, contextWindow, tokens, chunkSize)
+    new ScriptedLLMClient(respond, script, contextWindow, tokens, chunkSize)
 
   /** A fresh client with the same script and no recorded calls, streaming text in chunks of this size (at least 1). */
   def withChunkSize(characters: Int): ScriptedLLMClient =
-    new ScriptedLLMClient(respond, contextWindow, reserveCompletion, math.max(1, characters))
+    new ScriptedLLMClient(respond, script, contextWindow, reserveCompletion, math.max(1, characters))
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     answer(conversation, options, streamed = false).map { case (_, completion) => completion }
@@ -157,9 +198,11 @@ object ScriptedLLMClient {
    */
   def sequence(replies: Reply*): ScriptedLLMClient = {
     val script = replies.toVector
-    create { (index, _) =>
-      script.lift(index).toRight(s"the script has ${script.size} ${if (script.size == 1) "reply" else "replies"}")
-    }
+    create(
+      (index, _) =>
+        script.lift(index).toRight(s"the script has ${script.size} ${if (script.size == 1) "reply" else "replies"}"),
+      script
+    )
   }
 
   /**
@@ -176,13 +219,23 @@ object ScriptedLLMClient {
    * }}}
    */
   def respondingTo(rules: PartialFunction[Conversation, Reply]): ScriptedLLMClient =
-    create((_, conversation) => rules.lift(conversation).toRight("no rule matched the conversation"))
+    create((_, conversation) => rules.lift(conversation).toRight("no rule matched the conversation"), Vector.empty)
 
   /** A client that gives the same reply to every call. */
-  def always(reply: Reply): ScriptedLLMClient = create((_, _) => Right(reply))
+  def always(reply: Reply): ScriptedLLMClient = create((_, _) => Right(reply), Vector.empty)
 
-  private def create(respond: (Int, Conversation) => Either[String, Reply]): ScriptedLLMClient =
-    new ScriptedLLMClient(respond, DefaultContextWindow, DefaultReserveCompletion, DefaultChunkSize)
+  private def create(respond: (Int, Conversation) => Either[String, Reply], script: Vector[Reply]): ScriptedLLMClient =
+    new ScriptedLLMClient(respond, script, DefaultContextWindow, DefaultReserveCompletion, DefaultChunkSize)
+
+  /** One line saying what a reply would have returned, for [[ScriptedLLMClient.assertExhausted]]. */
+  private def describe(reply: Reply): String =
+    reply.failure match {
+      case Some(error) => s"failure ${error.getClass.getSimpleName}: ${preview(error.message)}"
+      case None =>
+        val text = Option.when(reply.content.nonEmpty || reply.toolCalls.isEmpty)(s"text \"${preview(reply.content)}\"")
+        val tools = reply.toolCalls.map(call => s"tool call ${call.name}(${preview(call.arguments.render())})")
+        (text.toList ++ tools).mkString(", ")
+    }
 
   private[testkit] def preview(text: String): String = {
     val oneLine = text.replace('\n', ' ')

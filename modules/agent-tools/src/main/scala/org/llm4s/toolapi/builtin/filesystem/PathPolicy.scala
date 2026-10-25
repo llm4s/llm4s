@@ -1,6 +1,8 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import java.nio.file.{ Files, LinkOption, Path, Paths }
+import java.text.Normalizer
+import java.util.Locale
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -28,6 +30,7 @@ import scala.util.Try
  * A tail that does not exist yet, such as the target of a write, is kept as written (its `.` and `..` applied to
  * it). Allowed and blocked entries are resolved the same way, and the comparison is `Path.startsWith`, which
  * compares whole path components: `/srv/data` contains `/srv/data/x` and does not contain `/srv/data-secret/x`.
+ * A blocked entry is also matched without regard to case ([[within]]), so `/ETC/hosts` is inside a blocked `/etc`.
  *
  * The file tools remove `.` and `..` from the path they are given as text before calling this, and then open the
  * location it returns, so for them `data/link/../x` is `data/x`, the two readings agree, and what they judge is what
@@ -199,12 +202,32 @@ private[builtin] object PathPolicy {
   private def permitted(spelled: Path, physical: Path, lexical: Path, entries: Entries): Boolean = {
     val locations = Seq(physical, lexical)
     !entries.blocked.exists { case (blockedLexical, blockedReal) =>
-      (spelled +: locations).exists(location => location.startsWith(blockedLexical) || location.startsWith(blockedReal))
+      (spelled +: locations).exists(location => within(location, blockedLexical) || within(location, blockedReal))
     } &&
     entries.allowed.forall(roots =>
       locations.forall(location => roots.exists { case (_, rootReal) => location.startsWith(rootReal) })
     )
   }
+
+  /**
+   * Whether `path` is `entry` or inside it, comparing whole components without regard to case or Unicode
+   * normalisation (NFC), as a case-insensitive file system such as the macOS and Windows defaults does - used for
+   * blocked entries only, where matching more is the safe direction. A blocked entry that exists is already compared
+   * by its real spelling; this also catches a differently spelled path to a part that does not exist yet, and a
+   * blocked entry that does not exist. On a case-sensitive file system it blocks a few more paths than it must.
+   */
+  private[filesystem] def within(path: Path, entry: Path): Boolean =
+    path.startsWith(entry) || {
+      def fold(name: String): String =
+        Normalizer.normalize(name, Normalizer.Form.NFC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
+      val sameRoot = (Option(path.getRoot), Option(entry.getRoot)) match {
+        case (Some(a), Some(b)) => fold(a.toString) == fold(b.toString)
+        case (None, None)       => true
+        case _                  => false
+      }
+      sameRoot && entry.getNameCount <= path.getNameCount &&
+      (0 until entry.getNameCount).forall(i => fold(path.getName(i).toString) == fold(entry.getName(i).toString))
+    }
 
   /** A configured entry as its absolute form and its real form. */
   private def entry(configured: String): Option[(Path, Path)] =
