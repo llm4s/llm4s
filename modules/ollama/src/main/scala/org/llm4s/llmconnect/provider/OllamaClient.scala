@@ -82,9 +82,12 @@ class OllamaClient(
   config: OllamaConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
+
+  // The injected client, or one routed by the config's proxy and TLS settings when none was given.
+  private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
   protected def providerName: String      = "ollama"
@@ -111,7 +114,7 @@ class OllamaClient(
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
     val startedAt   = Instant.now()
-    httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
+    http.post(url, headers, requestText, timeout = requestTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(OllamaClient.notRunningHint(error)))
       case Right(response) =>
@@ -208,7 +211,7 @@ class OllamaClient(
     val startedAt   = Instant.now()
     val rawResponse = new StringBuilder
 
-    httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
+    http.postStream(url, headers, requestText, timeout = streamTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(OllamaClient.notRunningHint(error)))
       case Right(response) if response.statusCode != 200 =>
@@ -399,7 +402,7 @@ class OllamaClient(
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   override protected def releaseResources(): Unit =
-    (httpClient: Any) match {
+    (http: Any) match {
       case c: AutoCloseable => c.close()
       case _                => ()
     }

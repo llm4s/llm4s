@@ -45,7 +45,8 @@ class ZaiClient(
         credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
-        timeouts = config.timeouts
+        timeouts = config.timeouts,
+        network = config.network
       ),
       ZaiDialect,
       metrics,

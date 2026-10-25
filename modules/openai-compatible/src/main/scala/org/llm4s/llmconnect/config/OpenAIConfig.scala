@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.spi.ProviderConfigKey
@@ -52,7 +53,8 @@ final case class OpenAIConfig private (
   reserveCompletion: Int,
   explicitProviderId: Option[ProviderId],
   workloadIdentity: Option[OpenAIWorkloadIdentity],
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -71,9 +73,10 @@ final case class OpenAIConfig private (
       if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]                            = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig = copy(timeouts = timeouts)
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): OpenAIConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): OpenAIConfig = copy(network = network)
 
   def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
@@ -124,7 +127,8 @@ object OpenAIConfig {
       reserveCompletion,
       explicitProviderId,
       workloadIdentity,
-      ProviderTimeouts.default
+      ProviderTimeouts.default,
+      network = HttpNetworkSettings.default
     )
 
   /**

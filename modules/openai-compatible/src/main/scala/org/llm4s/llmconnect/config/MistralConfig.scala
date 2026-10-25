@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -35,12 +36,14 @@ final case class MistralConfig private (
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  override val timeouts: ProviderTimeouts
+  override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("mistral")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): MistralConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                   = ProviderId("mistral")
+  override def endpointUrl: Option[String]                              = Some(baseUrl)
+  override def withModel(model: String): MistralConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
 
   def withApiKey(apiKey: String): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
@@ -72,7 +75,15 @@ object MistralConfig:
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
   ): MistralConfig =
-    new MistralConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts)
+    new MistralConfig(
+      apiKey,
+      model,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      timeouts,
+      network = HttpNetworkSettings.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

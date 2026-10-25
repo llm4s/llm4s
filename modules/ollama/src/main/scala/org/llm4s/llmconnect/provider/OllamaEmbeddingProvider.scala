@@ -66,7 +66,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = Llm4sHttpClient.create()
+    private val httpClient = Llm4sHttpClient.create(cfg.network)
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =

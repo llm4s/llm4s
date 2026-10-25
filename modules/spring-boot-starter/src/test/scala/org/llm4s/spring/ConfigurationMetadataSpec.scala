@@ -76,11 +76,20 @@ class ConfigurationMetadataSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "list nothing else but the llm4s.providers and llm4s.credentials blocks" in {
+  it should "list nothing else but the llm4s.providers, llm4s.credentials and llm4s.http blocks" in {
     (listed.keySet -- properties.keySet) shouldBe Set(
       "llm4s.providers.provider",
       "llm4s.providers",
       "llm4s.credentials"
+    ) ++ Set(
+      "llm4s.http.proxy.url",
+      "llm4s.http.proxy.username",
+      "llm4s.http.proxy.password",
+      "llm4s.http.proxy.non-proxy-hosts",
+      "llm4s.http.tls.trust-store",
+      "llm4s.http.tls.trust-store-password",
+      "llm4s.http.tls.key-store",
+      "llm4s.http.tls.key-store-password"
     )
   }
 

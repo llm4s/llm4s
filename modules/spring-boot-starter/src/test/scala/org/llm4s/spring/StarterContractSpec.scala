@@ -222,6 +222,15 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       SpringProviderSource.ProvidersPrefix,
       s"${SpringProviderSource.ProvidersPrefix}.provider",
       SpringProviderSource.CredentialsPrefix
+    ) ++ Set(
+      "llm4s.http.proxy.url",
+      "llm4s.http.proxy.username",
+      "llm4s.http.proxy.password",
+      "llm4s.http.proxy.non-proxy-hosts",
+      "llm4s.http.tls.trust-store",
+      "llm4s.http.tls.trust-store-password",
+      "llm4s.http.tls.key-store",
+      "llm4s.http.tls.key-store-password"
     )
     documented.keySet shouldBe bound + "llm4s.enabled" ++ environmentRead
     documented.values.foreach(p => p("description").str should not be empty)

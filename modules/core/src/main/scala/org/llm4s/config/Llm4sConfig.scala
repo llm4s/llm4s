@@ -223,13 +223,31 @@ object Llm4sConfig {
     yield config
 
   /**
+   * The proxy and TLS settings of the `llm4s.http` block: what every provider client loaded through this
+   * object uses, unless its section's own `http` block overrides it. Pass them to
+   * `Llm4sHttpClient.create(network)` for an HTTP client of your own - a tool, a vector store - that should
+   * take the same route.
+   *
+   * A missing trust or key store, or a wrong password, is a `ConfigurationError` naming the key.
+   */
+  def httpNetwork(): Result[org.llm4s.http.HttpNetworkSettings] =
+    httpNetwork(ConfigSource.default)
+
+  private[llm4s] def httpNetwork(source: ConfigSource): Result[org.llm4s.http.HttpNetworkSettings] =
+    HttpNetworkReader.load(source)
+
+  /**
    * Lists models for the configured default named provider.
    */
   def listModels()(using ProviderRegistry): Result[List[DiscoveredModel]] =
     listModels(ConfigSource.default)
 
   private[config] def listModels(source: ConfigSource)(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    listModels(source, Llm4sHttpClient.create())
+    for
+      sections    <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
+      defaultName <- sections.defaultProviderName
+      models      <- listModelsThroughNetwork(defaultName.asName, sections)
+    yield models
 
   private[config] def listModels(
     source: ConfigSource,
@@ -245,7 +263,15 @@ object Llm4sConfig {
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
    */
   def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    listModels(name, ConfigSource.default, Llm4sHttpClient.create())
+    org.llm4s.config.ProvidersConfigLoader.loadSections(ConfigSource.default).flatMap(listModelsThroughNetwork(name, _))
+
+  /** Lists `name`'s models with a client routed by the section's proxy and TLS settings, closed afterwards. */
+  private def listModelsThroughNetwork(name: String, sections: ProviderSections)(using
+    ProviderRegistry
+  ): Result[List[DiscoveredModel]] =
+    sections
+      .network(ProviderName(name))
+      .flatMap(network => scala.util.Using.resource(Llm4sHttpClient.create(network))(listModels(name, sections, _)))
 
   private[config] def listModels(
     name: String,

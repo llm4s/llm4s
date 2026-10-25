@@ -55,9 +55,12 @@ class VertexAIClient(
   config: VertexAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
-  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
+
+  // The injected client, or one routed by the config's proxy and TLS settings when none was given.
+  private[provider] val http: Llm4sHttpClient = Llm4sHttpClient.resolve(httpClient, config.network)
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -70,7 +73,7 @@ class VertexAIClient(
 
   private val authProvider = new VertexAIAuthProvider(
     config.credentialFilePath,
-    httpClient,
+    http,
     wellKnownCredentialPath = config.wellKnownCredentialPath
   )
 
@@ -120,7 +123,7 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          attempt <- httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
+          attempt <- http.post(url, headers, requestText, timeout = requestTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -172,7 +175,7 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          result <- httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
+          result <- http.postStream(url, headers, requestText, timeout = streamTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -481,7 +484,7 @@ class VertexAIClient(
     )
 
   override protected def releaseResources(): Unit =
-    (httpClient: Any) match {
+    (http: Any) match {
       case c: AutoCloseable => c.close()
       case _                => ()
     }

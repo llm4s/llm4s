@@ -50,8 +50,9 @@ private[config] object NamedProviderLoader:
     else
       for
         normalized <- sections.validated(ProviderName(trimmed))
+        network    <- sections.network(ProviderName(trimmed))
         config     <- buildConfigFromNamedConfig(trimmed, normalized)
-      yield config
+      yield config.withNetwork(network)
 
   /**
    * Loads all named provider configs from the given config source, returning errors and successes separately.
@@ -71,7 +72,11 @@ private[config] object NamedProviderLoader:
   ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     ProvidersConfigLoader.loadSections(source).map { sections =>
       val results = sections.sections.keys.toList.map { name =>
-        name -> sections.validated(name).flatMap(buildConfigFromNamedConfig(name.asName, _))
+        name -> (for
+          normalized <- sections.validated(name)
+          network    <- sections.network(name)
+          config     <- buildConfigFromNamedConfig(name.asName, normalized)
+        yield config.withNetwork(network))
       }
       (
         results.collect { case (name, Left(error)) => name -> error }.toMap,

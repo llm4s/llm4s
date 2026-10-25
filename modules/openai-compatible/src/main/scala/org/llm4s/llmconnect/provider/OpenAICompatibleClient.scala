@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.{
   AccessTokenProvider,
@@ -84,7 +85,7 @@ class OpenAICompatibleClient(
     .foreach(message => throw new IllegalArgumentException(message))
 
   // Scoped to the provider package so specs can substitute one
-  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
   private val endpoint                                = s"${settings.baseUrl}/chat/completions"
 
@@ -766,6 +767,8 @@ object OpenAICompatibleClient {
    * @param credential        how requests authenticate; [[Credential.Anonymous]] sends no `Authorization` header.
    * @param contextWindow     the model's total token capacity.
    * @param reserveCompletion tokens held back from the prompt for the reply.
+   * @param timeouts          how long a request and a stream may take; absent values keep this client's defaults.
+   * @param network           the proxy and TLS settings every request, and every token exchange, goes through.
    */
   final case class Settings private (
     providerName: String,
@@ -775,7 +778,8 @@ object OpenAICompatibleClient {
     credential: Credential,
     contextWindow: Int,
     reserveCompletion: Int,
-    timeouts: ProviderTimeouts
+    timeouts: ProviderTimeouts,
+    network: HttpNetworkSettings
   ) {
     def withProviderName(providerName: String): Settings        = copy(providerName = providerName)
     def withDisplayName(displayName: String): Settings          = copy(displayName = displayName)
@@ -785,6 +789,7 @@ object OpenAICompatibleClient {
     def withContextWindow(contextWindow: Int): Settings         = copy(contextWindow = contextWindow)
     def withReserveCompletion(reserveCompletion: Int): Settings = copy(reserveCompletion = reserveCompletion)
     def withTimeouts(timeouts: ProviderTimeouts): Settings      = copy(timeouts = timeouts)
+    def withNetwork(network: HttpNetworkSettings): Settings     = copy(network = network)
 
     override def toString: String =
       s"Settings(providerName=$providerName, displayName=$displayName, model=$model, baseUrl=$baseUrl, " +
@@ -802,9 +807,43 @@ object OpenAICompatibleClient {
       credential: Credential,
       contextWindow: Int,
       reserveCompletion: Int,
-      timeouts: ProviderTimeouts = ProviderTimeouts.default
+      timeouts: ProviderTimeouts = ProviderTimeouts.default,
+      network: HttpNetworkSettings = HttpNetworkSettings.default
     ): Settings =
-      new Settings(providerName, displayName, model, baseUrl, credential, contextWindow, reserveCompletion, timeouts)
+      new Settings(
+        providerName,
+        displayName,
+        model,
+        baseUrl,
+        credential,
+        contextWindow,
+        reserveCompletion,
+        timeouts,
+        network
+      )
+
+    /** The signature before `network` was added, kept so code compiled against it still links. */
+    def apply(
+      providerName: String,
+      displayName: String,
+      model: String,
+      baseUrl: String,
+      credential: Credential,
+      contextWindow: Int,
+      reserveCompletion: Int,
+      timeouts: ProviderTimeouts
+    ): Settings =
+      new Settings(
+        providerName,
+        displayName,
+        model,
+        baseUrl,
+        credential,
+        contextWindow,
+        reserveCompletion,
+        timeouts,
+        HttpNetworkSettings.default
+      )
   }
 
   /** The settings the generic `openai-compatible` provider derives from its config. */
@@ -821,7 +860,8 @@ object OpenAICompatibleClient {
       },
       contextWindow = config.contextWindow,
       reserveCompletion = config.reserveCompletion,
-      timeouts = config.timeouts
+      timeouts = config.timeouts,
+      network = config.network
     )
 
   /**

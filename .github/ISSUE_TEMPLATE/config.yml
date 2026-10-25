@@ -24,6 +24,10 @@ contact_links:
     url: https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md
     about: Learn how to contribute to LLM4S
   
+  - name: 🏢 Evaluating llm4s for your organisation?
+    url: https://llm4s.org/reference/enterprise-evaluation
+    about: Answers to an open-source intake questionnaire, each linked to its evidence, with the known gaps
+
   - name: 🙋 Getting help
     url: https://github.com/llm4s/llm4s/blob/main/SUPPORT.md
     about: Where to ask questions, report bugs and find the documentation

@@ -409,6 +409,82 @@ separately. (Up to 0.4.1 every section was validated on every load.)
 
 ---
 
+## Corporate networks: a proxy and a custom CA
+
+Behind an outbound proxy, or behind TLS inspection that re-signs traffic with a corporate CA, the first call fails with
+`connection timed out` or `PKIX path building failed`. One `llm4s.http` block fixes both for every provider client: the
+JDK client in core (the OpenAI-compatible providers, Ollama, Gemini, Vertex AI, watsonx.ai, the embedding providers
+and the model listers), the `openai-java` SDK (OpenAI, Azure OpenAI), the `anthropic-java` SDK and the AWS SDK (Bedrock)
+([#2273](https://github.com/llm4s/llm4s/issues/2273)).
+
+```hocon
+llm4s.http {
+  proxy {
+    url           = "http://proxy.corp:3128"        # bound to HTTPS_PROXY; an http proxy, with its port
+    username      = ${?LLM4S_PROXY_USER}            # Basic proxy authentication, if the proxy asks for it
+    password      = ${?LLM4S_PROXY_PASSWORD}
+    nonProxyHosts = ["localhost", "127.*", "*.internal"]   # bound to NO_PROXY; reached directly
+  }
+  tls {
+    trustStore         = "/etc/pki/corp-ca.p12"     # PKCS12 or JKS; trusted in addition to the JDK's CAs
+    trustStorePassword = ${?LLM4S_TRUSTSTORE_PASSWORD}
+    keyStore           = "/etc/pki/client.p12"      # optional: a client certificate, for mTLS gateways
+    keyStorePassword   = ${?LLM4S_KEYSTORE_PASSWORD}
+  }
+}
+```
+
+- Core's `reference.conf` binds `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD`,
+  `LLM4S_TRUSTSTORE`, `LLM4S_TRUSTSTORE_PASSWORD`, `LLM4S_KEYSTORE` and `LLM4S_KEYSTORE_PASSWORD`, so in a container
+  the variables alone are enough. A `user:password@` in the proxy URL is read as the credentials too.
+- `nonProxyHosts` entries are a host (`ollama.local`), a domain suffix (`*.internal` or `.internal`), a prefix
+  (`10.*`) or `*`. The default is the loopback addresses, so a local Ollama is reached directly; setting the list
+  replaces that default. CIDR ranges are not supported.
+- The trust store **adds** CAs: the public CAs of the JDK stay trusted.
+- An unknown key, a proxy URL that is not `http://host:port`, or a store that cannot be opened (missing, corrupt, wrong
+  password) fails the load with a `ConfigurationError` naming the key. Passwords never appear in an error, a log line
+  or a `toString`.
+
+A section that needs a different route - a gateway reached through another proxy, or directly - sets its own `http`
+block, whose keys take precedence over `llm4s.http` one by one:
+
+```hocon
+llm4s.providers.internal-gateway {
+  provider = "openai-compatible"
+  model    = "llama-3-70b"
+  baseUrl  = "https://llm.internal.corp/v1"
+  http.proxy.url = ""                               # no proxy for this section
+}
+```
+
+An HTTP client of your own - a tool, a vector store, an MCP transport - takes the same settings through
+`Llm4sHttpClient.create`:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.http.Llm4sHttpClient
+
+val routedClient = Llm4sConfig.httpNetwork().map(network => Llm4sHttpClient.create(network))
+```
+
+Java builders take the same settings with `proxy`, `proxyCredentials`, `nonProxyHosts`, `trustStore` and `keyStore`
+(see [the Java guide](../guide/java#behind-a-proxy-or-a-corporate-ca)); the Spring Boot starter binds the
+`llm4s.http.*` properties (`llm4s.http.proxy.url`, `llm4s.http.proxy.non-proxy-hosts`, `llm4s.http.tls.trust-store`,
+...).
+
+What is not covered:
+
+- **PAC files and Kerberos/NTLM proxy authentication.** Configure the JVM instead: `-Djava.net.useSystemProxies=true`
+  for the operating system's proxy settings, and the JDK's `jdk.http.auth.*` properties for the schemes it supports.
+- **Basic proxy authentication over an `https` tunnel in the JDK client.** The JDK disables Basic for `CONNECT` by
+  default; start the JVM with `-Djdk.http.auth.tunneling.disabledSchemes=""` to allow it. The `openai-java`,
+  `anthropic-java` and AWS SDK clients authenticate the tunnel without it.
+- **Bedrock's credential lookups** (instance metadata, STS) use the AWS SDK's own clients and are not routed through
+  `llm4s.http`; the AWS SDK reads `HTTPS_PROXY` for those itself.
+- **Clients you build yourself** with `Llm4sHttpClient.create()` keep the JVM's defaults; pass the settings as above.
+
+---
+
 ## Switching providers
 
 Your code calls `Llm4sConfig.defaultProvider()` and does not change. To use a different
@@ -912,6 +988,8 @@ also set in `application.conf` or with `-D`.
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
 | `LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT` | `llm4s.tracing.console.captureContent` (`false` by default: console tracing prints no prompt or completion content) | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
+| `HTTPS_PROXY`, `NO_PROXY`, `LLM4S_PROXY_USER`, `LLM4S_PROXY_PASSWORD` | `llm4s.http.proxy.url`, `.nonProxyHosts`, `.username`, `.password` ([Corporate networks](#corporate-networks-a-proxy-and-a-custom-ca)) | `llm4s-core` |
+| `LLM4S_TRUSTSTORE`, `LLM4S_TRUSTSTORE_PASSWORD`, `LLM4S_KEYSTORE`, `LLM4S_KEYSTORE_PASSWORD` | `llm4s.http.tls.trustStore`, `.trustStorePassword`, `.keyStore`, `.keyStorePassword` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |

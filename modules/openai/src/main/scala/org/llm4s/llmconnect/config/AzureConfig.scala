@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -47,12 +48,14 @@ final case class AzureConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
+  override val network: HttpNetworkSettings,
   tokenProvider: Option[AccessTokenProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                = ProviderId("azure")
-  override def endpointUrl: Option[String]                           = Some(endpoint)
-  override def withModel(model: String): AzureConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                 = ProviderId("azure")
+  override def endpointUrl: Option[String]                            = Some(endpoint)
+  override def withModel(model: String): AzureConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
 
   def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
   def withApiKey(apiKey: String): AzureConfig                    = copy(apiKey = apiKey)
@@ -106,6 +109,7 @@ object AzureConfig {
       contextWindow,
       reserveCompletion,
       timeouts,
+      HttpNetworkSettings.default,
       tokenProvider
     )
 

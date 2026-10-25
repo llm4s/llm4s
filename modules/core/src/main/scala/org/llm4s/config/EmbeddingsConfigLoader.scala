@@ -136,10 +136,12 @@ private[config] object EmbeddingsConfigLoader {
       section  <- readSection(source, descriptor)
       resolved <- resolveApiKey(section, descriptor, source)
       config   <- descriptor.buildConfig(section.withApiKey(resolved.map(_.value)), selected.modelOverride)
-      // The timeouts block is read once, for every provider, as a chat section's is.
+      network  <- HttpNetworkReader.load(source)
+      // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS
+      // settings are `llm4s.http`'s.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
-      id -> config.withTimeouts(section.timeouts)
+      id -> config.withTimeouts(section.timeouts).withNetwork(network)
     }
 
   private val UnifiedModelPath   = "llm4s.embeddings.model"

@@ -36,7 +36,7 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 - **Anything else**: `modules/providers/<name>`, artifact `llm4s-<name>`, depending only on core. `modules/providers/voyage` is the template, `modules/ollama` the chat plus embeddings example.
 - A streamed tool call's continuation deltas carry only `index`; a client must give each its call's id (`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id.
 - Vendor model rules live in the vendor's module, layered on with `RequestTransformer.adjusted` (`OpenAIModelRules`). The provider-author SPI is public: `docs/guide/writing-a-provider.md`.
-- A field only some providers read is that provider's declared extra, never a field of `NamedProviderConfig`. `BuiltinKeys` is `provider`, `model`, `baseUrl`, `apiKey`, `headers`, `timeouts` and `auth`.
+- A field only some providers read is that provider's declared extra, never a field of `NamedProviderConfig`. `BuiltinKeys` is `provider`, `model`, `baseUrl`, `apiKey`, `headers`, `timeouts`, `auth` and `http`.
 - Core tests never use a real provider: use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`) and `FixtureEmbeddingProvider` (id `fixtureembedding`), registered by core's **test** `META-INF/services` and visible to every module depending on `core % "test->test"`.
 - Test-only dependencies stay test-only: `rag` on `openai`, `image` on `observability-prometheus`.
 

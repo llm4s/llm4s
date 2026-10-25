@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -34,12 +35,14 @@ final case class GeminiConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
-  googleSearch: Boolean
+  googleSearch: Boolean,
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                 = ProviderId("gemini")
-  override def endpointUrl: Option[String]                            = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig                 = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig = copy(timeouts = timeouts)
+  override val providerId: ProviderId                                  = ProviderId("gemini")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): GeminiConfig                  = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): GeminiConfig = copy(network = network)
 
   def withApiKey(apiKey: String): GeminiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)
@@ -76,7 +79,16 @@ object GeminiConfig {
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
     googleSearch: Boolean = false
   ): GeminiConfig =
-    new GeminiConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, timeouts, googleSearch)
+    new GeminiConfig(
+      apiKey,
+      model,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      timeouts,
+      googleSearch,
+      network = HttpNetworkSettings.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

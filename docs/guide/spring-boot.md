@@ -182,6 +182,11 @@ llm4s.providers.local.headers.X-Team-Id=team-7
   are ignored. With none, the flat keys are read exactly as before.
 - An unknown provider id in a section stops the context with llm4s's own message, which names the registered providers
   and the dependency to add.
+- Behind an outbound proxy or a corporate CA, the `llm4s.http.*` properties - `llm4s.http.proxy.url`,
+  `.username`, `.password`, `.non-proxy-hosts` (a list), `llm4s.http.tls.trust-store`, `.trust-store-password`,
+  `.key-store`, `.key-store-password` - apply to the client in both forms, the flat keys and `llm4s.providers.*`, as
+  [`llm4s.http`](../getting-started/configuration#corporate-networks-a-proxy-and-a-custom-ca) does in HOCON. A
+  section's own `llm4s.providers.<name>.http.*` overrides them for that section.
 
 You can also define your own `JLlmClient` bean, for example from an `application.conf` as the Java guide describes. The
 starter's client backs off, and the template and the health indicator use yours; `llm4s.provider` and the other properties

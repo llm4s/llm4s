@@ -27,6 +27,8 @@ object ProvidersConfigModel:
    *  @param timeouts    the `timeouts` block as read, not yet checked for positive values
    *  @param auth         the section's `auth` block, if any, as scalars: the identity-token key and
    *                      whatever the provider reads from it
+   *  @param http         the section's `http` block, if any, as read: its proxy and TLS keys override
+   *                      `llm4s.http`'s for this section
    */
   final private[llm4s] case class RawNamedProviderSection(
     provider: Option[String],
@@ -36,7 +38,8 @@ object ProvidersConfigModel:
     headers: Option[Map[String, String]] = None,
     extras: Map[String, String] = Map.empty,
     timeouts: Option[ProviderTimeouts] = None,
-    auth: Option[Map[String, String]] = None
+    auth: Option[Map[String, String]] = None,
+    http: Option[com.typesafe.config.ConfigObject] = None
   )
 
   /**

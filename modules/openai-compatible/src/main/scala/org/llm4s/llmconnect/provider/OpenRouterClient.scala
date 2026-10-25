@@ -78,7 +78,8 @@ class OpenRouterClient(
         credential = OpenRouterClient.credential(config),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
-        timeouts = config.timeouts
+        timeouts = config.timeouts,
+        network = config.network
       ),
       OpenRouterDialect,
       metrics,

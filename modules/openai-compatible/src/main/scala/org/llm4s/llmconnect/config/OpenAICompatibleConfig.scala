@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -59,12 +60,14 @@ final case class OpenAICompatibleConfig private (
   headers: Map[String, String],
   streamUsage: Boolean,
   override val timeouts: ProviderTimeouts,
-  tokenExchange: Option[TokenExchangeConfig]
+  tokenExchange: Option[TokenExchangeConfig],
+  override val network: HttpNetworkSettings
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig = copy(timeouts = timeouts)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig  = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): OpenAICompatibleConfig = copy(network = network)
 
   def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
   def withApiKey(apiKey: String): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
@@ -128,7 +131,8 @@ object OpenAICompatibleConfig {
       headers,
       streamUsage,
       timeouts,
-      tokenExchange
+      tokenExchange,
+      network = HttpNetworkSettings.default
     )
 
   /**
