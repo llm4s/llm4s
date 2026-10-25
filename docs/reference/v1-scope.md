@@ -69,7 +69,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`, `MetricsConfigLoader`) — **carved** | `llm4s-observability-prometheus` | Beta |
 | `metrics` — Micrometer (`MicrometerMetrics`), a `MetricsCollector` over a `MeterRegistry` — **new** | `llm4s-observability-micrometer` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
-| `llmconnect/auth/azure` — `AzureEntraId`: Microsoft Entra ID tokens (`DefaultAzureCredential`, any `TokenCredential`) for the `azure` provider's `authentication = "entra-id"` ([#2274](https://github.com/llm4s/llm4s/issues/2274)) — **new** | `llm4s-azure-identity` (`modules/azure-identity`); carries Azure's `azure-identity` | Experimental |
+| `llmconnect/auth/azure` — `AzureEntraId`: Microsoft Entra ID tokens (`DefaultAzureCredential`, any `TokenCredential`) for the `azure` provider's `authentication = "entra-id"` ([#2274](https://github.com/llm4s/llm4s/issues/2274)) — **new** | `llm4s-azure-identity` (`modules/providers/azure-identity`); carries Azure's `azure-identity` | Experimental |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |
 | `llmconnect/provider` — Gemini (and Vertex AI) — **carved** | `llm4s-gemini` | Frozen at 1.0 |

@@ -1327,7 +1327,7 @@ lazy val openai = (project in file("modules/openai"))
 // `azure-identity` brings azure-core, MSAL4J, Netty and Reactor, so it is a module of its own rather than a
 // dependency of the frozen `llm4s-openai`, which `frozenDependencyCheck` keeps off `com.azure`; `llm4s-openai`
 // finds it through `META-INF/services`. It depends on `openai` for that SPI and for the client its specs drive.
-lazy val azureIdentity = (project in file("modules/azure-identity"))
+lazy val azureIdentity = (project in file("modules/providers/azure-identity"))
   .dependsOn(core % "compile->compile;test->test", openai, providerTestkit % Test)
   .settings(
     name := "llm4s-azure-identity",

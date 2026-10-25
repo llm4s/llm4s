@@ -752,7 +752,7 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/azure-identity/target/scala-3.7.1/scoverage-report/scoverage.xml
+          files: modules/providers/azure-identity/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: azure-identity
           slug: llm4s/llm4s
           fail_ci_if_error: false

@@ -116,7 +116,7 @@ flags:
       - modules/providers/bedrock/src/main/scala
   azure-identity:
     paths:
-      - modules/azure-identity/src/main/scala
+      - modules/providers/azure-identity/src/main/scala
   jina:
     paths:
       - modules/providers/jina/src/main/scala

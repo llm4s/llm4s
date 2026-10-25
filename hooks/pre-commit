@@ -110,7 +110,7 @@ map_file_to_project() {
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
-    modules/azure-identity/*)             echo "azureIdentity" ;;
+    modules/providers/azure-identity/*)   echo "azureIdentity" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
     modules/testkit/*)                    echo "testkit" ;;
