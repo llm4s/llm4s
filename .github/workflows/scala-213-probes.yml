@@ -58,19 +58,19 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Before setup-java: it installs a JVM of its own and points JAVA_HOME at it. The probes pick JDK 21 themselves
       # (`//> using jvm 21` in common/project.scala); sbt runs on the JDK 21 setup-java installs next.
-      - uses: VirtusLab/scala-cli-setup@v1
+      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Publish the probed modules to the runner's ~/.ivy2/local
         # A fixed version, so the probes need not chase sbt-dynver's. llm4s-java-api's dependencies (the provider
