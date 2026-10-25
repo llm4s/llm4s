@@ -32,6 +32,10 @@ concurrency:
 
 # Every job sets timeout-minutes, about twice its usual duration on main, so a hung job cannot hold a runner and the
 # merge queue for GitHub's six-hour default (#2370). Raising one: CONTRIBUTING.md#ci-time-limits.
+# Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
+permissions:
+  contents: read
+
 jobs:
   config-policy-check:
     name: Config Policy Check
@@ -41,15 +45,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # Smoke test: exercises CheckPolicies + dev policy against committed HOCON (no live Ollama).
       - name: Run policy check
@@ -100,15 +104,15 @@ jobs:
       contents: read
     
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
       # `latest_release` from the latest GitHub Release, so a literal one lags the release by design. README.md,
@@ -143,6 +147,14 @@ jobs:
       # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
       - name: Test that the required workflows run in a merge queue
         run: scripts/test-merge-queue-workflows.sh
+
+      # OpenSSF Scorecard (#2306): fails when a workflow has no top-level `permissions:` or grants write there, or when
+      # an action is not pinned by a full commit SHA with its version comment. The test runs the check against
+      # fixture workflows, then the check runs on the real ones. Needs ruby, on the runner.
+      - name: Check workflow token permissions and action pins
+        run: |
+          scripts/test-check-workflow-security.sh
+          scripts/check-workflow-security.sh
 
       # The dependency-footprint table in docs/reference/dependency-conflicts.md (#1496): the script against a fake `cs`,
       # with no network.
@@ -297,7 +309,7 @@ jobs:
           scripts/check-sbom.sh target/sboms target/published-artifacts.txt
 
       - name: Upload the SBOMs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: target/sboms/*.bom.json
@@ -342,15 +354,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Generate ScalaDoc
         # `doc` covers each module on its own; `docs/doc` builds the single aggregate API tree
@@ -429,15 +441,15 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Run tests with coverage
         env:
@@ -460,7 +472,7 @@ jobs:
       # Leg `core`
       - name: Upload core coverage to Codecov
         if: contains(matrix.modules, 'core')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/core/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -471,7 +483,7 @@ jobs:
 
       - name: Upload memory coverage to Codecov
         if: contains(matrix.modules, 'memory')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/memory/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -482,7 +494,7 @@ jobs:
 
       - name: Upload memory-postgres coverage to Codecov
         if: contains(matrix.modules, 'memoryPostgres')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/memory-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -493,7 +505,7 @@ jobs:
 
       - name: Upload schema-derivation coverage to Codecov
         if: contains(matrix.modules, 'schemaDerivation')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/schema-derivation/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -504,7 +516,7 @@ jobs:
 
       - name: Upload testkit coverage to Codecov
         if: contains(matrix.modules, 'testkit')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -515,7 +527,7 @@ jobs:
 
       - name: Upload observability-micrometer coverage to Codecov
         if: contains(matrix.modules, 'observabilityMicrometer')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability-micrometer/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -526,7 +538,7 @@ jobs:
 
       - name: Upload agent-tools coverage to Codecov
         if: contains(matrix.modules, 'agentTools')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-tools/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -537,7 +549,7 @@ jobs:
 
       - name: Upload trace-opentelemetry coverage to Codecov
         if: contains(matrix.modules, 'traceOpentelemetry')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/trace-opentelemetry/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -548,7 +560,7 @@ jobs:
 
       - name: Upload gradle-demo coverage to Codecov
         if: contains(matrix.modules, 'gradleDemo')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/gradle-demo/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -560,7 +572,7 @@ jobs:
       # Leg `rag`
       - name: Upload rag coverage to Codecov
         if: contains(matrix.modules, 'rag')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -571,7 +583,7 @@ jobs:
 
       - name: Upload vectorstore-elasticsearch coverage to Codecov
         if: contains(matrix.modules, 'vectorstoreElasticsearch')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/vectorstore-elasticsearch/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -582,7 +594,7 @@ jobs:
 
       - name: Upload vectorstore-redis coverage to Codecov
         if: contains(matrix.modules, 'vectorstoreRedis')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/vectorstore-redis/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -593,7 +605,7 @@ jobs:
 
       - name: Upload knowledgegraph coverage to Codecov
         if: contains(matrix.modules, 'knowledgegraph')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/knowledgegraph/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -604,7 +616,7 @@ jobs:
 
       - name: Upload mcp coverage to Codecov
         if: contains(matrix.modules, 'mcp')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/mcp/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -615,7 +627,7 @@ jobs:
 
       - name: Upload media coverage to Codecov
         if: contains(matrix.modules, 'media')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/media/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -626,7 +638,7 @@ jobs:
 
       - name: Upload image coverage to Codecov
         if: contains(matrix.modules, 'image')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/image/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -637,7 +649,7 @@ jobs:
 
       - name: Upload speech coverage to Codecov
         if: contains(matrix.modules, 'speech')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/speech/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -648,7 +660,7 @@ jobs:
 
       - name: Upload observability coverage to Codecov
         if: contains(matrix.modules, 'observability')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -659,7 +671,7 @@ jobs:
 
       - name: Upload observability-prometheus coverage to Codecov
         if: contains(matrix.modules, 'observabilityPrometheus')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -671,7 +683,7 @@ jobs:
       # Leg `providers`
       - name: Upload ollama coverage to Codecov
         if: contains(matrix.modules, 'ollama')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/ollama/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -682,7 +694,7 @@ jobs:
 
       - name: Upload gemini coverage to Codecov
         if: contains(matrix.modules, 'gemini')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/gemini/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -693,7 +705,7 @@ jobs:
 
       - name: Upload anthropic coverage to Codecov
         if: contains(matrix.modules, 'anthropic')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/anthropic/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -704,7 +716,7 @@ jobs:
 
       - name: Upload openai coverage to Codecov
         if: contains(matrix.modules, 'openai')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/openai/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -715,7 +727,7 @@ jobs:
 
       - name: Upload openai-compatible coverage to Codecov
         if: contains(matrix.modules, 'openaiCompatible')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/openai-compatible/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -726,7 +738,7 @@ jobs:
 
       - name: Upload voyage coverage to Codecov
         if: contains(matrix.modules, 'voyage')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/voyage/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -737,7 +749,7 @@ jobs:
 
       - name: Upload bedrock coverage to Codecov
         if: contains(matrix.modules, 'bedrock')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -748,7 +760,7 @@ jobs:
 
       - name: Upload jina coverage to Codecov
         if: contains(matrix.modules, 'jina')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -759,7 +771,7 @@ jobs:
 
       - name: Upload jev coverage to Codecov
         if: contains(matrix.modules, 'jev')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -770,7 +782,7 @@ jobs:
 
       - name: Upload cohere coverage to Codecov
         if: contains(matrix.modules, 'cohere')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/cohere/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -781,7 +793,7 @@ jobs:
 
       - name: Upload watsonx coverage to Codecov
         if: contains(matrix.modules, 'watsonx')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -792,7 +804,7 @@ jobs:
 
       - name: Upload provider-testkit coverage to Codecov
         if: contains(matrix.modules, 'providerTestkit')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/provider-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -803,7 +815,7 @@ jobs:
 
       - name: Upload java-api coverage to Codecov
         if: contains(matrix.modules, 'javaApi')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/java-api/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -814,7 +826,7 @@ jobs:
 
       - name: Upload java-rag coverage to Codecov
         if: contains(matrix.modules, 'javaRag')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/java-rag/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -825,7 +837,7 @@ jobs:
 
       - name: Upload reactor coverage to Codecov
         if: contains(matrix.modules, 'reactor')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/reactor/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -836,7 +848,7 @@ jobs:
 
       - name: Upload spring-boot-starter coverage to Codecov
         if: contains(matrix.modules, 'springBootStarter')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/spring-boot-starter/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -847,7 +859,7 @@ jobs:
 
       - name: Upload deploy-service coverage to Codecov
         if: contains(matrix.modules, 'deployService')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/deploy-service/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -858,7 +870,7 @@ jobs:
 
       - name: Upload examples-http coverage to Codecov
         if: contains(matrix.modules, 'examplesHttp')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/examples-http/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -870,7 +882,7 @@ jobs:
       # Leg `agent`
       - name: Upload agent coverage to Codecov
         if: contains(matrix.modules, 'agent')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -881,7 +893,7 @@ jobs:
 
       - name: Upload agent-testkit coverage to Codecov
         if: contains(matrix.modules, 'agentTestkit')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -892,7 +904,7 @@ jobs:
 
       - name: Upload agent-checkpoint-sqlite coverage to Codecov
         if: contains(matrix.modules, 'agentCheckpointSqlite')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-sqlite/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -903,7 +915,7 @@ jobs:
 
       - name: Upload agent-checkpoint-postgres coverage to Codecov
         if: contains(matrix.modules, 'agentCheckpointPostgres')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -914,7 +926,7 @@ jobs:
 
       - name: Upload agent-memory coverage to Codecov
         if: contains(matrix.modules, 'agentMemory')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-memory/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -925,7 +937,7 @@ jobs:
 
       - name: Upload llm4s-effect coverage to Codecov
         if: contains(matrix.modules, 'llm4sEffect')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-effect/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -936,7 +948,7 @@ jobs:
 
       - name: Upload llm4s-zio coverage to Codecov
         if: contains(matrix.modules, 'llm4sZio')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-zio/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -947,7 +959,7 @@ jobs:
 
       - name: Upload llm4s-pekko coverage to Codecov
         if: contains(matrix.modules, 'llm4sPekko')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -977,7 +989,7 @@ jobs:
           [ "$n" -eq "$expected" ]
 
       - name: Upload this leg's coverage data
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-data-${{ matrix.leg }}
           path: coverage-out/
@@ -1004,18 +1016,18 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Download the legs' coverage data
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-data-*
           merge-multiple: true
@@ -1024,7 +1036,7 @@ jobs:
         run: sbt coverageAggregate
 
       - name: Upload coverage report artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report
           path: |
@@ -1057,15 +1069,15 @@ jobs:
     timeout-minutes: 40
     
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.java }}
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
       
       # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
       - name: Run tests
@@ -1073,7 +1085,7 @@ jobs:
       
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports-${{ matrix.os }}
           path: |
@@ -1097,22 +1109,22 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Run performance tests
         run: sbt testPerformance
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports-performance
           path: |
@@ -1203,15 +1215,15 @@ jobs:
           - 7474:7474
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # Postgres, Redis and Valkey are covered by the service health checks above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
@@ -1277,7 +1289,7 @@ jobs:
 
       # One upload per module in COVERAGE_MODULES, under the same flag as that module's coverage-leg upload.
       - name: Upload rag integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1287,7 +1299,7 @@ jobs:
           verbose: true
 
       - name: Upload vectorstore-elasticsearch integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/vectorstore-elasticsearch/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1297,7 +1309,7 @@ jobs:
           verbose: true
 
       - name: Upload vectorstore-redis integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/vectorstore-redis/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1307,7 +1319,7 @@ jobs:
           verbose: true
 
       - name: Upload memory-postgres integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/memory-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1318,7 +1330,7 @@ jobs:
 
       # knowledgegraph-neo4j is in no coverage leg (scripts/check-coverage-legs.sh, EXEMPT), so this is its only upload.
       - name: Upload knowledgegraph-neo4j integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/knowledgegraph-neo4j/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1328,7 +1340,7 @@ jobs:
           verbose: true
 
       - name: Upload agent-checkpoint-postgres integration coverage to Codecov
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
@@ -1339,7 +1351,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports-integration
           path: |
@@ -1359,15 +1371,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # Resolving the baseline and the build's artifacts from Maven Central can hit a connection reset (seen once,
       # run 37316745524: "download error: Caught java.net.SocketException (Connection reset)"); the wrapper
@@ -1385,15 +1397,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Publish the library modules to local Maven
         # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
@@ -1402,7 +1414,7 @@ jobs:
         run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: '8.11.1'
           # Licence: v6's default 'enhanced' cache provider (gradle-actions-caching) is
@@ -1468,7 +1480,7 @@ jobs:
 
       - name: Upload Kotlin coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kotlin-coverage-report
           path: modules/kotlin-api/build/reports/jacoco/
@@ -1484,15 +1496,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Test the starter against the latest Spring Boot 3.x
         run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
@@ -1508,15 +1520,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Test the starter against Spring Boot 4.0
         run: sbt springBootStarterBoot4/test
@@ -1633,15 +1645,15 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
@@ -1690,7 +1702,7 @@ jobs:
       changed: ${{ steps.diff.outputs.changed }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
 
@@ -1719,20 +1731,20 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The image tag is derived from the version, which sbt-dynver reads from git
           # describe; a shallow clone with no tags yields a different tag than the test
           # is told to expect.
           fetch-depth: 0
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Build the workspace-runner image
         run: sbt workspaceRunner/Docker/publishLocal
@@ -1745,7 +1757,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports-workspace
           path: |
@@ -1769,15 +1781,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       # The official MCP reference server (#1006). Started in a step rather than as a service
       # container because a service cannot be given a command, and the server picks its
@@ -1810,7 +1822,7 @@ jobs:
 
       - name: Upload test reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-reports-mcp-reference
           path: |
@@ -1828,15 +1840,15 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@v1
+      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
       - name: Run cloud smoke tests
         env:

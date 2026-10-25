@@ -455,6 +455,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
+  actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
   (`sort -- -tNAME`): uutils coreutils, which the runner's Ubuntu-based image may ship, rewrites it on its unreleased
   main branch into
