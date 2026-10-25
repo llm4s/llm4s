@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `FileConfig()` blocks more by default: each platform's system and credential locations (`FileConfig.DefaultBlockedPaths`),
+  matched regardless of case; [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
 - `LLM4STemplate.completeAsync` refused by its executor fails with an `LlmException` of kind `OTHER` wrapping the
   `RejectedExecutionException`; [migration](docs/reference/migration.md#the-spring-boot-starters-refused-completeasync-fails-with-an-llmexception-2276).
 - The Postgres stores take a `javax.sql.DataSource`, not a `com.zaxxer.hikari.HikariDataSource`: `PgVectorStore.create`
@@ -339,14 +341,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with
+  `llm4s-java-api` workarounds; a CI workflow runs the 2.13 probes against the build and fails on any outcome change ([#2301](https://github.com/llm4s/llm4s/issues/2301)).
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
   versions generated from the descriptors and the build by `sbt generateCompatibilityMatrix`, with a CI drift check;
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
 - **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
   their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
-- **Changed** `README.md` into a landing page (pitch, links, dependency line and a compiled first call up front); its
-  build, CI and module-history sections moved to `CONTRIBUTING.md` and `docs/contribute/project-history.md`, talks and
-  GSoC to `docs/community/talks-and-sessions.md`, and its versions are checked against `latest_release` ([#2322](https://github.com/llm4s/llm4s/issues/2322)).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
@@ -410,6 +411,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `scripts/dependency-footprint.sh` and the footprint table it prints in
   [Dependency Conflicts](docs/reference/dependency-conflicts.md#dependency-footprint): `llm4s-java-api` 0.5.1 is 55 jars
   and 130 MB, against 22 jars and 30 MB for core, the agent and Ollama [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Added** `ScriptedLLMClient.assertExhausted()`, `remaining` and `unusedReplies` (a scripted reply never asked for), and
+  [testing guide](docs/guide/testing-with-the-testkit.md#other-test-frameworks) fixtures for MUnit, munit-cats-effect,
+  weaver and ZIO Test, each a suite CI runs [#2335](https://github.com/llm4s/llm4s/issues/2335).
 
 ### Embeddings & RAG
 
@@ -455,6 +459,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
+  Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
+  regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
 - **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
   actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
@@ -479,6 +486,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** a per-module dependency licence report (`sbt licenseReport`, SPDX ids, attached to each GitHub Release) and
+  `sbt licenseCheck`, a CI quick check that fails on a denied or unknown runtime licence [#2308](https://github.com/llm4s/llm4s/issues/2308); [Dependency licences](docs/reference/licences.md).
 - **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
   frozen module (top-level or nested) whose constructor is not `private` / `private[x]`, and for a public `copy` on
   one, naming the file, line and type. Case classes with no fields are exempt; `GrowthExempted` in

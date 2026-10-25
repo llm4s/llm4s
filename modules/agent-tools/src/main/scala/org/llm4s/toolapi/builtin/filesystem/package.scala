@@ -27,7 +27,7 @@ package org.llm4s.toolapi.builtin
  * import org.llm4s.toolapi.builtin.filesystem._
  * import org.llm4s.toolapi.ToolRegistry
  *
- * // Read-only tools with default config (blocked: /etc, /var, /sys, /proc, /dev)
+ * // Read-only tools with default config (blocked: FileConfig.DefaultBlockedPaths)
  * for {
  *   readFile <- ReadFileTool.toolSafe
  *   listDir  <- ListDirectoryTool.toolSafe

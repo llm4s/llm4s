@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model.{AssistantMessage, Completion, CompletionOptio
 
 final class CannedClient extends LLMClient {
   def complete(conversation: Conversation, options: CompletionOptions): Either[LLMError, Completion] =
-    Right(Completion(id = "1", created = 0L, content = "canned", model = "fake", message = AssistantMessage("canned")))
+    Right(Completion(id = "1", created = java.time.Instant.EPOCH, content = "canned", model = "fake", message = AssistantMessage("canned")))
   def streamComplete(conversation: Conversation, options: CompletionOptions, onChunk: StreamedChunk => Unit): Either[LLMError, Completion] =
     complete(conversation, options)
   def getContextWindow(): Int     = 8192

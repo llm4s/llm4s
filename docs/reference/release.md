@@ -222,14 +222,21 @@ it never overwrites. Write whatever the release deserves once it exists.
 
   Run against 0.4.1's POM it reports three problems: the description is the artifact name, the `<scm><url>` has a
   trailing slash and the connection is the SSH form. All three were fixed after 0.4.1 (#1588).
+- Check the Release's assets: the `sbom` job attaches one `<module>-<version>.bom.json` (the
+  [SBOM](sbom)) and one `<module>-<version>.licences.csv` (the [licence report](licences)) per published module that
+  ships a jar, all named for the tag's version:
+
+  ```bash
+  gh release view v0.5.0 --json assets --jq '.assets[].name' | grep -c '\.bom\.json$'       # one per module
+  gh release view v0.5.0 --json assets --jq '.assets[].name' | grep -c '\.licences\.csv$'   # the same number
+  ```
+
 - Check Scaladex: `https://index.scala-lang.org/llm4s/llm4s` should list the new version once Scaladex has picked it up.
   See [Discoverability](#discoverability-scaladex-and-github) when it does not.
 - Compile the Scala CLI quick start against the published artifacts: `gh workflow run scala-cli-quickstart.yml`.
   It checks that `modules/samples/scala-cli/hello.scala` pins the release now on Maven Central (the prepare commit
   bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
-  `scripts/check-scala-cli-quickstart.sh --central --compile`. The same prepare commit bumps the literal versions in
-  `README.md` (GitHub renders it without Liquid): `scripts/check-doc-versions.sh` fails until they equal
-  `latest_release`.
+  `scripts/check-scala-cli-quickstart.sh --central --compile`.
 
 ### Discoverability: Scaladex and GitHub
 
@@ -348,12 +355,12 @@ help.
     gh release edit v0.5.0 --notes-file notes.md   # say llm4s-kotlin-api is not in 0.5.0
     # The docs deploy (what the docs job dispatches), once the Release exists.
     gh workflow run pages.yml --ref main -f ref=v0.5.0
-    # The SBOMs (what the sbom job does), from a clean checkout of the tag, on JDK 21.
+    # The SBOMs and licence reports (what the sbom job does), from a clean checkout of the tag, on JDK 21.
     git checkout v0.5.0
-    sbt -batch publishedSboms
+    sbt -batch publishedSboms licenseReport
     sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
     scripts/check-sbom.sh target/sboms target/published-artifacts.txt
-    gh release upload v0.5.0 target/sboms/*.bom.json --clobber
+    gh release upload v0.5.0 target/sboms/*.bom.json target/licences/*.licences.csv --clobber
     ```
 
     This is the one case where the Release is created by hand ([section 4](#4-do-not-create-the-github-release-by-hand)):

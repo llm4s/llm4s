@@ -195,6 +195,30 @@ expect_fail "a Scala 2.13 support claim" "$d" "documents Scala 2.13"
 d="$(fresh_copy scala-denied)"; say "$d" "$INSTALL" "Scala 2.13 is not supported, and Scala 2 projects cannot depend on it."
 expect_pass "a statement that another Scala version is not supported" "$d"
 
+d="$(fresh_copy scala-213-tasty)"; say "$d" "$INSTALL" "Scala 2.13: call-only, via the TASTy reader."
+expect_pass "Scala 2.13 called through the TASTy reader (#2301)" "$d"
+
+d="$(fresh_copy scala-213-tasty-pin)"; say "$d" "$INSTALL" "$(printf '```scala\nscalaVersion := "2.13.16"   // read through the TASTy reader\n```')"
+expect_pass "a 2.13 scalaVersion pin on a line naming the TASTy reader" "$d"
+
+d="$(fresh_copy scala-213-tasty-page)"; printf -- '---\ntitle: From 2.13\nscala_2_13: tasty-reader\n---\n\nScala 2.13 calls LLM4S.\n' > "$d/docs/getting-started/from-213.md"
+expect_pass "a page that declares scala_2_13: tasty-reader" "$d"
+
+d="$(fresh_copy scala-213-tasty-page-other)"; printf -- '---\ntitle: From 2.12\nscala_2_13: tasty-reader\n---\n\nScala 2.12 calls LLM4S.\n' > "$d/docs/getting-started/from-212.md"
+expect_fail "the page declaration covers Scala 2.13 only" "$d" "documents Scala 2.12"
+
+d="$(fresh_copy scala-link-target)"; say "$d" "$INSTALL" "See [the 2.13 page](scala-2-13) and [this](../guide/scala-2-13#setup)."
+expect_pass "a page path in a link target is not a Scala claim" "$d"
+
+d="$(fresh_copy scala-link-text)"; say "$d" "$INSTALL" "See [Scala 2.12 support](scala-2-13)."
+expect_fail "a link's text is still a claim" "$d" "documents Scala 2.12"
+
+d="$(fresh_copy scala-212-tasty)"; say "$d" "$INSTALL" "Scala 2.12: call-only, via the TASTy reader."
+expect_fail "the TASTy-reader exemption is for Scala 2.13 only" "$d" "documents Scala 2.12"
+
+d="$(fresh_copy scala-213-tasty-artifact)"; say "$d" "$INSTALL" 'Through the TASTy reader, add `"org.llm4s" % "llm4s-core_2.13"`.'
+expect_fail "the TASTy reader does not make a _2.13 artifact" "$d" "_2.13"
+
 d="$(fresh_copy scala-build-moved)"; edit_model "$d" 'for p in m["projects"]: p["scalaVersion"] = "3.8.0"; p["crossScalaVersions"] = ["3.8.0"]'
 expect_fail "the build moved on, the docs did not" "$d" "but the build is Scala 3.8.0"
 

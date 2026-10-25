@@ -33,9 +33,10 @@ Not verified on a Databricks cluster. What the Databricks release notes say abou
 
 Spark and Databricks run Scala 2.13 (or 2.12); LLM4S is published for Scala 3 only. A Scala 2.13 job reads LLM4S's <!-- doc-support: ignore -->
 Scala 3 artifacts with the TASTy reader, which works for calling LLM4S but not for every API: see
-[Calling LLM4S from Scala 2.13](https://github.com/llm4s/llm4s/blob/main/docs/design/scala-2.13-interop.md) for <!-- doc-support: ignore -->
-what was measured. In short, completions, streaming, configuration, `ReliableClient`, agents and running tools work;
-defining tools with `ToolBuilder`, `completeStructured` and implementing `LLMClient` do not compile from 2.13.
+[Using LLM4S from Scala 2.13](../getting-started/scala-2-13) for the setup and what CI checks on every change. In <!-- doc-support: ignore -->
+short, completions, streaming, configuration, `ReliableClient`, agents and running tools work; defining tools with
+`ToolBuilder`, `completeStructured` and implementing `LLMClient` do not compile from 2.13, and `llm4s-java-api`'s
+`JTool` and `JLlmClient.complete(prompt, Record.class)` stand in for the first two.
 
 **Scala 2.12 is not supported**: it has no TASTy reader, so a Scala 2.12 runtime (Databricks 16.4 LTS's 2.12 image <!-- doc-support: ignore -->
 and earlier) cannot use LLM4S.

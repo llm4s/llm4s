@@ -95,7 +95,7 @@ object ListDirectoryTool {
       name = "list_directory",
       description = s"List contents of a directory. Returns file names, sizes, and types. " +
         s"Maximum entries: $MaxEntries. " +
-        s"Blocked paths: ${config.blockedPaths.mkString(", ")}. " +
+        s"Blocked paths: ${config.describedBlockedPaths}. " +
         config.allowedPaths.map(p => s"Allowed paths: ${p.mkString(", ")}").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
