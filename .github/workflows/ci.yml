@@ -761,7 +761,7 @@ jobs:
 
       - name: Upload azure-identity coverage to Codecov
         if: contains(matrix.modules, 'azureIdentity')
-        uses: codecov/codecov-action@v7
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/azure-identity/target/scala-3.7.1/scoverage-report/scoverage.xml
