@@ -97,7 +97,8 @@ llm4s/
 │   │   ├── jina/              # Jina AI embedding provider (typed JinaTask)
 │   │   ├── jev/               # Jev decision client (TypeSafe System One: typed Noul/Choice/Score questions); not an LLMClient
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
-│   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
+│   │   ├── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
+│   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
