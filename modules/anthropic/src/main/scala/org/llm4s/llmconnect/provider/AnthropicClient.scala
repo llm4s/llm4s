@@ -20,6 +20,7 @@ import com.anthropic.models.messages.{
   PlainTextSource,
   Message,
   MessageCreateParams,
+  MessageDeltaUsage,
   MessageParam,
   RawMessageStreamEvent,
   RedactedThinkingBlockParam,
@@ -30,8 +31,9 @@ import com.anthropic.models.messages.{
   ToolResultBlockParam,
   ToolUseBlockParam,
   UrlImageSource,
-  WebSearchTool20250305,
-  UrlPdfSource
+  UrlPdfSource,
+  Usage,
+  WebSearchTool20250305
 }
 import org.llm4s.media.{ ImageMediaType, MediaSource, MediaType }
 
@@ -61,7 +63,8 @@ import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*
-import scala.util.{ Try, Using }
+import scala.jdk.OptionConverters.*
+import scala.util.{ Failure, Success, Try, Using }
 
 /**
  * [[LLMClient]] implementation for Anthropic Claude models.
@@ -132,6 +135,8 @@ class AnthropicClient(
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
@@ -475,22 +480,10 @@ curl https://api.anthropic.com/v1/messages \
                 onChunk(chunk)
               }
 
-              val messageDeltaOpt = event.messageDelta()
-              if (messageDeltaOpt != null && messageDeltaOpt.isPresent) {
-                val msgDelta = messageDeltaOpt.get()
-                Try(msgDelta.usage()).foreach { usage =>
-                  if (usage != null) {
-                    val inputTokens = Option(usage.inputTokens()) match {
-                      case Some(opt: java.util.Optional[_]) if opt.isPresent =>
-                        Option(opt.get())
-                          .collect { case n: java.lang.Number => n.intValue() }
-                          .getOrElse(0)
-                      case _ => 0
-                    }
-                    val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
-                    if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
-                  }
-                }
+              AnthropicClient.streamedUsage(event) match {
+                case Success(usage) => usage.foreach(accumulator.updateUsage)
+                case Failure(e) =>
+                  logger.warn(s"Keeping the streamed usage counts so far: ${e.getClass.getSimpleName}: ${e.getMessage}")
               }
             }
           }
@@ -739,15 +732,8 @@ curl https://api.anthropic.com/v1/messages \
       // Extract token usage, including thinking tokens if available
       val usage = response.usage()
 
-      val cachedTokens: Option[Int] =
-        Option(usage.cacheReadInputTokens())
-          .filter(_.isPresent)
-          .map(_.get().toInt)
-
-      val cacheCreationTokens: Option[Int] =
-        Option(usage.cacheCreationInputTokens())
-          .filter(_.isPresent)
-          .map(_.get().toInt)
+      val cachedTokens: Option[Int]        = AnthropicClient.optionalCount(usage.cacheReadInputTokens())
+      val cacheCreationTokens: Option[Int] = AnthropicClient.optionalCount(usage.cacheCreationInputTokens())
 
       val tokenUsage = TokenUsage(
         promptTokens = usage.inputTokens().toInt,
@@ -1080,6 +1066,47 @@ object AnthropicClient {
     def toBlock: ThinkingBlock =
       redacted.fold[ThinkingBlock](ThinkingBlock.Text(text.toString, signature))(ThinkingBlock.Redacted(_))
   }
+
+  /** A token count the SDK reports as optional (absent, or JSON null) as an `Option[Int]`. */
+  private[provider] def optionalCount(count: java.util.Optional[java.lang.Long]): Option[Int] =
+    count.toScala.map(_.intValue)
+
+  /**
+   * The usage a streamed `message_start` or `message_delta` reports, for
+   * `StreamingAccumulator.updateUsage`, or `None` for any other event. Anthropic sends the input
+   * and prompt-cache counts on `message_start`, and the cumulative output count on
+   * `message_delta`, which repeats the others only when they changed. A count an event leaves out
+   * is `0` or `None`, which `updateUsage` reads as unchanged, and no event states a total. A
+   * `Failure` when the SDK cannot read the event's usage (it throws on a missing required count),
+   * so the caller decides what an unreadable count costs the stream.
+   */
+  private[provider] def streamedUsage(event: RawMessageStreamEvent): Try[Option[TokenUsage]] =
+    event
+      .messageStart()
+      .toScala
+      .map(start => Try(startUsage(start.message().usage())))
+      .orElse(event.messageDelta().toScala.map(delta => Try(deltaUsage(delta.usage())))) match {
+      case Some(usage) => usage.map(Some(_))
+      case None        => Success(None)
+    }
+
+  private def startUsage(usage: Usage): TokenUsage =
+    TokenUsage(
+      promptTokens = usage.inputTokens().toInt,
+      completionTokens = usage.outputTokens().toInt,
+      totalTokens = 0,
+      cachedTokens = optionalCount(usage.cacheReadInputTokens()),
+      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens())
+    )
+
+  private def deltaUsage(usage: MessageDeltaUsage): TokenUsage =
+    TokenUsage(
+      promptTokens = optionalCount(usage.inputTokens()).getOrElse(0),
+      completionTokens = usage.outputTokens().toInt,
+      totalTokens = 0,
+      cachedTokens = optionalCount(usage.cacheReadInputTokens()),
+      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens())
+    )
 
   /**
    * The thinking blocks of an assistant turn that Anthropic takes back: signed thinking and

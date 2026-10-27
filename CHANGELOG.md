@@ -276,6 +276,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vertexai` clients now read `usageMetadata.thoughtsTokenCount` as `thinkingTokens` and `cachedContentTokenCount` as
   `cachedTokens`, from `complete` and from a stream, so their cost estimates count thinking and cache reads
   [#2348](https://github.com/llm4s/llm4s/issues/2348).
+- **Fixed** a streamed Anthropic completion's usage, which reported `promptTokens = 0` and no prompt-cache counts:
+  it now passes `message_start`'s and `message_delta`'s counts to `StreamingAccumulator.updateUsage`, so its estimated cost is complete [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
 ### Java & Kotlin APIs
 
