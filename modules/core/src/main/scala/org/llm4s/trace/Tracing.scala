@@ -73,9 +73,84 @@ trait Tracing {
    *         if tracing fails. Callers may ignore or log tracing failures.
    */
   def traceEvent(event: TraceEvent): Result[Unit]
+
+  /**
+   * Records a tool call using the supplied tool name, input, and output.
+   *
+   * The ConsoleTracing and LangfuseTracing implementations emit a
+   * [[TraceEvent.ToolExecuted]] event with zero duration and the success
+   * flag set to true. They do not measure the duration or determine whether
+   * the tool execution succeeded.
+   *
+   * Implementations should report tracing failures through the returned
+   * result rather than throwing exceptions.
+   *
+   * @param toolName the name of the tool that was called
+   * @param input the input supplied to the tool
+   * @param output the output returned by the tool
+   * @return `Right(())` when the tracing call is handled successfully,
+   *         including when a no-op backend discards it, or `Left(error)`
+   *         if tracing fails. Callers may ignore or log tracing failures.
+   */
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
+
+  /**
+   * Records an error together with context describing where it occurred.
+   *
+   * The ConsoleTracing and LangfuseTracing implementations emit a
+   * [[TraceEvent.ErrorOccurred]] event containing the supplied error
+   * and context.
+   *
+   * Implementations should report tracing failures through the returned
+   * result rather than throwing exceptions.
+   *
+   * @param error the error to record
+   * @param context a description of the operation or circumstances in which
+   *                the error occurred, such as "fetching weather data";
+   *                defaults to an empty string
+   * @return `Right(())` when the tracing call is handled successfully,
+   *         including when a no-op backend discards it, or `Left(error)`
+   *         if tracing fails. Callers may ignore or log tracing failures.
+   */
   def traceError(error: Throwable, context: String = ""): Result[Unit]
+
+  /**
+   * Records a completion received from a model.
+   *
+   * The ConsoleTracing and LangfuseTracing implementations emit a
+   * [[TraceEvent.CompletionReceived]] event containing the completion ID,
+   * the supplied model identifier, the number of tool calls in the
+   * assistant message, and the message content.
+   *
+   * Implementations should report tracing failures through the returned
+   * result rather than throwing exceptions.
+   *
+   * @param completion the model response whose details are to be traced
+   * @param model the model identifier to associate with this completion
+   * @return `Right(())` when the tracing call is handled successfully,
+   *         including when a no-op backend discards it, or `Left(error)`
+   *         if tracing fails. Callers may ignore or log tracing failures.
+   */
   def traceCompletion(completion: Completion, model: String): Result[Unit]
+
+  /**
+   * Records token usage for a model operation.
+   *
+   * The ConsoleTracing and LangfuseTracing implementations emit a
+   * [[TraceEvent.TokenUsageRecorded]] event containing the supplied usage,
+   * model identifier, and operation label.
+   *
+   * Implementations should report tracing failures through the returned
+   * result rather than throwing exceptions.
+   *
+   * @param usage the token usage reported for the operation
+   * @param model the model identifier to associate with this usage
+   * @param operation a caller-defined label describing the operation,
+   *                  such as "completion"
+   * @return `Right(())` when the tracing call is handled successfully,
+   *         including when a no-op backend discards it, or `Left(error)`
+   *         if tracing fails. Callers may ignore or log tracing failures.
+   */
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit]
 
   /**
@@ -215,6 +290,10 @@ trait TracingComposer {
     new TransformedTracing(tracer, f)
 }
 
+/**
+ * Provides convenient access to tracer composition, event filtering,
+ * and event transformation.
+ */
 object TracingComposer extends TracingComposer
 
 /**
@@ -310,6 +389,10 @@ sealed trait TracingMode extends Product with Serializable {
   def name: String
 }
 
+/**
+ * Defines built-in and named tracing modes and provides case-insensitive
+ * parsing of mode strings.
+ */
 object TracingMode {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
