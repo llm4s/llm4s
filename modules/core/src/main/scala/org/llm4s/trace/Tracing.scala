@@ -61,6 +61,17 @@ import scala.util.control.NonFatal
  */
 @Stable
 trait Tracing {
+
+  /**
+   * Handles a structured trace event using this tracing backend.
+   * Implementations should report tracing failures through the returned
+   * result rather than throwing exceptions.
+   *
+   * @param event the structured event to trace
+   * @return `Right(())` when the tracing call is handled successfully,
+   *         including when a no-op backend discards the event, or `Left(error)`
+   *         if tracing fails. Callers may ignore or log tracing failures.
+   */
   def traceEvent(event: TraceEvent): Result[Unit]
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
   def traceError(error: Throwable, context: String = ""): Result[Unit]
