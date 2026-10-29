@@ -1069,9 +1069,12 @@ val fromConfig = RerankerFactory.fromConfig(Some(config))
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.reranker.{ LLMReranker, RerankerFactory }
 
 val reranker = for {
+  registry    <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   providerCfg <- Llm4sConfig.defaultProvider()
   client      <- LLMConnect.getClient(providerCfg)
 } yield LLMReranker(client) // same as RerankerFactory.llm(client)
@@ -1083,8 +1086,8 @@ val reranker = for {
 How it scores:
 
 - **Batches.** Documents go to the model `batchSize` at a time (default `LLMReranker.DEFAULT_BATCH_SIZE` = 10), one model call per batch. A smaller batch means more calls but shorter prompts.
-- **1000-character cut.** Each document is truncated to its first 1000 characters, on a code-point boundary, before it goes into the prompt. Put the most relevant text first in long chunks.
-- **Scores.** The model must answer with a JSON array of scores. Each score is clamped to `[0, 1]`, and an entry that is not a number scores 0.5. A short array is padded with 0.5; a long one is cut to the batch size.
+- **1,000-unit cut.** Each document is truncated to its first 1,000 UTF-16 code units (the Scala `String` length), stopping one short rather than splitting a surrogate pair, before it goes into the prompt. That is 1,000 characters for most text, but emoji-heavy text can be cut after roughly 500 characters. Put the most relevant text first in long chunks.
+- **Scores.** The model must answer with a JSON array of scores. A number, or a numeric string such as `"0.9"`, is clamped to `[0, 1]`; `null`, booleans and other non-string values score 0.5. A string that is not a number fails the parse for the whole batch, so the entire batch gets neutral scores: `[0.9, "unknown"]` gives both documents 0.5, not 0.9 and 0.5. A short array is padded with 0.5; a long one is cut to the batch size.
 - **Failed batches.** If a batch's call or parse fails, every document in that batch gets a neutral 0.5 and reranking continues with the next batch. Cancellation is the exception: it is returned as an error.
 - **`systemPrompt`.** Replaces the default judging instructions. Keep asking for "ONLY a JSON array of scores" so replies stay parseable.
 
@@ -1097,7 +1100,7 @@ How it scores:
 | Strategy | Builder | Notes |
 |---|---|---|
 | `RerankingStrategy.None` | (default) | Results keep their fused retrieval order |
-| `RerankingStrategy.Cohere(model)` | `.withCohereReranking(model = "rerank-english-v3.0")` | Needs a Cohere reranker config |
+| `RerankingStrategy.Cohere(model)` | `.withCohereReranking(model = "rerank-english-v3.0")` | Needs a Cohere reranker config. The model comes from that `RerankProviderConfig`; the `model` argument is currently not used to choose it |
 | `RerankingStrategy.LLM` | `.withLLMReranking` | Needs an LLM client: add `.withLLM(client)` when building RAG |
 
 `.withRerankTopK(k)` sets how many retrieved candidates are reranked.
