@@ -95,6 +95,14 @@ a model above it needs an explicit per-provider cap. `dev` caps at 1048576. Per-
 sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev"
 ```
 
+Accepted `--env` values (matched case-insensitively):
+- `dev`, `dev-sandbox`: evaluated against `CatalogEnvironment.Dev` using the `devSandbox` policy
+- `staging`: evaluated against `CatalogEnvironment.Staging` using `prodSafeDefaults`
+- `prod`, `prod-safe`: evaluated against `CatalogEnvironment.Prod` using `prodSafeDefaults`
+- `permissive`, `none`: evaluated against `CatalogEnvironment.Prod` using `permissive`
+
+An unknown `--env` prints an error message naming the accepted values to stderr and exits with code `2`.
+
 With an explicit config file (recommended for reproducible checks):
 
 ```bash
