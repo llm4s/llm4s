@@ -1864,6 +1864,20 @@ jobs:
 
       - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
 
+      # VertexAISmokeSpec authenticates with Application Default Credentials: a service-account
+      # JSON key, held as the VERTEX_CREDENTIALS_JSON secret, written to a file for
+      # GOOGLE_APPLICATION_CREDENTIALS. Without the secret nothing is written, and the suite fails
+      # under LLM4S_IT_STRICT like any other missing key.
+      - name: Write Vertex AI credentials
+        env:
+          VERTEX_CREDENTIALS_JSON: ${{ secrets.VERTEX_CREDENTIALS_JSON }}
+        run: |
+          if [ -n "$VERTEX_CREDENTIALS_JSON" ]; then
+            umask 077
+            printf '%s' "$VERTEX_CREDENTIALS_JSON" > "$RUNNER_TEMP/vertex-credentials.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/vertex-credentials.json" >> "$GITHUB_ENV"
+          fi
+
       - name: Run cloud smoke tests
         env:
           # `LLM4S_IT_STRICT=true` turns a missing key into a failure. Without it this job
@@ -1914,4 +1928,25 @@ jobs:
           WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
           # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # Smoke suites added for #1213. With LLM4S_IT_STRICT=true each required one that is
+          # missing from the repository secrets makes its suite FAIL (not skip).
+          # AzureSmokeSpec: the resource key, its endpoint (https://<resource>.openai.azure.com) and a
+          # chat deployment's name. AZURE_OPENAI_CUSTOM_ENDPOINT (the resource behind a custom domain)
+          # is optional; unset, that one test is cancelled.
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_API_BASE: ${{ secrets.AZURE_API_BASE }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_CUSTOM_ENDPOINT: ${{ secrets.AZURE_OPENAI_CUSTOM_ENDPOINT }}
+          # RequestySmokeSpec.
+          REQUESTY_API_KEY: ${{ secrets.REQUESTY_API_KEY }}
+          # OpenAICompatibleSmokeSpec: the generic provider against Groq. GROQ_MODEL is optional.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
+          # VoyageEmbeddingsSmokeSpec.
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          # VertexAISmokeSpec: the project, plus the credentials file written above.
+          # GOOGLE_CLOUD_LOCATION (default us-central1) and VERTEX_MODEL are optional.
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+          VERTEX_MODEL: ${{ secrets.VERTEX_MODEL }}
         run: sbt testSmoke
