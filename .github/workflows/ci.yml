@@ -124,6 +124,11 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
+      # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
+      - name: Check llms.txt and llms-full.txt build from the docs
+        run: scripts/check-llms-txt.sh
+
       # The cited-issue check itself needs the network and runs weekly and on docs pull requests
       # (docs-cited-issues.yml); its tests run it against a fake `gh`.
       - name: Test the cited-issue check

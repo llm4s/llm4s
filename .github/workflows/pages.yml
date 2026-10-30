@@ -196,6 +196,20 @@ jobs:
           cp -r "$SCALADOC_DIR"/* docs/scaladoc/
           echo "Scaladoc copied successfully"
 
+      # llms.txt, llms-full.txt and llm4s-rules.md are generated from the pages, never kept by hand (#2287). They are
+      # built for the latest release, and again under /llms/<major.minor>/ for it and the previous minor. The build
+      # fails when a file is missing, llms.txt links a page that does not exist, or a Scala block of a page that is
+      # not compile-checked lacks its marker. A release tag from before the script existed skips the step.
+      - name: Build llms.txt and llms-full.txt
+        env:
+          LATEST_RELEASE: ${{ steps.version.outputs.latest_release }}
+        run: |
+          if [ -f scripts/build-llms-txt.sh ]; then
+            scripts/build-llms-txt.sh "$LATEST_RELEASE"
+          else
+            echo "::notice::This ref predates scripts/build-llms-txt.sh: the site is built without llms.txt."
+          fi
+
       - name: Build Jekyll site
         working-directory: docs
         run: |

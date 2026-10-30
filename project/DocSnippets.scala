@@ -27,6 +27,7 @@ object DocSnippets {
 
   /** The pages whose snippets are compiled. Paths are relative to `docs/`. */
   val pages: Seq[String] = Seq(
+    "ai-assistants.md",
     "getting-started/configuration.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
