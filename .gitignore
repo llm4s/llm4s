@@ -43,3 +43,9 @@ modules/gradle-demo/.kotlin/
 
 # Scratch directory of deploy/scripts/deploy.sh
 deploy/rendered/
+
+# Built by scripts/build-llms-txt.sh when the docs site is built (#2287), never committed
+/docs/llms.txt
+/docs/llms-full.txt
+/docs/llm4s-rules.md
+/docs/llms/
