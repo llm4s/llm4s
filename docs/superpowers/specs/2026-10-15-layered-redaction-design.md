@@ -105,7 +105,7 @@ All components live in `llm4s-core`. No new dependency is added.
   - The set has a cap. When it is reached, the oldest token-kind entries are evicted first; configured keys are never evicted.
 - **Masking.** A match becomes `[REDACTED]`.
 - **Multi-tenant processes.** One tenant's secret may be masked in another tenant's output. This is harmless over-masking and is documented.
-- **Tests.** `KnownSecrets.isolated { … }` is a test hook that scopes registrations.
+- **Tests.** `KnownSecrets.isolated { … }` is a test hook that scopes registrations to the calling thread and the threads it starts, leaving the process-wide registry untouched, so suites running in parallel cannot disturb each other.
 
 ### `StructuredRedaction` (B1, `private[llm4s]`)
 

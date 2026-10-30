@@ -106,7 +106,7 @@ These are inputs and conditions the spec implies but does not test directly. Eac
     - `def registerIdentifier(value: String): Unit`;
     - `def forget(value: String): Unit` (releases one hold on a token; a configured key or identifier is never forgotten);
     - `def scrub(text: String, placeholder: String): String`;
-    - `def isolated[A](body: => A): A` (test hook);
+    - `def isolated[A](body: => A): A` (test hook: an empty registry for the calling thread and the threads it starts; the process-wide registry is untouched, so parallel suites cannot disturb each other);
     - `enum Kind { case Configured, Token, Identifier }`;
     - `val MinLength = 8`;
     - `val Cap = 4096`.
@@ -226,6 +226,20 @@ class KnownSecretsSpec extends AnyFlatSpec with Matchers {
     KnownSecrets.scrub("nothing secret here", P) shouldBe "nothing secret here"
   }
 
+  it should "keep an isolated registry apart from other threads" in KnownSecrets.isolated {
+    KnownSecrets.register("isolated-only-value", KnownSecrets.Kind.Token)
+    val seen = new java.util.concurrent.atomic.AtomicReference[String]()
+    val pool = Executors.newSingleThreadExecutor()          // started here, so it inherits this registry
+    pool.submit(() => seen.set(KnownSecrets.scrub("isolated-only-value", P))).get()
+    pool.shutdown()
+    seen.get() shouldBe P
+    val outside = new java.util.concurrent.atomic.AtomicReference[String]()
+    val other = Thread.ofPlatform().inheritInheritableThreadLocals(false).start(() =>
+      outside.set(KnownSecrets.scrub("isolated-only-value", P)))
+    other.join()
+    outside.get() shouldBe "isolated-only-value"             // the process-wide registry never saw it
+  }
+
   it should "be safe to register while other threads scan" in KnownSecrets.isolated {
     val pool  = Executors.newFixedThreadPool(8)
     val start = new CountDownLatch(1)
@@ -285,7 +299,10 @@ private[llm4s] object KnownSecrets {
   final private case class State(entries: Vector[Entry], matcher: Option[ExactMatcher], refused: Set[String])
 
   private val empty = State(Vector.empty, None, Set.empty)
-  private val state = new AtomicReference[State](empty)
+  private val global = new AtomicReference[State](empty)
+  // set only by `isolated`; inherited by threads the test body starts
+  private val scoped = new InheritableThreadLocal[AtomicReference[State]]
+  private def state: AtomicReference[State] = Option(scoped.get()).getOrElse(global)
 
   def register(value: String, kind: Kind): Unit = Option(value).map(_.trim).foreach { v =>
     state.updateAndGet { s =>
@@ -331,10 +348,15 @@ private[llm4s] object KnownSecrets {
   private[security] def size: Int         = state.get().entries.size
   private[security] def refusedCount: Int = state.get().refused.size
 
-  /** Runs `body` against an empty registry and restores the previous one afterwards (tests only). */
+  /**
+   * Runs `body` against an empty registry of its own, seen by the calling thread and the threads it starts, and never
+   * touches the process-wide one (tests only). Suites run in parallel, so swapping the shared registry would let one
+   * suite's registrations vanish from, or leak into, another's.
+   */
   def isolated[A](body: => A): A = {
-    val saved = state.getAndSet(empty)
-    scala.util.Using.resource(new AutoCloseable { def close(): Unit = state.set(saved) })(_ => body)
+    val outer = scoped.get()
+    scoped.set(new AtomicReference[State](empty))
+    scala.util.Using.resource(new AutoCloseable { def close(): Unit = scoped.set(outer) })(_ => body)
   }
 
   /**
