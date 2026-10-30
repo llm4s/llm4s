@@ -2,6 +2,9 @@
 layout: page
 title: Master code review guidelines
 nav_order: 9
+redirect_from:
+  - /reference/review-guidelines.main.backup
+  - /reference/review-guidelines.main.backup.html
 parent: Reference
 ---
 

@@ -238,6 +238,11 @@ it never overwrites. Write whatever the release deserves once it exists.
   bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
   `scripts/check-scala-cli-quickstart.sh --central --compile`.
 
+- After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
+  Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's
+  pages should not show new crawl errors). The deploy itself fails if `sitemap.xml` lists Scaladoc or PDF URLs
+  (`scripts/check-site-sitemaps.sh`).
+
 ### Discoverability: Scaladex and GitHub
 
 Scala developers look for libraries on [Scaladex](https://index.scala-lang.org). It indexes an artifact by the
