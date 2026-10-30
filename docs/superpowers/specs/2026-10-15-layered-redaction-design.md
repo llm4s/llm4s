@@ -91,6 +91,7 @@ All components live in `llm4s-core`. No new dependency is added.
   - watsonx IAM API keys and tokens;
   - Azure keys;
   - search-tool keys.
+- **One owner per token generation.** A value that changes on every refresh (an access token, a JWT assertion, a subject token) is registered by the code that sends it, through a `TokenGenerations` that keeps the current and previous generation and forgets older ones; nothing else registers it. A value registered once and kept (a configured key, a refresh token) is a plain `Secret`. So repeated refreshes never grow the registry.
 - **Config `toString` methods** stop calling `Redaction.secret` / `secretOpt` by hand.
 - **Not covered:** Bedrock credentials stay inside the AWS SDK. llm4s never holds the signed header, so `BedrockClient`'s exception-message redaction remains B2.
 

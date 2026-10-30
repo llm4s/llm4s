@@ -777,16 +777,20 @@ final private[llm4s] class TokenGenerations {
 ```
 
 - [ ] **Step 4: Wire up each source**
-  - **Vertex.** Hold a `TokenGenerations`. Where `cachedToken = Some(t)` is set, call `generations.rotate(t.value)`. Wrap the JWT assertion and the refresh token in `Secret.token` where they are built.
+
+  One rule decides which call each source makes. A value that changes on every refresh (an access token, a signed JWT assertion, a subject token) is registered only through a `TokenGenerations`, which releases its hold on the generation before last. `Secret.token` is for a value registered once and kept, such as a refresh token: its hold is never released, so a per-refresh value wrapped in it would stay registered until cap eviction, crowding out tokens other clients still use. Each generation has exactly one owner, the code that sends it.
+  - **Vertex.** Hold a `TokenGenerations` for access tokens: where `cachedToken = Some(t)` is set, call `generations.rotate(t.value)`. Hold a second one for JWT assertions, a fresh one per refresh: call `assertions.rotate(jwt)` where it is built, before it is sent. Wrap the refresh token, which does not change, in `Secret.token`.
   - **watsonx.** Hold a `TokenGenerations`, and call `rotate(token)` where `tokenCache.set(...)` is called. Delete the private `scrub(...)` and pass each body to `Redaction.safeBody` (or `HttpErrorMapper`) only.
   - **`AccessTokenProvider` consumers.** In `OpenAICompatibleClient.bearer()`, `OpenAIClient.EntraIdBearer` and `OpenAIEmbeddingProvider`, call `generations.rotate(token)` on each token before it is sent.
-  - **TokenExchange.** Call `Secret.token(jwt)` for the subject token and `Secret.token(accessToken)` for the exchanged token. Call `KnownSecrets.registerIdentifier` for `clientId`. Delete the `secrets` sequence.
+  - **TokenExchange.** Hold a `TokenGenerations` for subject tokens and call `subjects.rotate(jwt)` before each exchange request. Do not register the exchanged access token here: the client that sends it owns it, through its own `generations.rotate` (the `AccessTokenProvider` consumers above), and it is sent nowhere before that. Call `KnownSecrets.registerIdentifier` for `clientId`. Delete the `secrets` sequence.
   - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers, and each configured header with a credential name (`Redaction.isCredentialName`, such as a static `Authorization`) as configured secrets: the whole value, and for a value with an auth scheme (`Bearer <token>`, `Basic <b64>`) the credential after the scheme too, since a provider may echo the token alone. `credentialSecrets(requestHeaders)` covers this today by stripping `Bearer `. Delete the passing of `secrets` to `mapError` and its parameter.
   - **Langfuse.** Build the Basic header from `Secret.basic(...)`.
 
 - [ ] **Step 5: Add an echo test to each source's spec**
 
 In `VertexAIAuthProviderSpec` (gemini), `WatsonXClientSpec` (watsonx), `TokenExchangeSpec` and `CachingAccessTokenProviderSpec` (core, `llmconnect/auth`) and `OpenAIWorkloadIdentitySpec` (openai), add one case to each. The fake token endpoint (these specs already use a local server) issues token `T`. The next call's error body echoes `T`. The `LLMError.message` must not contain `T`.
+
+In `TokenExchangeSpec`, also test rotation through the real exchange-to-client path: an exchange-backed client whose fake token endpoint issues a new subject token and a new access token on each of three refreshes, with a request after each. Afterwards the third and second access tokens and subject tokens are still scrubbed, the first of each is not (`KnownSecrets.scrub` returns it unchanged), and `KnownSecrets.size` is the same after the third refresh as after the second, so repeated refreshes do not grow the registry.
 
 In the openai-compatible client spec, add a case with `Credential.Dynamic` over a custom `AccessTokenProvider` (a plain function, not `CachingAccessTokenProvider`) whose token the error body echoes, and one with a static `Authorization: Bearer <token>` header whose error body echoes the token alone, without the scheme.
 
