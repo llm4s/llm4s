@@ -6,34 +6,51 @@ import pureconfig.ConfigSource
 
 object CheckPolicies {
   def main(args: Array[String]): Unit = {
-    val envName   = parseArg(args, "--env").getOrElse("prod")
-    val configOpt = parseArg(args, "--config")
-
-    val environment = CatalogEnvironment.fromString(envName)
-    val policy      = ConfigPolicy.preset(envName).getOrElse(ConfigPolicy.prodSafeDefaults)
-    val source      = sourceFor(configOpt)
-
-    val checked = for {
-      providerConfig <- Llm4sConfig.providerFrom(source)
-      keySources     <- Llm4sConfig.apiKeySourcesFrom(source)
-    } yield ConfigPolicyEngine.check(providerConfig, policy, environment) ++
-      ConfigPolicyEngine.checkApiKeySources(keySources, policy, environment)
-
-    checked match {
-      case Right(violations) =>
-        if (violations.isEmpty) {
-          println(s"Config policy check passed for env=$envName")
-          sys.exit(0)
-        } else {
-          Console.err.println(s"Config policy check failed for env=$envName")
-          violations.foreach(v => Console.err.println(s" - [${v.rule}] ${v.message}"))
-          sys.exit(1)
-        }
+    val envName = parseArg(args, "--env").getOrElse("prod")
+    resolveEnv(envName) match {
       case Left(error) =>
-        Console.err.println(s"Failed to load provider config: ${error.formatted}")
-        sys.exit(1)
+        Console.err.println(error)
+        sys.exit(2)
+      case Right((environment, policy)) =>
+        val configOpt = parseArg(args, "--config")
+        val source    = sourceFor(configOpt)
+
+        val checked = for {
+          providerConfig <- Llm4sConfig.providerFrom(source)
+          keySources     <- Llm4sConfig.apiKeySourcesFrom(source)
+        } yield ConfigPolicyEngine.check(providerConfig, policy, environment) ++
+          ConfigPolicyEngine.checkApiKeySources(keySources, policy, environment)
+
+        checked match {
+          case Right(violations) =>
+            if (violations.isEmpty) {
+              println(s"Config policy check passed for env=$envName")
+              sys.exit(0)
+            } else {
+              Console.err.println(s"Config policy check failed for env=$envName")
+              violations.foreach(v => Console.err.println(s" - [${v.rule}] ${v.message}"))
+              sys.exit(1)
+            }
+          case Left(error) =>
+            Console.err.println(s"Failed to load provider config: ${error.formatted}")
+            sys.exit(1)
+        }
     }
   }
+
+  private[configpolicy] def resolveEnv(
+    envName: String
+  ): Either[String, (CatalogEnvironment, ConfigPolicy)] =
+    envName.toLowerCase match {
+      case "dev" | "dev-sandbox" => Right((CatalogEnvironment.Dev, ConfigPolicy.devSandbox))
+      case "staging"             => Right((CatalogEnvironment.Staging, ConfigPolicy.prodSafeDefaults))
+      case "prod" | "prod-safe"  => Right((CatalogEnvironment.Prod, ConfigPolicy.prodSafeDefaults))
+      case "permissive" | "none" => Right((CatalogEnvironment.Prod, ConfigPolicy.permissive))
+      case _ =>
+        Left(
+          s"Unknown --env '$envName'. Use one of: dev, dev-sandbox, staging, prod, prod-safe, permissive, none"
+        )
+    }
 
   /**
    * The config to check. Without `--config`, the application's own: `ConfigSource.default`.
