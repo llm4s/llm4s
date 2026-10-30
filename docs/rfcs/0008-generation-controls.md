@@ -11,7 +11,7 @@ nav_order: 8
 - **Status:** Proposed
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
-- **Pull request:** (this RFC)
+- **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
 
 ## Summary
 
