@@ -13,7 +13,7 @@
 ## Core Principles
 
 1. **Use `Result[A]` instead of exceptions** - `type Result[+A] = Either[LLMError, A]`
-2. **Use `Llm4sConfig` at the app edge** - Never use `sys.env`, `System.getenv`, or `ConfigSource.default` directly in core code
+2. **Use `Llm4sConfig` at the app edge** - Never use `sys.env`, `System.getenv`, or `ConfigSource.default` directly in core code; `Llm4sConfig.from(config)` reads a `Config` the app already has
 3. **Use type-safe newtypes** - `ModelName`, `ApiKey`, `ConversationId` etc.
 4. **Scala 3 idioms are welcome** - `opaque type`, `using` clauses, `enum` and `extension` are all in use. Do not rewrite them to a Scala 2.13-compatible subset; see [#1127](https://github.com/llm4s/llm4s/issues/1127)
 
