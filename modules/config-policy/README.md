@@ -120,6 +120,10 @@ LLM_PROVIDER=openai LLM_MODEL=gpt-4o-mini \
   sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=prod --preset=prod-safe"
 ```
 
+The exit code is `0` when every policy that ran passed and `1` when one failed. It is `2` for an unknown
+preset, or when every policy in the preset is skipped for the chosen `--env` (for example `--env=production`
+with `prod-safe`, whose policies apply only to `prod`), because then nothing was checked.
+
 ## CI
 
 The workflow runs `CheckPolicies` as a **smoke test**: it proves the CLI and dev policy path work; it does not start a real Ollama server. The smoke config lives at `config/examples/application-policy-smoke.conf`.
