@@ -61,6 +61,32 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ---- Sum types
+
+  object SumTypes {
+    import org.llm4s.schema.*
+    import upickle.default.ReadWriter
+
+    @description("What the support bot decides to do")
+    enum Action derives SchemaOf, ReadWriter {
+      @description("Refund the customer") case Refund(amount: BigDecimal, reason: String)
+      @description("Hand over to a human team") case Escalate(team: Team)
+      case Reply(text: String)
+    }
+
+    enum Team derives SchemaOf, ReadWriter {
+      case Billing, Shipping
+    }
+
+    def decide(client: LLMClient, conversation: Conversation): String =
+      client.completeStructuredOf[Action](conversation) match {
+        case Right(Action.Refund(amount, _)) => s"refund $amount"
+        case Right(Action.Escalate(team))    => s"escalate to $team"
+        case Right(Action.Reply(text))       => text
+        case Left(error)                     => error.message
+      }
+  }
+
   // ---- Tool parameters
 
   object Tools {
@@ -191,7 +217,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 9
+    scalaBlocks should have size 10
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -223,6 +249,22 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     contact("properties")("email")("type") shouldBe ujson.Arr("string", "null")
     contact("properties")("tags")("type") shouldBe ujson.Str("array")
     org.llm4s.schema.SchemaOf[Models.Priority].toJsonSchema()("enum") shouldBe ujson.Arr("Low", "Medium", "High")
+  }
+
+  "The sum type of the guide" should "be an anyOf of its cases, sent wrapped, with each reply read into its case" in {
+    import SumTypes.*
+    val schema = org.llm4s.schema.SchemaOf[Action].toJsonSchema()
+    schema("description") shouldBe ujson.Str("What the support bot decides to do")
+    schema("anyOf").arr.map(_("properties")("$type")("enum")) shouldBe
+      List(ujson.Arr("Refund"), ujson.Arr("Escalate"), ujson.Arr("Reply"))
+    schema("anyOf")(0)("description") shouldBe ujson.Str("Refund the customer")
+    val conversation = Conversation(Seq(UserMessage("My parcel arrived broken.")))
+    decide(new Scripted("""{"value":{"$type":"Refund","amount":"25.50","reason":"broken"}}"""), conversation) shouldBe
+      "refund 25.50"
+    decide(new Scripted("""{"value":{"$type":"Escalate","team":"Shipping"}}"""), conversation) shouldBe
+      "escalate to Shipping"
+    decide(new Scripted("""{"value":{"$type":"Reply","text":"Sorry!"}}"""), conversation) shouldBe "Sorry!"
+    decide(new Scripted("""{"value":{"$type":"Shout"}}"""), conversation) should include("does not match")
   }
 
   "The tool of the guide" should "send the derived schema as its parameters, and read a call with it" in {

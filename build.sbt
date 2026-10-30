@@ -1379,7 +1379,7 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     commonSettings,
     // Measured 98.94% statement and 95.24% branch coverage (`sbt coverage schemaDerivation/test
     // schemaDerivation/coverageReport`), up from 88.63% when the recursion check and the external-package and
-    // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were; 99.38% / 96.00% with the run-time recursion guard. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
+    // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were; 99.38% / 96.00% with the run-time recursion guard; 96.24% / 93.13% with sum types (#2327), whose new code is mostly compile-time checks scoverage cannot see. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
     // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
     // specs exercise it when they compile.
     coverageFloor(95),
@@ -2130,7 +2130,9 @@ lazy val it = (project in file("modules/it"))
     // the PostgreSQL checkpointer's contract, concurrency and cross-process suites (design 4.50)
     agentCheckpointPostgres % Test,
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
-    deployService % Test
+    deployService % Test,
+    // SumTypeStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
+    schemaDerivation % Test
   )
   .settings(
     name := "llm4s-it",
