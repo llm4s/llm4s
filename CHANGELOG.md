@@ -553,6 +553,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#380](https://github.com/llm4s/llm4s/issues/380).
 - **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
+- **Added** `@Cloud` smoke suites for Azure OpenAI (classic, custom-domain and `/openai/v1` endpoints), Requesty, the generic
+  `openai-compatible` provider (Groq, plus a keyless local run), Voyage embeddings and Vertex AI, and Mistral dialect checks [#1213](https://github.com/llm4s/llm4s/issues/1213).
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
   run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
 - **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,
