@@ -1,6 +1,7 @@
 ---
 # Owned by the site so that both sitemaps are listed (#2318); jekyll-sitemap writes its own robots.txt only when none exists.
 # sitemap: false keeps this file out of sitemap.xml.
+layout: null
 sitemap: false
 ---
 User-agent: *
