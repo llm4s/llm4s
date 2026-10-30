@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
-import org.llm4s.annotation.Stable
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -10,7 +10,10 @@ import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
 import org.llm4s.error.LLMError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import com.typesafe.config.{ Config, ConfigFactory }
 import pureconfig.ConfigSource
+
+import scala.util.Try
 
 /**
  * Application-edge configuration loader for LLM4S.
@@ -65,11 +68,50 @@ import pureconfig.ConfigSource
  * } yield result.answer
  * }}}
  *
+ * == A config the application already has ==
+ * Every method here reads the process-wide default configuration. To read a
+ * `com.typesafe.config.Config` the application loaded itself - Play's
+ * `Configuration.underlying`, a Pekko `ActorSystem.settings.config`, a config parsed
+ * per test or per tenant - call [[from]] and use the returned [[Llm4sSettings]], which
+ * has the same methods.
+ *
  * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
  *      `reference.conf` binds.
  */
 @Stable
 object Llm4sConfig {
+
+  /**
+   * The llm4s settings of `config` instead of the process-wide `application.conf`.
+   *
+   * `config` takes the place of `application.conf` and nothing else changes: JVM system
+   * properties still override it, every llm4s module's `reference.conf` still sits beneath it
+   * (so `llm4s.credentials.<providerId>.apiKey` and each module's defaults apply), and `${?VAR}`
+   * substitutions are resolved against the process environment - what `ConfigFactory.load(config)`
+   * does. A config that is already loaded and resolved, such as Play's or Pekko's, is accepted
+   * as is. Each call reads only its own `config`, so two settings in one JVM are independent.
+   *
+   * @param config the application's configuration; its `llm4s` block is read
+   * @return the settings, or a [[org.llm4s.error.ConfigurationError]] when `config` cannot be
+   *         resolved (a `${VAR}` substitution with nothing to substitute)
+   * @example
+   * {{{
+   * for {
+   *   settings <- Llm4sConfig.from(play.configuration.underlying)
+   *   registry <- settings.modelRegistryService()
+   *   cfg      <- settings.defaultProvider()
+   *   client   <- LLMConnect.getClient(cfg)(using registry)
+   * } yield client
+   * }}}
+   *
+   * Experimental: it takes a Typesafe `Config`, a third-party type, so whether that is the
+   * entry point to freeze is open until the API baseline (#2340, #1281).
+   */
+  @Experimental
+  def from(config: Config): Result[Llm4sSettings] =
+    Try(ConfigFactory.load(config)).toEither.left
+      .map(e => org.llm4s.error.ConfigurationError(s"Cannot resolve the given configuration: ${e.getMessage}"))
+      .map(loaded => new Llm4sSettings(ConfigSource.fromConfig(loaded)))
 
   def modelRegistryConfig(): Result[ModelRegistryConfig] =
     modelRegistryConfig(ConfigSource.default)
@@ -263,7 +305,12 @@ object Llm4sConfig {
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
    */
   def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    org.llm4s.config.ProvidersConfigLoader.loadSections(ConfigSource.default).flatMap(listModelsThroughNetwork(name, _))
+    listModels(ConfigSource.default, name)
+
+  private[config] def listModels(source: ConfigSource, name: String)(using
+    ProviderRegistry
+  ): Result[List[DiscoveredModel]] =
+    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(listModelsThroughNetwork(name, _))
 
   /** Lists `name`'s models with a client routed by the section's proxy and TLS settings, closed afterwards. */
   private def listModelsThroughNetwork(name: String, sections: ProviderSections)(using
@@ -353,8 +400,6 @@ object Llm4sConfig {
    * exchange logging remains off. When enabled, a JSONL sink is constructed
    * from a configured directory and writes to a new per-run file.
    */
-  // TODO: As part of the wider Llm4sConfig cleanup, accept an optional ConfigSource
-  // parameter here instead of hard-wiring ConfigSource.default inside the method body.
   def exchangeLogging(): Result[ProviderExchangeLogging] =
     org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
@@ -444,7 +489,12 @@ object Llm4sConfig {
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
   def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
-    embeddings().flatMap { case (provider, cfg) =>
+    textEmbeddingModel(ConfigSource.default)
+
+  private[config] def textEmbeddingModel(source: ConfigSource)(using
+    ProviderRegistry
+  ): Result[TextEmbeddingModelSettings] =
+    embeddings(source).flatMap { case (provider, cfg) =>
       val p = provider.toLowerCase
       ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
         TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)

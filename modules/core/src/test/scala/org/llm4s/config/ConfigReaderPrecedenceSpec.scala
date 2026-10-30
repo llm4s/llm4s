@@ -33,7 +33,11 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
           case other =>
             fail(s"Expected FixtureChatConfig, got $other")
         }
-      } finally if (original == null) System.clearProperty(key) else System.setProperty(key, original)
+      } finally {
+        if (original == null) System.clearProperty(key) else System.setProperty(key, original)
+        // Drop the cached overridden property so later specs do not see it.
+        ConfigFactory.invalidateCaches()
+      }
     }
   }
 }

@@ -514,6 +514,50 @@ there unless it is loaded.
 
 ---
 
+## Using a config your application already has
+
+`Llm4sConfig`'s methods read the process-wide `application.conf`. When your application already
+holds its configuration as a Typesafe `Config` - Play's `Configuration.underlying`, a Pekko
+`ActorSystem.settings.config`, one config per tenant, or one parsed per test case - pass it to
+`Llm4sConfig.from`. It returns an `Llm4sSettings` with the same methods (`defaultProvider()`,
+`provider(name)`, `providers()`, `embeddings()`, `tracing()`, `modelRegistryService()`, ...):
+
+```scala
+import com.typesafe.config.{ Config, ConfigFactory }
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.types.Result
+
+// In a Play or Pekko app this is the Config the framework already loaded.
+val appConfig: Config = ConfigFactory.parseString(
+  """llm4s.providers {
+    |  provider = "openai-main"
+    |  openai-main { provider = "openai", model = "gpt-4o-mini" }
+    |}""".stripMargin
+)
+
+val llmClient: Result[LLMClient] = for {
+  settings <- Llm4sConfig.from(appConfig)
+  registry <- settings.modelRegistryService()
+  cfg      <- settings.defaultProvider()
+  client   <- LLMConnect.getClient(cfg)(using registry)
+} yield client
+```
+
+The given config takes the place of `application.conf` and nothing else changes, exactly as
+`ConfigFactory.load(config)` would: JVM system properties still override it, every llm4s
+module's `reference.conf` still sits beneath it - so the shared `llm4s.credentials.<id>.apiKey`
+fallback (`OPENAI_API_KEY` above) and each module's defaults apply - and `${?VAR}`
+substitutions are resolved against the process environment. A config that is already loaded
+and resolved is accepted as is. Two `Llm4sSettings` in one JVM never see each other's
+configuration. `from` returns a `Left(ConfigurationError)` when the config cannot be resolved,
+such as a `${VAR}` substitution with no value.
+
+`Llm4sConfig.from` and `Llm4sSettings` are `@Experimental`: their shape may still change before
+1.0.
+
+---
+
 ## Running the samples
 
 The repository's samples read `modules/samples/src/main/resources/application.conf`, which
