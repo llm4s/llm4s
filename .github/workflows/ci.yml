@@ -136,6 +136,10 @@ jobs:
       - name: Test the release docs-deploy dispatcher
         run: scripts/test-dispatch-docs-deploy.sh
 
+      # The sitemap generator and check that pages.yml runs after the Jekyll build (#2318), on a fake built site.
+      - name: Test the sitemap scripts
+        run: scripts/test-check-site-sitemaps.sh
+
       # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
       # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
       # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
