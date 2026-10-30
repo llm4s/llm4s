@@ -122,3 +122,17 @@ reliability-guide.md | 3e60aa3697 | with | import org.llm4s.reliability._; impor
 reliability-guide.md | ea2b58a14f | with | import org.llm4s.error.LLMError; import scala.concurrent.duration.FiniteDuration
 reliability-guide.md | b36aaef65f | with | import scala.concurrent.duration._
 reliability-guide.md | fa35020d32 | with | import scala.concurrent.duration._
+guide/agents/handoffs.md | a9aa90095d | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
+guide/agents/handoffs.md | 8797be310f | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
+guide/agents/handoffs.md | 66c968311e | skip | specialistBuilder stands for the reader's specialist AgentBuilder; the Quick Start above shows a full one
+guide/agents/handoffs.md | c2851c9c8a | skip | mathAgent, codeAgent, legalAgent and medicalAgent stand for specialist builders the page does not define
+guide/agents/handoffs.md | 11f44a1d8d | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
+guide/agents/handoffs.md | cfd8b5cb6a | skip | queryDatabaseTool, generateChartTool, exportCSVTool and basicTools stand for the reader's own tools
+guide/agents/handoffs.md | a466d5b776 | with | import org.llm4s.agent.Agent; import org.llm4s.agent.Handoff
+guide/agents/handoffs.md | 423b68ea6c | skip | continues the customer support example above: billingAgent is the builder defined there
+guide/agents/handoffs.md | a7e216e203 | skip | mainAgent and query stand for an agent built as above and the user's question
+guide/agents/handoffs.md | 10d54e6bc1 | skip | specialist is the builder of the examples above; the comments sketch a conversation
+guide/agents/handoffs.md | 7fdebf1862 | with | import org.llm4s.agent.Handoff
+guide/agents/handoffs.md | 325a7ae427 | skip | agent stands for the specialist builder being described
+guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
+guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue

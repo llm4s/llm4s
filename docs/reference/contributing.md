@@ -175,8 +175,10 @@ def parseConfig(json: String): Config =
 ```scala
 // Good — in samples/CLI code
 val result = for {
-  config <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(config)
+  config   <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client   <- LLMConnect.getClient(config)
 } yield client
 
 // Bad — anywhere
