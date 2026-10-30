@@ -693,6 +693,26 @@ class TokenRotationSpec extends AnyFlatSpec with Matchers {
     KnownSecrets.scrub("ya29.first-token-0001", "[REDACTED]") shouldBe "[REDACTED]"
   }
 
+  it should "have registered a token before any concurrent rotate of it returns" in KnownSecrets.isolated {
+    // Each round: eight requests obtain the same new token at once; each must see it registered on return.
+    val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+    (0 until 200).foreach { i =>
+      val g     = new TokenGenerations
+      val t     = f"ya29.concurrent-$i%06d"
+      val start = new java.util.concurrent.CountDownLatch(1)
+      val tasks = (0 until 8).map { _ =>
+        pool.submit { () =>
+          start.await()
+          g.rotate(t)
+          KnownSecrets.scrub(t, "[REDACTED]") shouldBe "[REDACTED]"
+        }
+      }
+      start.countDown()
+      tasks.foreach(_.get(30, java.util.concurrent.TimeUnit.SECONDS))
+    }
+    pool.shutdown()
+  }
+
   it should "keep a token another source still holds" in KnownSecrets.isolated {
     val g1 = new TokenGenerations
     val g2 = new TokenGenerations
@@ -713,20 +733,22 @@ Expected: FAIL to compile, because `TokenGenerations` is not defined.
 ```scala
 package org.llm4s.security
 
-import java.util.concurrent.atomic.AtomicReference
-
 /**
  * Registers each token a source obtains, and keeps the token it replaced registered too: an error body
  * for a request made with the old token may still be on its way. The generation before that is forgotten.
  */
 final private[llm4s] class TokenGenerations {
-  private val held = new AtomicReference[Vector[String]](Vector.empty)
+  private var held = Vector.empty[String]
 
-  def rotate(next: String): Unit = {
-    val before = held.getAndUpdate(gens => if (gens.lastOption.contains(next)) gens else (gens :+ next).takeRight(2))
-    if (!before.lastOption.contains(next)) {
+  /**
+   * Serialised, so that a concurrent `rotate` of the same token cannot see it as current, skip registration and
+   * send it before the first caller has registered it. The section does no I/O: one registry update at most.
+   */
+  def rotate(next: String): Unit = synchronized {
+    if (!held.lastOption.contains(next)) {
       KnownSecrets.register(next, KnownSecrets.Kind.Token)
-      (before :+ next).dropRight(2).foreach(KnownSecrets.forget)
+      (held :+ next).dropRight(2).foreach(KnownSecrets.forget)
+      held = (held :+ next).takeRight(2)
     }
   }
 }
@@ -737,14 +759,14 @@ final private[llm4s] class TokenGenerations {
   - **watsonx.** Hold a `TokenGenerations`, and call `rotate(token)` where `tokenCache.set(...)` is called. Delete the private `scrub(...)` and pass each body to `Redaction.safeBody` (or `HttpErrorMapper`) only.
   - **`AccessTokenProvider` consumers.** In `OpenAICompatibleClient.bearer()`, `OpenAIClient.EntraIdBearer` and `OpenAIEmbeddingProvider`, call `generations.rotate(token)` on each token before it is sent.
   - **TokenExchange.** Call `Secret.token(jwt)` for the subject token and `Secret.token(accessToken)` for the exchanged token. Call `KnownSecrets.registerIdentifier` for `clientId`. Delete the `secrets` sequence.
-  - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers, and the value of each configured header with a credential name (`Redaction.isCredentialName`, such as a static `Authorization`) as a configured secret, which `credentialSecrets(requestHeaders)` covers today. Delete the passing of `secrets` to `mapError` and its parameter.
+  - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers, and each configured header with a credential name (`Redaction.isCredentialName`, such as a static `Authorization`) as configured secrets: the whole value, and for a value with an auth scheme (`Bearer <token>`, `Basic <b64>`) the credential after the scheme too, since a provider may echo the token alone. `credentialSecrets(requestHeaders)` covers this today by stripping `Bearer `. Delete the passing of `secrets` to `mapError` and its parameter.
   - **Langfuse.** Build the Basic header from `Secret.basic(...)`.
 
 - [ ] **Step 5: Add an echo test to each source's spec**
 
 In `VertexAIAuthProviderSpec` (gemini), `WatsonXClientSpec` (watsonx), `TokenExchangeSpec` and `CachingAccessTokenProviderSpec` (core, `llmconnect/auth`) and `OpenAIWorkloadIdentitySpec` (openai), add one case to each. The fake token endpoint (these specs already use a local server) issues token `T`. The next call's error body echoes `T`. The `LLMError.message` must not contain `T`.
 
-In the openai-compatible client spec, add a case with `Credential.Dynamic` over a custom `AccessTokenProvider` (a plain function, not `CachingAccessTokenProvider`) whose token the error body echoes, and one with a static credential-named header.
+In the openai-compatible client spec, add a case with `Credential.Dynamic` over a custom `AccessTokenProvider` (a plain function, not `CachingAccessTokenProvider`) whose token the error body echoes, and one with a static `Authorization: Bearer <token>` header whose error body echoes the token alone, without the scheme.
 
 Run: `sbt core/test gemini/test watsonx/test openai/test anthropic/test openaiCompatible/test azureIdentity/test observability/test`.
 Expected: PASS.
