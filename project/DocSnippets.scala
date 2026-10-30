@@ -33,6 +33,7 @@ object DocSnippets {
     "getting-started/next-steps.md",
     "getting-started/ollama-quickstart.md",
     "getting-started/testing-guide.md",
+    "guide/agents/handoffs.md",
     "guide/basic-usage.md",
     "guide/custom-tools.md",
     "guide/data-protection.md",

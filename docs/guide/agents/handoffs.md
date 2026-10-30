@@ -41,9 +41,12 @@ A handoff is a route inside one graph. The root agent and every agent reachable 
 import org.llm4s.agent.{Agent, Handoff}
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
 
   // The specialist is a builder, not yet a built agent
@@ -187,7 +190,7 @@ val mainAgent = Agent.builder("main", client)
   .withHandoffs(Handoff.to("physics", physicsAgent, "Physics questions requiring expert explanation"))
   .build()
 
-mainAgent.run("Explain quantum entanglement")
+mainAgent.flatMap(_.run("Explain quantum entanglement"))
 ```
 
 ### Tool Specialist

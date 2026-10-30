@@ -783,9 +783,11 @@ Use `client.validate()` during application startup to fail fast on misconfigurat
 
 ```scala
 val clientResult = for {
-  config <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(config)
-  _      <- client.validate()
+  config   <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client   <- LLMConnect.getClient(config)
+  _        <- client.validate()
 } yield client
 
 clientResult match {

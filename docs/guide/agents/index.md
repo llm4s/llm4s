@@ -47,10 +47,13 @@ An agent is built once - tools, guardrails, handoffs and middleware belong to it
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.agent.Agent
+import org.llm4s.model.ModelRegistryService
 
 // Create an agent and run a query
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   agent <- Agent.builder("assistant", client).build()
   result <- agent.run("What is the capital of France?")
@@ -69,22 +72,30 @@ a bad or duplicate handoff id, or `withMaxSteps` below 1.
 ### Agent with Tools
 
 ```scala
-import org.llm4s.toolapi.{ToolRegistry, ToolFunction}
+import org.llm4s.agent.Agent
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.toolapi.{ SafeParameterExtractor, Schema, ToolBuilder, ToolRegistry }
 
 // Define a tool
-def getWeather(location: String): String = {
-  s"The weather in $location is sunny, 72F"
-}
+def getWeather(params: SafeParameterExtractor): Either[String, String] =
+  params.getString("location").map(location => s"The weather in $location is sunny, 72F")
 
-val weatherTool = ToolFunction(
-  name = "get_weather",
-  description = "Get current weather for a location",
-  function = getWeather _
-)
+val weatherSchema = Schema
+  .`object`[Map[String, Any]]("Weather query")
+  .withProperty(Schema.property("location", Schema.string("The city to get the weather for")))
 
 // Give the agent its tools when you build it
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  weatherTool <- ToolBuilder[Map[String, Any], String](
+    "get_weather",
+    "Get current weather for a location",
+    weatherSchema
+  ).withHandler(getWeather).buildSafe()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   agent <- Agent.builder("assistant", client)
     .withTools(new ToolRegistry(Seq(weatherTool)))
@@ -102,7 +113,9 @@ of a previous result:
 
 ```scala
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   agent <- Agent.builder("assistant", client).build()
 
