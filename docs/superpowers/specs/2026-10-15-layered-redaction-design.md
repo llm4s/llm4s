@@ -86,7 +86,7 @@ All components live in `llm4s-core`. No new dependency is added.
   - Langfuse public and secret keys;
   - `llm4s.credentials.*`;
   - workload-identity subject tokens and exchanged tokens;
-  - Azure Entra ID access tokens (`llm4s-azure-identity`, through the core `CachingAccessTokenProvider`);
+  - Azure Entra ID access tokens (`llm4s-azure-identity`), and any token from a caller-supplied `AccessTokenProvider`, registered where a client sends it;
   - Vertex OAuth access tokens, refresh tokens and JWT assertions;
   - watsonx IAM API keys and tokens;
   - Azure keys;
