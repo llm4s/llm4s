@@ -53,7 +53,10 @@ These are inputs and conditions the spec implies but does not test directly. Eac
 2. **A configured credential shorter than 8 characters**, such as a local test key `abc`. It is not registered, which is documented. One DEBUG line is logged per value, and no exception is thrown. Pinned in Task 1: `KnownSecretsSpec`, "refuses a value under 8 characters and logs once".
 3. **A config printed without a client ever being built**, as `config-policy`'s Doctor and `toString` do. The credential must still be masked through `Secret.toString`. Pinned in Task 3: `SecretConfigToStringSpec`.
 4. **Configs compared by value** in user code and in tests. Two configs built from the same key must compare equal, so `Secret` has value equality. Pinned in Task 1: `SecretSpec`, "is equal by value and hashes by value".
-5. **Java callers.** The `java-api` builders take `String` keys and must wrap them in a `Secret`, so that a Java user's key is registered too. Pinned in Task 3: a `javaApi` test that the key passed to the builder is masked in an error body.
+5. **A value with more than one holder.** The registry is process-wide and keyed by value, so one value can be a configured key and a token, or a token held by two sources, or the same token returned twice in a row. `forget` releases one hold and never removes a configured key or identifier; `TokenGenerations` ignores a token equal to the current one. Pinned in Task 1: `KnownSecretsSpec`, "keep a value another holder still holds" and "never forget a configured key"; Task 4: `TokenRotationSpec`, "keep a token repeated across rotations".
+6. **More configured keys than the cap.** The cap bounds tokens only: configured keys and identifiers are never evicted, even past it. Pinned in Task 1: `KnownSecretsSpec`, "keep every configured key past the cap".
+7. **Tokens from a caller's own `AccessTokenProvider`.** A `Dynamic` credential (openai-compatible) or an Azure `tokenProvider` can be any implementation, not the caching one, so tokens are registered where a client sends them, not inside a provider. Pinned in Task 4: an echo case with a custom provider in the openai-compatible spec.
+8. **Java callers.** The `java-api` builders take `String` keys and must wrap them in a `Secret`, so that a Java user's key is registered too. Pinned in Task 3: a `javaApi` test that the key passed to the builder is masked in an error body.
 
 ---
 
@@ -72,7 +75,7 @@ These are inputs and conditions the spec implies but does not test directly. Eac
   - `VertexAIAuthProvider`;
   - `WatsonXClient`;
   - `TokenExchange`;
-  - `CachingAccessTokenProvider` (the cache behind `TokenExchange` and `llm4s-azure-identity`'s `AzureEntraId`);
+  - the consumers of `AccessTokenProvider.token()`: `OpenAICompatibleClient.bearer()`, `OpenAIClient.EntraIdBearer` and `OpenAIEmbeddingProvider` (this covers `TokenExchange`, `AzureEntraId` and any caller-supplied provider);
   - the OpenAI, Anthropic and OpenAI-compatible `credentialSecrets`;
   - Langfuse Basic auth.
 - **Create** the tests named in each task.
@@ -101,7 +104,7 @@ These are inputs and conditions the spec implies but does not test directly. Eac
   - `private[llm4s] object KnownSecrets`:
     - `def register(value: String, kind: Kind): Unit`;
     - `def registerIdentifier(value: String): Unit`;
-    - `def forget(value: String): Unit`;
+    - `def forget(value: String): Unit` (releases one hold on a token; a configured key or identifier is never forgotten);
     - `def scrub(text: String, placeholder: String): String`;
     - `def isolated[A](body: => A): A` (test hook);
     - `enum Kind { case Configured, Token, Identifier }`;
@@ -188,11 +191,35 @@ class KnownSecretsSpec extends AnyFlatSpec with Matchers {
     KnownSecrets.scrub("token-0123456789", P) shouldBe "token-0123456789"
   }
 
+  it should "keep a value another holder still holds" in KnownSecrets.isolated {
+    KnownSecrets.register("shared-token-0001", KnownSecrets.Kind.Token)
+    KnownSecrets.register("shared-token-0001", KnownSecrets.Kind.Token)
+    KnownSecrets.forget("shared-token-0001")
+    KnownSecrets.scrub("shared-token-0001", P) shouldBe P
+    KnownSecrets.forget("shared-token-0001")
+    KnownSecrets.scrub("shared-token-0001", P) shouldBe "shared-token-0001"
+  }
+
+  it should "never forget a configured key" in KnownSecrets.isolated {
+    KnownSecrets.register("configured-key-0001", KnownSecrets.Kind.Configured)
+    KnownSecrets.register("configured-key-0001", KnownSecrets.Kind.Token)
+    KnownSecrets.forget("configured-key-0001")
+    KnownSecrets.forget("configured-key-0001")
+    KnownSecrets.scrub("configured-key-0001", P) shouldBe P
+  }
+
   it should "evict tokens before configured keys at the cap" in KnownSecrets.isolated {
     KnownSecrets.register("configured-key-0001", KnownSecrets.Kind.Configured)
     (0 until KnownSecrets.Cap).foreach(i => KnownSecrets.register(f"token-$i%08d", KnownSecrets.Kind.Token))
     KnownSecrets.scrub("configured-key-0001", P) shouldBe P
     KnownSecrets.size should be <= KnownSecrets.Cap
+  }
+
+  it should "keep every configured key past the cap" in KnownSecrets.isolated {
+    val keys = (0 until KnownSecrets.Cap + 10).map(i => f"configured-$i%08d")
+    keys.foreach(KnownSecrets.register(_, KnownSecrets.Kind.Configured))
+    KnownSecrets.register("token-after-0001", KnownSecrets.Kind.Token)
+    keys.foreach(k => KnownSecrets.scrub(k, P) shouldBe P)
   }
 
   it should "leave text alone when nothing is registered" in KnownSecrets.isolated {
@@ -251,8 +278,11 @@ private[llm4s] object KnownSecrets {
 
   private val log = LoggerFactory.getLogger(getClass)
 
+  /** One registered value: its kind, and how many registrations hold it (`forget` releases one). */
+  final private case class Entry(value: String, kind: Kind, holds: Int)
+
   /** Insertion-ordered entries, plus the matcher built from their forms. */
-  final private case class State(entries: Vector[(String, Kind)], matcher: Option[ExactMatcher], refused: Set[String])
+  final private case class State(entries: Vector[Entry], matcher: Option[ExactMatcher], refused: Set[String])
 
   private val empty = State(Vector.empty, None, Set.empty)
   private val state = new AtomicReference[State](empty)
@@ -262,15 +292,36 @@ private[llm4s] object KnownSecrets {
       if (v.length < MinLength) {
         if (!s.refused.contains(v)) log.debug(s"Not registering a credential shorter than $MinLength characters")
         s.copy(refused = s.refused + v)
-      } else if (s.entries.exists(_._1 == v)) s
-      else rebuild(evict(s.entries :+ (v -> kind)), s.refused)
+      } else
+        s.entries.indexWhere(_.value == v) match {
+          case -1 => rebuild(evict(s.entries :+ Entry(v, kind, 1)), s.refused)
+          case i =>
+            // Configured outranks Identifier, which outranks Token: a value that is also a configured key is never
+            // evicted or forgotten. The forms are unchanged, so the matcher is kept.
+            val e    = s.entries(i)
+            val kept = if (e.kind == Kind.Configured || kind == Kind.Token) e.kind else kind
+            s.copy(entries = s.entries.updated(i, e.copy(kind = kept, holds = e.holds + 1)))
+        }
     }: Unit
   }
 
   def registerIdentifier(value: String): Unit = register(value, Kind.Identifier)
 
+  /**
+   * Releases one hold on a token. The value stays registered while another holder has it, and a configured key or
+   * identifier is never forgotten.
+   */
   def forget(value: String): Unit = Option(value).map(_.trim).foreach { v =>
-    state.updateAndGet(s => rebuild(s.entries.filterNot(_._1 == v), s.refused)): Unit
+    state.updateAndGet { s =>
+      s.entries.indexWhere(_.value == v) match {
+        case -1 => s
+        case i =>
+          val e = s.entries(i)
+          if (e.kind != Kind.Token) s
+          else if (e.holds > 1) s.copy(entries = s.entries.updated(i, e.copy(holds = e.holds - 1)))
+          else rebuild(s.entries.patch(i, Nil, 1), s.refused)
+      }
+    }: Unit
   }
 
   def scrub(text: String, placeholder: String): String =
@@ -286,17 +337,21 @@ private[llm4s] object KnownSecrets {
     scala.util.Using.resource(new AutoCloseable { def close(): Unit = state.set(saved) })(_ => body)
   }
 
-  private def evict(entries: Vector[(String, Kind)]): Vector[(String, Kind)] =
+  /**
+   * Drops the oldest tokens until the registry is back at [[Cap]]. Configured keys and identifiers are never dropped,
+   * so a process holding more than [[Cap]] of them keeps them all: the cap bounds the runtime tokens only.
+   */
+  private def evict(entries: Vector[Entry]): Vector[Entry] =
     if (entries.size <= Cap) entries
     else {
       val overflow  = entries.size - Cap
-      val evictable = entries.zipWithIndex.collect { case ((_, k), i) if k != Kind.Configured => i }.take(overflow).toSet
-      entries.zipWithIndex.collect { case (e, i) if !evictable(i) => e }.takeRight(Cap)
+      val evictable = entries.zipWithIndex.collect { case (e, i) if e.kind == Kind.Token => i }.take(overflow).toSet
+      entries.zipWithIndex.collect { case (e, i) if !evictable(i) => e }
     }
 
-  private def rebuild(entries: Vector[(String, Kind)], refused: Set[String]): State = {
+  private def rebuild(entries: Vector[Entry], refused: Set[String]): State = {
     val forms = entries.iterator
-      .map(_._1)
+      .map(_.value)
       .flatMap(v => Iterator(v, URLEncoder.encode(v, StandardCharsets.UTF_8), ExactMatcher.jsonEscaped(v)))
       .toSeq
       .distinct
@@ -376,6 +431,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `modules/core/src/main/scala/org/llm4s/util/Redaction.scala`
   - `redact` (~:576), `safeBody` (~:134), `redactForLogging` (~:2084), `safe` (~:2109), `remoteBody` (~:2126), `scrubRemote` (~:2135): each scrubs known secrets first.
+  - `url` (~:64): it keeps the path as is, and `BaseUrlValidation.shown`, `TokenExchangeConfig.toString` and the proxy configuration errors print its result directly, so it scrubs known secrets from the string it returns. (Scrubbing the input first would put `[REDACTED]` into the URL and make it fail to parse.)
   - Delete `scrub(input, secrets, placeholder)` (~:2149) and `identifiers` (~:2275).
   - Remove the `secrets` parameter from `remoteBody` and `scrubRemote`.
   - Keep the `sensitiveJsonValues` step inside `scrubRemote`.
@@ -422,6 +478,11 @@ class RedactionKnownSecretsSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "remove a registered credential from a URL's path" in KnownSecrets.isolated {
+    Secret(key)
+    Redaction.url(s"https://example.test/token/$key/v1") should not include key
+  }
+
   it should "leave an unregistered value of the same shape to the existing rules" in KnownSecrets.isolated {
     Redaction.scrubKnown(s"plain text $key here") shouldBe s"plain text $key here"
   }
@@ -446,6 +507,7 @@ Then make each entry point run `scrubKnown` on its input before doing anything e
 - `redact(input, placeholder)`: begin with `val scrubbed = KnownSecrets.scrub(input, placeholder)`, and use `scrubbed` from then on.
 - `safeBody(body, maxLength)`: `val scrubbed = scrubKnown(body)` before `safeBodyPrefix`. Measure the "original length" note on `body.length`, unchanged.
 - `redactForLogging` and `safe`: these delegate to `redact`, so they are covered. Confirm by reading them.
+- `url(value)`: apply `scrubKnown` to the URL it builds (the path is the part it keeps).
 - `remoteBody(body, maxLength)`: `redactForLogging(scrubRemote(body), maxLength)`.
 - `scrubRemote(body)`: `scrubEcho(scrubKnown(body), sensitiveJsonValues(body))`, where `scrubEcho` is the old `scrub` renamed, made `private`, and taking the echoed JSON values only.
 - Delete `identifiers`. Delete the public `scrub`, or make it private as `scrubEcho`.
@@ -588,16 +650,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   - the subject JWT (`form`, ~:205) and the exchanged access token (`parse`, ~:249): `Secret.token`;
   - `config.clientId`: `KnownSecrets.registerIdentifier`;
   - delete the secrets assembly, `sensitiveValues` (~:219), and the `secrets` parameter of its private `safeBody` (~:232) and `parse` (~:193).
-- Modify: `modules/core/src/main/scala/org/llm4s/llmconnect/auth/AccessTokenProvider.scala`: `CachingAccessTokenProvider` holds a `TokenGenerations` and rotates each token it caches. This registers the exchanged workload-identity tokens and the Azure Entra ID tokens (`AzureEntraId`, `llm4s-azure-identity`) in one place.
+- Modify the three places a client sends a token from an `AccessTokenProvider`: `OpenAICompatibleClient.bearer()` (~:337, the `Dynamic` and `Exchange` credentials), `OpenAIClient.EntraIdBearer` (~:1126) and `OpenAIEmbeddingProvider` (~:105). Each holds a `TokenGenerations` and rotates every token it is about to send. A provider can be the caller's own code (`Credential.Dynamic`, an Azure `tokenProvider`), not `CachingAccessTokenProvider`, so registering inside the caching provider would miss those tokens; this is what the per-request `credentialSecrets(requestHeaders)` covers today.
 - Modify: `OpenAIClient.credentialSecrets` (~:859), `AnthropicClient.credentialSecrets` (~:1052), `OpenAICompatibleClient.credentialSecrets` (~:361). Replace each with a `registerCredentials(config)` that calls `KnownSecrets.registerIdentifier` for the workload-identity ids (federation rule, organisation, service account, workspace, client id). The keys are already `Secret`s after Task 3. Delete the now-unused `credentialSecrets` vals and parameters.
 - Modify: `LangfuseBatchSender.scala:77` and `LangfuseTracing.scala:110`. Build the header from `Secret.basic(publicKey.reveal, secretKey.reveal).reveal`.
-- Create: `modules/core/src/main/scala/org/llm4s/security/TokenGenerations.scala`. A small helper: `final class TokenGenerations { def rotate(next: String): Secret }`. It registers `next` as a token, keeps the current token and the one before it, and forgets the generation before that.
+- Create: `modules/core/src/main/scala/org/llm4s/security/TokenGenerations.scala`. A small helper: `final class TokenGenerations { def rotate(next: String): Unit }`. It registers `next` as a token, keeps the current token and the one before it, and releases the generation before that. A `next` equal to the current token changes nothing, so a source that hands out the same token on every call registers it once.
 - Test: `modules/core/src/test/scala/org/llm4s/security/TokenRotationSpec.scala`
 - Test: extend each token source's existing spec with one case: an error body echoing the token is masked.
 
 **Interfaces:**
 - Consumes: `Secret.token`, `KnownSecrets.registerIdentifier` and `KnownSecrets.forget` from Task 1.
-- Produces: `org.llm4s.security.TokenGenerations` (`private[llm4s]`), with `def rotate(next: String): Secret`.
+- Produces: `org.llm4s.security.TokenGenerations` (`private[llm4s]`), with `def rotate(next: String): Unit`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -622,6 +684,22 @@ class TokenRotationSpec extends AnyFlatSpec with Matchers {
     g.rotate("ya29.first-token-0001"); g.rotate("ya29.second-token-0002"); g.rotate("ya29.third-token-0003")
     KnownSecrets.scrub("ya29.first-token-0001", "[REDACTED]") shouldBe "ya29.first-token-0001"
   }
+
+  it should "keep a token repeated across rotations" in KnownSecrets.isolated {
+    val g = new TokenGenerations
+    g.rotate("ya29.first-token-0001"); g.rotate("ya29.first-token-0001"); g.rotate("ya29.second-token-0002")
+    KnownSecrets.scrub("ya29.first-token-0001", "[REDACTED]") shouldBe "[REDACTED]"
+    g.rotate("ya29.first-token-0001") // A, B, A: A is current again and must stay registered
+    KnownSecrets.scrub("ya29.first-token-0001", "[REDACTED]") shouldBe "[REDACTED]"
+  }
+
+  it should "keep a token another source still holds" in KnownSecrets.isolated {
+    val g1 = new TokenGenerations
+    val g2 = new TokenGenerations
+    g1.rotate("ya29.shared-token-0001"); g2.rotate("ya29.shared-token-0001")
+    g1.rotate("ya29.g1-second-0002"); g1.rotate("ya29.g1-third-0003")
+    KnownSecrets.scrub("ya29.shared-token-0001", "[REDACTED]") shouldBe "[REDACTED]"
+  }
 }
 ```
 
@@ -644,11 +722,12 @@ import java.util.concurrent.atomic.AtomicReference
 final private[llm4s] class TokenGenerations {
   private val held = new AtomicReference[Vector[String]](Vector.empty)
 
-  def rotate(next: String): Secret = {
-    val secret  = Secret.token(next)
-    val dropped = held.getAndUpdate(gens => (gens :+ next).takeRight(2))
-    (dropped :+ next).dropRight(2).foreach(KnownSecrets.forget)
-    secret
+  def rotate(next: String): Unit = {
+    val before = held.getAndUpdate(gens => if (gens.lastOption.contains(next)) gens else (gens :+ next).takeRight(2))
+    if (!before.lastOption.contains(next)) {
+      KnownSecrets.register(next, KnownSecrets.Kind.Token)
+      (before :+ next).dropRight(2).foreach(KnownSecrets.forget)
+    }
   }
 }
 ```
@@ -656,14 +735,16 @@ final private[llm4s] class TokenGenerations {
 - [ ] **Step 4: Wire up each source**
   - **Vertex.** Hold a `TokenGenerations`. Where `cachedToken = Some(t)` is set, call `generations.rotate(t.value)`. Wrap the JWT assertion and the refresh token in `Secret.token` where they are built.
   - **watsonx.** Hold a `TokenGenerations`, and call `rotate(token)` where `tokenCache.set(...)` is called. Delete the private `scrub(...)` and pass each body to `Redaction.safeBody` (or `HttpErrorMapper`) only.
-  - **`CachingAccessTokenProvider`.** Call `generations.rotate(token.value)` where a fetched token is cached.
+  - **`AccessTokenProvider` consumers.** In `OpenAICompatibleClient.bearer()`, `OpenAIClient.EntraIdBearer` and `OpenAIEmbeddingProvider`, call `generations.rotate(token)` on each token before it is sent.
   - **TokenExchange.** Call `Secret.token(jwt)` for the subject token and `Secret.token(accessToken)` for the exchanged token. Call `KnownSecrets.registerIdentifier` for `clientId`. Delete the `secrets` sequence.
-  - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers. Delete the passing of `secrets` to `mapError` and its parameter.
+  - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers, and the value of each configured header with a credential name (`Redaction.isCredentialName`, such as a static `Authorization`) as a configured secret, which `credentialSecrets(requestHeaders)` covers today. Delete the passing of `secrets` to `mapError` and its parameter.
   - **Langfuse.** Build the Basic header from `Secret.basic(...)`.
 
 - [ ] **Step 5: Add an echo test to each source's spec**
 
 In `VertexAIAuthProviderSpec` (gemini), `WatsonXClientSpec` (watsonx), `TokenExchangeSpec` and `CachingAccessTokenProviderSpec` (core, `llmconnect/auth`) and `OpenAIWorkloadIdentitySpec` (openai), add one case to each. The fake token endpoint (these specs already use a local server) issues token `T`. The next call's error body echoes `T`. The `LLMError.message` must not contain `T`.
+
+In the openai-compatible client spec, add a case with `Credential.Dynamic` over a custom `AccessTokenProvider` (a plain function, not `CachingAccessTokenProvider`) whose token the error body echoes, and one with a static credential-named header.
 
 Run: `sbt core/test gemini/test watsonx/test openai/test anthropic/test openaiCompatible/test azureIdentity/test observability/test`.
 Expected: PASS.
@@ -728,9 +809,9 @@ object CredentialEchoChecks {
 
 - [ ] **Step 2: Write one spec per client and confirm it passes**
 
-Each spec builds the client from its config with `apiKey = Secret("echo-key-0123456789abcdef")` and `baseUrl = <local>`, then makes one call through `assertNotEchoed`. The call is `complete`, `embed`, `rerank`, `generate` or `transcribe`, whichever the client offers.
+Each spec builds the client from its config with `apiKey = Secret("echo-key-0123456789abcdef")` and `baseUrl = <local>`, then makes one call through `assertNotEchoed`. A client with no configurable base URL is tested through the HTTP client it is given instead: `HuggingFaceClient(config, httpClient)` hard-codes `https://api-inference.huggingface.co`, so its spec passes a stub `HttpClient` that answers 401 with `CredentialEchoChecks.echoBody(key)`. If a listed client has neither a base URL nor an injected HTTP client, stop and raise it in the PR rather than adding an endpoint setting. The call is `complete`, `embed`, `rerank`, `generate` or `transcribe`, whichever the client offers.
 
-Before Task 2's change, many of these leaked through `safeBody`, which was told no secrets. To prove the specs bite, temporarily revert Task 2's `scrubKnown` call in `safeBody`, confirm at least the embedding and image specs FAIL, then restore it.
+Before Task 2's change, many of these leaked through `safeBody`, which was told no secrets. To prove the specs bite, disable layer A everywhere at once: temporarily make `KnownSecrets.scrub` return its input, so no entry point (`safeBody`, `redact`, `remoteBody`, ...) can mask a registered value. Confirm the specs FAIL (the `"raw":"<key>"` shape sits under no sensitive key, so the heuristics leave it), then restore it. Disabling only `safeBody`'s call is not enough, because `safeBody` delegates to `redact`, which also scrubs.
 
 Run: `sbt test 2>&1 | grep -E "CredentialEcho|\*\*\* FAILED|Failed tests" | tail -40`
 Expected: every `CredentialEchoSpec` passes.
