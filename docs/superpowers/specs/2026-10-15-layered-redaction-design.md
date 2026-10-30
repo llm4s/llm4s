@@ -2,7 +2,9 @@
 
 - **Status:** proposed.
 - **Issue:** [#1932](https://github.com/llm4s/llm4s/issues/1932).
-- **Supersedes:** PR [#1959](https://github.com/llm4s/llm4s/pull/1959), which will be closed without merging.
+- **Supersedes:** PR [#1959](https://github.com/llm4s/llm4s/pull/1959), closed without merging.
+- **Implementation:** [#1965](https://github.com/llm4s/llm4s/issues/1965).
+- **Refreshed** against `main` at `2931f2ee8` (2026-10-30): names, paths and issue states only; the design is unchanged.
 
 ## Why the single-pass tokenizer (#1959) did not converge
 
@@ -21,7 +23,7 @@ The cause is the goal, not the implementation. "The value of a key" in arbitrary
 
 ## What the codebase shows
 
-Audit of `main` at `e04bfed8c` and later:
+Audit of `main` at `e04bfed8c` and later, rechecked at `2931f2ee8`:
 
 - **Callers.** There are about 50 non-test callers.
   - Most pass a *remote response or error body* to `safeBody`: every provider, embedder, reranker, image client, MCP transport and Langfuse.
@@ -30,7 +32,7 @@ Audit of `main` at `e04bfed8c` and later:
 - **Known-secret scrubbing is ad hoc.** A few clients assemble their own `secrets` list and call `scrubRemote`, `remoteBody` or `scrub`: OpenAI, Anthropic, OpenAI-compatible, watsonx and `TokenExchange`. The common path, `Llm4sHttpClient.ensureSuccess` → `safeBody`, receives no secrets, and neither do the embedders, rerankers, image clients, MCP or Langfuse.
 - **No type marks a credential.** `ApiKey` is `opaque type ApiKey = String`, and every config masks its own `toString` by hand.
 - **Structure is discarded before redaction.** `ProviderExchange` holds `String` bodies, although every client had a ujson value or an SDK object first. Redaction then has to recover the structure from text.
-- **Traces are never redacted.** `TraceEvent` carries queries, content, tool input and output, and stack traces, and sends them to Langfuse and OpenTelemetry unredacted.
+- **Traces are barely redacted.** `TraceEvent` carries queries, content, tool input and output, and stack traces. Langfuse receives them unredacted. OpenTelemetry passes only its opt-in GenAI message content and the error status through the heuristic `Redaction.redact` (since #2275); every other attribute is sent as is.
 
 ## Guarantees
 
@@ -84,6 +86,7 @@ All components live in `llm4s-core`. No new dependency is added.
   - Langfuse public and secret keys;
   - `llm4s.credentials.*`;
   - workload-identity subject tokens and exchanged tokens;
+  - Azure Entra ID access tokens (`llm4s-azure-identity`, through the core `CachingAccessTokenProvider`);
   - Vertex OAuth access tokens, refresh tokens and JWT assertions;
   - watsonx IAM API keys and tokens;
   - Azure keys;
@@ -127,7 +130,7 @@ All components live in `llm4s-core`. No new dependency is added.
 | `scrubKnown(text)` | A only (traces) |
 | `url`, `isCredentialName` | Kept |
 
-**Removed:** `redactForLogging`, which duplicates `safeBody`; its callers in openai-compatible, gemini, mcp `PayloadLog` and agent-tools switch to `safeBody`. Also removed: `remoteBody`, `scrubRemote`, `scrub(secrets)` and `identifiers`. The registry replaces them, and their callers become plain `safeBody` / `redact` calls. `secret` / `secretOpt` are also removed once `Secret` replaces their uses.
+**Removed:** `redactForLogging`, which duplicates `safeBody`; its callers in core `ProviderExchangeSink` (until PR 3 moves it to B1), openai-compatible, gemini (Gemini and Vertex), mcp `PayloadLog` and the agent-tools search tools switch to `safeBody`. Also removed: `remoteBody`, `scrubRemote`, `scrub(secrets)` and `identifiers`. The registry replaces them, and their callers become plain `safeBody` / `redact` calls. `secret` / `secretOpt` are also removed once `Secret` replaces their uses.
 
 ### Wiring
 
@@ -167,7 +170,7 @@ Four PRs, in order. Until PR 4, `main` keeps its existing heuristics with layer 
 4. **Layer B2.**
    - `TextRedaction` replaces the old heuristic body of `Redaction` (about 4,000 lines on `main`).
    - The salvaged tests and the corpus tool move in.
-   - Each of #1657, #1689, #1752, #1765, #1777, #1782, #1788, #1799, #1800 and #1844 is closed or re-scoped against the B2 contract.
+   - Each of the eight open shape issues, #1657, #1689, #1752, #1777, #1782, #1788, #1799 and #1800, is closed or re-scoped against the B2 contract. #1765 and #1844, in the original list, were fixed on `main` by #2197 and #2106; their reproducers are re-run against the B2 contract like the rest.
 
 ## Testing
 
@@ -191,5 +194,5 @@ Four PRs, in order. Until PR 4, `main` keeps its existing heuristics with layer 
 - All four PRs are merged.
 - Every caller of a removed API is migrated.
 - `sbt redactionCorpus` reports zero A leaks and zero B1 leaks.
-- The ten shape issues are each closed or re-scoped.
+- The eight open shape issues are each closed or re-scoped.
 - `docs/reference/security.md` and the design record state the three guarantees and the B2 contract.

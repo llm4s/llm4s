@@ -13,7 +13,9 @@
 
 This is PR 1 of 4. PRs 2–4 (the trace wrapper, structural redaction B1, coarse text redaction B2) each get their own plan once this one merges.
 
-**Tech Stack:** Scala 3.7.1, sbt, ScalaTest, ScalaCheck (core test dependency, as used on the #1959 branch), `LocalProviderTestServer` from `llm4s-provider-testkit`.
+**Tech Stack:** Scala 3.7.1, sbt, ScalaTest, ScalaCheck (`scalatestplus` `scalacheck-1-18`, a test dependency of every module through `commonSettings`), `LocalProviderTestServer` from `llm4s-provider-testkit`.
+
+**Refreshed** against `main` at `2931f2ee8` (2026-10-30): line numbers, paths, names and sbt commands. Line numbers are approximate; `grep -n` before editing.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-layered-redaction-design.md`. Read the "Guarantees", "Secret", "KnownSecrets" and "Delivery → 1" sections.
 
@@ -21,13 +23,14 @@ This is PR 1 of 4. PRs 2–4 (the trace wrapper, structural redaction B1, coarse
 
 - **Error handling.** No `try`/`catch`/`finally` keywords, outside the safety packages. Use `Result`, `Try(...).toResult` or `Using`.
 - **Configuration.** No `sys.env` or `System.getenv`. Configuration is read only through the existing loaders.
-- **Commits.** Every commit uses `git commit -s` and ends with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
+- **Commits.** Every commit uses `git commit -s` and ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **API changes.** This is pre-1.0, so break APIs outright, with no shims and no `@deprecated`. Record each break in the CHANGELOG and in `docs/reference/migration.md`.
-- **Stability annotations.** A new top-level public type in `llm4s-core` needs `@Stable` or `@Experimental` (from `org.llm4s.annotation`); `sbt stabilityTierCheck` enforces this.
+- **Stability annotations.** A new top-level public type in `llm4s-core` needs `@Stable` or `@Experimental` (from `org.llm4s.annotation`); `sbt stabilityTierCheck` (a root task) enforces this.
+- **Growth-prone configs** (`final case class X private (...)`, such as `EmbeddingProviderConfig` and `NamedProviderConfig`). Change the credential's type in the constructor, in every `apply` overload (the defaults one and the older forwarding one) and in its `with*` setter(s).
 - **Durations** are `FiniteDuration`.
 - **Coverage floors** are never lowered.
 - **CHANGELOG** (rules in CLAUDE.md, "Reading files and output efficiently"). `[Unreleased]` is organised by area.
-  - Add one entry of 1–2 lines under `### Core`.
+  - Add one entry of 1–2 lines under `### Security`.
   - Add one line under `### Breaking changes`.
   - Never add a duplicate heading.
 - **Spec values to use verbatim:**
@@ -69,6 +72,7 @@ These are inputs and conditions the spec implies but does not test directly. Eac
   - `VertexAIAuthProvider`;
   - `WatsonXClient`;
   - `TokenExchange`;
+  - `CachingAccessTokenProvider` (the cache behind `TokenExchange` and `llm4s-azure-identity`'s `AzureEntraId`);
   - the OpenAI, Anthropic and OpenAI-compatible `credentialSecrets`;
   - Langfuse Basic auth.
 - **Create** the tests named in each task.
@@ -80,7 +84,7 @@ These are inputs and conditions the spec implies but does not test directly. Eac
 ### Task 1: `Secret` and `KnownSecrets`
 
 **Files:**
-- Create: `modules/core/src/main/scala/org/llm4s/util/ExactMatcher.scala`. Move `ExactMatcher` (class and companion) and `jsonEscaped` out of `Redaction.scala`, at about lines 2096–2190. Make them `private[llm4s]`.
+- Create: `modules/core/src/main/scala/org/llm4s/util/ExactMatcher.scala`. Move `ExactMatcher` (class and companion) and `jsonEscaped` out of `Redaction.scala`, at about lines 2168–2264. Make them `private[llm4s]`.
 - Modify: `modules/core/src/main/scala/org/llm4s/util/Redaction.scala`. Use the moved `ExactMatcher` and delete the private copy.
 - Create: `modules/core/src/main/scala/org/llm4s/security/Secret.scala`
 - Create: `modules/core/src/main/scala/org/llm4s/security/KnownSecrets.scala`
@@ -353,7 +357,7 @@ object Secret {
 
 - [ ] **Step 7: Run the tests and confirm they pass**
 
-Run: `sbt "core/testOnly org.llm4s.security.*" core/stabilityTierCheck`
+Run: `sbt "core/testOnly org.llm4s.security.*" stabilityTierCheck`
 Expected: PASS.
 
 - [ ] **Step 8: Commit**
@@ -362,7 +366,7 @@ Expected: PASS.
 git add modules/core/src/main/scala/org/llm4s/security modules/core/src/main/scala/org/llm4s/util/ExactMatcher.scala modules/core/src/main/scala/org/llm4s/util/Redaction.scala modules/core/src/test/scala/org/llm4s/security
 git commit -s -m "feat(core): Secret and KnownSecrets, a registry of credentials scrubbed by exact match (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -371,12 +375,12 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `modules/core/src/main/scala/org/llm4s/util/Redaction.scala`
-  - `redact` (~:571), `safeBody` (~:134), `redactForLogging` (~:2012), `safe` (~:2037), `remoteBody` (~:2054), `scrubRemote` (~:2063): each scrubs known secrets first.
-  - Delete `scrub(input, secrets, placeholder)` (~:2077) and `identifiers` (~:2203).
+  - `redact` (~:576), `safeBody` (~:134), `redactForLogging` (~:2084), `safe` (~:2109), `remoteBody` (~:2126), `scrubRemote` (~:2135): each scrubs known secrets first.
+  - Delete `scrub(input, secrets, placeholder)` (~:2149) and `identifiers` (~:2275).
   - Remove the `secrets` parameter from `remoteBody` and `scrubRemote`.
   - Keep the `sensitiveJsonValues` step inside `scrubRemote`.
 - Test: `modules/core/src/test/scala/org/llm4s/util/RedactionKnownSecretsSpec.scala`
-- Modify: the existing `RedactionScrubSpec` / `RedactionRemoteBodySpec`. Rewrite the tests that passed `secrets =` to register a `Secret` inside `KnownSecrets.isolated` instead. Delete the tests of `identifiers`; Task 4 covers the behaviour that replaces it.
+- Modify: the existing `RedactionScrubSpec`, `RedactionRemoteBodySpec` and `RedactionPluralKeysSpec` (all in `modules/core/src/test/scala/org/llm4s/util/`). Rewrite the tests that passed `secrets` to register a `Secret` inside `KnownSecrets.isolated` instead. Delete the tests of `identifiers`; Task 4 covers the behaviour that replaces it.
 
 **Interfaces:**
 - Consumes: `KnownSecrets.scrub(text, placeholder)` from Task 1.
@@ -451,12 +455,13 @@ Then make each entry point run `scrubKnown` on its input before doing anything e
 Run: `sbt compile 2>&1 | grep -E "\[error\]" | head -40`
 
 Each error is a call that passed `secrets`. For each one, remove the argument; Task 4 replaces the secrets by registration. The known sites are:
-- `AnthropicClient.scala:837`
+- `AnthropicClient.scala:1017` (`mapError`'s `safe`)
 - `TokenExchange.scala:233` and `:278`
 - `ProviderModelListers.scala:71`
-- `OpenAICompatibleClient.scala:119`, `:151` and `:181`
-- `OpenAIClient.scala:756` and `:771`
-- `WatsonXClient.scala:169`
+- `OpenAICompatibleClient.scala:120`, `:152` and `:182`
+- `OpenAIClient.scala:835` and `:850`
+
+`WatsonXClient` never calls the shared `scrub`; its own private `scrub` is Task 4's. The tests that call the removed parameters are `AnthropicWorkloadIdentitySpec` and `OpenAIWorkloadIdentitySpec` (through `credentialSecrets`/`mapError`) besides the three core specs above.
 
 Leave each `credentialSecrets` method in place for now. Task 4 turns each one into registration.
 
@@ -470,7 +475,7 @@ Expected: PASS. The rewritten scrub and remote-body specs pass.
 ```bash
 git commit -s -am "feat(core): every Redaction entry point removes registered credentials first; drop per-caller secrets (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -480,21 +485,21 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `modules/core/src/main/scala/org/llm4s/types/ProviderModelTypes.scala` (~:25 and ~:43–57)
 - Modify the configs. In each one, the credential fields change from `String` to `Secret`, and from `Option[String]` to `Option[Secret]`. The "currently" paths are on `main`:
-  - core: `llmconnect/config/EmbeddingProviderConfig.scala` (`apiKey`), `config/SharedCredentials.scala` (the resolved `apiKey`, which becomes `Secret`), and `NamedProviderConfig`'s `apiKey` if it is a `String`.
-  - openai-compatible: `OpenAIConfig`, `OpenAICompatibleConfig` (`Option`), `DeepSeekConfig`, `MistralConfig`, `CohereConfig`, `ZaiConfig`
+  - core: `llmconnect/config/EmbeddingProviderConfig.scala` (`apiKey`, both `apply` overloads and `withApiKey`), `llmconnect/spi/EmbeddingConfigSpec.scala` (`EmbeddingProviderSection.apiKey`, an `Option`), `config/SharedCredentials.scala` (the resolved `apiKey`, which becomes `Secret`), and `RawNamedProviderSection.apiKey` in `config/ProvidersConfigModel.scala` where it becomes an `ApiKey`. `NamedProviderConfig.apiKey` is already `Option[ApiKey]`, so the `ApiKey` change covers it.
+  - openai-compatible: `OpenAIConfig`, `OpenAICompatibleConfig` (`Option`), `DeepSeekConfig`, `MistralConfig`, `CohereConfig`, `ZaiConfig`, `XaiConfig`; the `clientId` in `OpenAIWorkloadIdentity`
   - openai: `AzureConfig`
-  - anthropic: `AnthropicConfig`
+  - anthropic: `AnthropicConfig` (the `AnthropicWorkloadIdentity` ids are identifiers, Task 4)
   - gemini: `GeminiConfig`
-  - image: `ImageProcessingConfig`, plus the image-generation configs (find them with `git grep -n "apiKey" modules/image/src/main`)
+  - image: `ImageProcessingConfig`, plus the image-generation configs in `imagegeneration/ImageGeneration.scala` (find them with `grep -rn apiKey modules/image/src/main`)
   - speech: `SpeechConfig` (both `apiKey` fields)
-  - providers: `watsonx/WatsonXConfig`, `jev/JevConfig`, `bedrock/BedrockConfig` (only if it holds a static key), `jina`, `cohere`, `voyage` (find them with `git grep -ln "apiKey" modules/providers/*/src/main`)
-  - observability: `LangfuseConfig` (`publicKey`, `secretKey`)
+  - providers: `watsonx/WatsonXConfig`, `jev/JevConfig`, `bedrock/BedrockConfig` (`BedrockCredentials.accessKeyId` / `secretAccessKey`, the static keys), `jina`, `cohere`, `voyage` (find them with `grep -rln apiKey modules/providers/*/src/main`)
+  - observability: `LangfuseConfig` (`publicKey`, `secretKey`, both `Option`)
   - agent-tools: the search-tool configs (`*SearchToolConfig`) and any `apiKey` field there
   - rag: the reranker config's `apiKey`
 - Modify each config's loader. Wherever a loader reads a `String` key, wrap it with `Secret(_)` at the point it is read: in the `ProviderDescriptor`'s config builder and in the `*ConfigLoader`.
 - Modify each config's `toString`. Remove `Redaction.secret(...)` / `Redaction.secretOpt(...)`; interpolating the field now prints `***` or `Some(***)`. Remove `Redaction.secret` and `secretOpt` from `Redaction` once nothing uses them.
 - Modify each client's use of a key. `config.apiKey` becomes `config.apiKey.reveal` exactly where it is placed in a header, a URL or an SDK builder.
-- Modify the `java-api` builders (`ClientSettings.java` and friends). They keep taking `String` and wrap it with `Secret.apply` (`org.llm4s.security.Secret.apply(key)` from Java).
+- Modify the `java-api` builders. `ClientSettings.java` and the `*ClientBuilder.java` builders keep taking `String`; `ClientBuilds.scala`, which turns the settings into a config, wraps the key with `Secret(_)` (or `ApiKey(_)`).
 - Modify the tests across all modules. Replace `apiKey = "…"` with `apiKey = Secret("…")`.
 - Test: `modules/core/src/test/scala/org/llm4s/security/SecretConfigToStringSpec.scala`, plus one `javaApi` test.
 
@@ -524,7 +529,7 @@ class SecretConfigToStringSpec extends AnyFlatSpec with Matchers {
 
 Adjust the `EmbeddingProviderConfig` constructor arguments to its real `apply` signature.
 
-Add the `javaApi` test. Build a client through the Java builder with key `"java-key-0123456789"`, then assert that `Redaction.safeBody("echo java-key-0123456789")` does not include the key. Place it beside the existing `ClientSettings` tests.
+Add the `javaApi` test. Build a client through the Java builder with key `"java-key-0123456789"`, then assert that `Redaction.safeBody("echo java-key-0123456789")` does not include the key. Place it in `ClientBuildersSpec` (`modules/java-api/src/test`).
 
 - [ ] **Step 2: Run them and confirm they fail**
 
@@ -547,7 +552,7 @@ Expected: FAIL to compile, because `apiKey` expects a `String`.
 
 - [ ] **Step 4: Convert the configs, loaders, `toString`s and clients, one module at a time**
 
-For each module, in the order core, openai-compatible, openai, anthropic, gemini, providers/*, image, speech, observability, agent-tools, rag, java-api:
+For each module, in the order core, openai-compatible, openai, anthropic, gemini, providers/*, image, speech, observability, agent-tools, rag, java-api (sbt ids: `core`, `openaiCompatible`, `openai`, `anthropic`, `gemini`, `watsonx`, `jev`, `bedrock`, `jina`, `cohere`, `voyage`, `image`, `speech`, `observability`, `agentTools`, `rag`, `javaApi`):
 - change the field type;
 - wrap the value where the loader reads it;
 - fix `toString`;
@@ -559,7 +564,7 @@ Expected: compiles, and the tests pass.
 
 - [ ] **Step 5: Run the cross-module checks**
 
-Run: `sbt compile test:compile stabilityTierCheck "core/testOnly org.llm4s.security.*" "javaApi/test"`
+Run: `sbt compile Test/compile stabilityTierCheck "core/testOnly org.llm4s.security.*" "javaApi/test"`
 Expected: PASS.
 
 - [ ] **Step 6: Commit (one commit per module group is fine)**
@@ -567,7 +572,7 @@ Expected: PASS.
 ```bash
 git commit -s -am "feat!: ApiKey and every config credential are Secret, so each configured key is registered for redaction (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -578,12 +583,13 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/VertexAIAuthProvider.scala`:
   - `cachedToken` (~:71–89): wrap each access token obtained with `Secret.token(...)`, and keep the previous generation;
   - JWT assertion and refresh token (~:129, ~:212): `Secret.token`.
-- Modify: `modules/providers/watsonx/src/main/scala/org/llm4s/llmconnect/provider/WatsonXClient.scala`: `tokenCache` (~:126–195). Each IAM token becomes `Secret.token`. Remove the manual `scrub` (~:169).
+- Modify: `modules/providers/watsonx/src/main/scala/org/llm4s/llmconnect/provider/WatsonXClient.scala`: `tokenCache` (~:162–231). Each IAM token becomes `Secret.token`. Remove the private `scrub(text, token)` (~:205), which blanks the API key and token by plain `replace`, and its four callers (~:218, ~:258, ~:288, ~:437).
 - Modify: `modules/core/src/main/scala/org/llm4s/llmconnect/auth/TokenExchange.scala`:
-  - the subject JWT and the exchanged access token (~:205–233): `Secret.token`;
+  - the subject JWT (`form`, ~:205) and the exchanged access token (`parse`, ~:249): `Secret.token`;
   - `config.clientId`: `KnownSecrets.registerIdentifier`;
-  - delete the secrets assembly at ~:217–220.
-- Modify: `OpenAIClient.credentialSecrets` (~:780), `AnthropicClient.credentialSecrets` (~:855), `OpenAICompatibleClient.credentialSecrets` (~:351). Replace each with a `registerCredentials(config)` that calls `KnownSecrets.registerIdentifier` for the workload-identity ids (federation rule, organisation, service account, workspace, client id). The keys are already `Secret`s after Task 3. Delete the now-unused `credentialSecrets` vals and parameters.
+  - delete the secrets assembly, `sensitiveValues` (~:219), and the `secrets` parameter of its private `safeBody` (~:232) and `parse` (~:193).
+- Modify: `modules/core/src/main/scala/org/llm4s/llmconnect/auth/AccessTokenProvider.scala`: `CachingAccessTokenProvider` holds a `TokenGenerations` and rotates each token it caches. This registers the exchanged workload-identity tokens and the Azure Entra ID tokens (`AzureEntraId`, `llm4s-azure-identity`) in one place.
+- Modify: `OpenAIClient.credentialSecrets` (~:859), `AnthropicClient.credentialSecrets` (~:1052), `OpenAICompatibleClient.credentialSecrets` (~:361). Replace each with a `registerCredentials(config)` that calls `KnownSecrets.registerIdentifier` for the workload-identity ids (federation rule, organisation, service account, workspace, client id). The keys are already `Secret`s after Task 3. Delete the now-unused `credentialSecrets` vals and parameters.
 - Modify: `LangfuseBatchSender.scala:77` and `LangfuseTracing.scala:110`. Build the header from `Secret.basic(publicKey.reveal, secretKey.reveal).reveal`.
 - Create: `modules/core/src/main/scala/org/llm4s/security/TokenGenerations.scala`. A small helper: `final class TokenGenerations { def rotate(next: String): Secret }`. It registers `next` as a token, keeps the current token and the one before it, and forgets the generation before that.
 - Test: `modules/core/src/test/scala/org/llm4s/security/TokenRotationSpec.scala`
@@ -649,16 +655,17 @@ final private[llm4s] class TokenGenerations {
 
 - [ ] **Step 4: Wire up each source**
   - **Vertex.** Hold a `TokenGenerations`. Where `cachedToken = Some(t)` is set, call `generations.rotate(t.value)`. Wrap the JWT assertion and the refresh token in `Secret.token` where they are built.
-  - **watsonx.** Hold a `TokenGenerations`, and call `rotate(token)` where `tokenCache.set(...)` is called. Delete the `scrub(...)` call at ~:169, and pass the body to `Redaction.safeBody` only.
+  - **watsonx.** Hold a `TokenGenerations`, and call `rotate(token)` where `tokenCache.set(...)` is called. Delete the private `scrub(...)` and pass each body to `Redaction.safeBody` (or `HttpErrorMapper`) only.
+  - **`CachingAccessTokenProvider`.** Call `generations.rotate(token.value)` where a fetched token is cached.
   - **TokenExchange.** Call `Secret.token(jwt)` for the subject token and `Secret.token(accessToken)` for the exchanged token. Call `KnownSecrets.registerIdentifier` for `clientId`. Delete the `secrets` sequence.
   - **OpenAI, Anthropic and OpenAI-compatible.** Replace each `credentialSecrets(...)` with `registerCredentials(config)`, called once at client construction. It registers the workload-identity ids as identifiers. Delete the passing of `secrets` to `mapError` and its parameter.
   - **Langfuse.** Build the Basic header from `Secret.basic(...)`.
 
 - [ ] **Step 5: Add an echo test to each source's spec**
 
-In `VertexAIAuthProviderSpec`, `WatsonXClientSpec`, `TokenExchangeSpec` and the `OpenAIClient` workload-identity spec, add one case to each. The fake token endpoint (these specs already use a local server) issues token `T`. The next call's error body echoes `T`. The `LLMError.message` must not contain `T`.
+In `VertexAIAuthProviderSpec` (gemini), `WatsonXClientSpec` (watsonx), `TokenExchangeSpec` and `CachingAccessTokenProviderSpec` (core, `llmconnect/auth`) and `OpenAIWorkloadIdentitySpec` (openai), add one case to each. The fake token endpoint (these specs already use a local server) issues token `T`. The next call's error body echoes `T`. The `LLMError.message` must not contain `T`.
 
-Run: `sbt core/test gemini/test watsonx/test openai/test anthropic/test openaiCompatible/test observability/test`. Check the project ids in `build.sbt`.
+Run: `sbt core/test gemini/test watsonx/test openai/test anthropic/test openaiCompatible/test azureIdentity/test observability/test`.
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -666,7 +673,7 @@ Expected: PASS.
 ```bash
 git commit -s -am "feat: runtime tokens and workload-identity ids register themselves; drop per-client secret lists (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -677,7 +684,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Create: `modules/provider-testkit/src/main/scala/org/llm4s/testkit/CredentialEchoChecks.scala`
 - Test, one spec per client module, named `<Client>CredentialEchoSpec`:
   - openai (OpenAI, Azure);
-  - openai-compatible (generic, DeepSeek, Mistral, Cohere chat, Z.ai, OpenRouter);
+  - openai-compatible (generic, DeepSeek, Mistral, Cohere chat, Z.ai, OpenRouter, xAI);
   - anthropic;
   - gemini;
   - ollama (embedding only, if it has a key);
@@ -688,7 +695,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `LocalProviderTestServer` (provider-testkit) and the configs with `Secret` fields from Task 3.
-- Produces: `CredentialEchoChecks.assertNotEchoed(key: String)(call: String => Either[org.llm4s.error.LLMError, ?]): Unit`. It starts a local server that answers every request with HTTP 401 and a JSON body echoing `key` in four shapes (raw, inside a JSON string, JSON-escaped, URL-encoded). It runs `call(baseUrl)` and asserts that the `Left` message does not contain `key` in any form.
+- Produces: `CredentialEchoChecks.assertNotEchoed(key: String)(call: String => Either[org.llm4s.error.LLMError, ?]): Unit`. It starts a local server (`LocalProviderTestServer.withServer(path)(handler)(test)`, which passes `test` the base URL) that answers every request with HTTP 401 and a JSON body echoing `key` in four shapes (raw, inside a JSON string, JSON-escaped, URL-encoded). It runs `call(baseUrl)` and asserts that the `Left` message does not contain `key` in any form.
 
 - [ ] **Step 1: Write the helper**
 
@@ -706,7 +713,7 @@ object CredentialEchoChecks {
 
   /** Fails unless `call` returns a Left whose message holds none of `key`'s forms. */
   def assertNotEchoed(key: String)(call: String => Either[LLMError, ?]): Unit =
-    LocalProviderTestServer.withServer(status = 401, body = echoBody(key)) { baseUrl =>
+    LocalProviderTestServer.withServer("/")(LocalProviderTestServer.sendJsonResponse(_, 401, echoBody(key))) { baseUrl =>
       call(baseUrl) match {
         case Left(err) =>
           val forms = Seq(key, URLEncoder.encode(key, StandardCharsets.UTF_8))
@@ -717,7 +724,7 @@ object CredentialEchoChecks {
 }
 ```
 
-Adapt `LocalProviderTestServer.withServer` to its real API: read `modules/provider-testkit/src/main/scala/org/llm4s/testkit/LocalProviderTestServer.scala` first, and add a fixed-response mode if it has none.
+`withServer` binds the handler to a path prefix, so `"/"` answers every request; `sendJsonResponse(exchange, status, body)` is the existing fixed-response helper in the same object.
 
 - [ ] **Step 2: Write one spec per client and confirm it passes**
 
@@ -733,7 +740,7 @@ Expected: every `CredentialEchoSpec` passes.
 ```bash
 git commit -s -am "test: every client keeps a credential the provider echoes back out of its error (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -749,7 +756,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 Find the headings with `grep -n '^## \|^### ' CHANGELOG.md | head -20`.
 
-Under `### Core`, add:
+Under `### Security` in `[Unreleased]`, add:
 
 ```markdown
 - **Added** `Secret`: every credential llm4s holds (configured keys, runtime tokens) is registered and removed by exact match from all error messages, logs and exchange logs, whatever the syntax around it ([#1932](https://github.com/llm4s/llm4s/issues/1932), [design](docs/superpowers/specs/2026-10-15-layered-redaction-design.md)).
@@ -787,7 +794,7 @@ Expected: OK.
 ```bash
 git commit -s -am "docs: Secret, the known-secret guarantee and its migration (#1932)
 
-Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
