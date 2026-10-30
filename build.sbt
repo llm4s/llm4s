@@ -2131,7 +2131,7 @@ lazy val it = (project in file("modules/it"))
     agentCheckpointPostgres % Test,
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
     deployService % Test,
-    // SumTypeStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
+    // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
     schemaDerivation % Test
   )
   .settings(
