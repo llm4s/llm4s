@@ -1,0 +1,13 @@
+# The release lines and their support status, rendered by docs/reference/support-policy.md.
+# Updated by hand in the release process (docs/reference/release.md, step "Update the support table").
+# status: latest | superseded (not patched; upgrade to the latest) | security-only | eol
+# Until the compatibility baseline is set (#1281) every line before it is "pre-baseline: latest only".
+lines:
+  - version: "0.5.1"
+    released: "2026-10-15"
+    status: "latest"
+    note: "Pre-baseline: the only line that gets fixes."
+  - version: "0.5.0"
+    released: "2026-10-15"
+    status: "superseded"
+    note: "Pre-baseline: not patched; upgrade to the latest release."

@@ -16,6 +16,9 @@ All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc. Use th
 
 ### 2. Release Steps
 
+Before tagging, update the [support table](support-policy#current-lines) (see
+[Update the support table](#update-the-support-table)).
+
 ```bash
 # 1. Ensure you're on main branch with latest changes
 git checkout main
@@ -27,6 +30,12 @@ git push origin v0.3.2
 
 # 3. The GitHub Actions release workflow does the rest -- see below.
 ```
+
+### Update the support table
+
+Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
+it replaces, in the same pull request that prepares the release. The table is rendered on the
+[Support Policy](support-policy). Nothing checks it yet, so a release tag missing from it is not caught by CI.
 
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
