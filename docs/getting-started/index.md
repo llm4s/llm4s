@@ -20,11 +20,12 @@ This section will guide you through:
 7. **[Scala CLI Quick Start](scala-cli)** - A first LLM call from a single file, with no sbt project
 8. **[Maven Quick Start](maven)** - A complete `pom.xml` that runs a first call from Java with `llm4s-java-api`
 9. **[JBang Quick Start](jbang)** - A first LLM call from one Java file, with no build tool
-10. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
+10. **[Mill Quick Start](mill)** - A `build.mill` project with a first call and a test that needs no API key
+11. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
     and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`
     {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
-11. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
-12. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
+12. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
+13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 
