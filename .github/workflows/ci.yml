@@ -226,6 +226,12 @@ jobs:
           scripts/test-check-scala-cli-quickstart.sh
           scripts/check-scala-cli-quickstart.sh
 
+      # The same for the Mill quick start (modules/samples/mill, #2293); mill-quickstart.yml builds and tests it.
+      - name: Check the Mill quick start pins the latest release
+        run: |
+          scripts/test-check-mill-quickstart.sh
+          scripts/check-mill-quickstart.sh
+
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
       # script's checks stay able to fail between releases.

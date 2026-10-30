@@ -1,0 +1,45 @@
+name: Mill quick start
+
+# Builds the Mill quick start (modules/samples/mill, docs/getting-started/mill.md, #2293) against the llm4s release
+# it pins, runs its test (a scripted client: no API key, no network beyond Maven Central), and checks that release
+# is the latest on Maven Central. sbt never builds the sample, so without this a release that forgets to bump it, or
+# a published artifact it no longer compiles against, goes unnoticed until a reader copies it. It needs the network,
+# so it runs weekly and when the sample changes, not on every pull request; the offline part of the check (the
+# sample and docs/_data/project.yml agree) is tested in ci.yml.
+
+on:
+  schedule:
+    - cron: "37 4 * * 1"  # 04:37 UTC every Monday
+  push:
+    branches: [main]
+    paths:
+      - modules/samples/mill/**
+      - docs/_data/project.yml
+      - scripts/check-mill-quickstart.sh
+      - .github/workflows/mill-quickstart.yml
+  pull_request:
+    paths:
+      - modules/samples/mill/**
+      - scripts/check-mill-quickstart.sh
+      - .github/workflows/mill-quickstart.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quickstart:
+    name: Build and test the Mill sample against the latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The sample's ./mill launcher downloads Mill and the JDK that build.mill's `mill-jvm-version` names.
+      - name: Check the sample's version against Maven Central, build it and run its test
+        run: scripts/check-mill-quickstart.sh --central --build
