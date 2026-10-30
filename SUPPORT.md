@@ -33,7 +33,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUC
 
 The [enterprise evaluation](https://llm4s.org/reference/enterprise-evaluation) page answers the questions an
 open-source intake form asks (licence, governance, release and support, security, supply chain, data protection),
-each with a link to its evidence, and lists the known gaps with their issues.
+each with a link to its evidence, and lists the known gaps with their issues. Legal and IP questions (licence,
+copyright, DCO, patents, third-party licences) are in the [Legal and IP FAQ](https://llm4s.org/reference/legal-faq).
 
 ## I want to be listed as a user
 

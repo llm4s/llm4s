@@ -365,6 +365,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
 - **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
   their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
+- **Added** [Legal and IP FAQ](docs/reference/legal-faq.md): licence, copyright, DCO, patents, third-party licences and provider terms, with what the project has not decided ([#2309](https://github.com/llm4s/llm4s/issues/2309)).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
