@@ -63,14 +63,37 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
 
   it should "refuse a sealed hierarchy nested in another, whose case names uPickle would not write" in {
     val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithOuter]"))
-    errors should include("Middle of Outer is not a singleton")
+    errors should include("Middle of Outer is itself a sealed hierarchy")
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[SumFixtures.Outer]")) should include(
+      "Inner of Outer is itself a sealed hierarchy"
+    )
   }
 
-  it should "refuse a sealed hierarchy with fields, naming the case that has them" in {
+  it should "derive a sealed hierarchy with fields (#2327), and a case class that holds one" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.Shape]") shouldBe Nil
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[SumFixtures.Action]") shouldBe Nil
+    scala.compiletime.testing.typeCheckErrors(
+      "{ given SchemaOf[Fixtures.Shape] = SchemaOf.derived; SchemaOf.derived[Fixtures.WithShape] }"
+    ) shouldBe Nil
+  }
+
+  it should "say what is missing for a case class holding a sealed hierarchy that has no SchemaOf" in {
     val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[Fixtures.WithShape]"))
-    errors should include("Circle")
-    errors should include("Circle of Shape is not a singleton")
-    errors should include("oneOf")
+    errors should include("Cannot derive a JSON schema for")
+    errors should include("Shape")
+  }
+
+  it should "refuse a recursive sum type, naming it" in {
+    val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[SumFixtures.Expr]"))
+    errors should include("Cannot derive SchemaOf[org.llm4s.schema.SumFixtures.Expr]")
+    errors should include("Expr refers to itself")
+    errors should include("$ref")
+  }
+
+  it should "refuse a sum type with a generic case" in {
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[SumFixtures.Generic]")) should include(
+      "Holds of Generic is generic"
+    )
   }
 
   it should "refuse a field type it does not know, with the list of supported types" in {

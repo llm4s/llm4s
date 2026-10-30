@@ -95,4 +95,76 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     result.left.toOption.map(_.message).getOrElse("") should include("recursive type P")
     client.asked.get shouldBe None
   }
+
+  // ---- sum types (#2327)
+
+  private def sentSchema(client: Scripted): ujson.Value =
+    client.asked.get.flatMap(_.responseFormat) match {
+      case Some(ResponseFormat.JsonSchema(schema, _, strict)) =>
+        strict shouldBe true
+        schema
+      case other => fail(s"expected a JSON schema response format, got $other")
+    }
+
+  "completeStructuredOf for a sum type" should "send the anyOf wrapped in a value property, and unwrap the reply" in {
+    import SumFixtures.*
+    val client = new Scripted("""{"value":{"$type":"Refund","amount":"12.50","reason":"broken"}}""")
+    client.completeStructuredOf[Action](conversation) shouldBe Right(Action.Refund(BigDecimal("12.50"), "broken"))
+
+    val schema = sentSchema(client)
+    ujson.write(schema) shouldBe ujson.write(StructuredOutput.wrap(SchemaOf[Action].toJsonSchema()))
+    schema("type") shouldBe ujson.Str("object")
+    schema("required") shouldBe ujson.Arr("value")
+    schema("additionalProperties") shouldBe ujson.False
+    schema("properties")("value")("anyOf").arr should have size 3
+  }
+
+  it should "read each case, a singleton, a custom discriminator and a fenced reply" in {
+    import SumFixtures.*
+    new Scripted("""{"value":{"$type":"Escalate","team":"Billing"}}""")
+      .completeStructuredOf[Action](conversation) shouldBe
+      Right(Action.Escalate(Team.Billing))
+    new Scripted("""{"value":"Free"}""").completeStructuredOf[Payment](conversation) shouldBe Right(Payment.Free)
+    new Scripted("""{"value":{"kind":"click","x":1,"y":2}}""").completeStructuredOf[Event](conversation) shouldBe
+      Right(Click(1, 2))
+    new Scripted("Here it is:\n```json\n{\"value\":{\"$type\":\"Reply\",\"text\":\"hi\"}}\n```")
+      .completeStructuredOf[Action](conversation) shouldBe Right(Action.Reply("hi"))
+    new Scripted("""{"value":null}""").completeStructuredOf[Option[Action]](conversation) shouldBe Right(None)
+  }
+
+  it should "fail with a ValidationError for a reply without the wrapper, of an unknown case, not JSON or null" in {
+    import SumFixtures.*
+    for (
+      reply <- List(
+        """{"$type":"Reply","text":"hi"}""",
+        """{"value":{"$type":"Shout","text":"hi"}}""",
+        """{"value":{"$type":"Reply"}}""",
+        "not json at all",
+        "null",
+        "[1]"
+      )
+    ) withClue(reply) {
+      val result = new Scripted(reply).completeStructuredOf[Action](conversation)
+      result.left.map(_.getClass) shouldBe Left(classOf[ValidationError])
+      result.left.toOption.map(_.message).getOrElse("") should include("Response")
+    }
+  }
+
+  "completeStructuredOf for a case class holding sum types" should "send its JSON schema unwrapped and read the reply" in {
+    import SumFixtures.*
+    val reply  = """{"title":"t","shapes":[{"$type":"Circle","radius":1},"Dot"],"highlight":null,"last":"idle"}"""
+    val client = new Scripted(reply)
+    client.completeStructuredOf[Drawing](conversation) shouldBe Right(Drawing("t", List(Circle(1), Dot), None, Idle))
+    ujson.write(sentSchema(client)) shouldBe ujson.write(SchemaOf[Drawing].toJsonSchema())
+    new Scripted("""{"title":"t"}""").completeStructuredOf[Drawing](conversation).left.map(_.getClass) shouldBe
+      Left(classOf[ValidationError])
+  }
+
+  "A sum type's core schema" should "be refused with a message, since core's model has no union" in {
+    import SumFixtures.*
+    val error = intercept[UnsupportedOperationException](SchemaOf[Action].definition)
+    error.getMessage should include("Action is a sum type with fields")
+    error.getMessage should include("anyOf")
+    intercept[UnsupportedOperationException](SchemaOf[Drawing].definition).getMessage should include("Shape")
+  }
 }

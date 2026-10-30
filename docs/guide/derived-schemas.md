@@ -89,6 +89,7 @@ This is exactly the schema that `Schema.object[Invoice](...)` with three `withRe
 | `List[A]`, `Vector[A]`, `Seq[A]`, `Set[A]` | `array` of the schema of `A` |
 | a case class | `object` with one property per field, in declaration order, `additionalProperties: false` |
 | an `enum` or sealed hierarchy of singletons | `string` limited to the case names (a case's `@upickle.implicits.key`, where it has one) |
+| an `enum` or sealed trait whose cases have fields | `anyOf` with one schema per case: see [Sum types](#sum-types) |
 
 Case classes nest, and they can be generic (`Box[Int]` is described for `Int`).
 
@@ -197,6 +198,43 @@ def extractWithAgent(client: LLMClient, email: String): Result[Invoice] =
 
 As with `completeStructuredOf`, `A` must be a case class: `build` refuses any other type with a `Left`.
 
+## Sum types
+
+An enum or sealed trait whose cases have fields is a sum type: the reply is one of its cases. It derives like any other type.
+
+```scala
+@description("What the support bot decides to do")
+enum Action derives SchemaOf, ReadWriter {
+  @description("Refund the customer") case Refund(amount: BigDecimal, reason: String)
+  @description("Hand over to a human team") case Escalate(team: Team)
+  case Reply(text: String)
+}
+
+enum Team derives SchemaOf, ReadWriter {
+  case Billing, Shipping
+}
+
+def decide(client: LLMClient, conversation: Conversation): String =
+  client.completeStructuredOf[Action](conversation) match {
+    case Right(Action.Refund(amount, _)) => s"refund $amount"
+    case Right(Action.Escalate(team))    => s"escalate to $team"
+    case Right(Action.Reply(text))       => text
+    case Left(error)                     => error.message
+  }
+```
+
+The schema is an `anyOf` with one alternative per case, written as uPickle writes that case:
+
+- **A case with fields** is an object whose first property is the discriminator, a required string that can only be the case's tag (a single-value `enum`), followed by the case's fields. uPickle's discriminator is `"$type"`, or the key set with `@upickle.implicits.key("kind")` on the sealed trait or enum. The tag is the case's name, or its own `@upickle.implicits.key`. A case class without fields (`case class Blank()`) is an object holding only the discriminator.
+- **A case without fields** (an enum case or a case object) is a string that can only be its tag, since uPickle writes it as a bare string.
+- A case's `@description` describes its alternative.
+
+Sum types nest: a case class field, a `List` or an `Option` of a sum type is described in place (an `Option` adds `{"type": "null"}` to the `anyOf`), and a case may hold a case class or another sum type.
+
+OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStructuredOf` asks for a sum type wrapped in an object, `{"value": <the case>}`, sends that schema as a `ResponseFormat.JsonSchema`, and reads the reply's `value` into the type: the caller never sees the wrapper. A case class that holds a sum type is an object already and is sent as it is. A case class without one goes through `completeStructured` as before. The wrapped schema is within the subset OpenAI's strict mode accepts (`anyOf` below the root, `additionalProperties: false` and every property required on each object), and Gemini accepts it too; the module's tests check both the subset and the round trip with uPickle for every case.
+
+A sum type has no schema in `llm4s-core`'s model, which has no union node: `SchemaOf[Action].toJsonSchema()` is its schema, while `SchemaOf[Action].definition` throws an `UnsupportedOperationException`. So a tool's parameters cannot hold a sum type yet, and `Tool.of` returns a `Left` for one.
+
 ## Descriptions
 
 The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
@@ -208,6 +246,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 - **Field names.** A property is named as uPickle writes the field, so `@upickle.implicits.key("user_name")` is honoured.
 - **`Option`.** uPickle writes `None` as `null` and `Some(x)` as `x`, and the schema allows exactly that.
 - **`BigDecimal`.** uPickle writes it as a string and cannot read a JSON number, so the schema says `string`.
+- **Sum types.** uPickle writes a case with fields as an object with its tag under `"$type"` (or the trait's `@upickle.implicits.key`), and a case without fields as its tag alone; the `anyOf` describes exactly that (see [Sum types](#sum-types)).
 - **Enums.** uPickle writes a case as its name, or as its `@upickle.implicits.key("...")` when the case (an enum case or a case object) has one, and the `enum` list in the schema holds exactly those strings.
 - **`Long`.** uPickle writes a `Long` beyond 2^53 (9007199254740992) in either direction as a JSON *string*, because a JSON number that large loses precision in many readers; it reads both forms back. The schema says `integer`, so a value written that large does not match it. A model answering the schema writes a number, which reads back; if your values can be that large and you validate what uPickle writes, describe the field as a string yourself.
 - **`BigDecimal` and `BigInt` text.** The schema says `string` and cannot say that only numeric text reads back (llm4s-core's schema model has no `pattern`), so give such a field a `@description` that asks for a number.
@@ -219,7 +258,7 @@ The schema describes what uPickle's derived `ReadWriter` reads and writes, so a 
 
 ## Types the module does not know
 
-Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. The derivation takes a hand-written given as it is and does not look inside the type, so this also works for a type it would otherwise refuse, such as a sealed hierarchy with fields or a recursive type, as long as the given describes what its `ReadWriter` writes and does not itself derive a type that leads back to the one being derived (see [Recursion](#recursion)). `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
+Another type needs a `given SchemaOf` of its own, written next to the `ReadWriter` that reads it. The derivation takes a hand-written given as it is and does not look inside the type, so this also works for a type it would otherwise refuse, such as a recursive type, as long as the given describes what its `ReadWriter` writes and does not itself derive a type that leads back to the one being derived (see [Recursion](#recursion)). `SchemaOf.string` describes a type that is written as a JSON string, and `SchemaOf.stringEnum` one that is written as one of a fixed set of strings. The text you pass is what the model sees for a field of that type, unless the field has its own `@description`.
 
 ```scala
 import java.time.Instant
@@ -235,14 +274,14 @@ case class Meeting(title: String, starts: Instant) derives SchemaOf, ReadWriter
 These are refused at compile time, with a message that names the type:
 
 - **`Map`.** `llm4s-core`'s `ObjectSchema` has a fixed set of properties and no way to describe the values of a map.
-- **Recursive types** (a `Tree` with `children: List[Tree]`). They need a JSON Schema `$ref`, which the schema model cannot express. One case is caught only at run time: see [Recursion](#recursion).
-- **Sealed hierarchies with fields** (`Circle(radius)` and `Rectangle(w, h)` under `Shape`). They need `oneOf`, which the schema model cannot express. Enums and sealed hierarchies of singletons are fine.
+- **Recursive types** (a `Tree` with `children: List[Tree]`, or an `Expr` sum type with an `Add(left: Expr, right: Expr)` case). They need a JSON Schema `$ref`, which the derivation does not emit yet. One case is caught only at run time: see [Recursion](#recursion).
+- **A sealed hierarchy nested in another** (a sealed trait whose case is itself a sealed trait), and **a sum type with a generic case** (`case class Holds[A](a: A)`). List the cases directly under one sealed trait or enum, without type parameters.
 - **`Option` directly inside `Option`** (`Option[Option[Int]]`). uPickle writes it as a JSON array (`[]`, `[null]`, `[1]`), not as the value or `null`. An `Option` inside a `List` inside an `Option` is fine.
 - **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class with named fields.
 - **Named tuples** (`(a: Int, b: String)`). uPickle has no `ReadWriter` for them, so nothing could read the reply back. Use a case class.
 - **A class that is not a case class**, and a field of a type nothing describes (a function, for instance).
 
-`completeStructuredOf` also needs the type to be a case class, since the model answers with a JSON object: for an enum or another type it returns a `Left` before calling the model.
+`completeStructuredOf` also needs the type to be a case class or a sum type whose cases have fields, since the model answers with a JSON object: for an enum of singletons or another type it returns a `Left` before calling the model.
 
 ### Recursion
 

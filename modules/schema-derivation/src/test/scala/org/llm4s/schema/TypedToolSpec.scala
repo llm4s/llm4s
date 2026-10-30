@@ -455,6 +455,22 @@ class TypedToolSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "refuse a sum type with fields, and a case class holding one, saying why" in {
+    import SumFixtures.*
+    for (
+      refused <- List(
+        Tool.of[Action, String]("act", "A sum type")(_ => Right("unused")),
+        Tool.of[Drawing, String]("draw", "Holds sum types")(_ => Right("unused"))
+      )
+    )
+      refused.left.map(_.message) match {
+        case Left(message) =>
+          message should include("is a sum type with fields")
+          message should include("a tool's arguments cannot hold a sum type")
+        case Right(_) => fail("a sum type was taken as a tool's arguments")
+      }
+  }
+
   it should "refuse arguments whose schema cannot be built, with the reason" in {
     val refused = Tool.of[Unbuildable, String]("u", "Cannot be described")(_ => Right("unused"))
     refused.left.map(_.message) match {

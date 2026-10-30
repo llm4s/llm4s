@@ -81,6 +81,21 @@ schema and the case class in step by hand, and test the pair on a sample reply.
 
 The schema is a closed object: `additionalProperties` is `false` unless you pass `true` to `ObjectSchema`.
 
+`llm4s-schema-derivation` removes the need to keep the two in step: `client.completeStructuredOf[A](conversation)`
+derives the schema from `A` (`derives SchemaOf`); see [Derived Schemas](derived-schemas).
+
+### Sum types
+
+When the answer is one of several shapes ("refund this amount", "escalate to this team" or "reply with this
+text"), make `A` an enum or sealed trait whose cases have fields, deriving `SchemaOf` and `ReadWriter`, and call
+`completeStructuredOf[A]`. The derived schema is a JSON Schema `anyOf` of one object per case, each tagged with
+the discriminator uPickle writes (`"$type"`, or the trait's `@upickle.implicits.key`), so the reply reads back into
+the right case. Because OpenAI's strict mode refuses an `anyOf` at the root, the request asks for
+`{"value": <the case>}` and the reply is unwrapped before it is read; the caller only sees `A`. The request is a
+`ResponseFormat.JsonSchema` that core's `ObjectSchema` could not express, sent the same way to every provider
+(section 8). [Derived Schemas: Sum types](derived-schemas#sum-types) has the example, compiled, and the exact
+shape of the schema.
+
 ## 3. Fenced and prose-wrapped replies
 
 Models often wrap JSON in a markdown fence or write a sentence around it. Before parsing, the reply is
@@ -266,9 +281,9 @@ use that provider.
 - **One call, no streaming, no repair.** There is no automatic retry inside `completeStructured`.
 - **The content goes to the provider.** The conversation and the schema are sent to whichever provider the client
   talks to, like any other completion.
-- **The schema is JSON Schema, not your case class.** A type uPickle can read but the schema cannot describe
-  (a sealed hierarchy, a map with free keys) needs a schema that matches what the model should produce, and a
-  reader that accepts it.
+- **The schema is JSON Schema, not your case class.** A type uPickle can read but `ObjectSchema` cannot describe
+  (a map with free keys, a recursive type) needs a schema that matches what the model should produce, and a
+  reader that accepts it. A sum type is described by `completeStructuredOf` ([Sum types](#sum-types)).
 
 ## Related
 
