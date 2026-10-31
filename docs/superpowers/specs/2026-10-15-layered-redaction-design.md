@@ -90,7 +90,9 @@ All components live in `llm4s-core`. No new dependency is added.
   - Vertex OAuth access tokens, refresh tokens and JWT assertions;
   - watsonx IAM API keys and tokens;
   - Azure keys;
-  - search-tool keys.
+  - search-tool keys;
+  - store credentials: the Postgres passwords (checkpointer, agent memory, pgvector and the RAG search and keyword indexes), Neo4j, Qdrant, and Elasticsearch/OpenSearch keys and passwords, and those of any store added later (decision 2);
+  - the HTTP proxy password and the TLS trust-store and key-store passwords (`HttpNetworkSettings`), and the MCP server's `apiKey` (my call, by the same rule: llm4s holds them).
 - **One owner per token generation.** A value that changes on every refresh (an access token, a JWT assertion, a subject token) is registered by the code that sends it, through a `TokenGenerations` that keeps the current and previous generation and forgets older ones; nothing else registers it. A value registered once and kept (a configured key, a refresh token) is a plain `Secret`. So repeated refreshes never grow the registry.
 - **Config `toString` methods** stop calling `Redaction.secret` / `secretOpt` by hand.
 - **Not covered:** Bedrock credentials stay inside the AWS SDK. llm4s never holds the signed header, so `BedrockClient`'s exception-message redaction remains B2.
@@ -137,7 +139,7 @@ All components live in `llm4s-core`. No new dependency is added.
 
 - **`ProviderExchange`.** Its bodies become `Payload = Json(ujson.Value) | Text(String)`. `ProviderExchangeRecorder` and each client's `recordExchange` pass the structure they already hold: the OpenAI SDK params go through Jackson to ujson, Gemini and Vertex are already ujson, and the rest are built by hand. `ProviderExchangeSink` redacts with B1.
 - **Debug request and response logs** in the clients redact the ujson value before it is rendered.
-- **Traces.** A single wrapper in the core tracing contract (`Tracing`/`TracingComposer`) applies `scrubKnown` to every string field of a `TraceEvent` before any backend sees it.
+- **Traces.** A single wrapper in the core tracing contract (`Tracing`/`TracingComposer`) applies `scrubKnown` to every string field of a `TraceEvent` before any backend sees it. The OpenTelemetry backend stops passing its opt-in GenAI content and its error status through the heuristic `Redaction.redact`: they get the wrapper's `scrubKnown` like every other field (decision 1).
 - **`ShellTool` output** is unchanged. It is model-facing, not diagnostic.
 
 ## What is kept from #1959
@@ -163,7 +165,7 @@ Four PRs, in order. Until PR 4, `main` keeps its existing heuristics with layer 
    - Every existing `Redaction` entry point runs A first.
    - Delete the per-caller secret APIs.
    - End-to-end leak tests for each client.
-2. **Traces.** The `scrubKnown` wrapper on `Tracing`, with tests for each backend.
+2. **Traces.** The `scrubKnown` wrapper on `Tracing`, with tests for each backend. OpenTelemetry's `Redaction.redact` calls go (decision 1).
 3. **Layer B1.**
    - `StructuredRedaction` and `Payload` in `ProviderExchange`.
    - Clients pass structure.
@@ -189,6 +191,11 @@ Four PRs, in order. Until PR 4, `main` keeps its existing heuristics with layer 
 - Linear time, checked by the scaling backstop under `sbt testPerformance`.
 - Redaction never throws.
 - No regex with a nested quantifier.
+
+## Decisions (2026-10-31)
+
+1. **Trace content gets layer A only, OpenTelemetry included.** Since #2275, OpenTelemetry has run the heuristic `Redaction.redact` over its opt-in GenAI content and its error status. PR 2 replaces that with the tracing wrapper's `scrubKnown`, as for every other backend: the content is model text the user chose to export, which heuristic masking would mangle, and every credential llm4s holds is still removed exactly.
+2. **Store credentials are part of PR 1's "every credential".** Database drivers' errors often echo connection strings, so each store credential becomes a `Secret`, registered where its config is loaded.
 
 ## Acceptance
 
