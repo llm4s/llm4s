@@ -4,6 +4,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.knowledgegraph.storage._
 import org.llm4s.types.Result
+import org.llm4s.security.Secret
 import org.neo4j.driver._
 import org.slf4j.LoggerFactory
 
@@ -500,7 +501,7 @@ object Neo4jGraphStore {
   final case class Config(
     uri: String = "bolt://localhost:7687",
     user: String = "neo4j",
-    password: String = "",
+    password: Secret = Secret(""),
     database: String = "neo4j",
     maxPoolSize: Int = 10
   )
@@ -512,7 +513,7 @@ object Neo4jGraphStore {
         .builder()
         .withMaxConnectionPoolSize(config.maxPoolSize)
         .build()
-      val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password), driverConfig)
+      val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password.reveal), driverConfig)
       new Neo4jGraphStore(driver, config.database, ownsDriver = true)
     }.toEither.left.map(e => ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}"))
 
@@ -520,12 +521,12 @@ object Neo4jGraphStore {
   def apply(
     uri: String,
     user: String = "neo4j",
-    password: String = "",
+    password: Secret = Secret(""),
     database: String = "neo4j"
   ): Result[Neo4jGraphStore] = apply(Config(uri, user, password, database))
 
   /** Connects to bolt://localhost:7687 with the given credentials. */
-  def local(user: String = "neo4j", password: String = "neo4j"): Result[Neo4jGraphStore] =
+  def local(user: String = "neo4j", password: Secret = Secret("neo4j")): Result[Neo4jGraphStore] =
     apply(Config(user = user, password = password))
 
   /**

@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import com.typesafe.config.ConfigFactory
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.opensearch.{ OpenSearchAuth, OpenSearchConfig, OpenSearchEngine, OpenSearchSpaceType }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -48,7 +49,7 @@ class OpenSearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers wi
     config shouldBe OpenSearchConfig(
       baseUrl = "https://search.example.com:9200",
       index = "docs",
-      auth = OpenSearchAuth.Basic("llm4s", "pw"),
+      auth = OpenSearchAuth.Basic("llm4s", Secret("pw")),
       spaceType = OpenSearchSpaceType.InnerProduct,
       engine = OpenSearchEngine.Faiss,
       dimensions = Some(384),
@@ -63,7 +64,7 @@ class OpenSearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers wi
   it should "read a token as bearer authentication" in {
     load("""
       llm4s.vectorstore.opensearch { baseUrl = "https://search.example.com", token = "eyJ.abc.def" }
-    """).value.auth shouldBe OpenSearchAuth.BearerToken("eyJ.abc.def")
+    """).value.auth shouldBe OpenSearchAuth.BearerToken(Secret("eyJ.abc.def"))
   }
 
   it should "treat blank values, as an unset variable binds, as unset" in {
@@ -121,9 +122,9 @@ class OpenSearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers wi
     )
     basic.baseUrl shouldBe "https://search.example.com"
     basic.index shouldBe "docs"
-    basic.auth shouldBe OpenSearchAuth.Basic("admin", "pw")
+    basic.auth shouldBe OpenSearchAuth.Basic("admin", Secret("pw"))
 
     resolve("""OPENSEARCH_URL = "https://search.example.com"
-              |OPENSEARCH_TOKEN = jwt""".stripMargin).auth shouldBe OpenSearchAuth.BearerToken("jwt")
+              |OPENSEARCH_TOKEN = jwt""".stripMargin).auth shouldBe OpenSearchAuth.BearerToken(Secret("jwt"))
   }
 }

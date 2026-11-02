@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import com.typesafe.config.ConfigFactory
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.redis.{ RedisConfig, RedisDistanceMetric, RedisVectorAlgorithm }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -51,7 +52,7 @@ class RedisVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers with Ei
       tls = true,
       database = 1,
       username = Some("app"),
-      password = Some("secret"),
+      password = Some(Secret("secret")),
       index = "docs",
       keyPrefix = Some("d:"),
       algorithm = RedisVectorAlgorithm.Flat,
@@ -111,7 +112,7 @@ class RedisVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers with Ei
     config.port shouldBe 6390
     config.tls shouldBe true
     config.username shouldBe Some("app")
-    config.password shouldBe Some("pw")
+    config.password shouldBe Some(Secret("pw"))
     config.index shouldBe "docs"
   }
 }

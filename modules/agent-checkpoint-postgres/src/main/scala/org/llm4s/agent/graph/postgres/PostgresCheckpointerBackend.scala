@@ -3,6 +3,7 @@ package org.llm4s.agent.graph.postgres
 import org.llm4s.agent.graph.spi.{ CheckpointStore, CheckpointerBackend, CheckpointerSettings }
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 /**
@@ -43,10 +44,10 @@ object PostgresCheckpointerBackend:
   final private[postgres] case class Connection(
     url: String,
     user: String,
-    password: String,
+    password: Secret,
     config: PostgresCheckpointerConfig
   ):
-    override def toString: String = s"Connection($url, $user, <password>, $config)"
+    override def toString: String = s"Connection($url, $user, $password, $config)"
 
   /** The connection `settings` describe, checked before anything is opened. */
   private[postgres] def connection(settings: CheckpointerSettings): Result[Connection] =
@@ -82,4 +83,4 @@ object PostgresCheckpointerBackend:
           val block = s"${CheckpointerSettings.Path}.$Kind"
           ConfigurationError(s"Invalid $block: ${e.message}", List(block))
         }
-    yield Connection(url, user, settings.optionalString("password").getOrElse(""), config)
+    yield Connection(url, user, Secret(settings.optionalString("password").getOrElse("")), config)

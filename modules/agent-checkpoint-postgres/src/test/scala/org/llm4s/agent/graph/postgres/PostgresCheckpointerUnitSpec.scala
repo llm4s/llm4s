@@ -3,6 +3,7 @@ package org.llm4s.agent.graph.postgres
 import com.zaxxer.hikari.HikariDataSource
 import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadId, ThreadQuery, ThreadStatus }
 import org.llm4s.error.{ ProcessingError, ValidationError }
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -231,7 +232,7 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     val unreachable = PostgresCheckpointer.open(
       "jdbc:postgresql://127.0.0.1:1/none",
       "nobody",
-      "nothing",
+      Secret("nothing"),
       PostgresCheckpointerConfig(connectionTimeout = 300.millis, maxPoolSize = 1)
     )
     unreachable.left.value shouldBe a[ProcessingError]

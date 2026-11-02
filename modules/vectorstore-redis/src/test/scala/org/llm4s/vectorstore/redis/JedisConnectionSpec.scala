@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.redis
 
 import org.llm4s.error.{ AuthenticationError, NetworkError, ProcessingError, TimeoutError }
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -54,9 +55,14 @@ class JedisConnectionSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "build a client with credentials and TLS" in {
-    val config     = RedisConfig(username = Some("app"), password = Some("pw"), tls = true, database = 1)
+    val config     = RedisConfig(username = Some("app"), password = Some(Secret("pw")), tls = true, database = 1)
     val connection = JedisConnection(config).value
     connection.close()
-    JedisConnection(RedisConfig(password = Some("pw"))).value.close()
+    JedisConnection(RedisConfig(password = Some(Secret("pw")))).value.close()
+  }
+
+  it should "send the real password, not the masked one, to the client" in {
+    val client = JedisConnection.clientConfig(RedisConfig(username = Some("app"), password = Some(Secret("pw-real-1"))))
+    (client.getUser, client.getPassword) shouldBe ("app", "pw-real-1")
   }
 }

@@ -2,6 +2,7 @@ package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError }
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.PostgresVectorHelpers
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
@@ -667,7 +668,7 @@ object PostgresMemoryStore {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "agent_memories",
     maxPoolSize: Int = 10
   ) {
@@ -697,7 +698,7 @@ object PostgresMemoryStore {
       val hikariConfig = new HikariConfig()
       hikariConfig.setJdbcUrl(config.jdbcUrl)
       hikariConfig.setUsername(config.user)
-      hikariConfig.setPassword(config.password)
+      hikariConfig.setPassword(config.password.reveal)
       hikariConfig.setMaximumPoolSize(config.maxPoolSize)
       hikariConfig.setMinimumIdle(1)
       new HikariDataSource(hikariConfig)

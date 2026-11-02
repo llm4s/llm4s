@@ -2,6 +2,7 @@ package org.llm4s.vectorstore.elasticsearch
 
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.{ MetadataFilter, VectorRecord }
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
@@ -33,7 +34,7 @@ class ElasticsearchVectorStoreSpec extends AnyWordSpec with Matchers with Before
       val config = ElasticsearchConfig(
         baseUrl = url,
         index = s"llm4s-it-${System.nanoTime()}",
-        auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(ElasticsearchAuth.ApiKey(_))
+        auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(ElasticsearchAuth.ApiKey(Secret(_)))
       )
       store = ElasticsearchVectorStore(config).fold(e => fail(s"Failed to create store: ${e.formatted}"), identity)
     }

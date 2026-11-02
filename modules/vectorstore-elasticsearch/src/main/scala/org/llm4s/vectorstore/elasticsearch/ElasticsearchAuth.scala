@@ -1,5 +1,7 @@
 package org.llm4s.vectorstore.elasticsearch
 
+import org.llm4s.security.Secret
+
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -28,18 +30,18 @@ object ElasticsearchAuth {
    *
    * @param encoded the key's `encoded` value, as the create-API-key API and Kibana show it (Base64 of `id:api_key`)
    */
-  final case class ApiKey(encoded: String) extends ElasticsearchAuth {
-    private[elasticsearch] def headers: Map[String, String] = Map("Authorization" -> s"ApiKey $encoded")
-    private[elasticsearch] def secrets: Seq[String]         = Seq(encoded)
+  final case class ApiKey(encoded: Secret) extends ElasticsearchAuth {
+    private[elasticsearch] def headers: Map[String, String] = Map("Authorization" -> s"ApiKey ${encoded.reveal}")
+    private[elasticsearch] def secrets: Seq[String]         = Seq(encoded.reveal)
     override def toString: String                           = "ApiKey(***)"
   }
 
   /** HTTP basic authentication, for a native-realm user such as `elastic`. */
-  final case class Basic(username: String, password: String) extends ElasticsearchAuth {
+  final case class Basic(username: String, password: Secret) extends ElasticsearchAuth {
     private def token: String =
-      Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))
+      Base64.getEncoder.encodeToString(s"$username:${password.reveal}".getBytes(StandardCharsets.UTF_8))
     private[elasticsearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic $token")
-    private[elasticsearch] def secrets: Seq[String]         = Seq(password, token)
+    private[elasticsearch] def secrets: Seq[String]         = Seq(password.reveal, token)
     override def toString: String                           = s"Basic($username, ***)"
   }
 }

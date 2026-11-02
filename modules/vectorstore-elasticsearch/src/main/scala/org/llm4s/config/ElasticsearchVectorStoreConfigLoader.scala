@@ -2,6 +2,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.elasticsearch.{ ElasticsearchAuth, ElasticsearchConfig, ElasticsearchSimilarity }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -98,8 +99,8 @@ object ElasticsearchVectorStoreConfigLoader {
       auth <- (nonEmpty(s.apiKey), nonEmpty(s.username), nonEmpty(s.password)) match {
         case (Some(_), Some(_), _) =>
           Left(ConfigurationError(s"$Section sets both apiKey and username: choose one way to authenticate"))
-        case (Some(key), None, _)        => Right(ElasticsearchAuth.ApiKey(key))
-        case (None, Some(user), Some(p)) => Right(ElasticsearchAuth.Basic(user, p))
+        case (Some(key), None, _)        => Right(ElasticsearchAuth.ApiKey(Secret(key)))
+        case (None, Some(user), Some(p)) => Right(ElasticsearchAuth.Basic(user, Secret(p)))
         case (None, Some(_), None) =>
           Left(ConfigurationError(s"$Section.username is set without a password", List(s"$Section.password")))
         case (None, None, Some(_)) =>

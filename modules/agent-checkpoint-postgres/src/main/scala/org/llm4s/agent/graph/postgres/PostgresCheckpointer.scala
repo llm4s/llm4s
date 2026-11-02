@@ -4,6 +4,7 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.agent.graph.*
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
@@ -799,7 +800,7 @@ object PostgresCheckpointer:
   def open(
     jdbcUrl: String,
     user: String,
-    password: String,
+    password: Secret,
     config: PostgresCheckpointerConfig = PostgresCheckpointerConfig.default
   ): Result[PostgresCheckpointer] =
     given ErrorContext = ErrorContext(config.schema)
@@ -807,7 +808,7 @@ object PostgresCheckpointer:
       val hikari = new HikariConfig()
       hikari.setJdbcUrl(jdbcUrl)
       hikari.setUsername(user)
-      hikari.setPassword(password)
+      hikari.setPassword(password.reveal)
       hikari.setMaximumPoolSize(config.maxPoolSize)
       hikari.setConnectionTimeout(DurationRounding.ceilMillis(config.connectionTimeout))
       hikari.setPoolName(s"llm4s-checkpointer-${config.schema}")

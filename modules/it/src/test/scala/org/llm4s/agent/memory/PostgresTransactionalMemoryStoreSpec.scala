@@ -2,6 +2,7 @@ package org.llm4s.agent.memory
 
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 
 import java.util.concurrent.{ Executors, TimeUnit }
 import scala.util.Try
@@ -25,7 +26,7 @@ class PostgresTransactionalMemoryStoreSpec extends TransactionalMemoryStoreContr
     port = sys.env.getOrElse("POSTGRES_PORT", "5432").toInt,
     database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
     user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
-    password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
+    password = Secret(sys.env.getOrElse("POSTGRES_PASSWORD", "password")),
     tableName = table,
     maxPoolSize = 4
   )

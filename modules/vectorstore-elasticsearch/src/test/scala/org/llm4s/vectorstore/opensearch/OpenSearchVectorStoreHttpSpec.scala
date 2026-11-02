@@ -9,6 +9,7 @@ import org.llm4s.error.{
   ValidationError
 }
 import org.llm4s.http.HttpResponse
+import org.llm4s.security.Secret
 import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.elasticsearch.FakeElasticsearch
@@ -406,7 +407,8 @@ class OpenSearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Eithe
   }
 
   it should "redact credentials an error body echoes, the configured ones included" in {
-    val cfg     = config.withBaseUrl("https://search.example.com").withAuth(OpenSearchAuth.BearerToken("my-jwt-123"))
+    val cfg =
+      config.withBaseUrl("https://search.example.com").withAuth(OpenSearchAuth.BearerToken(Secret("my-jwt-123")))
     val (os, _) = store({ case ("GET", _) => status(500, EchoedCredentials.Text + " my-jwt-123") }, cfg)
 
     val message = os.get("x").left.value.formatted
@@ -417,11 +419,19 @@ class OpenSearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Eithe
   "Authentication" should "send a user as Basic and a token as Bearer" in {
     val (basicStore, basicFake) = store(
       { case ("POST", _) => ok("""{"count":0}""") },
-      OpenSearchConfig("https://search.example.com", index = "vectors", auth = OpenSearchAuth.Basic("admin", "pw"))
+      OpenSearchConfig(
+        "https://search.example.com",
+        index = "vectors",
+        auth = OpenSearchAuth.Basic("admin", Secret("pw"))
+      )
     )
     val (tokenStore, tokenFake) = store(
       { case ("POST", _) => ok("""{"count":0}""") },
-      OpenSearchConfig("https://search.example.com", index = "vectors", auth = OpenSearchAuth.BearerToken("jwt"))
+      OpenSearchConfig(
+        "https://search.example.com",
+        index = "vectors",
+        auth = OpenSearchAuth.BearerToken(Secret("jwt"))
+      )
     )
 
     basicStore.count() shouldBe Right(0L)

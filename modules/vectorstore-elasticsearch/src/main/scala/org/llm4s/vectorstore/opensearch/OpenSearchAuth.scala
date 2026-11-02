@@ -1,5 +1,7 @@
 package org.llm4s.vectorstore.opensearch
 
+import org.llm4s.security.Secret
+
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -28,18 +30,18 @@ object OpenSearchAuth {
   }
 
   /** HTTP basic authentication, for a user of the security plugin such as `admin`. */
-  final case class Basic(username: String, password: String) extends OpenSearchAuth {
+  final case class Basic(username: String, password: Secret) extends OpenSearchAuth {
     private def token: String =
-      Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))
+      Base64.getEncoder.encodeToString(s"$username:${password.reveal}".getBytes(StandardCharsets.UTF_8))
     private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic $token")
-    private[opensearch] def secrets: Seq[String]         = Seq(password, token)
+    private[opensearch] def secrets: Seq[String]         = Seq(password.reveal, token)
     override def toString: String                        = s"Basic($username, ***)"
   }
 
   /** A bearer token, sent as `Authorization: Bearer <token>`: a JWT the security plugin's JWT backend accepts. */
-  final case class BearerToken(token: String) extends OpenSearchAuth {
-    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Bearer $token")
-    private[opensearch] def secrets: Seq[String]         = Seq(token)
+  final case class BearerToken(token: Secret) extends OpenSearchAuth {
+    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Bearer ${token.reveal}")
+    private[opensearch] def secrets: Seq[String]         = Seq(token.reveal)
     override def toString: String                        = "BearerToken(***)"
   }
 }

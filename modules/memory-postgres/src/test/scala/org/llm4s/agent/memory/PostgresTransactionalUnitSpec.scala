@@ -1,6 +1,7 @@
 package org.llm4s.agent.memory
 
 import com.zaxxer.hikari.HikariDataSource
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -224,6 +225,12 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     an[IllegalArgumentException] should be thrownBy PostgresMemoryStore.Config(tableName = "t" * 56)
     // `<table>_applied`, the longest derived name, fits PostgreSQL's limit untruncated
     (("t" * 55) + "_applied").length should be <= 63
+  }
+
+  it should "hold the password as a Secret that its toString masks" in KnownSecrets.isolated {
+    val config = PostgresMemoryStore.Config(password = Secret("pg-store-password-1"))
+    config.password.reveal shouldBe "pg-store-password-1"
+    (config.toString should not).include("pg-store-password-1")
   }
 
   "PostgresMemoryStore.applyAtomically" should "fail, writing nothing, when the connection fails" in {

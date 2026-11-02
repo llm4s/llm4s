@@ -107,25 +107,32 @@ final private[redis] class JedisConnection(client: RedisClient, endpoint: String
 
 private[redis] object JedisConnection {
 
-  /** A Jedis client for `config`'s server, speaking RESP2. No connection is opened until the first command. */
-  def apply(config: RedisConfig): Result[JedisConnection] = {
+  /** The Jedis client settings for `config`: timeouts, TLS, database, and the user and password it holds. */
+  private[redis] def clientConfig(config: RedisConfig): redis.clients.jedis.JedisClientConfig = {
     val millis = config.timeout.toMillis.toInt
+    val base = DefaultJedisClientConfig
+      .builder()
+      .protocol(RedisProtocol.RESP2)
+      .database(config.database)
+      .connectionTimeoutMillis(millis)
+      .socketTimeoutMillis(millis)
+      .clientName("llm4s-vectorstore")
+    val secured  = if (config.tls) base.sslOptions(SslOptions.defaults()) else base
+    val withUser = config.username.fold(secured)(secured.user)
+    config.password.fold(withUser)(p => withUser.password(p.reveal)).build()
+  }
+
+  /** A Jedis client for `config`'s server, speaking RESP2. No connection is opened until the first command. */
+  def apply(config: RedisConfig): Result[JedisConnection] =
     Try {
-      val base = DefaultJedisClientConfig
+      RedisClient
         .builder()
-        .protocol(RedisProtocol.RESP2)
-        .database(config.database)
-        .connectionTimeoutMillis(millis)
-        .socketTimeoutMillis(millis)
-        .clientName("llm4s-vectorstore")
-      val secured      = if (config.tls) base.sslOptions(SslOptions.defaults()) else base
-      val withUser     = config.username.fold(secured)(secured.user)
-      val clientConfig = config.password.fold(withUser)(withUser.password).build()
-      RedisClient.builder().hostAndPort(new HostAndPort(config.host, config.port)).clientConfig(clientConfig).build()
+        .hostAndPort(new HostAndPort(config.host, config.port))
+        .clientConfig(clientConfig(config))
+        .build()
     }.toEither.left
       .map(e => ConfigurationError(s"Cannot create a Redis client for ${config.host}:${config.port}: ${e.getMessage}"))
       .map(client => new JedisConnection(client, s"${config.host}:${config.port}", config.timeout))
-  }
 
   /** A raw command: its name, then its arguments. */
   private def arguments(command: Seq[Array[Byte]]): CommandArguments = {

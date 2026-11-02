@@ -6,6 +6,7 @@ import org.llm4s.knowledgegraph.{ Edge, Node }
 import org.llm4s.knowledgegraph.storage.Direction
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
+import org.llm4s.security.Secret
 import org.slf4j.LoggerFactory
 
 import scala.util.Using
@@ -14,7 +15,7 @@ object Neo4jKnowledgeGraphExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    val neo4jConfig = Neo4jGraphStore.Config(password = "password")
+    val neo4jConfig = Neo4jGraphStore.Config(password = Secret("password"))
 
     Neo4jGraphStore(neo4jConfig) match {
       case Left(error) =>

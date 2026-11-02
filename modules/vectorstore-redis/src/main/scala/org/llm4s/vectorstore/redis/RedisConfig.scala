@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.redis
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 import scala.concurrent.duration.*
@@ -15,7 +16,7 @@ import scala.concurrent.duration.*
  * {{{
  * val config = RedisConfig("redis.example.com")
  *   .withTls(true)
- *   .withPassword("secret")
+ *   .withPassword(Secret("secret"))
  *   .withIndex("docs")
  * }}}
  *
@@ -43,7 +44,7 @@ final case class RedisConfig private (
   tls: Boolean,
   database: Int,
   username: Option[String],
-  password: Option[String],
+  password: Option[Secret],
   index: String,
   keyPrefix: Option[String],
   algorithm: RedisVectorAlgorithm,
@@ -58,8 +59,8 @@ final case class RedisConfig private (
   def withDatabase(database: Int): RedisConfig                             = copy(database = database)
   def withUsername(username: String): RedisConfig                          = copy(username = Some(username))
   def withUsername(username: Option[String]): RedisConfig                  = copy(username = username)
-  def withPassword(password: String): RedisConfig                          = copy(password = Some(password))
-  def withPassword(password: Option[String]): RedisConfig                  = copy(password = password)
+  def withPassword(password: Secret): RedisConfig                          = copy(password = Some(password))
+  def withPassword(password: Option[Secret]): RedisConfig                  = copy(password = password)
   def withIndex(index: String): RedisConfig                                = copy(index = index)
   def withKeyPrefix(keyPrefix: String): RedisConfig                        = copy(keyPrefix = Some(keyPrefix))
   def withKeyPrefix(keyPrefix: Option[String]): RedisConfig                = copy(keyPrefix = keyPrefix)
@@ -81,7 +82,7 @@ final case class RedisConfig private (
     else if (database < 0) bad(s"database must not be negative, got $database")
     else if (username.exists(u => u.isEmpty || unsafe(u))) bad("username is blank or contains whitespace")
     else if (username.isDefined && password.isEmpty) bad("username is set without a password")
-    else if (password.exists(_.isEmpty)) bad("password is empty")
+    else if (password.exists(_.reveal.isEmpty)) bad("password is empty")
     else if (index.isEmpty || unsafe(index)) bad("index name is blank or contains whitespace")
     else if (keyPrefix.exists(p => p.isEmpty || p.exists(_.isControl))) bad("keyPrefix is empty")
     else if (dimensions.exists(d => d < 1 || d > RedisConfig.MaxDimensions))
@@ -121,7 +122,7 @@ object RedisConfig {
     tls: Boolean = false,
     database: Int = 0,
     username: Option[String] = None,
-    password: Option[String] = None,
+    password: Option[Secret] = None,
     index: String = DefaultIndex,
     keyPrefix: Option[String] = None,
     algorithm: RedisVectorAlgorithm = RedisVectorAlgorithm.Hnsw,

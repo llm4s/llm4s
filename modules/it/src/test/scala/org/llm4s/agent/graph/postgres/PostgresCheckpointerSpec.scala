@@ -3,6 +3,7 @@ package org.llm4s.agent.graph.postgres
 import org.llm4s.agent.graph.*
 import org.llm4s.error.ProcessingError
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.scalatest.{ BeforeAndAfterAll, EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -153,7 +154,8 @@ class PostgresCheckpointerSpec
         st.execute(s"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA $s TO $role")
       }
     }
-    val store = PostgresCheckpointer.open(PgCheckpointerDb.jdbcUrl, role, "dml-only", config.withMaxPoolSize(2)).value
+    val store =
+      PostgresCheckpointer.open(PgCheckpointerDb.jdbcUrl, role, Secret("dml-only"), config.withMaxPoolSize(2)).value
     val t     = thread()
     val token = store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value.token
     store.commit(t, Commit(token, Some(checkpoint("c1", None, t)))).value
@@ -161,7 +163,7 @@ class PostgresCheckpointerSpec
     store.close()
     // the same role cannot create a schema of its own: the open fails, as a ProcessingError
     PostgresCheckpointer
-      .open(PgCheckpointerDb.jdbcUrl, role, "dml-only", fresh().withMaxPoolSize(1))
+      .open(PgCheckpointerDb.jdbcUrl, role, Secret("dml-only"), fresh().withMaxPoolSize(1))
       .left
       .value shouldBe a[ProcessingError]
     Using.resource(PgCheckpointerDb.connect()) { c =>
@@ -191,7 +193,7 @@ class PostgresCheckpointerSpec
   "A store with a pool of its own" should "work, close its pool with it, and report an unreachable database" in {
     val config = fresh().withMaxPoolSize(2)
     val store = PostgresCheckpointer
-      .open(PgCheckpointerDb.jdbcUrl, PgCheckpointerDb.user, PgCheckpointerDb.password, config)
+      .open(PgCheckpointerDb.jdbcUrl, PgCheckpointerDb.user, Secret(PgCheckpointerDb.password), config)
       .value
     val t = thread()
     store.claim(t, ClaimRequest(RunId("run"), None, 30.seconds)).value
@@ -199,7 +201,7 @@ class PostgresCheckpointerSpec
     store.isClosed shouldBe true
     store.latest(t).left.value shouldBe a[ProcessingError]
     val unreachable = PostgresCheckpointer
-      .open("jdbc:postgresql://127.0.0.1:1/none", "nobody", "nothing", config.withConnectionTimeout(500.millis))
+      .open("jdbc:postgresql://127.0.0.1:1/none", "nobody", Secret("nothing"), config.withConnectionTimeout(500.millis))
       .left
       .value
     unreachable shouldBe a[ProcessingError]
