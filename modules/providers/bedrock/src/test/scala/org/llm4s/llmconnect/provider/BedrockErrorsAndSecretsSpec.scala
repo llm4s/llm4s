@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.*
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
 import org.llm4s.llmconnect.model.*
@@ -32,7 +33,7 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
   private val secretKey  = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYSECRETSECRET"
   private val sessionTok = "FwoGZXIvYXdzSESSIONTOKENVALUE"
   private val withSecrets = (url: String) =>
-    config(url).copy(credentials = Some(BedrockCredentials("AKIDEXAMPLE", secretKey, Some(sessionTok))))
+    config(url).copy(credentials = Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret(secretKey), Some(Secret(sessionTok)))))
 
   // One server and one client for every error-mapping case: the server answers with whatever
   // `nextError` holds. A client per case cost ~2 s each, because closing a client that has streamed
@@ -136,10 +137,10 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
     "refuse static credentials combined with a profile, and a blank access key or secret" in {
       given org.llm4s.llmconnect.config.ContextWindowResolver =
         org.llm4s.llmconnect.config.ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-      val creds = BedrockCredentials("AKID", "secret")
+      val creds = BedrockCredentials(Secret("AKID"), Secret("secret"))
       BedrockConfig.fromValues("m", "us-east-1", Some(creds), Some("p")).isLeft shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(accessKeyId = " "))).isLeft shouldBe true
-      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(secretAccessKey = ""))).isLeft shouldBe true
+      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(accessKeyId = Secret(" ")))).isLeft shouldBe true
+      BedrockConfig.fromValues("m", "us-east-1", Some(creds.copy(secretAccessKey = Secret("")))).isLeft shouldBe true
       BedrockConfig.fromValues("m", "us-east-1", Some(creds)).isRight shouldBe true
       BedrockConfig.fromValues("m", "us-east-1", None, Some("p")).isRight shouldBe true
       BedrockConfig.fromValues("m", "us-east-1").isRight shouldBe true

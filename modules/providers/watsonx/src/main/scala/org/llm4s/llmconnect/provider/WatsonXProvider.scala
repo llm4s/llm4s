@@ -73,7 +73,7 @@ object WatsonXProvider extends ProviderDescriptor:
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       config <- WatsonXConfig.fromValues(
         modelName = section.model.asString,
-        apiKey = apiKey.reveal,
+        apiKey = apiKey,
         projectId = section.extra(ProjectIdKey),
         spaceId = section.extra(SpaceIdKey),
         baseUrl = baseUrl,

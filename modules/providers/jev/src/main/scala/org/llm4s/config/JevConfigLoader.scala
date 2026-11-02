@@ -103,7 +103,7 @@ object JevConfigLoader {
           )
         }
         JevConfig(
-          apiKey = key.value.reveal,
+          apiKey = key.value,
           baseUrl = nonEmpty(s.baseUrl).getOrElse(JevConfig.DefaultBaseUrl),
           model = nonEmpty(s.model).getOrElse(JevConfig.DefaultModel),
           timeout = s.timeout.getOrElse(JevConfig.DefaultTimeout),

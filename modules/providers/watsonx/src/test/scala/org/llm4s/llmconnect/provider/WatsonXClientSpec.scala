@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, NetworkError, RateLimitError, ValidationError }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -14,7 +15,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val config = WatsonXConfig(
-    apiKey = "secret key&=",
+    apiKey = Secret("secret key&="),
     projectId = "project-1",
     spaceId = None,
     model = "ibm/granite-13b-instruct-v2",

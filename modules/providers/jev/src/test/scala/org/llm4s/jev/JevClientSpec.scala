@@ -1,5 +1,6 @@
 package org.llm4s.jev
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger as LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
@@ -40,7 +41,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     private val retry                      = new JevRetry(policy, sleep = d => slept += d, random = () => 0.0)
     val client: JevClient =
       JevClient
-        .withHttp(tweak(JevConfig(secret, baseUrl = baseUrl, retry = policy)), Llm4sHttpClient.create(), retry)
+        .withHttp(tweak(JevConfig(Secret(secret), baseUrl = baseUrl, retry = policy)), Llm4sHttpClient.create(), retry)
         .value
   }
 
@@ -481,7 +482,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       s"""{"error":{"message":"bad key $unicode"}}"""
     ).foreach { body =>
       serve(Reply(401, body)) { (url, _) =>
-        val error = new Rig(url, tweak = _.withApiKey(key)).client.evaluate(request).left.value
+        val error = new Rig(url, tweak = _.withApiKey(Secret(key))).client.evaluate(request).left.value
 
         withClue(s"$body ") {
           error shouldBe an[AuthenticationError]
@@ -503,7 +504,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       ok(withChoice(encoded))
     ).foreach { reply =>
       serve(reply) { (url, _) =>
-        val error = new Rig(url, tweak = _.withApiKey(key)).client.evaluate(choiceRequest).left.value
+        val error = new Rig(url, tweak = _.withApiKey(Secret(key))).client.evaluate(choiceRequest).left.value
 
         withClue(s"${reply.status} ") {
           error.message should include("***")
@@ -522,7 +523,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
   it should "mask the URL-encoded key in a body read as text" in {
     JevErrors.redactBody(
       "plain text, url tsk%2Flive%2B0123%3Dabc.",
-      "tsk/live+0123=abc"
+      Secret("tsk/live+0123=abc")
     ) shouldBe "plain text, url ***."
   }
 
@@ -549,7 +550,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     val body =
       s"""{"message":"bad key $secret","nested":${"[" * deepDepth}"$secret"${"]" * deepDepth}}"""
 
-    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+    val redacted = onSmallStack(JevErrors.redactBody(body, Secret(secret)))
 
     (redacted should not).include(secret)
     redacted should include("***")
@@ -560,7 +561,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     val escaped = ujson.write(ujson.Str(key)).drop(1).dropRight(1).replace("/", "\\/")
     val body    = s"""{"message":"bad key $escaped","nested":${"[" * deepDepth}${"]" * deepDepth}}"""
     serve(Reply(500, body)) { (url, _) =>
-      val rig    = new Rig(url, tweak = _.withApiKey(key))
+      val rig    = new Rig(url, tweak = _.withApiKey(Secret(key)))
       val result = onSmallStack(rig.client.evaluate(request))
 
       val error = result.left.value
@@ -588,7 +589,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
 
   it should "redact, on a small stack, a non-2xx body nested 511 levels deep without reading it as JSON" in {
     val body     = s"""{"message":"bad key $secret","x":${"[" * 510}"$secret"${"]" * 510}}"""
-    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+    val redacted = onSmallStack(JevErrors.redactBody(body, Secret(secret)))
 
     (redacted should not).include(secret)
   }
@@ -599,7 +600,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     val body  = s"""{"message":"bad key $secret","x":${"[" * depth}"$secret"${"]" * depth}}"""
     BoundedJson.exceedsDepth(body, JevErrors.MaxErrorDepth) shouldBe false
 
-    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+    val redacted = onSmallStack(JevErrors.redactBody(body, Secret(secret)))
     ujson.read(redacted)("message").str shouldBe "bad key ***"
     (redacted should not).include(secret)
 
@@ -660,12 +661,12 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
   // ---- building clients ----
 
   "A client" should "refuse an invalid config instead of being built" in {
-    JevClient(JevConfig(secret, baseUrl = "http://evil.example")).left.value shouldBe a[ConfigurationError]
-    JevClient(JevConfig("")).left.value shouldBe a[ConfigurationError]
+    JevClient(JevConfig(Secret(secret), baseUrl = "http://evil.example")).left.value shouldBe a[ConfigurationError]
+    JevClient(JevConfig(Secret(""))).left.value shouldBe a[ConfigurationError]
   }
 
   it should "build over its own HTTP client and close it" in {
-    val client = JevClient(JevConfig(secret)).value
+    val client = JevClient(JevConfig(Secret(secret))).value
 
     noException should be thrownBy client.close()
   }
@@ -699,7 +700,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       override def close(): Unit = closed = true
     }
 
-    JevClient.withHttp(JevConfig(secret), http, new JevRetry(JevRetryPolicy.none)).value.close()
+    JevClient.withHttp(JevConfig(Secret(secret)), http, new JevRetry(JevRetryPolicy.none)).value.close()
 
     closed shouldBe false
   }

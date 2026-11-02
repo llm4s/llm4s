@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -48,11 +49,11 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
     }
 
     "return a Left for blank credentials" in {
-      val blankKey = Some(BedrockCredentials("", "secret"))
+      val blankKey = Some(BedrockCredentials(Secret(""), Secret("secret")))
       BedrockConfig.fromValues("m", "us-east-1", credentials = blankKey).left.toOption.value.message should include(
         "accessKeyId"
       )
-      val blankSecret = Some(BedrockCredentials("AKID", ""))
+      val blankSecret = Some(BedrockCredentials(Secret("AKID"), Secret("")))
       BedrockConfig.fromValues("m", "us-east-1", credentials = blankSecret).left.toOption.value.message should include(
         "secretAccessKey"
       )
@@ -60,7 +61,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
     "return a Left for credentials together with a profile" in {
       BedrockConfig
-        .fromValues("m", "us-east-1", credentials = Some(BedrockCredentials("a", "b")), profile = Some("work"))
+        .fromValues("m", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))), profile = Some("work"))
         .isLeft shouldBe true
     }
   }
@@ -75,7 +76,7 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
     "keep its credentials, but switch model, with withModel" in {
       val config =
-        BedrockConfig.fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials("a", "b"))).toOption.value
+        BedrockConfig.fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b")))).toOption.value
       config.withModel("m2") shouldBe config.copy(model = "m2")
     }
 
@@ -86,9 +87,9 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
           "us-east-1",
           credentials = Some(
             BedrockCredentials(
-              "AKIAIOSFODNN7EXAMPLE",
-              "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-              Some("session-token-value")
+              Secret("AKIAIOSFODNN7EXAMPLE"),
+              Secret("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
+              Some(Secret("session-token-value"))
             )
           )
         )

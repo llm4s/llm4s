@@ -3,8 +3,8 @@ package org.llm4s.llmconnect.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Explicit AWS credentials for [[BedrockConfig]].
@@ -13,13 +13,12 @@ import org.llm4s.util.Redaction
  * it the signature is rejected.
  */
 final case class BedrockCredentials(
-  accessKeyId: String,
-  secretAccessKey: String,
-  sessionToken: Option[String] = None
+  accessKeyId: Secret,
+  secretAccessKey: Secret,
+  sessionToken: Option[Secret] = None
 ) {
   override def toString: String =
-    s"BedrockCredentials(accessKeyId=${Redaction.secret(accessKeyId)}, secretAccessKey=***, " +
-      s"sessionToken=${sessionToken.map(_ => "***").getOrElse("none")})"
+    s"BedrockCredentials(accessKeyId=$accessKeyId, secretAccessKey=$secretAccessKey, sessionToken=$sessionToken)"
 }
 
 /**
@@ -95,8 +94,8 @@ object BedrockConfig:
       _ <- ProviderConfig.nonEmpty("Bedrock", "model", modelName)
       _ <- credentials.fold[Result[Unit]](Right(())) { c =>
         for
-          _ <- ProviderConfig.nonEmpty("Bedrock", "accessKeyId", c.accessKeyId)
-          _ <- ProviderConfig.nonEmpty("Bedrock", "secretAccessKey", c.secretAccessKey)
+          _ <- ProviderConfig.nonEmpty("Bedrock", "accessKeyId", c.accessKeyId.reveal)
+          _ <- ProviderConfig.nonEmpty("Bedrock", "secretAccessKey", c.secretAccessKey.reveal)
         yield ()
       }
       _ <- Either.cond(

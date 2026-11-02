@@ -89,7 +89,7 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       )
       loaded match
         case Right(config: WatsonXConfig) =>
-          config.apiKey shouldBe "env-key"
+          config.apiKey.reveal shouldBe "env-key"
           config.projectId shouldBe "p-1"
           config.baseUrl shouldBe WatsonXConfig.DEFAULT_BASE_URL
           config.apiVersion shouldBe WatsonXConfig.DEFAULT_API_VERSION

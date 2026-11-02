@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ AuthenticationError, NetworkError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
@@ -92,7 +93,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         sendJsonResponse(exchange, 200, converseResponse("ok"))
       } { url =>
         val withToken =
-          config(url).copy(credentials = Some(BedrockCredentials("AKIDEXAMPLE", "secret", Some("session-token-1"))))
+          config(url).copy(credentials = Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret("secret"), Some(Secret("session-token-1")))))
         new BedrockClient(withToken).complete(conversation, CompletionOptions())
       }
 

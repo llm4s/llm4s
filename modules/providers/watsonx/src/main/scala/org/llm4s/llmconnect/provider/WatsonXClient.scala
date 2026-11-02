@@ -208,11 +208,11 @@ class WatsonXClient(
 
   /** `text` with the API key and `token` blanked, for a body that goes into an error message. */
   private def scrub(text: String, token: String): String =
-    Seq(config.apiKey, token).filter(_.nonEmpty).foldLeft(text)(_.replace(_, "[REDACTED]"))
+    Seq(config.apiKey.reveal, token).filter(_.nonEmpty).foldLeft(text)(_.replace(_, "[REDACTED]"))
 
   private def fetchToken(): Result[String] = {
     val body =
-      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey, "UTF-8")}"
+      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey.reveal, "UTF-8")}"
     val headers = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
     http.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
       if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body)

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials }
 import org.llm4s.testkit.LocalProviderTestServer
@@ -23,7 +24,7 @@ private[provider] object BedrockTestSupport {
       model = model,
       contextWindow = 32000,
       reserveCompletion = 4096,
-      credentials = Some(BedrockCredentials("test-key-id", "test-secret-key")),
+      credentials = Some(BedrockCredentials(Secret("test-key-id"), Secret("test-secret-key"))),
       endpointUrl = Some(endpointUrl)
     )
 

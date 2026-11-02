@@ -837,9 +837,9 @@ object BedrockClient {
     config.credentials match {
       case Some(c) =>
         // An empty AWS_SESSION_TOKEN is "no token", not a token of "".
-        val credentials: AwsCredentials = c.sessionToken.filter(_.trim.nonEmpty) match {
-          case Some(token) => AwsSessionCredentials.create(c.accessKeyId, c.secretAccessKey, token)
-          case None        => AwsBasicCredentials.create(c.accessKeyId, c.secretAccessKey)
+        val credentials: AwsCredentials = c.sessionToken.map(_.reveal).filter(_.trim.nonEmpty) match {
+          case Some(token) => AwsSessionCredentials.create(c.accessKeyId.reveal, c.secretAccessKey.reveal, token)
+          case None        => AwsBasicCredentials.create(c.accessKeyId.reveal, c.secretAccessKey.reveal)
         }
         StaticCredentialsProvider.create(credentials)
       case None =>
