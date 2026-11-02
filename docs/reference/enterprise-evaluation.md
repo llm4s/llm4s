@@ -45,7 +45,7 @@ linked to its open issue.
 | Which APIs are stable? | Each module is Frozen, Beta or Experimental: [1.0 Scope](v1-scope), with the promise per tier in the [Compatibility and Deprecation Policy](compatibility-policy). Every top-level public type of a Frozen module carries `@Stable` or `@Experimental`: [Tiers in the Code](api-stability#tiers-in-the-code). |
 | Is binary compatibility checked? | MiMa runs in the build, against a baseline that is not set yet, so it checks nothing until then: [API Stability](api-stability#the-baseline) and [Known gaps](#known-gaps). |
 | How are releases made, and where are the notes? | From a tag, by CI, to Maven Central: [Release Process](release). Notes are the [GitHub Releases](https://github.com/llm4s/llm4s/releases) and the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md); upgrades are in the [Migration Guide](migration). |
-| Which versions get fixes, and for how long? | Fixes ship in the latest release only; older releases are not patched ([SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions)). There is no published release cadence, supported-lines policy or long-term-support line: see [Known gaps](#known-gaps). |
+| Which versions get fixes, and for how long? | Fixes ship in the latest release only; older releases are not patched ([SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md#supported-versions)). The [Support Policy](support-policy) states this and the platform windows; the release cadence, supported lines after 1.0 and any long-term-support line are still to be decided: see [Known gaps](#known-gaps). |
 
 ## Security
 
@@ -114,7 +114,7 @@ closes, so this list is updated when the gap is.
 |---|---|
 | No binary-compatibility baseline yet: MiMa checks nothing until a pre-1.0 release sets one, then 1.0 | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
 | GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
-| No published support policy: release cadence, supported lines, long-term support, end-of-support notice | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
+| Support policy published, but release cadence, supported lines after 1.0, long-term support and end-of-support notice period are not yet decided (see [Support Policy](support-policy)) | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
 | No build provenance or signed SBOMs, and no guide to verifying a release | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
 | Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
@@ -142,8 +142,8 @@ Governance: GOVERNANCE.md (lazy consensus; maintainer majority for larger decisi
 Versioning: semantic versioning (early-semver). Pre-1.0: any 0.5.x release may break
   compatibility, with a migration note (https://llm4s.org/reference/compatibility-policy).
   No binary-compatibility baseline yet (https://github.com/llm4s/llm4s/issues/1281).
-Support policy: fixes ship in the latest release only. No published cadence, supported lines
-  or LTS (https://github.com/llm4s/llm4s/issues/2289). Volunteer-maintained, best effort,
+Support policy: fixes ship in the latest release only (https://llm4s.org/reference/support-policy).
+  Cadence, supported lines after 1.0 and LTS not yet decided (https://github.com/llm4s/llm4s/issues/2289). Volunteer-maintained, best effort,
   no SLA, no commercial support (SUPPORT.md).
 Security: SECURITY.md; reports handled by the Security Committee and maintainers, best
   effort, no response-time commitment. Threat model: https://llm4s.org/reference/security.
