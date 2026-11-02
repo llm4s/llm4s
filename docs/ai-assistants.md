@@ -2,7 +2,7 @@
 layout: page
 title: AI Coding Assistants
 parent: Getting Started
-nav_order: 13
+nav_order: 14
 description: "Point Copilot, Claude Code, Cursor and Codex at llm4s: llms.txt, llms-full.txt and a rules file that keeps generated code compiling."
 ---
 
