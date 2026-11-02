@@ -47,6 +47,23 @@ class TokenRotationSpec extends AnyFlatSpec with Matchers {
     pool.shutdown()
   }
 
+  it should "keep a token held by a request in flight however many rotations pass it" in KnownSecrets.isolated {
+    val g = new TokenGenerations
+    g.rotate("ya29.first-token-0001")
+    val masked = g.holding("ya29.first-token-0001") {
+      g.rotate("ya29.second-token-0002"); g.rotate("ya29.third-token-0003")
+      KnownSecrets.scrub("late body echoing ya29.first-token-0001", "[REDACTED]")
+    }
+    masked shouldBe "late body echoing [REDACTED]"
+    KnownSecrets.scrub("ya29.first-token-0001", "[REDACTED]") shouldBe "ya29.first-token-0001"
+  }
+
+  it should "release its hold when the request throws" in KnownSecrets.isolated {
+    val g = new TokenGenerations
+    an[IllegalStateException] should be thrownBy g.holding("ya29.thrown-token-0001")(throw new IllegalStateException)
+    KnownSecrets.scrub("ya29.thrown-token-0001", "[REDACTED]") shouldBe "ya29.thrown-token-0001"
+  }
+
   it should "keep a token another source still holds" in KnownSecrets.isolated {
     val g1 = new TokenGenerations
     val g2 = new TokenGenerations

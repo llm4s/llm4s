@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.OpenAICompatibleModelLister
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
@@ -16,9 +16,12 @@ import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.io.ByteArrayInputStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Path }
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ Callable, Executors }
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 class OpenAICompatibleWorkloadIdentitySpec
@@ -777,6 +780,52 @@ class OpenAICompatibleWorkloadIdentitySpec
         an[IllegalArgumentException] should be thrownBy
           new OpenAICompatibleClient(settings(credential), OpenAICompatibleDialect.standard(Seq(name -> "Bearer x")))
     }
+
+    "mask a token whose response arrives after two newer requests have rotated it out (#1932)" in
+      KnownSecrets.isolated {
+        // A provider that hands out a fresh opaque token per call. While the first request is in flight, two more
+        // run to completion and rotate past it; its error body, echoing its own token, arrives last.
+        val issued = new AtomicInteger(0)
+        val perCall = new AccessTokenProvider:
+          def token(): Result[String]            = Right(s"opaquePerCallToken000${issued.incrementAndGet()}")
+          def invalidate(rejected: String): Unit = ()
+        for streaming <- Seq(false, true) do
+          issued.set(0)
+          var overlap: () => Unit = () => ()
+          def echo(headers: Map[String, String]): String = {
+            val token = headers("Authorization").stripPrefix("Bearer ")
+            val run   = overlap
+            overlap = () => ()
+            run()
+            s"""{"error":{"message":"bad request with $token"}}"""
+          }
+          val http = new Llm4sHttpClient:
+            private def unused = Left(org.llm4s.error.ValidationError("http", "not used by this spec"))
+            def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration) = unused
+            def post(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
+              Right(HttpResponse(400, echo(h)))
+            def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = unused
+            def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = unused
+            def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = unused
+            def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = unused
+            def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = unused
+            def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
+              Right(StreamingHttpResponse(400, new ByteArrayInputStream(echo(h).getBytes(StandardCharsets.UTF_8))))
+          val c = new OpenAICompatibleClient(
+            settings(OpenAICompatibleClient.Credential.Dynamic(perCall)),
+            OpenAICompatibleDialect.Standard
+          ) {
+            override protected[provider] val httpClient: Llm4sHttpClient = http
+          }
+          def call() =
+            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            else c.complete(conversation, CompletionOptions())
+          overlap = () => { call(); call(); () }
+          val first = call().left.value.message
+          first should include("bad request with")
+          (first should not).include("opaquePerCallToken0001")
+          c.close()
+      }
 
     "fail a request whose Dynamic provider throws with an AuthenticationError, sending nothing (#1818)" in {
       val throwing = new AccessTokenProvider:

@@ -18,4 +18,14 @@ final private[llm4s] class TokenGenerations {
       held = (held :+ next).takeRight(2)
     }
   }
+
+  /**
+   * Runs `use`, a request sent with `token` and the handling of its reply, keeping `token` registered until it
+   * returns or throws. Two generations cover a source that refreshes now and then; a source that hands out a fresh
+   * token per call rotates past a request still in flight, whose error body must still be scrubbed of its token.
+   */
+  def holding[A](token: String)(use: => A): A = {
+    KnownSecrets.register(token, KnownSecrets.Kind.Token)
+    scala.util.Using.resource(new AutoCloseable { def close(): Unit = KnownSecrets.forget(token) })(_ => use)
+  }
 }

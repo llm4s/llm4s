@@ -366,7 +366,11 @@ class OpenAICompatibleClient(
    */
   private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] = {
     def attempt(token: Option[String]): Result[A] = {
-      val result = send(requestHeaders(token))
+      // A refreshed token stays registered until this request's reply has been scrubbed and logged, however many
+      // newer requests rotate past it meanwhile.
+      val result = (token, tokenProvider) match
+        case (Some(t), Some(_)) => bearers.holding(t)(send(requestHeaders(token)))
+        case _                  => send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
           tokenProvider.foreach(p => Try(p.invalidate(rejected)))
