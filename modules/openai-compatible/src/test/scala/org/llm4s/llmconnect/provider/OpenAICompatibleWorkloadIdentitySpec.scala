@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -293,43 +294,47 @@ class OpenAICompatibleWorkloadIdentitySpec
       http.closed shouldBe true
     }
 
-    "never repeat the bearer, client id or identity token from an API error body, on complete or stream" in {
-      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
-      val bearer                                 = "opaque-dbx-token-1"
-      val clientId                               = "sp-client-5e7d"
-      val subject                                = "opaque-svid-literal-42"
-      val rejected = HttpResponse(
-        403,
-        s"""{"error":{"message":"token $bearer of $clientId (subject $subject) lacks permission"},""" +
-          s""""access_token":"$bearer"}"""
-      )
-      for streaming <- Seq(false, true) do
-        val http = MockHttpClient(
-          Seq(HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}"""), rejected)
+    "never repeat the bearer, client id or identity token from an API error body, on complete or stream" in KnownSecrets
+      .isolated {
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val bearer                                 = "opaque-dbx-token-1"
+        val clientId                               = "sp-client-5e7d"
+        val subject                                = "opaque-svid-literal-42"
+        Secret.token(subject)
+        KnownSecrets.registerIdentifier(clientId)
+        val rejected = HttpResponse(
+          403,
+          s"""{"error":{"message":"token $bearer of $clientId (subject $subject) lacks permission"},""" +
+            s""""access_token":"$bearer"}"""
         )
-        val config = OpenAICompatibleConfig(
-          model = "m",
-          baseUrl = "https://ws.example/serving-endpoints",
-          tokenExchange = Some(
-            TokenExchangeConfig(
-              IdentitySource.Literal(subject),
-              "https://ws.example/oidc/v1/token",
-              clientId = Some(clientId)
+        for streaming <- Seq(false, true) do
+          val http = MockHttpClient(
+            Seq(HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}"""), rejected)
+          )
+          val config = OpenAICompatibleConfig(
+            model = "m",
+            baseUrl = "https://ws.example/serving-endpoints",
+            tokenExchange = Some(
+              TokenExchangeConfig(
+                IdentitySource.Literal(subject),
+                "https://ws.example/oidc/v1/token",
+                clientId = Some(clientId)
+              )
             )
           )
-        )
-        val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
-          override protected[provider] val httpClient: Llm4sHttpClient = http
-        }
-        val result =
-          if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
-          else c.complete(conversation, CompletionOptions())
-        val error = result.left.value
-        error shouldBe an[AuthenticationError]
-        error.message should include("lacks permission")
-        for secret <- Seq(bearer, clientId, subject) do (error.message should not).include(secret)
-        c.close()
-    }
+          val c =
+            new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
+              override protected[provider] val httpClient: Llm4sHttpClient = http
+            }
+          val result =
+            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            else c.complete(conversation, CompletionOptions())
+          val error = result.left.value
+          error shouldBe an[AuthenticationError]
+          error.message should include("lacks permission")
+          for secret <- Seq(bearer, clientId, subject) do (error.message should not).include(secret)
+          c.close()
+      }
 
     "return a Left, never overflow, for an API error body nested 100,000 deep, on complete or stream" in {
       given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()

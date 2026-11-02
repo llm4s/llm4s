@@ -4,6 +4,8 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
+import org.llm4s.security.KnownSecrets
+
 import scala.annotation.{ tailrec, unused }
 import scala.util.matching.Regex
 
@@ -62,6 +64,9 @@ private[llm4s] object Redaction {
    * replaced by `***`. A value that does not parse as an absolute URL is `***` altogether.
    */
   def url(value: String): String =
+    scrubKnown(urlShown(value))
+
+  private def urlShown(value: String): String =
     scala.util
       .Try(new java.net.URI(value.trim))
       .toOption
@@ -133,14 +138,16 @@ private[llm4s] object Redaction {
    */
   def safeBody(body: String, maxLength: Int = 2048): String =
     if (body == null) "null"
-    else
-      safeBodyPrefix(body, maxLength) match {
+    else {
+      val scrubbed = scrubKnown(body)
+      safeBodyPrefix(scrubbed, maxLength) match {
         case Some(Some((cut, redacted))) =>
           redacted.take(maxLength) +
             s"... (truncated, original length: ${body.length}, redacted from its first $cut chars)"
         case Some(None) => safeBodyOmitted(body)
-        case None       => truncateForLog(redact(body), maxLength)
+        case None       => truncateForLog(redact(scrubbed), maxLength)
       }
+    }
 
   /** The longest body [[safeBody]] redacts whole. */
   private val SafeBodyWholeLimit: Int = 128 * 1024
@@ -575,7 +582,10 @@ private[llm4s] object Redaction {
    */
   def redact(input: String, placeholder: String = RedactionPlaceholder): String =
     if (input == null || input.isEmpty) input
-    else redaction(input, placeholder, singleQuotedFromInput = true, addedReadings = true)._1
+    else {
+      val scrubbed = KnownSecrets.scrub(input, placeholder)
+      redaction(scrubbed, placeholder, singleQuotedFromInput = true, addedReadings = true)._1
+    }
 
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
@@ -2115,26 +2125,27 @@ private[llm4s] object Redaction {
 
   /**
    * A remote reply's body (or an exception message carrying one), fit to put in an `LLMError` or a log
-   * line. In order: every exact occurrence of each of `secrets` - the credentials the request carried,
-   * such as a subject token, client id or bearer - is replaced, as are its URL-encoded and JSON-escaped
-   * forms; so is the string value (of eight characters or more) of every sensitive JSON field
+   * line. In order: every registered credential (`KnownSecrets`: a subject token, client id, bearer, ...) is
+   * replaced, as are its URL-encoded and JSON-escaped forms; so is the string value (of eight characters or more) of every sensitive JSON field
    * (`access_token`, `refresh_token`, `id_token`, `client_secret`, `assertion`, `subject_token`, ...)
    * anywhere in the body, wherever else it is repeated; then [[redact]] applies the general patterns (bearer tokens, JWTs, API keys,
-   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Blank
-   * secrets are ignored. Truncation comes last, so it never cuts a secret in two before it is matched.
+   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Truncation comes last, so it never cuts a secret in two before it is matched.
    */
-  def remoteBody(body: String, secrets: Iterable[String] = Nil, maxLength: Int = 512): String =
+  def remoteBody(body: String, maxLength: Int = 512): String =
     if (body == null || body.isEmpty) ""
-    else redactForLogging(scrubRemote(body, secrets), maxLength)
+    else redactForLogging(scrubRemote(body), maxLength)
 
   /**
    * The exact-match half of [[remoteBody]], untruncated and without the general patterns: `secrets`, and
    * the string values of sensitive JSON fields in `body`, scrubbed. For a body that is parsed afterwards,
    * as `HttpErrorMapper` parses one, which then redacts and truncates the detail it extracts.
    */
-  def scrubRemote(body: String, secrets: Iterable[String] = Nil): String =
+  def scrubRemote(body: String): String =
     if (body == null || body.isEmpty) body
-    else scrub(body, secrets ++ sensitiveJsonValues(body))
+    else scrubEcho(scrubKnown(body), sensitiveJsonValues(body))
+
+  /** Layer A only: removes every credential registered with llm4s, by exact match. Used for trace content. */
+  def scrubKnown(text: String): String = KnownSecrets.scrub(text, RedactionPlaceholder)
 
   /**
    * `input` with every exact occurrence of each non-blank value in `secrets`, and of its URL-encoded and
@@ -2146,7 +2157,7 @@ private[llm4s] object Redaction {
    * length of the forms, however many there are: a body echoing thousands of tokens is scrubbed as
    * quickly as one echoing one.
    */
-  def scrub(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
+  private def scrubEcho(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
     if (input == null || input.isEmpty) input
     else {
       val forms = secrets.iterator
@@ -2162,16 +2173,6 @@ private[llm4s] object Redaction {
     }
 
   private val MinRepeatedSecretLength = 8
-
-  /**
-   * Of `ids` - identifiers a request carried that are not themselves credentials, such as a client id, an
-   * identity-provider, organization or federation-rule id - those long enough to scrub by exact match: eight
-   * characters or more, the floor applied to sensitive JSON values. A short id (`app`, `prod`) would garble every
-   * error body it was scrubbed from, so it is left out. Never pass a bearer token, API key, JWT or identity token
-   * through this: those go to [[scrub]] / [[remoteBody]] as they are, whatever their length.
-   */
-  def identifiers(ids: Iterable[String]): Seq[String] =
-    ids.iterator.filter(_ != null).map(_.trim).filter(_.length >= MinRepeatedSecretLength).toSeq
 
   /**
    * The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. The body is a

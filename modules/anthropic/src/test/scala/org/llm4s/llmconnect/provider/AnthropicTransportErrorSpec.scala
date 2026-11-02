@@ -90,11 +90,11 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
 
   "AnthropicClient.mapError" should "map an SDK I/O failure by its cause" in {
     val io = new com.anthropic.errors.AnthropicIoException("Request failed", new ConnectException("refused"))
-    AnthropicClient.mapError(io, Nil) shouldBe a[NetworkError]
+    AnthropicClient.mapError(io) shouldBe a[NetworkError]
   }
 
   it should "leave an SDK I/O failure without a cause an UnknownError" in {
-    AnthropicClient.mapError(new com.anthropic.errors.AnthropicIoException("Request failed"), Nil) shouldBe
+    AnthropicClient.mapError(new com.anthropic.errors.AnthropicIoException("Request failed")) shouldBe
       an[UnknownError]
   }
 }

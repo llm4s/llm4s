@@ -5,6 +5,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -374,58 +375,26 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
   }
 
   "AnthropicClient.mapError" should {
-    val config = AnthropicConfig(
-      "",
-      "claude-test",
-      "https://api.anthropic.com",
-      200000,
-      4096,
-      Some(
-        AnthropicWorkloadIdentity(
-          Path.of("/var/run/svid.jwt"),
-          "fdrl_secret_1",
-          "org_secret_1",
-          serviceAccountId = Some("svac_secret_1"),
-          workspaceId = Some("wrkspc_secret_1")
-        )
-      )
-    )
-    val secrets = AnthropicClient.credentialSecrets(config)
-    val echoed  = Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1", "opaque-access-tok-1")
+    val echoed = Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1", "opaque-access-tok-1")
     val body =
       """{"error":"federation rejected","federation_rule_id":"fdrl_secret_1","organization_id":"org_secret_1",""" +
         """"service_account_id":"svac_secret_1","workspace_id":"wrkspc_secret_1","access_token":"opaque-access-tok-1"}"""
 
-    "redact the federation exchange's reply and the configured ids from any SDK failure" in {
+    "redact the federation exchange's reply and the registered ids from any SDK failure" in KnownSecrets.isolated {
+      Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1").foreach(KnownSecrets.registerIdentifier)
       val failures = Seq(
         new com.anthropic.errors.AnthropicInvalidDataException(s"invalid token response: $body"),
         new IllegalStateException(s"token exchange failed: $body")
       )
       for failure <- failures do
-        val error = AnthropicClient.mapError(failure, secrets)
+        val error = AnthropicClient.mapError(failure)
         error.message should include("federation rejected")
         for secret <- echoed do (error.message should not).include(secret)
     }
 
-    "not scrub ids too short to scrub without garbling the body, but always an API key" in {
-      val short = config.withWorkloadIdentity(
-        AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "rule", "org", workspaceId = Some("prod"))
-      )
-      AnthropicClient.credentialSecrets(short) shouldBe Nil
-      AnthropicClient.credentialSecrets(config.withApiKey("k").withWorkloadIdentity(None)) shouldBe Seq("k")
-      val error = AnthropicClient.mapError(
-        new IllegalStateException("org prod rejected"),
-        AnthropicClient.credentialSecrets(short)
-      )
-      error.message should include("org prod rejected")
-    }
-
-    "redact an API key echoed by a failure when no workload identity is configured" in {
-      val keyed = config.withApiKey("opaque-anthropic-key-1").withWorkloadIdentity(None)
-      val error = AnthropicClient.mapError(
-        new IllegalStateException("rejected key opaque-anthropic-key-1"),
-        AnthropicClient.credentialSecrets(keyed)
-      )
+    "redact an API key echoed by a failure when it is registered" in KnownSecrets.isolated {
+      Secret("opaque-anthropic-key-1")
+      val error = AnthropicClient.mapError(new IllegalStateException("rejected key opaque-anthropic-key-1"))
       (error.message should not).include("opaque-anthropic-key-1")
     }
   }

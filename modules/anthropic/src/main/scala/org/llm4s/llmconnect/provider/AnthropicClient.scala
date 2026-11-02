@@ -142,7 +142,6 @@ class AnthropicClient(
   private val providerConfig: ProviderConfig = config
 
   /** The configured credentials, which an error built from a remote reply must not repeat. */
-  private val credentialSecrets: Seq[String] = AnthropicClient.credentialSecrets(config)
 
   // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
@@ -243,7 +242,7 @@ class AnthropicClient(
         // Make API call
         val attempt = Try(
           requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
-        ).toEither.left.map(AnthropicClient.mapError(_, credentialSecrets))
+        ).toEither.left.map(AnthropicClient.mapError(_))
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
@@ -488,7 +487,7 @@ curl https://api.anthropic.com/v1/messages \
             }
           }
         }.toEither.left
-          .map(AnthropicClient.mapError(_, credentialSecrets))
+          .map(AnthropicClient.mapError(_))
 
         // Return the accumulated completion
         val result = attempt.flatMap(_ =>
@@ -1006,15 +1005,15 @@ object AnthropicClient {
   /**
    * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
    * reply - or, with workload identity, the federation token endpoint's - which may repeat a credential:
-   * every message that becomes part of the error is scrubbed of `secrets` and of credential JSON fields,
+   * every message that becomes part of the error is scrubbed of registered credentials and of credential JSON fields,
    * passed through the general redactor and truncated.
    */
-  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError =
+  private[provider] def mapError(e: Throwable): LLMError =
     // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
-    TroubleshootingLinks.annotate(mapSdkError(e, secrets))
+    TroubleshootingLinks.annotate(mapSdkError(e))
 
-  private def mapSdkError(e: Throwable, secrets: Seq[String]): LLMError = {
-    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
+  private def mapSdkError(e: Throwable): LLMError = {
+    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
     e match {
       case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
@@ -1031,7 +1030,7 @@ object AnthropicClient {
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
-      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause, secrets)
+      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause)
       case e =>
         e.toLLMError match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
@@ -1044,17 +1043,6 @@ object AnthropicClient {
   private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =
     headers.names().asScala.map(name => name -> headers.values(name).asScala.toSeq).toMap
 
-  /**
-   * The configured values an error must not repeat: the API key, or with workload identity the ids
-   * `AnthropicWorkloadIdentity.toString` redacts, when long enough to scrub without garbling the body
-   * ([[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
-    config.workloadIdentity match {
-      case None => Seq(config.apiKey)
-      case Some(wi) =>
-        Redaction.identifiers(Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
-    }
   import org.llm4s.types.TryOps
 
   /** A thinking or redacted-thinking block being assembled from a stream. */

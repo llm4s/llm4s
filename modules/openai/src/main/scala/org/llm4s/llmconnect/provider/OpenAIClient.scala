@@ -35,7 +35,7 @@ import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, IdentityTokenSource }
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentityTokenSource }
 import org.llm4s.llmconnect.config.{
   AzureConfig,
   OpenAIConfig,
@@ -131,7 +131,6 @@ class OpenAIClient private[provider] (
   private val displayName: String = OpenAIClient.displayName(provider)
 
   /** The configured credentials, which an error built from a remote reply must not repeat. */
-  private val credentialSecrets: Seq[String] = OpenAIClient.credentialSecrets(config)
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
@@ -255,7 +254,7 @@ class OpenAIClient private[provider] (
   /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      val error = OpenAIClient.mapError(e, providerName, credentialSecrets)
+      val error = OpenAIClient.mapError(e, providerName)
       e match {
         // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
         // may repeat a credential: only the redacted error is logged, not the exception.
@@ -817,59 +816,35 @@ object OpenAIClient {
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
    */
-  private[provider] def mapError(e: Throwable, provider: String, secrets: Seq[String] = Nil): LLMError =
-    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider, secrets))
+  private[provider] def mapError(e: Throwable, provider: String): LLMError =
+    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider))
 
   /**
-   * A service reply's body is scrubbed of `secrets` and of credential JSON fields before `HttpErrorMapper`
+   * A service reply's body is scrubbed of registered credentials and of credential JSON fields before `HttpErrorMapper`
    * extracts (and redacts) its detail; any other SDK exception's message - the workload-identity token
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
-  private def mapSdkError(e: Throwable, provider: String, secrets: Seq[String]): LLMError = e match {
+  private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
     case service: OpenAIServiceException =>
       HttpErrorMapper
         .mapHttpError(
           service.statusCode(),
           // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
           // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
-          Redaction.scrubRemote(
-            Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse(""),
-            secrets
-          ),
+          Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
           provider,
           Try(headerMap(service.headers())).getOrElse(Map.empty)
         )
         .left
-        .getOrElse(redactMessage(service.toLLMError, service, secrets))
-    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause, secrets)
-    case other                                        => redactMessage(other.toLLMError, other, secrets)
+        .getOrElse(redactMessage(service.toLLMError, service))
+    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
+    case other                                        => redactMessage(other.toLLMError, other)
   }
 
   /** `error` with its message redacted when it is the exception's own message, as `UnknownError`'s is. */
-  private def redactMessage(error: LLMError, cause: Throwable, secrets: Seq[String]): LLMError = error match {
-    case unknown: UnknownError => UnknownError(Redaction.remoteBody(unknown.message, secrets), cause)
+  private def redactMessage(error: LLMError, cause: Throwable): LLMError = error match {
+    case unknown: UnknownError => UnknownError(Redaction.remoteBody(unknown.message), cause)
     case other                 => other
-  }
-
-  /**
-   * The configured values an error built from a remote reply must not repeat: the API key, or with
-   * workload identity a literal identity token and the ids `toString` redacts (those long enough to scrub
-   * without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private[provider] def credentialSecrets(config: ProviderConfig): Seq[String] = config match {
-    case openAI: OpenAIConfig =>
-      openAI.workloadIdentity match {
-        case None => Seq(openAI.apiKey)
-        case Some(wi) =>
-          Redaction.identifiers(
-            Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId
-          ) ++ (wi.identityToken match {
-            case IdentitySource.Literal(token) => Seq(token)
-            case IdentitySource.File(_)        => Nil
-          })
-      }
-    case azure: AzureConfig => Seq(azure.apiKey).filter(_.nonEmpty)
-    case _                  => Nil
   }
 
   /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */

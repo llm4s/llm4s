@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.security.KnownSecrets
 import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -13,16 +14,24 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
 
   private val P = Redaction.RedactionPlaceholder
 
-  /** The implementation `scrub` replaced: one whole-input `replace` per form, longest first. */
+  /** What `KnownSecrets` scrubs: values of `KnownSecrets.MinLength` or more, trimmed. */
+  private def registrable(secrets: Iterable[String]): Seq[String] =
+    secrets.iterator.filter(_ != null).map(_.trim).filter(_.length >= KnownSecrets.MinLength).toSeq
+
+  /** `input` scrubbed with `secrets` registered, in a registry of its own. */
+  private def scrubWith(input: String, secrets: Iterable[String]): String =
+    KnownSecrets.isolated {
+      secrets.foreach(KnownSecrets.registerIdentifier)
+      KnownSecrets.scrub(input, P)
+    }
+
+  /** The implementation `KnownSecrets` replaced: one whole-input `replace` per form, longest first. */
   private def referenceScrub(input: String, secrets: Iterable[String]): String = {
     def jsonEscaped(value: String): String = {
       val rendered = ujson.Str(value).render()
       rendered.substring(1, rendered.length - 1)
     }
-    val forms = secrets.iterator
-      .filter(_ != null)
-      .map(_.trim)
-      .filter(_.nonEmpty)
+    val forms = registrable(secrets).iterator
       .flatMap(secret => Iterator(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), jsonEscaped(secret)))
       .toSeq
       .distinct
@@ -33,7 +42,7 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
   private def forms(secret: String): Seq[String] =
     Seq(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), ujson.Str(secret).render().drop(1).dropRight(1))
 
-  "Redaction.scrub" should "match the previous implementation on hand-written bodies" in {
+  "Scrubbing registered values" should "match the previous implementation on hand-written bodies" in {
     val cases: Seq[(String, Seq[String])] = Seq(
       ("""{"error":"bad token opaque-bearer-99"}""", Seq("opaque-bearer-99")),
       (
@@ -52,7 +61,7 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
     )
     cases.foreach { case (body, secrets) =>
       withClue(s"body=$body secrets=$secrets: ") {
-        Redaction.scrub(body, secrets) shouldBe referenceScrub(body, secrets)
+        scrubWith(body, secrets) shouldBe referenceScrub(body, secrets)
       }
     }
   }
@@ -75,21 +84,21 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
         }
         .mkString + from(fillerAlphabet, 1)
       withClue(s"body=$body secrets=$all: ") {
-        Redaction.scrub(body, all) shouldBe referenceScrub(body, all)
+        scrubWith(body, all) shouldBe referenceScrub(body, all)
       }
     }
   }
 
   it should "leave no secret behind when occurrences overlap, masking the run they cover once" in {
-    Redaction.scrub("x abcdefghijkl y", Seq("abcdefgh", "efghijkl")) shouldBe s"x $P y"
-    Redaction.scrub("x aaaaaaaaaa y", Seq("aaaa")) shouldBe s"x $P y"
-    Redaction.scrub("abcd-wxyz", Seq("abcd", "wxyz")) shouldBe s"$P-$P"
-    Redaction.scrub("abcdwxyz", Seq("abcd", "wxyz")) shouldBe s"$P$P"
+    scrubWith("x abcdefghijkl y", Seq("abcdefgh", "efghijkl")) shouldBe s"x $P y"
+    scrubWith("x aaaaaaaaaaaaaaaa y", Seq("aaaaaaaa")) shouldBe s"x $P y"
+    scrubWith("abcdefgh-wxyzwxyz", Seq("abcdefgh", "wxyzwxyz")) shouldBe s"$P-$P"
+    scrubWith("abcdefghwxyzwxyz", Seq("abcdefgh", "wxyzwxyz")) shouldBe s"$P$P"
     val rnd = new Random(42L)
     (1 to 500).foreach { _ =>
-      val body    = Seq.fill(rnd.nextInt(60))("ab" (rnd.nextInt(2))).mkString
-      val secrets = Seq.fill(1 + rnd.nextInt(3))(Seq.fill(1 + rnd.nextInt(5))("ab" (rnd.nextInt(2))).mkString)
-      val out     = Redaction.scrub(body, secrets)
+      val body    = Seq.fill(rnd.nextInt(80))("ab" (rnd.nextInt(2))).mkString
+      val secrets = Seq.fill(1 + rnd.nextInt(3))(Seq.fill(8 + rnd.nextInt(5))("ab" (rnd.nextInt(2))).mkString)
+      val out     = scrubWith(body, secrets)
       secrets.foreach(s => withClue(s"body=$body secrets=$secrets out=$out: ")((out should not).include(s)))
     }
   }
@@ -104,9 +113,12 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
     val echoed = tokens(17000)
     val body   = echoing(echoed)
     body.length should be > 1000000
-    val started  = System.nanoTime()
-    val scrubbed = Redaction.scrubRemote(body, Seq("configured-secret"))
-    val elapsed  = (System.nanoTime() - started).nanos
+    val started = System.nanoTime()
+    val scrubbed = KnownSecrets.isolated {
+      KnownSecrets.registerIdentifier("configured-secret")
+      Redaction.scrubRemote(body)
+    }
+    val elapsed = (System.nanoTime() - started).nanos
     echoed.foreach(t => (scrubbed should not).include(t))
     scrubbed should include(s""""access_token":"$P"""")
     info(s"scrubbed ${body.length} chars in ${elapsed.toMillis} ms")
@@ -114,8 +126,11 @@ class RedactionScrubSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "scrub a body echoing many access tokens in time linear in the input" taggedAs PerformanceTest in {
-    LinearTime.assertLinear("access tokens, 2,000 vs 8,000", echoing(tokens(2000)), echoing(tokens(8000)))(
-      Redaction.scrubRemote(_, Seq("configured-secret"))
+    LinearTime.assertLinear("access tokens, 2,000 vs 8,000", echoing(tokens(2000)), echoing(tokens(8000)))(body =>
+      KnownSecrets.isolated {
+        KnownSecrets.registerIdentifier("configured-secret")
+        Redaction.scrubRemote(body)
+      }
     )
   }
 }

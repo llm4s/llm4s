@@ -190,7 +190,7 @@ object TokenExchange:
           form(config, jwt),
           timeout
         )
-        token <- parse(response, sensitiveValues(config, jwt), clock)
+        token <- parse(response, clock)
       yield token
 
   /** [[rfc8693]] behind a [[CachingAccessTokenProvider]]. */
@@ -212,25 +212,14 @@ object TokenExchange:
   private def encode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)
 
   /**
-   * The values a token-endpoint reply must never repeat into an error: the subject token posted, the
-   * configured identity token when it is a literal, and the `clientId` (redacted in `toString` too) when it
-   * is long enough to scrub without garbling the body ([[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private def sensitiveValues(config: TokenExchangeConfig, jwt: String): Seq[String] =
-    Seq(jwt) ++ Redaction.identifiers(config.clientId) ++ (config.identityToken match
-      case IdentitySource.Literal(token) => Seq(token)
-      case IdentitySource.File(_)        => Nil
-    )
-
-  /**
-   * A token-endpoint reply's body fit for an error message: `secrets` scrubbed by exact match (with their
-   * URL-encoded and JSON-escaped forms), credential fields such as `access_token`, `refresh_token`,
+   * A token-endpoint reply's body fit for an error message: registered credentials scrubbed by exact match
+   * (`KnownSecrets`, with their URL-encoded and JSON-escaped forms), credential fields such as `access_token`, `refresh_token`,
    * `id_token` or `client_secret` scrubbed by key, the general patterns (bearer tokens, JWTs, API keys)
    * redacted, and the result truncated - some identity providers quote the rejected assertion or the
    * client id back, and an error message reaches logs.
    */
-  private[auth] def safeBody(body: String, secrets: Seq[String]): String =
-    Redaction.remoteBody(body, secrets, MaxErrorBodyLength)
+  private[auth] def safeBody(body: String): String =
+    Redaction.remoteBody(body, MaxErrorBodyLength)
 
   private val MaxErrorBodyLength = 512
 
@@ -238,9 +227,9 @@ object TokenExchange:
    * The reply's token and expiry. `expires_in` is optional: without it the expiry is the access token's
    * own `exp` claim when the token is a JWT, and otherwise [[DefaultLifetime]] from now.
    */
-  private def parse(response: HttpResponse, secrets: Seq[String], clock: Clock): Result[AccessToken] =
+  private def parse(response: HttpResponse, clock: Clock): Result[AccessToken] =
     // Some identity providers quote the rejected assertion or client id back; it must not reach a log line.
-    lazy val errorBody = safeBody(response.body, secrets)
+    lazy val errorBody = safeBody(response.body)
     response.statusCode match
       case status if status >= 200 && status < 300 =>
         // Bounded: the reply is a remote server's, and a too-deep one is just a reply with no access_token.
@@ -275,7 +264,7 @@ object TokenExchange:
         Left(AuthenticationError(Provider, s"token endpoint rejected the identity token (HTTP $status): $errorBody"))
       case status =>
         // Scrubbed of the exact values before HttpErrorMapper extracts and redacts its detail.
-        HttpErrorMapper.mapHttpError(status, Redaction.scrubRemote(response.body, secrets), Provider, response.headers)
+        HttpErrorMapper.mapHttpError(status, Redaction.scrubRemote(response.body), Provider, response.headers)
 
   /** The `exp` claim of `token`, if it is a JWT with a numeric one; the signature is not checked. */
   private def jwtExpiry(token: String): Option[Instant] =

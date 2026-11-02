@@ -4,13 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{
-  AccessTokenProvider,
-  CachingAccessTokenProvider,
-  IdentitySource,
-  TokenExchange,
-  TokenExchangeConfig
-}
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, CachingAccessTokenProvider, TokenExchange, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -117,7 +111,7 @@ class OpenAICompatibleClient(
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
-                  Redaction.scrubRemote(body, credentialSecrets(headers)),
+                  Redaction.scrubRemote(body),
                   providerName,
                   response.headers
                 )
@@ -148,8 +142,7 @@ class OpenAICompatibleClient(
                 response.body,
                 rawStream,
                 onChunk,
-                response.headers,
-                credentialSecrets(headers)
+                response.headers
               )
             )
             .map(bindThinking(_, conversation, options))
@@ -163,23 +156,22 @@ class OpenAICompatibleClient(
    * Turns a streaming response into a completion, closing `body` on every path: an error
    * status, a malformed event, an exception from `onChunk`, or success. (Two of the three
    * clients this replaced leaked the body on an error status.) Everything read is appended to
-   * `rawStream` for the exchange log. An error body is scrubbed of `secrets`, the credentials the request
-   * carried, before it is mapped to an error.
+   * `rawStream` for the exchange log. An error body is scrubbed of registered credentials before it is
+   * mapped to an error.
    */
   protected[provider] def consumeStream(
     statusCode: Int,
     body: InputStream,
     rawStream: StringBuilder,
     onChunk: StreamedChunk => Unit,
-    headers: Map[String, Seq[String]] = Map.empty,
-    secrets: Seq[String] = Nil
+    headers: Map[String, Seq[String]] = Map.empty
   ): Result[Completion] =
     if (statusCode != 200) {
       val errorBody =
         Try(Using.resource(body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)))
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
-      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody, secrets), providerName, headers)
+      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody), providerName, headers)
     } else
       // A failure while reading the open body is classified as a transport failure would be
       Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
@@ -352,26 +344,6 @@ class OpenAICompatibleClient(
     Map("Content-Type" -> "application/json") ++
       token.map(t => "Authorization" -> s"Bearer $t") ++
       OpenAICompatibleClient.combineRepeated(dialect.headers)
-
-  /**
-   * The credentials a request with `requestHeaders` carried, which an error body must not repeat: the
-   * bearer token sent, and for an exchange its literal identity token and its client id (when long enough to
-   * scrub without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private def credentialSecrets(requestHeaders: Map[String, String]): Seq[String] = {
-    val bearer = requestHeaders.collect {
-      case (name, value) if name.equalsIgnoreCase("Authorization") => value.stripPrefix("Bearer ").trim
-    }
-    val exchange = settings.credential match {
-      case OpenAICompatibleClient.Credential.Exchange(config) =>
-        Redaction.identifiers(config.clientId) ++ (config.identityToken match {
-          case IdentitySource.Literal(token) => Seq(token)
-          case IdentitySource.File(_)        => Nil
-        })
-      case _ => Nil
-    }
-    bearer.toSeq ++ exchange
-  }
 
   /**
    * Sends with the current token; when the credential is dynamic and the reply is a 401, reports the

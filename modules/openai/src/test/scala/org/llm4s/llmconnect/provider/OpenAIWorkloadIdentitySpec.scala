@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -103,20 +104,9 @@ class OpenAIWorkloadIdentitySpec
         an[AuthenticationError]
     }
 
-    "redact the token exchange's reply, and the configured ids, from an SDK error" in {
-      val config = OpenAIConfig(
-        apiKey = "",
-        model = "gpt-4o-mini",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1",
-        contextWindow = 8192,
-        reserveCompletion = 1024,
-        workloadIdentity = Some(
-          OpenAIWorkloadIdentity(IdentitySource.Literal("opaque-svid-literal-7"), "idp_secret_1", "sa_secret_1")
-            .withClientId("client_secret_id_1")
-        )
-      )
-      val secrets = OpenAIClient.credentialSecrets(config)
+    "redact the token exchange's reply, and the registered ids, from an SDK error" in KnownSecrets.isolated {
+      Secret.token("opaque-svid-literal-7")
+      Seq("idp_secret_1", "sa_secret_1", "client_secret_id_1").foreach(KnownSecrets.registerIdentifier)
       val sdkMessages = Seq(
         // What the SDK's exchange reports for a reply without an access token.
         "Token exchange response missing 'access_token' field. Response: " +
@@ -125,7 +115,7 @@ class OpenAIWorkloadIdentitySpec
           """"refresh_token":"opaque-refresh-token-1"}"""
       )
       for message <- sdkMessages do
-        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai", secrets)
+        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai")
         error.message should include("Token exchange response")
         for secret <- Seq(
             "client_secret_id_1",
@@ -135,28 +125,6 @@ class OpenAIWorkloadIdentitySpec
             "opaque-refresh-token-1"
           )
         do (error.message should not).include(secret)
-    }
-
-    "scrub a short literal identity token, but not short ids that would garble every error body" in {
-      val config = OpenAIConfig(
-        apiKey = "",
-        model = "gpt-4o-mini",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1",
-        contextWindow = 8192,
-        reserveCompletion = 1024,
-        workloadIdentity = Some(
-          OpenAIWorkloadIdentity(IdentitySource.Literal("tok"), "idp", "prod").withClientId("app")
-        )
-      )
-      OpenAIClient.credentialSecrets(config) shouldBe Seq("tok")
-      val error = OpenAIClient.mapError(
-        new com.openai.errors.OpenAIInvalidDataException("app in prod rejected tok"),
-        "openai",
-        OpenAIClient.credentialSecrets(config)
-      )
-      error.message should include("app in prod rejected")
-      (error.message should not).include("tok")
     }
 
     "read the identity token for the async path off the common pool" in {

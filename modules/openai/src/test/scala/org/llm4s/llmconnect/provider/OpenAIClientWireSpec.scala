@@ -4,6 +4,7 @@ import com.openai.azure.AzureUrlPathMode
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.AuthenticationError
 import org.llm4s.error.LLMError
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.llmconnect.{
   LLMClient,
   LlmClientOptions,
@@ -199,8 +200,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     }
   }
 
-  it should "not repeat the configured key, or a credential field, from the error body" in {
+  it should "not repeat the configured key, or a credential field, from the error body" in KnownSecrets.isolated {
     val key = "opaque-openai-key-1"
+    Secret(key)
     LocalProviderTestServer.withServer("/") { exchange =>
       exchange.getRequestBody.readAllBytes()
       LocalProviderTestServer.sendJsonResponse(
