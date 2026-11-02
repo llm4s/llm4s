@@ -363,6 +363,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** a split sitemap for llm4s.org (`sitemap.xml` for the guide, `scaladoc-sitemap.xml` for the API pages, both in
+  `robots.txt`, checked in the Pages deploy), a custom 404 page, and `redirect_from` for a moved page ([#2318](https://github.com/llm4s/llm4s/issues/2318)).
 - **Added** the [Mill quick start](docs/getting-started/mill.md) and its `build.mill` sample (`modules/samples/mill`), built
   and tested against Maven Central by `mill-quickstart.yml`, with an offline check that it pins `latest_release` ([#2293](https://github.com/llm4s/llm4s/issues/2293)).
 - **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with

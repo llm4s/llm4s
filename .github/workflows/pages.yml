@@ -204,6 +204,13 @@ jobs:
         env:
           JEKYLL_ENV: production
 
+      # sitemap.xml (jekyll-sitemap) lists the guide pages only; the Scaladoc, copied in above, gets its own file (#2318).
+      # The check fails the deploy if sitemap.xml lists a /scaladoc/ URL, a PDF or too many URLs, or robots.txt omits one.
+      - name: Generate and check the sitemaps
+        run: |
+          scripts/generate-scaladoc-sitemap.sh docs/_site
+          scripts/check-site-sitemaps.sh docs/_site
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
