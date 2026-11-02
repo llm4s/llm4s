@@ -20,6 +20,7 @@ plugins:
   - jekyll-feed
   - jekyll-sitemap
   - jekyll-seo-tag
+  - jekyll-redirect-from
 
 # Code block settings
 enable_copy_code_button: true
@@ -53,6 +54,16 @@ defaults:
       path: ""
     values:
       layout: "default"
+  # Keep the generated API docs and the slide decks out of sitemap.xml (#2318). The Scaladoc has its own
+  # scaladoc-sitemap.xml, written by scripts/generate-scaladoc-sitemap.sh in the Pages workflow.
+  - scope:
+      path: "scaladoc"
+    values:
+      sitemap: false
+  - scope:
+      path: "image_assets"
+    values:
+      sitemap: false
   - scope:
       path: ""
       type: "guide"
@@ -96,6 +107,10 @@ discord_invite: https://discord.gg/4uvTPn6qww
 # google_analytics: UA-XXXXXXXXX-X
 
 # SEO settings
+# Search Console / Bing verification (#2318, a maintainer step): add the tokens from each tool here, e.g.
+# webmaster_verifications:
+#   google: <token>
+#   bing: <token>
 twitter:
   username: llm4sfoundation
   card: summary_large_image

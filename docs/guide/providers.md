@@ -476,7 +476,9 @@ unchanged.
 > request and response shapes are the ones IBM's public pages report, cross-checked against IBM's own
 > open-source clients (the Node.js SDK and IBM's LangChain integration; the pinned sources are listed in
 > `WatsonXClient`'s Scaladoc): the token-limit field, the encoding of tool-call arguments, the finish reasons
-> and the stream's usage chunk are all shown there. That proves IBM's clients send them, not that the
+> and the stream's usage chunk are all shown there. IBM's
+> [tool-calling guide](https://www.ibm.com/docs/SSYOK8/wsj/analyze-data/fm-api-chat-tools.html) shows the
+> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. That proves IBM's clients send them, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
 > which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has

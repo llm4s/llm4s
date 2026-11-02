@@ -16,6 +16,9 @@ All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc. Use th
 
 ### 2. Release Steps
 
+Before tagging, update the [support table](support-policy#current-lines) (see
+[Update the support table](#update-the-support-table)).
+
 ```bash
 # 1. Ensure you're on main branch with latest changes
 git checkout main
@@ -27,6 +30,12 @@ git push origin v0.3.2
 
 # 3. The GitHub Actions release workflow does the rest -- see below.
 ```
+
+### Update the support table
+
+Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
+it replaces, in the same pull request that prepares the release. The table is rendered on the
+[Support Policy](support-policy). Nothing checks it yet, so a release tag missing from it is not caught by CI.
 
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
@@ -237,6 +246,15 @@ it never overwrites. Write whatever the release deserves once it exists.
   It checks that `modules/samples/scala-cli/hello.scala` pins the release now on Maven Central (the prepare commit
   bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
   `scripts/check-scala-cli-quickstart.sh --central --compile`.
+- Build and test the Mill quick start the same way: `gh workflow run mill-quickstart.yml`. It checks that
+  `llm4sVersion` in `modules/samples/mill/build.mill` is the release now on Maven Central (bump it with
+  `docs/_data/project.yml` in the prepare commit) and runs `./mill app.compile + app.test`; it also runs weekly.
+  Locally: `scripts/check-mill-quickstart.sh --central --build`.
+
+- After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
+  Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's
+  pages should not show new crawl errors). The deploy itself fails if `sitemap.xml` lists Scaladoc or PDF URLs
+  (`scripts/check-site-sitemaps.sh`).
 
 ### Discoverability: Scaladex and GitHub
 

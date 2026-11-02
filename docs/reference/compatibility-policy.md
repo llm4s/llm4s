@@ -129,6 +129,8 @@ The [migration guide](migration) records each such removal.
 
 ## Supported platforms
 
+Which releases get fixes, and for how long, is in the [Support Policy](support-policy).
+
 1.0 targets **Scala 3 only (3.7.1)**; Scala 2.13 support is deferred to after 1.0 and, if it happens,
 will target the frozen spine rather than the full tree. The minimum JDK is 21 and CI runs only JDK 21; see [Scala and JDK support](v1-scope#scala-and-jdk-support).
 `llm4s-provider-testkit` in particular needs it: its interruption checks and `LocalProviderTestServer` run on virtual threads
