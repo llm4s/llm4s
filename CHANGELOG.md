@@ -287,6 +287,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
+  unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
   included), `JAgent.runAsync`/`continueConversationAsync`/`resumeAsync`/`recoverAsync` and `embedAsync`, failing with
   `LlmException`, `cancel(true)` interrupting the call, on a virtual thread or a `withAsyncExecutor` executor;

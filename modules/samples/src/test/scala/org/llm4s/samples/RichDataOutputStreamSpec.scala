@@ -4,8 +4,8 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.io.{ ByteArrayOutputStream, DataOutputStream }
-import java.nio.{ ByteBuffer, ByteOrder }
+import _root_.java.io.{ ByteArrayOutputStream, DataOutputStream }
+import _root_.java.nio.{ ByteBuffer, ByteOrder }
 import scala.util.{ Failure, Success }
 
 class RichDataOutputStreamSpec extends AnyFlatSpec with Matchers with MockFactory {
