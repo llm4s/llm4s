@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -67,7 +69,7 @@ class AzureSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Pr
       .fromValues(
         modelName = deployment.getOrElse("gpt-4o-mini"),
         endpoint = at,
-        apiKey = key,
+        apiKey = Secret(key),
         apiVersion = AzureConfig.DEFAULT_API_VERSION
       )
       .value

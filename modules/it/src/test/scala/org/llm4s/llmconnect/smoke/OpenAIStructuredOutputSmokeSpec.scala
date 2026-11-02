@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -28,7 +30,7 @@ class OpenAIStructuredOutputSmokeSpec extends AnyFlatSpec with Matchers with Eit
     val config = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o-mini",
-        apiKey = apiKey.get,
+        apiKey = Secret(apiKey.get),
         organization = None,
         baseUrl = "https://api.openai.com/v1"
       )

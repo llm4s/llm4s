@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -38,7 +40,7 @@ class RequestySmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
   private def client(key: String): Result[LLMClient] =
     OpenAIConfig
-      .fromValues(Model, key, None, RequestyProvider.DEFAULT_BASE_URL, Some(RequestyProvider.id))
+      .fromValues(Model, Secret(key), None, RequestyProvider.DEFAULT_BASE_URL, Some(RequestyProvider.id))
       .flatMap(RequestyProvider.buildClient(_, LlmClientOptions.default))
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
