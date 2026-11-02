@@ -90,7 +90,7 @@ providers:
     chat_api_key: "required"
     chat_workload_identity: false
     embeddings: false
-    cloud_smoke: ["GeminiSmokeSpec"]
+    cloud_smoke: ["GeminiSmokeSpec", "GeminiStructuredOutputSmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
@@ -153,7 +153,7 @@ providers:
     embedding_artifact: "llm4s-openai"
     embedding_module: "org.llm4s.llmconnect.provider.Llm4sOpenAIModule"
     embedding_api_key: "required"
-    cloud_smoke: ["OpenAISmokeSpec"]
+    cloud_smoke: ["OpenAISmokeSpec", "OpenAIStructuredOutputSmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
