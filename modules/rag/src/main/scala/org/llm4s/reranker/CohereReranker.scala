@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.security.Secret
 import org.llm4s.error.CancelledError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
@@ -42,7 +43,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
     logger.debug(s"[CohereReranker] POST $url model=${config.model} docs=${request.documents.size} topN=$topN")
 
-    val headers = Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json")
+    val headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}", "Content-Type" -> "application/json")
 
     // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
     // A cancellation passes through as it is (design section 4.4); any other failure is a RerankError.
@@ -133,5 +134,5 @@ object CohereReranker {
     model: String = DEFAULT_MODEL,
     baseUrl: String = DEFAULT_BASE_URL
   ): CohereReranker =
-    new CohereReranker(RerankProviderConfig(baseUrl, apiKey, model))
+    new CohereReranker(RerankProviderConfig(baseUrl, Secret(apiKey), model))
 }

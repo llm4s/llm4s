@@ -104,7 +104,7 @@ object RerankerConfigLoader {
       SharedCredentials.logSource(CohereSection, key)
       RerankProviderConfig(
         baseUrl = nonEmpty(cohere.baseUrl).getOrElse(CohereReranker.DEFAULT_BASE_URL),
-        apiKey = key.value.reveal,
+        apiKey = key.value,
         model = nonEmpty(cohere.model).getOrElse(CohereReranker.DEFAULT_MODEL)
       )
     }
