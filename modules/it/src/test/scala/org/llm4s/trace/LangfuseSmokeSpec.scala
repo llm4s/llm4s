@@ -132,7 +132,9 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     val apiBase = DefaultLangfuseBatchSender.normalizeIngestionUrl(config.url).stripSuffix("/api/public/ingestion")
     val auth =
-      "Basic " + Base64.getEncoder.encodeToString(s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
+      "Basic " + Base64.getEncoder.encodeToString(
+        s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8)
+      )
     val http = Llm4sHttpClient.create()
 
     eventually {

@@ -12,7 +12,8 @@ import java.nio.file.Files
 
 class AzureSTTClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = STTConfig("azure", "en-US", Secret("azure-key"), "https://eastus.stt.speech.microsoft.com", Some("eastus"))
+  private val cfg =
+    STTConfig("azure", "en-US", Secret("azure-key"), "https://eastus.stt.speech.microsoft.com", Some("eastus"))
 
   private def wavAt(rate: Int): Array[Byte] = {
     val pcm = Array.fill[Byte](3200)(5)

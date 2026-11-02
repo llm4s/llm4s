@@ -31,12 +31,14 @@ class CloudSpeechCancellationSpec extends AnyFlatSpec {
   }
 
   "AzureTTSClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new AzureTTSClient(TTSConfig("azure", "azure", "en-US-JennyNeural", Secret("azure-key"), url, Some("eastus")))
+    val client =
+      new AzureTTSClient(TTSConfig("azure", "azure", "en-US-JennyNeural", Secret("azure-key"), url, Some("eastus")))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("azure-tts synthesize")(client.synthesize("Hello"))
   }
 
   "ElevenLabsTTSClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new ElevenLabsTTSClient(TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", Secret("el-key"), url))
+    val client =
+      new ElevenLabsTTSClient(TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", Secret("el-key"), url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("elevenlabs-tts synthesize")(client.synthesize("Hello"))
   }
 

@@ -90,7 +90,9 @@ class ErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
     new OpenAIVisionClient(OpenAIVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeout = 10.seconds))
 
   private def anthropic(baseUrl: String) =
-    new AnthropicVisionClient(AnthropicVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeout = 10.seconds))
+    new AnthropicVisionClient(
+      AnthropicVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeout = 10.seconds)
+    )
 
   private def gemini(baseUrl: String) =
     new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeoutSeconds = 10))

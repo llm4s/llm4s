@@ -19,7 +19,10 @@ class LangfuseErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
   "DefaultLangfuseBatchSender" should "redact credentials echoed in an error body before logging it" in {
     val sender = new DefaultLangfuseBatchSender(new MockHttpClient(HttpResponse(500, EchoedCredentials.Text)), () => ())
     val (_, lines) = logged(
-      sender.sendBatch(events, LangfuseHttpApiCaller("https://cloud.langfuse.com", Secret("pk-lf-test"), Secret("sk-lf-test")))
+      sender.sendBatch(
+        events,
+        LangfuseHttpApiCaller("https://cloud.langfuse.com", Secret("pk-lf-test"), Secret("sk-lf-test"))
+      )
     )
     lines.exists(_.contains("[REDACTED]")) shouldBe true
     lines.flatMap(leaked) shouldBe empty

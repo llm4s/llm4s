@@ -157,7 +157,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   }
 
   test("OpenAI and Anthropic vision clients send the real key, not its masked form") {
-    val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+    val seen   = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
     val server = HttpServer.create(new InetSocketAddress(0), 0)
     server.createContext(
       "/",
@@ -185,7 +185,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
           org.llm4s.imageprocessing.config.AnthropicVisionConfig(key, baseUrl = url, requestTimeout = RequestTimeout)
         ).analyzeImage(imagePath, Some("p")): Unit
         import scala.jdk.CollectionConverters.*
-        seen.asScala.toSeq should contain allOf ("Authorization" -> s"Bearer ${key.reveal}", "x-api-key" -> key.reveal)
+        (seen.asScala.toSeq should contain).allOf("Authorization" -> s"Bearer ${key.reveal}", "x-api-key" -> key.reveal)
       }
     finally server.stop(0)
   }

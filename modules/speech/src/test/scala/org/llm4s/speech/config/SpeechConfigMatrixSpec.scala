@@ -50,7 +50,11 @@ class SpeechConfigMatrixSpec extends AnyWordSpec with Matchers with EitherValues
       val tts = SpeechConfigLoader.tts(env(allKeys :+ ("SPEECH_TTS_MODEL" -> "elevenlabs/v1"): _*)).value
       tts.apiKey.reveal shouldBe "sk-e"
       tts.provider shouldBe "elevenlabs"
-      SpeechConfigLoader.stt(env(allKeys :+ ("SPEECH_STT_MODEL" -> "azure/de-DE"): _*)).value.apiKey.reveal shouldBe "az-k"
+      SpeechConfigLoader
+        .stt(env(allKeys :+ ("SPEECH_STT_MODEL" -> "azure/de-DE"): _*))
+        .value
+        .apiKey
+        .reveal shouldBe "az-k"
     }
   }
 

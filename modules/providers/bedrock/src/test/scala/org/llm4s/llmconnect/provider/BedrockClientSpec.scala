@@ -93,7 +93,9 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         sendJsonResponse(exchange, 200, converseResponse("ok"))
       } { url =>
         val withToken =
-          config(url).copy(credentials = Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret("secret"), Some(Secret("session-token-1")))))
+          config(url).copy(credentials =
+            Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret("secret"), Some(Secret("session-token-1"))))
+          )
         new BedrockClient(withToken).complete(conversation, CompletionOptions())
       }
 

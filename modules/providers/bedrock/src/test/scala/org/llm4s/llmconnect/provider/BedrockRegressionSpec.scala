@@ -166,7 +166,8 @@ class BedrockRegressionSpec extends AnyWordSpec with Matchers {
         token.set(Option(ex.getRequestHeaders.getFirst("x-amz-security-token")))
         sendJsonResponse(ex, 200, converseResponse("ok"))
       } { url =>
-        val cfg    = config(url).copy(credentials = Some(BedrockCredentials(Secret("AKID"), Secret("secret"), Some(Secret("")))))
+        val cfg =
+          config(url).copy(credentials = Some(BedrockCredentials(Secret("AKID"), Secret("secret"), Some(Secret("")))))
         val client = BedrockClient(cfg).toOption.value
         client.complete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions()).isRight shouldBe true
         client.close()

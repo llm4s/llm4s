@@ -197,7 +197,11 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
       )
     ).toEither.left.map(e => visionFailed(e.getMessage)).flatMap { requestBody =>
       val headers =
-        Map("Content-Type" -> "application/json", "x-api-key" -> config.apiKey.reveal, "anthropic-version" -> "2023-06-01")
+        Map(
+          "Content-Type"      -> "application/json",
+          "x-api-key"         -> config.apiKey.reveal,
+          "anthropic-version" -> "2023-06-01"
+        )
       httpClient.post(s"${config.baseUrl}/v1/messages", headers, requestBody, config.requestTimeout) match {
         case Left(cancelled: CancelledError) => Left(cancelled)
         case Left(error) =>

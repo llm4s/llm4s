@@ -61,7 +61,12 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
     "return a Left for credentials together with a profile" in {
       BedrockConfig
-        .fromValues("m", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))), profile = Some("work"))
+        .fromValues(
+          "m",
+          "us-east-1",
+          credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))),
+          profile = Some("work")
+        )
         .isLeft shouldBe true
     }
   }
@@ -76,7 +81,10 @@ class BedrockConfigSpec extends AnyWordSpec with Matchers {
 
     "keep its credentials, but switch model, with withModel" in {
       val config =
-        BedrockConfig.fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b")))).toOption.value
+        BedrockConfig
+          .fromValues("m1", "us-east-1", credentials = Some(BedrockCredentials(Secret("a"), Secret("b"))))
+          .toOption
+          .value
       config.withModel("m2") shouldBe config.copy(model = "m2")
     }
 

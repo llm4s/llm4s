@@ -2,7 +2,6 @@ package org.llm4s.speech.config
 
 import org.llm4s.security.Secret
 
-
 /**
  * Configuration for a cloud TTS provider, as produced by [[SpeechConfigLoader.tts]].
  *

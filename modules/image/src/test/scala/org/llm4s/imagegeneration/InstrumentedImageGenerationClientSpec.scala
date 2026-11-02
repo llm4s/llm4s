@@ -254,10 +254,10 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
 
   test("maps each provider config to its metrics provider name") {
     val cases: Seq[(ImageGenerationConfig, String)] = Seq(
-      StableDiffusionConfig()                  -> "stable-diffusion",
+      StableDiffusionConfig()                          -> "stable-diffusion",
       StabilityAIConfig(apiKey = Secret("test-key"))   -> "stability-ai",
       HuggingFaceConfig(apiKey = Secret("test-token")) -> "huggingface",
-      testConfig                               -> "openai"
+      testConfig                                       -> "openai"
     )
 
     cases.foreach { case (config, expected) =>

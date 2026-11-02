@@ -33,7 +33,9 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
   private val secretKey  = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYSECRETSECRET"
   private val sessionTok = "FwoGZXIvYXdzSESSIONTOKENVALUE"
   private val withSecrets = (url: String) =>
-    config(url).copy(credentials = Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret(secretKey), Some(Secret(sessionTok)))))
+    config(url).copy(credentials =
+      Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret(secretKey), Some(Secret(sessionTok))))
+    )
 
   // One server and one client for every error-mapping case: the server answers with whatever
   // `nextError` holds. A client per case cost ~2 s each, because closing a client that has streamed

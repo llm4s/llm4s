@@ -108,7 +108,8 @@ class LangfuseTracing(
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
-    val credentials  = Base64.getEncoder.encodeToString(s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
+    val credentials =
+      Base64.getEncoder.encodeToString(s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
 
     httpClient.post(
       url = apiUrl,

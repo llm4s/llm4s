@@ -75,7 +75,9 @@ class DefaultLangfuseBatchSender(
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
     val credentials =
-      Base64.getEncoder.encodeToString(s"${config.publicKey.reveal}:${config.secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
+      Base64.getEncoder.encodeToString(
+        s"${config.publicKey.reveal}:${config.secretKey.reveal}".getBytes(StandardCharsets.UTF_8)
+      )
 
     httpClient.post(
       url = apiUrl,

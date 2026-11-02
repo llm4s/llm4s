@@ -74,8 +74,9 @@ object BedrockProvider extends ProviderDescriptor:
   /** Both halves of a static credential pair, or neither; a lone half is a mistake worth naming. */
   private def credentialsOf(providerName: String, section: NamedProviderConfig): Result[Option[BedrockCredentials]] =
     (section.extra(ACCESS_KEY_ID_KEY), section.extra(SECRET_ACCESS_KEY_KEY), section.extra(SESSION_TOKEN_KEY)) match
-      case (Some(keyId), Some(secret), token) => Right(Some(BedrockCredentials(Secret(keyId), Secret(secret), token.map(Secret(_)))))
-      case (None, None, None)                 => Right(None)
+      case (Some(keyId), Some(secret), token) =>
+        Right(Some(BedrockCredentials(Secret(keyId), Secret(secret), token.map(Secret(_)))))
+      case (None, None, None) => Right(None)
       case (None, None, Some(_)) =>
         Left(
           ConfigurationError(

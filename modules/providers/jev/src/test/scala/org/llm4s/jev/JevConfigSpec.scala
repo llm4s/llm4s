@@ -31,7 +31,10 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "build the evaluation URL from a base URL with or without a trailing slash" in {
-    JevConfig(Secret(secret), baseUrl = "https://example.test/").evaluateUrl shouldBe "https://example.test/v1/systemone"
+    JevConfig(
+      Secret(secret),
+      baseUrl = "https://example.test/"
+    ).evaluateUrl shouldBe "https://example.test/v1/systemone"
     JevConfig(Secret(secret), baseUrl = "https://example.test").evaluateUrl shouldBe "https://example.test/v1/systemone"
   }
 
@@ -44,7 +47,14 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
       .withRetry(JevRetryPolicy.none)
       .withHeaders(Map("X-A" -> "1"))
 
-    config shouldBe JevConfig(Secret("k2"), "https://x.test", "jev-1.13.0", 5.seconds, JevRetryPolicy.none, Map("X-A" -> "1"))
+    config shouldBe JevConfig(
+      Secret("k2"),
+      "https://x.test",
+      "jev-1.13.0",
+      5.seconds,
+      JevRetryPolicy.none,
+      Map("X-A" -> "1")
+    )
   }
 
   // ---- the credential is never shown ----
@@ -102,7 +112,9 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse an out-of-range address that only looks like loopback" in {
-    refused(JevConfig(Secret(secret), baseUrl = "http://127.0.0.256")) should (include("must be https").or(include("host")))
+    refused(JevConfig(Secret(secret), baseUrl = "http://127.0.0.256")) should (include("must be https").or(
+      include("host")
+    ))
   }
 
   it should "refuse a URL whose userinfo dresses a bad host up as a good one" in {
@@ -121,7 +133,9 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse a URL with whitespace, a control character, a query or a fragment" in {
     refused(JevConfig(Secret(secret), baseUrl = "https://a.test/ x")) should include("whitespace or control")
-    refused(JevConfig(Secret(secret), baseUrl = "https://a.test/\r\nHost: evil")) should include("whitespace or control")
+    refused(JevConfig(Secret(secret), baseUrl = "https://a.test/\r\nHost: evil")) should include(
+      "whitespace or control"
+    )
     refused(JevConfig(Secret(secret), baseUrl = "https://a.test?x=1")) should include("query")
     refused(JevConfig(Secret(secret), baseUrl = "https://a.test#frag")) should include("fragment")
   }
@@ -136,7 +150,9 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "refuse a default header that could inject another or replace the client's own" in {
     refused(JevConfig(Secret(secret), headers = Map("X-A" -> "1\r\nEvil: 1"))) should include("llm4s.jev.headers")
-    refused(JevConfig(Secret(secret), headers = Map("Authorization" -> "Bearer x"))) should include("cannot be overridden")
+    refused(JevConfig(Secret(secret), headers = Map("Authorization" -> "Bearer x"))) should include(
+      "cannot be overridden"
+    )
   }
 
   it should "refuse two default headers whose names differ only in case" in {

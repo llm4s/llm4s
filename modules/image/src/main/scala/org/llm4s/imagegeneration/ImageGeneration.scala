@@ -311,7 +311,7 @@ case class OpenAIConfig(
   override val timeout: FiniteDuration = 30.seconds
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
-  override def toString: String         = s"OpenAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+  override def toString: String = s"OpenAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
 }
 
 /**

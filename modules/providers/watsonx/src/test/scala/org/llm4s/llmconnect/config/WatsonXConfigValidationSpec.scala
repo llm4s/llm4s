@@ -20,7 +20,8 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
     baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL,
     apiVersion: String = WatsonXConfig.DEFAULT_API_VERSION,
     iamUrl: String = WatsonXConfig.DEFAULT_IAM_URL
-  ) = WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl, apiVersion, iamUrl)
+  ) =
+    WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl, apiVersion, iamUrl)
 
   test(
     "each of apiKey, baseUrl, apiVersion and iamUrl, blank or whitespace, is a ConfigurationError naming the field"
