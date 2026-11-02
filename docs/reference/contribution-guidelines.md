@@ -215,7 +215,7 @@ val result = messages.map(_.role)  // Good
 val result = messages.map(m => m.role)  // Also good
 
 // Prefer lazy evaluation where appropriate
-lazy val config = Llm4sConfig.provider()
+lazy val config = Llm4sConfig.defaultProvider()
 ```
 
 ---

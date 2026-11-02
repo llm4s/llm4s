@@ -2,14 +2,27 @@ package org.llm4s.schema
 
 /**
  * A validator for the part of JSON Schema that `ObjectSchema` and its siblings emit: `type` (one name or an array
- * of names), `enum`, `properties`, `required`, `additionalProperties: false` and `items`. It exists so a spec can
+ * of names), `enum`, `properties`, `required`, `additionalProperties: false`, `items`, and the `anyOf` a sum type is
+ * derived as. It exists so a spec can
  * ask whether a document the model might return satisfies the derived schema, independently of the uPickle reader
  * the document is then read with.
  */
 object JsonSchemaValidator {
 
   /** The problems of `value` against `schema`, empty if it conforms. Each names the path it is at. */
-  def validate(schema: ujson.Value, value: ujson.Value, path: String = "$"): List[String] = {
+  def validate(schema: ujson.Value, value: ujson.Value, path: String = "$"): List[String] =
+    schema.obj.get("anyOf") match {
+      case Some(alternatives) =>
+        val each = alternatives.arr.toList.map(validate(_, value, path))
+        if (each.exists(_.isEmpty)) Nil
+        else
+          List(
+            s"$path: ${render(value)} matches none of the alternatives: ${each.map(_.mkString("; ")).mkString(" | ")}"
+          )
+      case None => validateOne(schema, value, path)
+    }
+
+  private def validateOne(schema: ujson.Value, value: ujson.Value, path: String): List[String] = {
     val declared = schema.obj.get("type").map {
       case ujson.Str(name) => List(name)
       case names           => names.arr.toList.map(_.str)

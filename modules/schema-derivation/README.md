@@ -23,11 +23,11 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 
 | | |
 |---|---|
-| `SchemaOf[A]` | the schema of `A`; `derives SchemaOf` for case classes, enums and sealed hierarchies of singletons |
+| `SchemaOf[A]` | the schema of `A`; `derives SchemaOf` for case classes, enums and sealed traits, with or without fields |
 | `SchemaOf[A].toJsonSchema(strict)` | the JSON Schema document `completeStructured` sends |
-| `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters |
+| `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters (not for a sum type with fields, which core cannot express) |
 | `@description("...")` | the description the model sees, on a field or a type |
-| `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema |
+| `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema; for a sum type, its `anyOf` wrapped in a `value` property and unwrapped from the reply |
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
 | `Tool.of[A, R](name, description)(a => Either[String, R])` | a `ToolFunction` from a function over a case class: the schema derived from `A`, the arguments decoded into it, argument errors as `SafeParameterExtractor`'s `ToolParameterError`s |
 
@@ -35,10 +35,11 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 
 Supported: `String`, `Int`, `Long`, `Double`, `Float`, `Boolean`, `BigDecimal`, `BigInt`, `Option`, `List`, `Seq`,
 `Vector`, `Set`, case classes (nested, generic, with `@upickle.implicits.key`), enums and sealed hierarchies of
-singletons (with `@upickle.implicits.key` on a case, too).
+singletons (with `@upickle.implicits.key` on a case, too), and sum types whose cases have fields: an `anyOf` of one
+object per case, tagged with uPickle's discriminator (`"$type"` or the trait's `@upickle.implicits.key`).
 
-Refused at compile time, naming the type: `Map`, recursive types, and sealed hierarchies with fields. `llm4s-core`'s
-schema model has a fixed set of properties and no `$ref` or `oneOf`, so it cannot express them. Also refused:
+Refused at compile time, naming the type: `Map` (`llm4s-core`'s schema model has a fixed set of properties), recursive
+types (they need a `$ref`), and a sealed hierarchy nested in another or with a generic case. Also refused:
 `Option` directly inside `Option` and tuples, which uPickle writes as JSON arrays, and named tuples, which it cannot
 read. A type with a hand-written `given SchemaOf` is taken as that given describes it, even one that would otherwise be
 refused. A recursion that runs through a hand-written given which itself derives its type is not visible at compile
