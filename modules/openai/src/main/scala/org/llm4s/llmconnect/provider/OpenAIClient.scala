@@ -6,9 +6,9 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.openai.auth.{ SubjectTokenProvider, SubjectTokenType, WorkloadIdentity }
 import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
-import com.openai.client.okhttp.OpenAIOkHttpClient
-import com.openai.client.{ OpenAIClient => SdkClient }
-import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
+import com.openai.client.okhttp.{ OkHttpClient, OpenAIOkHttpClient }
+import com.openai.client.{ OpenAIClient => SdkClient, OpenAIClientImpl }
+import com.openai.core.{ ClientOptions, JsonField, ObjectMappers, RequestOptions, Timeout }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.credential.BearerTokenCredential
 import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException, UnauthorizedException }
@@ -985,22 +985,86 @@ private[provider] object OpenAIClientTransport {
    * OpenAI, Requesty or any OpenAI-compatible base URL: a bearer API key, the configured
    * organisation, and requests to `<baseUrl>/chat/completions`.
    */
-  def openAI(
-    config: OpenAIConfig,
-    customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
-  ): OpenAIClientTransport = {
+  def openAI(config: OpenAIConfig): OpenAIClientTransport = {
     // A config built with `apply` or a `with*` setter skipped `fromValues`: `OpenAIClient.apply` refuses it as a
     // ConfigurationError, and every constructor here, so an exchanged OpenAI token never goes to another provider.
     OpenAIConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
-    val builder = OpenAIOkHttpClient
-      .builder()
-      .baseUrl(config.baseUrl)
-      .organization(config.organization.orNull)
     config.workloadIdentity match {
-      case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
-      case None     => builder.apiKey(config.apiKey.reveal)
+      case Some(wi) => sdk(workloadIdentityClient(config, wi), config.timeouts)
+      case None =>
+        val builder = OpenAIOkHttpClient
+          .builder()
+          .baseUrl(config.baseUrl)
+          .organization(config.organization.orNull)
+          .apiKey(config.apiKey.reveal)
+        sdk(withNetwork(builder, config.network, config.baseUrl).build(), config.timeouts)
     }
-    sdk(customize(withNetwork(builder, config.network, config.baseUrl)).build(), config.timeouts)
+  }
+
+  /**
+   * The SDK client for workload identity, assembled as `OpenAIOkHttpClient.build` assembles it, but over an HTTP
+   * client that registers each request's bearer ([[RegisteringBearer]]). The SDK exchanges the identity token and
+   * sends the access token itself; its workload-identity layer wraps the HTTP client given here, so the requests
+   * this client sees already carry that token.
+   */
+  private def workloadIdentityClient(config: OpenAIConfig, wi: OpenAIWorkloadIdentity): SdkClient = {
+    val http = OkHttpClient.builder().timeout(Timeout.default())
+    applyNetwork(config.network, config.baseUrl)(
+      http.proxy(_),
+      http.proxyAuthenticator(_),
+      (factory, trust) => http.sslSocketFactory(factory).trustManager(trust)
+    )
+    workloadIdentitySdk(config, wi, http.build())
+  }
+
+  /** [[workloadIdentityClient]] over `base`, the HTTP client every request (the token exchange too) goes out on. */
+  private[provider] def workloadIdentitySdk(
+    config: OpenAIConfig,
+    wi: OpenAIWorkloadIdentity,
+    base: SdkHttpClient
+  ): SdkClient =
+    new OpenAIClientImpl(
+      ClientOptions
+        .builder()
+        .httpClient(new RegisteringBearer(base))
+        .baseUrl(config.baseUrl)
+        .organization(config.organization.orNull)
+        .workloadIdentity(sdkWorkloadIdentity(wi))
+        .build()
+    )
+
+  /**
+   * Registers the bearer token of each request before passing it on, through its own [[TokenGenerations]], so an
+   * error body echoing a workload-identity access token the SDK obtained is scrubbed.
+   */
+  final private[provider] class RegisteringBearer(next: SdkHttpClient) extends SdkHttpClient {
+    private val generations = new TokenGenerations
+
+    private def register(request: com.openai.core.http.HttpRequest): Unit =
+      request
+        .headers()
+        .values("Authorization")
+        .asScala
+        .collect { case value if value.regionMatches(true, 0, "Bearer ", 0, 7) => value.drop(7).trim }
+        .foreach(generations.rotate)
+
+    override def execute(
+      request: com.openai.core.http.HttpRequest,
+      options: RequestOptions
+    ): com.openai.core.http.HttpResponse = {
+      register(request)
+      next.execute(request, options)
+    }
+
+    override def executeAsync(
+      request: com.openai.core.http.HttpRequest,
+      options: RequestOptions
+    ): CompletableFuture[com.openai.core.http.HttpResponse] = {
+      register(request)
+      next.executeAsync(request, options)
+    }
+
+    override def close(): Unit = next.close()
   }
 
   /**
@@ -1016,19 +1080,32 @@ private[provider] object OpenAIClientTransport {
     network: HttpNetworkSettings,
     baseUrl: String
   ): OpenAIOkHttpClient.Builder = {
-    HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
-      builder.proxy(proxy)
+    applyNetwork(network, baseUrl)(
+      builder.proxy(_),
+      builder.proxyAuthenticator(_),
+      (factory, trust) => builder.sslSocketFactory(factory).trustManager(trust)
+    )
+    builder
+  }
+
+  /** [[withNetwork]] over any builder, given its proxy, proxy-authenticator and TLS setters. */
+  private def applyNetwork(network: HttpNetworkSettings, baseUrl: String)(
+    proxy: java.net.Proxy => Any,
+    proxyAuthenticator: ProxyAuthenticator => Any,
+    tls: (javax.net.ssl.SSLSocketFactory, javax.net.ssl.X509TrustManager) => Any
+  ): Unit = {
+    HttpNetwork.proxyForUrl(network, baseUrl).foreach { p =>
+      proxy(p)
       network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
-        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
+        proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
       }
     }
     HttpNetwork
       .tlsMaterial(network.tls)
       .fold(
         error => throw new IllegalArgumentException(error.message),
-        _.foreach(tls => builder.sslSocketFactory(tls.sslContext.getSocketFactory).trustManager(tls.trustManager))
+        _.foreach(material => tls(material.sslContext.getSocketFactory, material.trustManager))
       )
-    builder
   }
 
   /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */

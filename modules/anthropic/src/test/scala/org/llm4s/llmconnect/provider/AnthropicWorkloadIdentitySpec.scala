@@ -60,6 +60,47 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         fake.apiAuthorizations.last shouldBe "Bearer t1"
       }
 
+    "mask the access token the SDK obtained when the API's error body echoes it bare (#1932)" in KnownSecrets.isolated {
+      val token  = "opaqueAnthropicAccess01"
+      val seen   = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+      val server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("localhost", 0), 0)
+      def reply(ex: com.sun.net.httpserver.HttpExchange, status: Int, body: String): Unit =
+        ex.getRequestBody.readAllBytes()
+        val bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        ex.getResponseHeaders.add("Content-Type", "application/json")
+        ex.sendResponseHeaders(status, bytes.length.toLong)
+        ex.getResponseBody.write(bytes)
+        ex.close()
+      server.createContext(
+        "/v1/oauth/token",
+        ex => reply(ex, 200, s"""{"access_token":"$token","token_type":"Bearer","expires_in":3600}""")
+      )
+      server.createContext(
+        "/v1/messages",
+        ex =>
+          seen.add(Option(ex.getRequestHeaders.getFirst("Authorization")).getOrElse(""))
+          reply(
+            ex,
+            403,
+            s"""{"type":"error","error":{"type":"permission_error","message":"request with $token is denied"}}"""
+          )
+      )
+      server.start()
+      val outcome = scala.util.Try {
+        val file    = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+        val base    = s"http://localhost:${server.getAddress.getPort}"
+        val client  = assertBuildsClient(AnthropicProvider, sectionOf(section(base, file.toString)))
+        val message = client.complete(conversation, CompletionOptions()).left.value.message
+        client.close()
+        message
+      }
+      server.stop(0)
+      val message = outcome.get
+      seen.toArray.toSeq should contain(s"Bearer $token")
+      message should include("denied")
+      (message should not).include(token)
+    }
+
     "refresh after a 401" in FakeTokenExchangeServer.withServer { fake =>
       val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
       val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))

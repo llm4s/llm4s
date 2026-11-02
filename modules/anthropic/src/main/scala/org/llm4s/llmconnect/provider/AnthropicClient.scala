@@ -45,7 +45,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
-import org.llm4s.security.KnownSecrets
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{
@@ -168,7 +168,11 @@ class AnthropicClient(
           .baseUrl(config.baseUrl)
           .organizationId(wi.organizationId)
         wi.workspaceId.foreach(profile.workspaceId)
-        builder.configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+        builder
+          .configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+          // The SDK exchanges the identity token and sends the access token itself: this sees each request after
+          // the SDK has added its bearer, and registers it before it is sent.
+          .addInterceptor(new AnthropicClient.RegisteringBearer)
     }
     AnthropicClient.withNetwork(builder, config.network, config.baseUrl).build()
   }
@@ -887,6 +891,42 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  /**
+   * Registers the bearer token of each request it passes on, through its own [[TokenGenerations]], so an error
+   * body echoing a workload-identity access token the SDK obtained is scrubbed. The SDK's interceptors sit beneath
+   * its authorizing layer, so they see the `Authorization` header it adds.
+   */
+  final private[provider] class RegisteringBearer extends com.anthropic.core.http.Interceptor {
+    private val generations = new TokenGenerations
+
+    private def register(request: com.anthropic.core.http.HttpRequest): Unit =
+      request
+        .headers()
+        .values("Authorization")
+        .asScala
+        .collect { case value if value.regionMatches(true, 0, "Bearer ", 0, 7) => value.drop(7).trim }
+        .foreach(generations.rotate)
+
+    override def intercept(next: com.anthropic.core.http.HttpClient): com.anthropic.core.http.HttpClient =
+      new com.anthropic.core.http.HttpClient {
+        override def execute(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): com.anthropic.core.http.HttpResponse = {
+          register(request)
+          next.execute(request, options)
+        }
+        override def executeAsync(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): java.util.concurrent.CompletableFuture[com.anthropic.core.http.HttpResponse] = {
+          register(request)
+          next.executeAsync(request, options)
+        }
+        override def close(): Unit = next.close()
+      }
+  }
 
   /**
    * Registers with `KnownSecrets` the workload-identity ids of `config` (federation rule, organisation, service

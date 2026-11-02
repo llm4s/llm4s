@@ -16,6 +16,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.file.{ Files, Path }
 import java.util.concurrent.CompletionException
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 class OpenAIWorkloadIdentitySpec
@@ -164,6 +165,66 @@ class OpenAIWorkloadIdentitySpec
           message should include("Token exchange failed")
           (message should not).include(t)
         KnownSecrets.scrub(subjects.head, "[X]") shouldBe subjects.head
+      }
+
+    "mask the access token the SDK obtained when the API's error body echoes it bare, on complete and stream (#1932)" in
+      KnownSecrets.isolated {
+        // The SDK posts the exchange to a fixed https://auth.openai.com/oauth/token, so no local server can answer
+        // it: the SDK runs for real over an in-memory HTTP client, which answers the exchange and the API call.
+        import com.openai.core.http.{ Headers, HttpClient as SdkHttp, HttpRequest, HttpResponse as SdkResponse }
+        val token = "opaqueOpenAIAccess0001"
+        val seen  = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+        def response(status: Int, text: String): SdkResponse = new SdkResponse {
+          def statusCode(): Int = status
+          def headers(): Headers =
+            Headers.builder().put("Content-Type", "application/json").build()
+          def body(): java.io.InputStream =
+            new java.io.ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+          def close(): Unit = ()
+        }
+        val base = new SdkHttp {
+          def execute(request: HttpRequest, options: com.openai.core.RequestOptions): SdkResponse =
+            if request.url().startsWith("https://auth.openai.com/") then
+              response(
+                200,
+                s"""{"access_token":"$token","issued_token_type":"urn:ietf:params:oauth:token-type:access_token",""" +
+                  """"token_type":"Bearer","expires_in":3600}"""
+              )
+            else
+              seen.add(request.headers().values("Authorization").asScala.mkString(","))
+              response(403, s"""{"error":{"message":"request with $token is denied","type":"permission_error"}}""")
+          def executeAsync(
+            request: HttpRequest,
+            options: com.openai.core.RequestOptions
+          ): java.util.concurrent.CompletableFuture[SdkResponse] =
+            java.util.concurrent.CompletableFuture.completedFuture(execute(request, options))
+          def close(): Unit = ()
+        }
+        val wi = OpenAIWorkloadIdentity(IdentitySource.Literal("eyJ.svid.sig"), "idp_1", "sa_1")
+        val config = OpenAIConfig(
+          Secret(""),
+          "gpt-4o-mini",
+          None,
+          "https://api.openai.com/v1",
+          128000,
+          4096,
+          workloadIdentity = Some(wi)
+        )
+        val transport = OpenAIClientTransport.sdk(OpenAIClientTransport.workloadIdentitySdk(config, wi, base))
+        val client = OpenAIClient.forTest("gpt-4o-mini", transport, config)(using
+          org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        )
+        val conversation = Conversation(Seq(UserMessage("hi")))
+        for result <- Seq(
+            client.complete(conversation, CompletionOptions()),
+            client.streamComplete(conversation, CompletionOptions(), _ => ())
+          )
+        do
+          val message = result.left.value.message
+          message should include("denied")
+          (message should not).include(token)
+        seen.asScala.toSeq.distinct shouldBe Seq(s"Bearer $token")
+        client.close()
       }
 
     "read the identity token for the async path off the common pool" in {
