@@ -3,7 +3,8 @@ package org.llm4s.config
 import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.auth.TokenExchange
+import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
+import org.llm4s.security.TokenGenerations
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig, XaiConfig }
 import org.llm4s.llmconnect.provider.{ OpenAICompatibleProvider, OpenRouterDialect, OpenRouterProvider }
 import org.llm4s.types.Result
@@ -112,16 +113,31 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
       // (a plain-http baseUrl or tokenUrl with auth, an apiKey or Authorization header beside auth, ...) is
       // refused here too, so no identity token is exchanged and no access token sent for it.
       valid <- OpenAICompatibleProvider.validatedConfig(SectionLabel, config)(_ => None)
-      // A section with `auth` is exchanged once, and lists with the access token as its key.
-      bearer <- valid.tokenExchange match
-        case None           => Right(valid.apiKey.map(_.reveal))
-        case Some(exchange) => TokenExchange.rfc8693(exchange, httpClient)().map(token => Some(token.value))
+      // A section with `auth` is exchanged once per listing, and lists with the access token as its bearer. The
+      // token is registered through the exchange's own generations before it is sent, and sent as a header, never
+      // wrapped as an ApiKey (a configured secret, never released): repeated listings do not grow the registry.
+      listed <- valid.tokenExchange match
+        case None => Right(config.withApiKey(valid.apiKey.map(key => ApiKey(key.reveal))).withHeaders(valid.headers))
+        case Some(exchange) =>
+          val held = generations(exchange)
+          TokenExchange.rfc8693With(exchange, httpClient, held.subjects)().map { token =>
+            held.access.rotate(token.value)
+            config.withApiKey(None).withHeaders(valid.headers.updated("Authorization", s"Bearer ${token.value}"))
+          }
       models <- delegate.listModels(
-        config
-          .withAuth(None)
-          .withApiKey(bearer.map(ApiKey(_)))
-          .withBaseUrl(Some(BaseUrl(valid.baseUrl)))
-          .withHeaders(valid.headers),
+        listed.withAuth(None).withBaseUrl(Some(BaseUrl(valid.baseUrl))),
         httpClient
       )
     yield models
+
+  /** The subject and access tokens of one exchange config's listings: each keeps two generations registered. */
+  final private class Held:
+    val subjects = new TokenGenerations
+    val access   = new TokenGenerations
+
+  // Keyed by the exchange config, so one section's listings never release another's tokens. Bounded by the
+  // number of distinct sections listed.
+  private val held = new java.util.concurrent.ConcurrentHashMap[TokenExchangeConfig, Held]()
+
+  private def generations(exchange: TokenExchangeConfig): Held =
+    held.computeIfAbsent(exchange, _ => new Held)

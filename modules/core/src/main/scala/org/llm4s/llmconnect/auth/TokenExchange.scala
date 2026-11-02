@@ -185,8 +185,21 @@ object TokenExchange:
     clock: Clock = Clock.systemUTC(),
     timeout: FiniteDuration = DefaultTimeout
   ): () => Result[AccessToken] =
-    val subject  = IdentityTokenSource.from(config.identityToken)
-    val subjects = new TokenGenerations
+    rfc8693With(config, httpClient, new TokenGenerations, clock, timeout)
+
+  /**
+   * [[rfc8693]] registering its subject tokens through `subjects`: a caller that builds an exchange per use (the
+   * model lister) passes one it keeps, so repeated exchanges release old subject tokens instead of each holding
+   * its own.
+   */
+  private[llm4s] def rfc8693With(
+    config: TokenExchangeConfig,
+    httpClient: Llm4sHttpClient,
+    subjects: TokenGenerations,
+    clock: Clock = Clock.systemUTC(),
+    timeout: FiniteDuration = DefaultTimeout
+  ): () => Result[AccessToken] =
+    val subject = IdentityTokenSource.from(config.identityToken)
     config.clientId.foreach(KnownSecrets.registerIdentifier)
     () =>
       for

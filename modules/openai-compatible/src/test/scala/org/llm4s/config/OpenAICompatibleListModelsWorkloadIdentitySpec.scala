@@ -3,7 +3,7 @@ package org.llm4s.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.security.{ KnownSecrets, Secret }
+import org.llm4s.security.KnownSecrets
 import org.llm4s.testkit.{ FakeTokenExchangeServer, TestJwt }
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -52,9 +52,8 @@ class OpenAICompatibleListModelsWorkloadIdentitySpec extends AnyWordSpec with Ma
 
     "not repeat the exchanged access token, or a credential field, from a rejected listing's body" in KnownSecrets
       .isolated {
+        // Nothing registered by hand: the lister registers the subject and the access token itself (#1932).
         val bearer = "opaque-listing-token-3"
-        Secret.token(bearer)
-        Secret.token("opaque-svid-literal-1")
         val http = org.llm4s.http.MockHttpClient(
           Seq(
             org.llm4s.http.HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}"""),
@@ -79,6 +78,37 @@ class OpenAICompatibleListModelsWorkloadIdentitySpec extends AnyWordSpec with Ma
         error.message should include("revoked")
         for secret <- Seq(bearer, "opaque-refresh-token-9", "opaque-svid-literal-1") do
           (error.message should not).include(secret)
+      }
+
+    "register each listing's access token without growing the registry across listings (#1932)" in KnownSecrets
+      .isolated {
+        val tokens = Seq("opaqueListingGen0001", "opaqueListingGen0002", "opaqueListingGen0003")
+        val models = org.llm4s.http.HttpResponse(200, """{"data":[{"id":"m1"}]}""")
+        val http = org.llm4s.http.MockHttpClient(
+          tokens.flatMap(t =>
+            Seq(org.llm4s.http.HttpResponse(200, s"""{"access_token":"$t","expires_in":3600}"""), models)
+          )
+        )
+        val section = org.llm4s.testkit.ProviderTestConfig
+          .loadSection(
+            "main",
+            """llm4s.providers.main {
+            |  provider = "openai-compatible"
+            |  model    = "m"
+            |  baseUrl  = "https://ws.example/listing-generations"
+            |  auth { identityToken = "opaque-svid-literal-2", tokenUrl = "https://ws.example/oidc/v1/token" }
+            |}""".stripMargin
+          )
+          .fold(error => fail(error.message), identity)
+        val sizes = tokens.map { t =>
+          OpenAICompatibleModelLister.listModels(section, http).value.map(_.name.toString) shouldBe List("m1")
+          http.lastHeaders.map(_("Authorization")) shouldBe Some(s"Bearer $t")
+          KnownSecrets.size
+        }
+        sizes(2) shouldBe sizes(1)
+        KnownSecrets.scrub(tokens(2), "[X]") shouldBe "[X]"
+        KnownSecrets.scrub(tokens(1), "[X]") shouldBe "[X]"
+        KnownSecrets.scrub(tokens.head, "[X]") shouldBe tokens.head
       }
 
     "exchange and list for a loopback baseUrl" in FakeTokenExchangeServer.withServer { fake =>
