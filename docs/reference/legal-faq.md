@@ -39,9 +39,9 @@ authoritative; read it rather than this summary.
 are the Developer Certificate of Origin, which asks for a sign-off and contains no assignment of copyright. The
 project has no Contributor Licence Agreement.
 
-**Who may relicense?** The project has not published a relicensing policy, and this page does not state one. The
-licence changes only by the maintainers' decision under [GOVERNANCE.md](https://github.com/llm4s/llm4s/blob/main/GOVERNANCE.md),
-and no licence change is planned in the repository's documents.
+**Who may relicense?** Not decided: the project has not published a relicensing policy, and this page does not state
+one. Contributions are made under the MIT licence with a DCO sign-off, with no copyright assignment and no CLA. No
+licence change is planned in the repository's documents.
 
 **How does the LLM4S Foundation relate to the copyright holder?** The [Foundation](../foundation/) page describes the
 Foundation and its status; this page adds nothing to it. The project has published nothing on whether the Foundation
