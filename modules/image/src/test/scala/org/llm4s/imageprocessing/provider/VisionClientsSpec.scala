@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
@@ -78,7 +79,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
     withTestServer(0, status = 500, body = longBody, path = "/chat/completions") { port =>
       withTempImageFile { imagePath =>
         val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
-          apiKey = "x",
+          apiKey = Secret("x"),
           baseUrl = s"http://localhost:$port",
           requestTimeout = RequestTimeout,
           connectTimeout = ConnectTimeout
@@ -115,7 +116,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
     withTestServer(0, status = 500, body = longBody, path = "/v1/messages") { port =>
       withTempImageFile { imagePath =>
         val cfg = org.llm4s.imageprocessing.config.AnthropicVisionConfig(
-          apiKey = "x",
+          apiKey = Secret("x"),
           baseUrl = s"http://localhost:$port",
           requestTimeout = RequestTimeout,
           connectTimeout = ConnectTimeout
@@ -155,10 +156,44 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
     port
   }
 
+  test("OpenAI and Anthropic vision clients send the real key, not its masked form") {
+    val seen = new java.util.concurrent.ConcurrentLinkedQueue[(String, String)]()
+    val server = HttpServer.create(new InetSocketAddress(0), 0)
+    server.createContext(
+      "/",
+      new HttpHandler {
+        override def handle(t: HttpExchange): Unit = {
+          val h = t.getRequestHeaders
+          Option(h.getFirst("Authorization")).foreach(v => seen.add("Authorization" -> v))
+          Option(h.getFirst("x-api-key")).foreach(v => seen.add("x-api-key" -> v))
+          val resp = "error".getBytes(StandardCharsets.UTF_8)
+          t.sendResponseHeaders(500, resp.length)
+          t.getResponseBody.write(resp)
+          t.getResponseBody.close()
+        }
+      }
+    )
+    server.start()
+    try
+      withTempImageFile { imagePath =>
+        val url = s"http://localhost:${server.getAddress.getPort}"
+        val key = Secret("vision-key-0123456789abcdef")
+        new org.llm4s.imageprocessing.provider.OpenAIVisionClient(
+          org.llm4s.imageprocessing.config.OpenAIVisionConfig(key, baseUrl = url, requestTimeout = RequestTimeout)
+        ).analyzeImage(imagePath, Some("p")): Unit
+        new org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient(
+          org.llm4s.imageprocessing.config.AnthropicVisionConfig(key, baseUrl = url, requestTimeout = RequestTimeout)
+        ).analyzeImage(imagePath, Some("p")): Unit
+        import scala.jdk.CollectionConverters.*
+        seen.asScala.toSeq should contain allOf ("Authorization" -> s"Bearer ${key.reveal}", "x-api-key" -> key.reveal)
+      }
+    finally server.stop(0)
+  }
+
   test("OpenAIVisionClient: a refused connection is a Left, never an exception") {
     withTempImageFile { imagePath =>
       val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
-        apiKey = "x",
+        apiKey = Secret("x"),
         baseUrl = s"http://localhost:${closedPort()}",
         requestTimeout = RequestTimeout,
         connectTimeout = ConnectTimeout
@@ -174,7 +209,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   test("OpenAIVisionClient: a blank apiKey is refused before any request, never sent as an empty bearer") {
     withTempImageFile { imagePath =>
       val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
-        apiKey = " ",
+        apiKey = Secret(" "),
         baseUrl = s"http://localhost:${closedPort()}",
         requestTimeout = RequestTimeout,
         connectTimeout = ConnectTimeout
@@ -191,7 +226,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   test("AnthropicVisionClient: a refused connection is a Left, never an exception") {
     withTempImageFile { imagePath =>
       val cfg = org.llm4s.imageprocessing.config.AnthropicVisionConfig(
-        apiKey = "x",
+        apiKey = Secret("x"),
         baseUrl = s"http://localhost:${closedPort()}",
         requestTimeout = RequestTimeout,
         connectTimeout = ConnectTimeout
@@ -209,7 +244,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   private def openAI(port: Int) =
     new org.llm4s.imageprocessing.provider.OpenAIVisionClient(
       org.llm4s.imageprocessing.config.OpenAIVisionConfig(
-        apiKey = "x",
+        apiKey = Secret("x"),
         baseUrl = s"http://localhost:$port",
         requestTimeout = RequestTimeout,
         connectTimeout = ConnectTimeout
@@ -219,7 +254,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   private def anthropic(port: Int) =
     new org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient(
       org.llm4s.imageprocessing.config.AnthropicVisionConfig(
-        apiKey = "x",
+        apiKey = Secret("x"),
         baseUrl = s"http://localhost:$port",
         requestTimeout = RequestTimeout,
         connectTimeout = ConnectTimeout

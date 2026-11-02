@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.media.MediaType
@@ -254,8 +255,8 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
   test("maps each provider config to its metrics provider name") {
     val cases: Seq[(ImageGenerationConfig, String)] = Seq(
       StableDiffusionConfig()                  -> "stable-diffusion",
-      StabilityAIConfig(apiKey = "test-key")   -> "stability-ai",
-      HuggingFaceConfig(apiKey = "test-token") -> "huggingface",
+      StabilityAIConfig(apiKey = Secret("test-key"))   -> "stability-ai",
+      HuggingFaceConfig(apiKey = Secret("test-token")) -> "huggingface",
       testConfig                               -> "openai"
     )
 

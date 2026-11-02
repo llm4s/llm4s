@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.config
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.*
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -8,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 class ImageProcessingConfigTest extends AnyFlatSpec with Matchers {
 
   "OpenAIVisionConfig" should "have default timeout values" in {
-    val config = OpenAIVisionConfig(apiKey = "test-key")
+    val config = OpenAIVisionConfig(apiKey = Secret("test-key"))
 
     config.connectTimeout shouldBe 30.seconds
     config.requestTimeout shouldBe 60.seconds
@@ -16,7 +17,7 @@ class ImageProcessingConfigTest extends AnyFlatSpec with Matchers {
 
   it should "accept custom timeout values" in {
     val config = OpenAIVisionConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       connectTimeout = 10.seconds,
       requestTimeout = 120.seconds
     )
@@ -26,7 +27,7 @@ class ImageProcessingConfigTest extends AnyFlatSpec with Matchers {
   }
 
   "AnthropicVisionConfig" should "have default timeout values" in {
-    val config = AnthropicVisionConfig(apiKey = "test-key")
+    val config = AnthropicVisionConfig(apiKey = Secret("test-key"))
 
     config.connectTimeout shouldBe 30.seconds
     config.requestTimeout shouldBe 60.seconds
@@ -34,7 +35,7 @@ class ImageProcessingConfigTest extends AnyFlatSpec with Matchers {
 
   it should "accept custom timeout values" in {
     val config = AnthropicVisionConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       connectTimeout = 15.seconds,
       requestTimeout = 90.seconds
     )

@@ -207,7 +207,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     val url = s"${config.baseUrl}/sdapi/v1/img2img"
     val headers = Map(
       "Content-Type" -> "application/json"
-    ) ++ config.apiKey.map(key => "Authorization" -> s"Bearer $key").toMap
+    ) ++ config.apiKey.map(key => "Authorization" -> s"Bearer ${key.reveal}").toMap
 
     logger.debug(s"Making img2img request to: $url")
     // logger.debug(s"Payload: ${write(payload, indent = 2)}") // Too large to log with base64 images
@@ -266,7 +266,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     val url = s"${config.baseUrl}/sdapi/v1/txt2img"
     val headers = Map(
       "Content-Type" -> "application/json"
-    ) ++ config.apiKey.map(key => "Authorization" -> s"Bearer $key").toMap
+    ) ++ config.apiKey.map(key => "Authorization" -> s"Bearer ${key.reveal}").toMap
 
     logger.debug(s"Making request to: $url")
     logger.debug(s"Payload: ${write(payload, indent = 2)}")

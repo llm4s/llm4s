@@ -115,7 +115,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
   // ---- private helpers ----
 
   private def validateConfig(): Either[LLMError, Unit] =
-    if (config.apiKey.trim.isEmpty)
+    if (config.apiKey.reveal.trim.isEmpty)
       Left(ConfigurationError("Gemini vision API key is blank", List("apiKey")))
     else if (config.model.trim.isEmpty)
       Left(ConfigurationError("Gemini vision model name is blank", List("model")))
@@ -130,7 +130,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
     // The key goes in a header: a query-string key is echoed by URI parse errors and could be
     // captured by proxies and access logs.
     val url     = s"${config.baseUrl}/models/${config.model}:generateContent"
-    val headers = Map("Content-Type" -> "application/json", "x-goog-api-key" -> config.apiKey)
+    val headers = Map("Content-Type" -> "application/json", "x-goog-api-key" -> config.apiKey.reveal)
 
     logger.debug(s"[GeminiVisionClient] Sending request to $url")
 

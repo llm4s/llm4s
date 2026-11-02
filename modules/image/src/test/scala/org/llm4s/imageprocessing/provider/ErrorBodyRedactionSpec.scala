@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
@@ -86,13 +87,13 @@ class ErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
   }
 
   private def openAI(baseUrl: String) =
-    new OpenAIVisionClient(OpenAIVisionConfig(apiKey = "x", baseUrl = baseUrl, requestTimeout = 10.seconds))
+    new OpenAIVisionClient(OpenAIVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeout = 10.seconds))
 
   private def anthropic(baseUrl: String) =
-    new AnthropicVisionClient(AnthropicVisionConfig(apiKey = "x", baseUrl = baseUrl, requestTimeout = 10.seconds))
+    new AnthropicVisionClient(AnthropicVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeout = 10.seconds))
 
   private def gemini(baseUrl: String) =
-    new GeminiVisionClient(GeminiVisionConfig(apiKey = "x", baseUrl = baseUrl, requestTimeoutSeconds = 10))
+    new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret("x"), baseUrl = baseUrl, requestTimeoutSeconds = 10))
 
   private val visionClients: Seq[(String, String => ImageProcessingClient)] =
     Seq("openai" -> openAI, "anthropic" -> anthropic, "gemini" -> gemini)
@@ -153,7 +154,7 @@ class ErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
     val http = new Answering(500, EchoedText)
     Seq(
       "stable-diffusion" -> new StableDiffusionClient(StableDiffusionConfig(baseUrl = "http://localhost:1"), http),
-      "huggingface"      -> new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), http)
+      "huggingface"      -> new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret("k")), http)
     ).foreach { case (name, client) =>
       withClue(s"$name: ") {
         val error = client.generateImage("a cat").left.getOrElse(fail("expected a failure")).message
@@ -168,7 +169,7 @@ class ErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
       status <- Seq(400, 500)
       body   <- Seq(EchoedText, EchoedJsonError)
     } withClue(s"$status, ${body.take(20)}: ") {
-      val client = new OpenAIImageClient(OpenAIConfig(apiKey = "k"), new Answering(status, body))
+      val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("k")), new Answering(status, body))
       val error  = client.generateImage("a cat").left.getOrElse(fail("expected a failure")).message
       error should include("[REDACTED]")
       assertNoSecret(error)

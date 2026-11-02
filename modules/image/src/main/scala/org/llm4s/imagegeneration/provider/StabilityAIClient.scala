@@ -148,7 +148,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     httpClient
       .get(
         healthUrl,
-        headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+        headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}"),
         timeout = 5.seconds
       )
       .toEither
@@ -254,7 +254,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       .post(
         url,
         headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
+          "Authorization" -> s"Bearer ${config.apiKey.reveal}",
           "Content-Type"  -> "application/json",
           "Accept"        -> "application/json" // Request JSON response with base64 images
         ),
