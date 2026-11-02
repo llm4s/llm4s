@@ -365,6 +365,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** the [support policy](docs/reference/support-policy.md): current lines and their status (`docs/_data/support.yml`), platform
   support and end of support; cadence and post-1.0 lines are marked to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+- **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
+  unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per
   minor release, and the [AI coding assistants](docs/ai-assistants.md) page ([#2287](https://github.com/llm4s/llm4s/issues/2287)).
 - **Added** a split sitemap for llm4s.org (`sitemap.xml` for the guide, `scaladoc-sitemap.xml` for the API pages, both in

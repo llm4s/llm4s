@@ -6,8 +6,8 @@ import org.llm4s.speech.tts.{ TTSOptions, Tacotron2TextToSpeech }
 import org.llm4s.speech.util.PlatformCommands
 import org.slf4j.LoggerFactory
 
-import java.io.{ DataOutputStream, FileOutputStream }
-import java.nio.file.{ Files, Path, Paths }
+import _root_.java.io.{ DataOutputStream, FileOutputStream }
+import _root_.java.nio.file.{ Files, Path, Paths }
 import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{ Try, Using }
 
@@ -51,7 +51,7 @@ object SpeechSamples {
     Files.createTempFile(filename, fileExt)
   }
 
-  def createTestWavFile(): Try[java.nio.file.Path] = {
+  def createTestWavFile(): Try[Path] = {
     val sampleRate     = 8000
     val channels       = 1
     val bitsPerSample  = 16
@@ -109,7 +109,7 @@ object SpeechSamples {
     }
   }
 
-  def createToneWavFile(): Try[java.nio.file.Path] = {
+  def createToneWavFile(): Try[Path] = {
     val sampleRate     = 16000 // Higher sample rate for better quality
     val channels       = 1
     val bitsPerSample  = 16
@@ -167,7 +167,7 @@ object SpeechSamples {
     }
   }
 
-  def createSpeechLikeWavFile(): Try[java.nio.file.Path] = {
+  def createSpeechLikeWavFile(): Try[Path] = {
     val sampleRate     = 16000 // Higher sample rate for better quality
     val channels       = 1
     val bitsPerSample  = 16

@@ -846,6 +846,9 @@ that does not answer in time `TIMEOUT`; any other failure with no status, such a
 
 ## Testing your code
 
+For a complete runnable example, see the [Java offline ticket classifier](../examples/#java-offline-example).
+It injects a `JLlmClient`, handles unknown replies and provider failures, and checks recorded prompts in its test.
+
 `FakeLlmClient` is a fake model for your own tests: it answers from a script, records every prompt your code sent, and
 needs no network or API key. Its `client()` is a real `JLlmClient`, so the code under test needs no interface or mock -
 give it the fake's client wherever it takes one:
