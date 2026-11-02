@@ -1042,6 +1042,7 @@ results.foreach(_.foreach { r =>
 
 ```scala
 import org.llm4s.reranker._
+import org.llm4s.security.Secret
 
 // Cohere reranker (recommended for production)
 val cohereReranker = RerankerFactory.cohere(
@@ -1055,7 +1056,7 @@ val passthrough = RerankerFactory.passthrough
 
 // From typed config
 val config = RerankProviderConfig(
-  apiKey = "your-api-key",
+  apiKey = Secret("your-api-key"),
   model = "rerank-english-v3.0",
   baseUrl = "https://api.cohere.com"
 )

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.it.Tier
@@ -136,7 +137,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
     WatsonXConfig
       .fromValues(
         modelName = modelName,
-        apiKey = key,
+        apiKey = Secret(key),
         projectId = projectId,
         spaceId = spaceId,
         baseUrl = baseUrl,
@@ -172,7 +173,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
   final private class Raw(cfg: WatsonXConfig, http: Llm4sHttpClient) {
     private lazy val token: String = {
       val form =
-        s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(cfg.apiKey, "UTF-8")}"
+        s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(cfg.apiKey.reveal, "UTF-8")}"
       val headers  = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
       val response = http.post(cfg.iamUrl, headers, form, 30.seconds).value
       withClue(s"IAM token exchange answered ${response.statusCode}")(response.statusCode shouldBe 200)
@@ -196,7 +197,7 @@ class WatsonXAssumptionProbeSpec extends AnyFlatSpec with Matchers with EitherVa
     }
 
     /** Text safe to print: the API key and the bearer token removed. */
-    def scrub(text: String): String = Seq(cfg.apiKey, token).foldLeft(text)(_.replace(_, "[REDACTED]")).take(600)
+    def scrub(text: String): String = Seq(cfg.apiKey.reveal, token).foldLeft(text)(_.replace(_, "[REDACTED]")).take(600)
 
     def chat(request: ujson.Obj): HttpResponse =
       http.post(url("/ml/v1/text/chat"), headers("application/json"), request.render(), 90.seconds).value
