@@ -19,12 +19,21 @@ object CredentialEchoChecks {
 
   /**
    * Starts a local server answering every request with HTTP 401 and [[echoBody]], runs
-   * `call(baseUrl)`, and fails unless it returns a `Left` whose message holds none of `key`'s forms.
+   * `call(baseUrl)`, and fails unless the server saw a request and the call returns a `Left` whose message holds none of `key`'s forms.
    */
-  def assertNotEchoed(key: String)(call: String => Either[LLMError, ?]): Unit =
-    LocalProviderTestServer.withServer("/")(LocalProviderTestServer.sendJsonResponse(_, 401, echoBody(key))) {
-      baseUrl => assertHidesKey(key, call(baseUrl))
+  def assertNotEchoed(key: String)(call: String => Either[LLMError, ?]): Unit = {
+    val requests = new java.util.concurrent.atomic.AtomicInteger(0)
+    val handler = (exchange: com.sun.net.httpserver.HttpExchange) => {
+      requests.incrementAndGet(): Unit
+      LocalProviderTestServer.sendJsonResponse(exchange, 401, echoBody(key))
     }
+    LocalProviderTestServer.withServer("/")(handler) { baseUrl =>
+      val result = call(baseUrl)
+      if (requests.get() < 1)
+        throw new AssertionError(s"the call never reached the server, so it proves nothing: $result")
+      assertHidesKey(key, result)
+    }
+  }
 
   /**
    * Fails unless `result` is a `Left` whose message holds none of `key`'s forms. For a client with

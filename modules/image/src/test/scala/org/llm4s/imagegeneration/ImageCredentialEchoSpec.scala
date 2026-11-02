@@ -26,7 +26,8 @@ class ImageCredentialEchoSpec extends AnyFlatSpec with Matchers {
   /** An image-generation transport that answers every call with 401 and the echoing body. */
   private object Answering extends HttpClient {
     private val body  = CredentialEchoChecks.echoBody(echoKey)
-    private def reply = Success(HttpResponse(401, body))
+    val calls         = new java.util.concurrent.atomic.AtomicInteger(0)
+    private def reply = { calls.incrementAndGet(); Success(HttpResponse(401, body)) }
     def post(url: String, headers: Map[String, String], data: String, timeout: FiniteDuration): Try[HttpResponse] =
       reply
     def postBytes(
@@ -47,7 +48,10 @@ class ImageCredentialEchoSpec extends AnyFlatSpec with Matchers {
       headers: Map[String, String],
       data: String,
       timeout: FiniteDuration
-    ): Try[HttpRawResponse] = Success(HttpRawResponse(401, body.getBytes(StandardCharsets.UTF_8)))
+    ): Try[HttpRawResponse] = {
+      calls.incrementAndGet()
+      Success(HttpRawResponse(401, body.getBytes(StandardCharsets.UTF_8)))
+    }
   }
 
   private def withImage[A](f: String => A): A = {
@@ -82,7 +86,9 @@ class ImageCredentialEchoSpec extends AnyFlatSpec with Matchers {
   // HuggingFaceClient hard-codes its endpoint, so it is reached through the HTTP client it is given.
   "HuggingFaceClient" should "keep an echoed key out of the error" in KnownSecrets.isolated {
     val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret(echoKey)), Answering)
-    CredentialEchoChecks.assertHidesKey(echoKey, client.generateImage("a cat"))
+    val result = client.generateImage("a cat")
+    withClue("the stub was never called: ")(Answering.calls.get() should be >= 1)
+    CredentialEchoChecks.assertHidesKey(echoKey, result)
   }
 
   "OpenAIVisionClient" should "keep an echoed key out of the error" in KnownSecrets.isolated {
