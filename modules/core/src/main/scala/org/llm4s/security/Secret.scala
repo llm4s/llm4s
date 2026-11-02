@@ -41,8 +41,9 @@ object Secret {
 
   /** HTTP Basic credentials: registers the password and the header's base64 of `user:password`. */
   def basic(user: String, password: String): Secret = {
-    KnownSecrets.register(orEmpty(password), KnownSecrets.Kind.Configured)
-    Secret(Base64.getEncoder.encodeToString(s"$user:$password".getBytes(StandardCharsets.UTF_8)))
+    val pw = orEmpty(password)
+    KnownSecrets.register(pw, KnownSecrets.Kind.Configured)
+    Secret(Base64.getEncoder.encodeToString(s"${orEmpty(user)}:$pw".getBytes(StandardCharsets.UTF_8)))
   }
 
   private def orEmpty(value: String): String = if (value == null) "" else value

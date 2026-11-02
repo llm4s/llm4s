@@ -45,4 +45,14 @@ class PgStoreKnownSecretsSpec extends AnyFlatSpec with Matchers {
       error.message should include("password authentication failed")
       (error.message should not).include(Password)
     }
+
+  "HybridSearcher.pgvectorShared" should "keep a JDBC URL's password out of a pool-creation error" in KnownSecrets
+    .isolated {
+      // No driver accepts this URL, and the pool quotes it in its error (masking only a password= parameter)
+      val url    = "jdbc:nosuchdriver://app:hybrid-password-0001@db.example.com/app"
+      val result = HybridSearcher.pgvectorShared(url)
+      val error  = result.left.getOrElse(fail(s"expected a failure, got $result"))
+      error.message should include("Failed to create connection pool")
+      (error.message should not).include("hybrid-password-0001")
+    }
 }

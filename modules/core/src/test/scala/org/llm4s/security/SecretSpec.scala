@@ -52,4 +52,9 @@ class SecretSpec extends AnyFlatSpec with Matchers {
     configured shouldBe token
     KnownSecrets.size shouldBe 0
   }
+
+  it should "read a null Basic password as empty in the header too" in KnownSecrets.isolated {
+    val header = Secret.basic("basic-user-0001", null).reveal
+    new String(java.util.Base64.getDecoder.decode(header), "UTF-8") shouldBe "basic-user-0001:"
+  }
 }
