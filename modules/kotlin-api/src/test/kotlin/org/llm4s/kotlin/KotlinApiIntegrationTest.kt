@@ -28,6 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.llm4s.javaapi.Llm4s as JLlm4s
+import org.llm4s.security.Secret
 import java.util.Optional
 
 private const val RegistryResource = "llm4s.modelRegistry.resourcePath"
@@ -207,7 +208,7 @@ class KotlinApiIntegrationTest {
 
     private class EndpointFactory(private val baseUrl: String) : ClientFactory {
         override fun createDefault(): LlmResult<JLlmClient> =
-            JLlm4s.createClient(OpenAICompatibleConfig.apply("test-model", baseUrl).withApiKey("test-key"))
+            JLlm4s.createClient(OpenAICompatibleConfig.apply("test-model", baseUrl).withApiKey(Secret.apply("test-key")))
 
         override fun createAgent(client: JLlmClient): JAgent = JLlm4s.createAgent(client)
     }
