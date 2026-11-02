@@ -237,6 +237,10 @@ it never overwrites. Write whatever the release deserves once it exists.
   It checks that `modules/samples/scala-cli/hello.scala` pins the release now on Maven Central (the prepare commit
   bumps it with `docs/_data/project.yml`) and runs `scala-cli compile` on it; it also runs weekly. Locally:
   `scripts/check-scala-cli-quickstart.sh --central --compile`.
+- Build and test the Mill quick start the same way: `gh workflow run mill-quickstart.yml`. It checks that
+  `llm4sVersion` in `modules/samples/mill/build.mill` is the release now on Maven Central (bump it with
+  `docs/_data/project.yml` in the prepare commit) and runs `./mill app.compile + app.test`; it also runs weekly.
+  Locally: `scripts/check-mill-quickstart.sh --central --build`.
 
 - After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
   Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's

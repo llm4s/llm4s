@@ -53,7 +53,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # Smoke test: exercises CheckPolicies + dev policy against committed HOCON (no live Ollama).
       - name: Run policy check
@@ -112,7 +112,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
       # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
@@ -229,6 +229,12 @@ jobs:
         run: |
           scripts/test-check-scala-cli-quickstart.sh
           scripts/check-scala-cli-quickstart.sh
+
+      # The same for the Mill quick start (modules/samples/mill, #2293); mill-quickstart.yml builds and tests it.
+      - name: Check the Mill quick start pins the latest release
+        run: |
+          scripts/test-check-mill-quickstart.sh
+          scripts/check-mill-quickstart.sh
 
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
@@ -368,7 +374,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Generate ScalaDoc
         # `doc` covers each module on its own; `docs/doc` builds the single aggregate API tree
@@ -456,7 +462,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Run tests with coverage
         env:
@@ -1042,7 +1048,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Download the legs' coverage data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -1095,7 +1101,7 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
       
       # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
       - name: Run tests
@@ -1135,7 +1141,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Run performance tests
         run: sbt testPerformance
@@ -1241,7 +1247,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # Postgres, Redis and Valkey are covered by the service health checks above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
@@ -1397,7 +1403,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # Resolving the baseline and the build's artifacts from Maven Central can hit a connection reset (seen once,
       # run 37316745524: "download error: Caught java.net.SocketException (Connection reset)"); the wrapper
@@ -1423,7 +1429,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Publish the library modules to local Maven
         # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
@@ -1432,7 +1438,7 @@ jobs:
         run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           gradle-version: '8.11.1'
           # Licence: v6's default 'enhanced' cache provider (gradle-actions-caching) is
@@ -1522,7 +1528,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Test the starter against the latest Spring Boot 3.x
         run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
@@ -1546,7 +1552,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Test the starter against Spring Boot 4.0
         run: sbt springBootStarterBoot4/test
@@ -1671,7 +1677,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
@@ -1762,7 +1768,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Build the workspace-runner image
         run: sbt workspaceRunner/Docker/publishLocal
@@ -1807,7 +1813,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # The official MCP reference server (#1006). Started in a step rather than as a service
       # container because a service cannot be given a command, and the server picks its
@@ -1866,7 +1872,21 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      # VertexAISmokeSpec authenticates with Application Default Credentials: a service-account
+      # JSON key, held as the VERTEX_CREDENTIALS_JSON secret, written to a file for
+      # GOOGLE_APPLICATION_CREDENTIALS. Without the secret nothing is written, and the suite fails
+      # under LLM4S_IT_STRICT like any other missing key.
+      - name: Write Vertex AI credentials
+        env:
+          VERTEX_CREDENTIALS_JSON: ${{ secrets.VERTEX_CREDENTIALS_JSON }}
+        run: |
+          if [ -n "$VERTEX_CREDENTIALS_JSON" ]; then
+            umask 077
+            printf '%s' "$VERTEX_CREDENTIALS_JSON" > "$RUNNER_TEMP/vertex-credentials.json"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/vertex-credentials.json" >> "$GITHUB_ENV"
+          fi
 
       - name: Run cloud smoke tests
         env:
@@ -1918,4 +1938,25 @@ jobs:
           WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
           # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # Smoke suites added for #1213. With LLM4S_IT_STRICT=true each required one that is
+          # missing from the repository secrets makes its suite FAIL (not skip).
+          # AzureSmokeSpec: the resource key, its endpoint (https://<resource>.openai.azure.com) and a
+          # chat deployment's name. AZURE_OPENAI_CUSTOM_ENDPOINT (the resource behind a custom domain)
+          # is optional; unset, that one test is cancelled.
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_API_BASE: ${{ secrets.AZURE_API_BASE }}
+          AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+          AZURE_OPENAI_CUSTOM_ENDPOINT: ${{ secrets.AZURE_OPENAI_CUSTOM_ENDPOINT }}
+          # RequestySmokeSpec.
+          REQUESTY_API_KEY: ${{ secrets.REQUESTY_API_KEY }}
+          # OpenAICompatibleSmokeSpec: the generic provider against Groq. GROQ_MODEL is optional.
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
+          # VoyageEmbeddingsSmokeSpec.
+          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+          # VertexAISmokeSpec: the project, plus the credentials file written above.
+          # GOOGLE_CLOUD_LOCATION (default us-central1) and VERTEX_MODEL are optional.
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+          VERTEX_MODEL: ${{ secrets.VERTEX_MODEL }}
         run: sbt testSmoke

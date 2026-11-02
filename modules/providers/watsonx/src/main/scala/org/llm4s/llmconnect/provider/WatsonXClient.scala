@@ -41,7 +41,12 @@ import scala.util.{ Try, Using }
  *    `libs/ibm/langchain_ibm/chat_models.py`;
  *  - `PY`: IBM's Python SDK, `ibm-watsonx-ai` 1.8.0 on PyPI;
  *  - `JAVA`: https://github.com/IBM/watsonx-ai-java-sdk at 02246d5 (2026-10-22), IBM's Java SDK, whose test
- *    resources include replies recorded from the service (`modules/watsonx-ai/src/test/...`).
+ *    resources include replies recorded from the service (`modules/watsonx-ai/src/test/...`);
+ *  - `DOCS`: IBM's documentation page "Building agent-driven workflows with the chat API"
+ *    (https://www.ibm.com/docs/SSYOK8/wsj/analyze-data/fm-api-chat-tools.html, read 2026-10-30), whose curl examples
+ *    post to `/ml/v1/text/chat?version=...` with `tool_choice_option: "auto"`, and whose quoted reply has
+ *    `finish_reason: "tool_calls"` and a call `{"id","type":"function","function":{"name","arguments"}}` with
+ *    `arguments` a JSON string. `WatsonXDocumentedShapesSpec` pins those shapes.
  *
  * The `@Cloud` suite `WatsonXAssumptionProbeSpec` (modules/it) re-checks each of these against a real account and
  * prints which held.
