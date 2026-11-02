@@ -1182,9 +1182,11 @@ object ApiKey {
 
 ```scala
 for {
-  config <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(config)
-  result <- client.complete(conversation)
+  config   <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client   <- LLMConnect.getClient(config)
+  result   <- client.complete(conversation)
 } yield result
 ```
 
@@ -2461,7 +2463,7 @@ Quick reference for finding code examples in llm4s codebase.
 | **Factory pattern**     | `llmconnect/LLMConnect.scala`            | `LLMConnect.getClient`                |
 | **Builder pattern**     | `toolapi/ToolBuilder.scala`              | `class ToolBuilder`                   |
 | **for-comprehension**   | `agent/Agent.scala`                      | `Agent.run` method                    |
-| **Config boundary**     | `config/Llm4sConfig.scala`               | `Llm4sConfig.provider()`              |
+| **Config boundary**     | `config/Llm4sConfig.scala`               | `Llm4sConfig.defaultProvider()`       |
 | **Error ADT**           | `error/LLMError.scala`                   | `sealed trait LLMError`               |
 | **Newtype**             | `types/ModelName.scala`                  | `case class ModelName(value: String)` |
 | **Resource management** | `effect/cats/LLMClientIO.scala`          | `Resource[F, A]` usage                |
