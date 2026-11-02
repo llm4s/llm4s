@@ -1,7 +1,7 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
-import org.llm4s.error.NotFoundError
+import org.llm4s.error.{ ConfigurationError, NotFoundError }
 import org.llm4s.security.Secret
 
 /**
@@ -175,7 +175,21 @@ object VectorStoreFactory {
    * @param config The store configuration
    * @return The vector store or error
    */
-  def create(config: Config): Result[VectorStore] = config.backend match {
+  def create(config: Config): Result[VectorStore] =
+    config.options.keys.find(CredentialKeys.contains) match {
+      case Some(key) =>
+        Left(
+          ConfigurationError(
+            s"VectorStoreFactory.Config option '$key' is a credential: set it with withSecret(\"$key\", Secret(...))",
+            List(key)
+          )
+        )
+      case None => createChecked(config)
+    }
+
+  private val CredentialKeys = Set("password", "apiKey")
+
+  private def createChecked(config: Config): Result[VectorStore] = config.backend match {
     case Backend.SQLite =>
       config.path match {
         case Some(path) => SQLiteVectorStore(path)

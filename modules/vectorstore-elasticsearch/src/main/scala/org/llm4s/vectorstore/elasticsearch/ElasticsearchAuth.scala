@@ -2,9 +2,6 @@ package org.llm4s.vectorstore.elasticsearch
 
 import org.llm4s.security.Secret
 
-import java.nio.charset.StandardCharsets
-import java.util.Base64
-
 /**
  * How [[ElasticsearchVectorStore]] authenticates to the cluster. Credentials are never printed by `toString`.
  */
@@ -38,10 +35,10 @@ object ElasticsearchAuth {
 
   /** HTTP basic authentication, for a native-realm user such as `elastic`. */
   final case class Basic(username: String, password: Secret) extends ElasticsearchAuth {
-    private def token: String =
-      Base64.getEncoder.encodeToString(s"$username:${password.reveal}".getBytes(StandardCharsets.UTF_8))
-    private[elasticsearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic $token")
-    private[elasticsearch] def secrets: Seq[String]         = Seq(password.reveal, token)
+    // Secret.basic registers the password and the base64 token, so an error body echoing either is scrubbed
+    private val token: Secret                               = Secret.basic(username, password.reveal)
+    private[elasticsearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic ${token.reveal}")
+    private[elasticsearch] def secrets: Seq[String]         = Seq(password.reveal, token.reveal)
     override def toString: String                           = s"Basic($username, ***)"
   }
 }

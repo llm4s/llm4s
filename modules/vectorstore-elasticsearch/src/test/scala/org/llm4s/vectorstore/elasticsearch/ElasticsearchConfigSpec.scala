@@ -99,4 +99,12 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
     ElasticsearchSimilarity.fromString("max_inner_product") shouldBe Some(ElasticsearchSimilarity.MaxInnerProduct)
     ElasticsearchSimilarity.fromString("euclid") shouldBe None
   }
+
+  it should "register the derived basic token so an error body echoing it is scrubbed" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val b64  = java.util.Base64.getEncoder.encodeToString("elastic:basic-pw-register-1".getBytes("UTF-8"))
+      val auth = ElasticsearchAuth.Basic("elastic", Secret("basic-pw-register-1"))
+      auth.headers("Authorization") shouldBe s"Basic $b64"
+      (org.llm4s.util.Redaction.safeBody(s"Basic $b64") should not).include(b64)
+    }
 }

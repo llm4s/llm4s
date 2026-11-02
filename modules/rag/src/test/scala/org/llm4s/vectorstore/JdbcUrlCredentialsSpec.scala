@@ -32,4 +32,12 @@ class JdbcUrlCredentialsSpec extends AnyFlatSpec with Matchers {
     (shown should not).include("factory-pw-3")
     VectorStoreFactory.Config.qdrantCloud("https://q.example", Secret("factory-key-4")).toString should include("***")
   }
+
+  it should "refuse a password or apiKey set as a plain option, naming withSecret" in {
+    Seq("password", "apiKey").foreach { key =>
+      val config = VectorStoreFactory.Config(VectorStoreFactory.Backend.PgVector).withOption(key, "x")
+      val error  = VectorStoreFactory.create(config).left.getOrElse(fail("expected a refusal"))
+      error.message should (include(key).and(include("withSecret")))
+    }
+  }
 }

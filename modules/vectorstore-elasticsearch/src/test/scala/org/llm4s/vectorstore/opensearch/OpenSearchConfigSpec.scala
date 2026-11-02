@@ -133,4 +133,12 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "keep l2's score, already in (0, 1]" in {
     OpenSearchSpaceType.L2.normalise(0.2) shouldBe 0.2
   }
+
+  it should "register the derived basic token so an error body echoing it is scrubbed" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val b64  = java.util.Base64.getEncoder.encodeToString("elastic:basic-pw-register-1".getBytes("UTF-8"))
+      val auth = OpenSearchAuth.Basic("elastic", Secret("basic-pw-register-1"))
+      auth.headers("Authorization") shouldBe s"Basic $b64"
+      (org.llm4s.util.Redaction.safeBody(s"Basic $b64") should not).include(b64)
+    }
 }
