@@ -37,8 +37,7 @@ capability by capability, and where each gap went.
 
 The comparison was checked against each project's documentation on 2026-10-23. **Where it went** names the
 destination of each llm4s gap: a later stage, an issue, the separate HTTP server project, or out of scope. Items
-marked *deferred* are the Stage 5 spec's Decisions 11 ("deferred, as later issues"); each gets its own issue when its
-work is picked up.
+marked *deferred* are the Stage 5 spec's Decision 11 ("deferred, as later issues"), each with its own issue.
 
 ## Durable execution and scale-out
 
@@ -56,7 +55,7 @@ work is picked up.
 | Thread search | By status and metadata, sorted ([threads](https://docs.langchain.com/langsmith/use-threads)) | Inherits | Thread registry: by tenant, status, agent, metadata and update time, paged; incomplete threads | Parity |
 | Retention | `checkpointer.ttl` (`delete` or `keep_latest`), `store.ttl`, swept every 5 minutes ([TTL](https://docs.langchain.com/langsmith/configure-ttl)) | Inherits | Store-wide sweep on the worker's schedule: by age, checkpoint and event counts; tombstones reclaimed with a defined answer for readers (`ThreadDeleted`); closed entries reclaimed | Parity |
 | Rolling upgrades | Shutdown draining is documented; schema migration behaviour of Agent Server across versions is not ([standalone](https://docs.langchain.com/langsmith/deploy-standalone-server)) | Inherits | Rolling within one schema and checkpoint format; otherwise a full stop, an old instance refusing a newer schema | Expand-then-contract migrations: with the 1.0 compatibility baseline |
-| Encryption at rest | AES keys for checkpoints and JSON fields; custom handlers with per-tenant keys (beta) ([encryption](https://docs.langchain.com/langsmith/custom-encryption)) | Inherits | None in the store (database-level encryption applies) | *Deferred*: checkpoint encryption at rest |
+| Encryption at rest | AES keys for checkpoints and JSON fields; custom handlers with per-tenant keys (beta) ([encryption](https://docs.langchain.com/langsmith/custom-encryption)) | Inherits | None in the store (database-level encryption applies) | *Deferred*: checkpoint encryption at rest ([#2449](https://github.com/llm4s/llm4s/issues/2449)) |
 | External durability engine | No | No | No (the store is the durability layer) | Out of scope for Stage 5; Temporal integration is [#876](https://github.com/llm4s/llm4s/issues/876) |
 
 ## Observability and operations
@@ -66,8 +65,8 @@ work is picked up.
 | Tracing | LangSmith by default; OpenTelemetry and Datadog export ([variables](https://docs.langchain.com/langsmith/env-var-self-hosted)) | Inherits; traces to LangSmith | OpenTelemetry span tree and Langfuse nesting from the agent's tracing; child runs under their `task` call | Parity |
 | One trace across machines | LangSmith `langsmith-trace` / `baggage` headers, opt-in ([distributed tracing](https://docs.langchain.com/langsmith/agent-server-distributed-tracing)) | Inherits | W3C `TraceContext` on the submission, continued by every attempt, recorded on every checkpoint | Parity (standard W3C headers) |
 | Metrics | Prometheus `GET /metrics`; Datadog ([metrics](https://docs.langchain.com/langsmith/self-hosted-agent-server-metrics)) | Inherits | Runs, claims, commits, child tasks, queue and sweep metrics through Prometheus or Micrometer | Parity |
-| Cron / scheduled runs | Thread-bound or stateless cron jobs ([cron](https://docs.langchain.com/langsmith/cron-jobs)) | Inherits | None | *Deferred*: cron |
-| Webhooks on completion | `webhook` on runs and crons ([webhooks](https://docs.langchain.com/langsmith/use-webhooks)) | Inherits | None (a caller can `await` a ticket) | *Deferred*: webhooks |
+| Cron / scheduled runs | Thread-bound or stateless cron jobs ([cron](https://docs.langchain.com/langsmith/cron-jobs)) | Inherits | None | *Deferred*: cron ([#2446](https://github.com/llm4s/llm4s/issues/2446)) |
+| Webhooks on completion | `webhook` on runs and crons ([webhooks](https://docs.langchain.com/langsmith/use-webhooks)) | Inherits | None (a caller can `await` a ticket) | *Deferred*: webhooks ([#2447](https://github.com/llm4s/llm4s/issues/2447)) |
 | Evaluation | LangSmith datasets and experiments; trajectory evaluators in `agentevals` ([trajectory evals](https://docs.langchain.com/langsmith/trajectory-evals)) | The same tooling | None in the runtime | **Stage 6**: agent evaluation ([#410](https://github.com/llm4s/llm4s/issues/410)) |
 
 ## Serving and deployment
@@ -75,9 +74,9 @@ work is picked up.
 | Capability | LangGraph Platform | Deep Agents | llm4s | Where it went |
 |---|---|---|---|---|
 | HTTP API for threads and runs | Agent Server, a superset of Agent Protocol ([Agent Protocol](https://www.langchain.com/blog/agent-protocol-interoperability-for-llm-agents)) | Inherits | An example service (`modules/deploy-service`); the kernel is transport-neutral | The separate HTTP server project (Decisions 2) |
-| A2A, MCP and AG-UI endpoints | MCP at `/mcp`, A2A at `/a2a/{assistant_id}` ([MCP](https://docs.langchain.com/langsmith/server-mcp), [A2A](https://docs.langchain.com/langsmith/server-a2a)) | Inherits | MCP client and server in `llm4s-mcp`, not exposed per agent; no A2A or AG-UI | *Deferred*: A2A, AG-UI; the server's endpoints: the HTTP server project |
+| A2A, MCP and AG-UI endpoints | MCP at `/mcp`, A2A at `/a2a/{assistant_id}` ([MCP](https://docs.langchain.com/langsmith/server-mcp), [A2A](https://docs.langchain.com/langsmith/server-a2a)) | Inherits | MCP client and server in `llm4s-mcp`, not exposed per agent; no A2A or AG-UI | *Deferred*: A2A ([#2450](https://github.com/llm4s/llm4s/issues/2450)), AG-UI ([#2451](https://github.com/llm4s/llm4s/issues/2451)); the server's endpoints: the HTTP server project |
 | Authentication | Custom auth handlers with owner filters; none by default when self-hosted ([auth](https://docs.langchain.com/langsmith/auth)) | Inherits | Every registry, queue and cancel call is tenant-scoped; authentication is the server's | The HTTP server project |
-| Versioned assistants | Assistants: graph plus config, every update a version, rollback by activating one ([assistants](https://docs.langchain.com/langsmith/assistants)) | Inherits | None: an agent is code, named by its id; graph versions are checked before a worker takes a thread | *Deferred*: versioned assistants |
+| Versioned assistants | Assistants: graph plus config, every update a version, rollback by activating one ([assistants](https://docs.langchain.com/langsmith/assistants)) | Inherits | None: an agent is code, named by its id; graph versions are checked before a worker takes a thread | *Deferred*: versioned assistants ([#2448](https://github.com/llm4s/llm4s/issues/2448)) |
 | Deployment | Cloud, Hybrid, self-hosted, or a standalone server that needs a license key and Postgres plus Redis ([deployment](https://docs.langchain.com/langsmith/deployment), [standalone](https://docs.langchain.com/langsmith/deploy-standalone-server)) | MIT library; deploy through LangSmith Deployment or Managed Deep Agents | MIT library in your own service; a Kubernetes overlay running three instances on one Postgres | Parity for self-hosting; no hosted offering (out of scope) |
 
 ## Agent harness
@@ -86,10 +85,10 @@ work is picked up.
 |---|---|---|---|---|
 | Human in the loop | `interrupt()` resumed with `Command(resume=...)` ([HITL](https://docs.langchain.com/langsmith/add-human-in-the-loop)) | `interrupt_on` per tool: approve, edit, reject ([HITL](https://docs.langchain.com/oss/python/deepagents/human-in-the-loop.md)) | Typed approvals and questions, concurrent interrupts, partial resume, breakpoints, edit and reject | Parity |
 | Subagents | Graph composition | `task` tool, general-purpose subagent, parallel calls ([subagents](https://docs.langchain.com/oss/python/deepagents/subagents)) | `task` and typed `TypedAgent[I, O]` delegation, isolated child threads, bounded parallel children, nested streams | Parity |
-| Background (async) subagents | - | Async subagents (beta) over Agent Protocol ([async subagents](https://docs.langchain.com/oss/python/deepagents/async-subagents)) | None: a `task` call waits for its child | *Deferred*: async subagents |
+| Background (async) subagents | - | Async subagents (beta) over Agent Protocol ([async subagents](https://docs.langchain.com/oss/python/deepagents/async-subagents)) | None: a `task` call waits for its child | *Deferred*: async subagents ([#2452](https://github.com/llm4s/llm4s/issues/2452)) |
 | Planning, files, context, skills, memory, sandbox | - | Todos, virtual filesystem backends, summarisation and offload, skills, `AGENTS.md`, sandboxed `execute` ([backends](https://docs.langchain.com/oss/python/deepagents/backends.md), [context](https://docs.langchain.com/oss/python/deepagents/context-engineering.md), [skills](https://docs.langchain.com/oss/python/deepagents/skills.md), [sandboxes](https://docs.langchain.com/oss/python/deepagents/sandboxes.md)) | The Deep Agents harness profile (Stage 3): todos, virtual files and composite backends, summarisation and offload, Agent Skills, instruction memory, workspace sandbox `execute` | Parity |
-| Long-term memory store | Postgres-backed `Store` with semantic search ([semantic search](https://docs.langchain.com/langsmith/semantic-search)) | `StoreBackend` for files across threads | Long-term store SPI and semantic-memory hooks (Stage 3); `llm4s-memory-postgres` for agent memory; no shared Postgres `LongTermStore` for the harness | *Deferred*: a Postgres `LongTermStore` |
-| Compensating tool actions | No | No | No (idempotency keys guard re-execution) | *Deferred*: compensating tool actions |
+| Long-term memory store | Postgres-backed `Store` with semantic search ([semantic search](https://docs.langchain.com/langsmith/semantic-search)) | `StoreBackend` for files across threads | Long-term store SPI and semantic-memory hooks (Stage 3); `llm4s-memory-postgres` for agent memory; no shared Postgres `LongTermStore` for the harness | *Deferred*: a Postgres `LongTermStore` ([#2453](https://github.com/llm4s/llm4s/issues/2453)) |
+| Compensating tool actions | No | No | No (idempotency keys guard re-execution) | *Deferred*: compensating tool actions ([#2454](https://github.com/llm4s/llm4s/issues/2454)) |
 
 ## Summary
 

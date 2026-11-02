@@ -80,9 +80,8 @@ Beta or Experimental module may change its API in a minor release ([1.0 Scope](v
 ## End of support
 
 Today a release stops getting fixes when a newer one is published, and nothing more is announced: the table above shows
-it as superseded. When longer-lived lines exist, an end-of-support date will be added to the table, and announced in the
-CHANGELOG and the GitHub Release of the release that ends it. How far ahead, and whether Discord or a pinned
-Discussion is also used, is **to be decided before 1.0**.
+it as superseded. How an end of support will be announced once longer-lived lines exist (the table above, the CHANGELOG,
+the GitHub Release, Discord), and how far ahead, is **to be decided before 1.0**.
 
 ---
 

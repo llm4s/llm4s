@@ -5,9 +5,18 @@ import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  CompletionOptions,
+  Conversation,
+  StreamedChunk,
+  ToolCall,
+  ToolMessage,
+  UserMessage
+}
 import org.llm4s.llmconnect.provider.MistralClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -33,10 +42,13 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   private val apiKey: Option[String] = Option(System.getenv("MISTRAL_API_KEY")).filter(_.nonEmpty)
 
-  private def config(key: String): MistralConfig =
+  /** A reasoning model: it returns its reasoning as `thinking` content chunks. */
+  private val ReasoningModel = "magistral-small-latest"
+
+  private def config(key: String, model: String = "mistral-small-latest"): MistralConfig =
     MistralConfig
       .fromValues(
-        modelName = "mistral-small-latest",
+        modelName = model,
         apiKey = key,
         baseUrl = MistralConfig.DEFAULT_BASE_URL
       )
@@ -45,6 +57,18 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
   private val options: CompletionOptions = CompletionOptions(maxTokens = Some(16))
+
+  private val NineCharacterId = "[A-Za-z0-9]{9}"
+
+  private def secretCodeTool: ToolFunction[_, _] = {
+    val schema = Schema
+      .`object`[Map[String, Any]]("Secret code parameters")
+      .withProperty(Schema.property("topic", Schema.string("What the code is for")))
+    ToolBuilder[Map[String, Any], String]("get_secret_code", "Looks up the secret code for a topic", schema)
+      .withHandler(params => params.getString("topic").map(_ => "ZX-4417"))
+      .buildSafe()
+      .value
+  }
 
   "Mistral" should "complete a basic request" in {
     Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
@@ -78,12 +102,94 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     result.swap.value shouldBe an[AuthenticationError]
   }
 
+  it should "return tool calls with nine-character ids" in {
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
+
+    val client = MistralClient(config(apiKey.get)).value
+    val completion = client
+      .complete(
+        Conversation(Seq(UserMessage("Use the get_secret_code tool with the topic 'vault'."))),
+        CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+      )
+      .value
+    client.close()
+
+    completion.toolCalls should not be empty
+    completion.toolCalls.foreach(_.id should fullyMatch regex NineCharacterId)
+  }
+
+  it should "accept a history whose tool-call id is not nine characters (from another provider)" in {
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
+
+    // Mistral rejects such an id itself; the dialect maps it to a stable nine-character one, on the call and the
+    // tool message alike, so the two still match.
+    val foreignId = "call_0123456789abcdefFOREIGN"
+    val history = Conversation(
+      Seq(
+        UserMessage("Use the get_secret_code tool with the topic 'vault', then tell me the code."),
+        AssistantMessage(toolCalls = Seq(ToolCall(foreignId, "get_secret_code", ujson.Obj("topic" -> "vault")))),
+        ToolMessage("ZX-4417", foreignId)
+      )
+    )
+
+    val client = MistralClient(config(apiKey.get)).value
+    val result = client.complete(
+      history,
+      CompletionOptions(temperature = 0.0, maxTokens = Some(64)).withTools(Seq(secretCodeTool))
+    )
+    client.close()
+
+    withClue(s"A history with a foreign tool-call id was rejected: ${result.swap.toOption}") {
+      result.isRight shouldBe true
+    }
+  }
+
+  it should "accept a history with an empty assistant turn" in {
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
+
+    // Mistral rejects an assistant message with neither content nor tool calls; the dialect leaves it out.
+    val history = Conversation(
+      Seq(UserMessage("Hello"), AssistantMessage(contentOpt = None), UserMessage("Say hi in one word"))
+    )
+
+    val client = MistralClient(config(apiKey.get)).value
+    val result = client.complete(history, options)
+    client.close()
+
+    withClue(s"A history with an empty assistant turn was rejected: ${result.swap.toOption}") {
+      result.isRight shouldBe true
+    }
+    result.value.content should not be empty
+  }
+
+  it should "stream a Magistral model's thinking chunks as thinking deltas, apart from the answer" in {
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
+
+    val client = MistralClient(config(apiKey.get, ReasoningModel)).value
+    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+    val result = client.streamComplete(conversation, CompletionOptions(maxTokens = Some(2048)), c => chunks += c)
+    client.close()
+
+    withClue(s"Streaming from $ReasoningModel failed: ${result.swap.toOption}") {
+      result.isRight shouldBe true
+    }
+    chunks.flatMap(_.thinkingDelta).mkString should not be empty
+    result.value.content should not be empty
+  }
+
   // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
 
   override protected def providerLabel: String                          = "Mistral"
   override protected def apiKeyEnvVar: String                           = "MISTRAL_API_KEY"
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = MistralClient(config(key))
+  // Magistral reasons whatever the options say and returns its reasoning as `thinking` content chunks, which the
+  // dialect reads back as Completion.thinking. The cap leaves room for the answer after the reasoning.
+  override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
+    MistralClient(config(key, ReasoningModel)).map { client =>
+      ReasoningSetup(client, CompletionOptions(maxTokens = Some(2048)), expectsThinkingText = true)
+    }
+  }
 
   registerCapabilityContract()
 }
