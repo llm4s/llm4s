@@ -27,7 +27,7 @@ providers:
     chat_api_key: "required"
     chat_workload_identity: false
     embeddings: false
-    cloud_smoke: []
+    cloud_smoke: ["AzureSmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
@@ -168,7 +168,7 @@ providers:
     chat_api_key: "not required"
     chat_workload_identity: true
     embeddings: false
-    cloud_smoke: []
+    cloud_smoke: ["OpenAICompatibleSmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
@@ -198,7 +198,7 @@ providers:
     chat_api_key: "required"
     chat_workload_identity: false
     embeddings: false
-    cloud_smoke: []
+    cloud_smoke: ["RequestySmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
@@ -213,7 +213,7 @@ providers:
     chat_api_key: "not required"
     chat_workload_identity: false
     embeddings: false
-    cloud_smoke: []
+    cloud_smoke: ["VertexAISmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
@@ -225,7 +225,7 @@ providers:
     embedding_artifact: "llm4s-voyage"
     embedding_module: "org.llm4s.llmconnect.provider.Llm4sVoyageModule"
     embedding_api_key: "required"
-    cloud_smoke: []
+    cloud_smoke: ["VoyageEmbeddingsSmokeSpec"]
     structured_output: "not declared"
     vision_input: "not declared"
     reasoning_effort: "not declared"
