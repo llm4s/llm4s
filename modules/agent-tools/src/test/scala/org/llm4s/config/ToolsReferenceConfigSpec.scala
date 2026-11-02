@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 // scalafix:off DisableSyntax.NoConfigFactory
+import org.llm4s.security.Secret
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
 import org.scalatest.EitherValues
@@ -29,7 +30,7 @@ class ToolsReferenceConfigSpec extends AnyWordSpec with Matchers with EitherValu
       )
 
       ToolsConfigLoader.loadBraveSearchTool(source).value shouldBe
-        BraveSearchToolConfig("brave-env-key", "https://brave.example/res/v1", 7, "strict")
+        BraveSearchToolConfig(Secret("brave-env-key"), "https://brave.example/res/v1", 7, "strict")
     }
 
     "bind the EXA_* variables under llm4s.tools.exa" in {
@@ -45,7 +46,7 @@ class ToolsReferenceConfigSpec extends AnyWordSpec with Matchers with EitherValu
       )
 
       ToolsConfigLoader.loadExaSearchTool(source).value shouldBe
-        ExaSearchToolConfig("exa-env-key", "https://exa.example", 3, "neural", 900)
+        ExaSearchToolConfig(Secret("exa-env-key"), "https://exa.example", 3, "neural", 900)
     }
 
     "bind DUCK_DUCK_GO_SEARCH_API_URL under llm4s.tools.duckduckgo" in {
@@ -63,9 +64,9 @@ class ToolsReferenceConfigSpec extends AnyWordSpec with Matchers with EitherValu
       )
 
       ToolsConfigLoader.loadBraveSearchTool(source).value shouldBe
-        BraveSearchToolConfig("b", "https://api.search.brave.com/res/v1", 5, "moderate")
+        BraveSearchToolConfig(Secret("b"), "https://api.search.brave.com/res/v1", 5, "moderate")
       ToolsConfigLoader.loadExaSearchTool(source).value shouldBe
-        ExaSearchToolConfig("e", "https://api.exa.ai", 10, "auto", 500)
+        ExaSearchToolConfig(Secret("e"), "https://api.exa.ai", 10, "auto", 500)
       ToolsConfigLoader.loadDuckDuckGoSearchTool(source).value shouldBe
         DuckDuckGoSearchToolConfig("https://api.duckduckgo.com/")
     }
@@ -92,7 +93,7 @@ class ToolsReferenceConfigSpec extends AnyWordSpec with Matchers with EitherValu
         )
       ) {
         val cfg = ToolsConfigLoader.loadBraveSearchTool().value
-        cfg.apiKey shouldBe "brave-test-key"
+        cfg.apiKey.reveal shouldBe "brave-test-key"
         cfg.count shouldBe 10
         cfg.safeSearch shouldBe "moderate"
       }
@@ -115,7 +116,7 @@ class ToolsReferenceConfigSpec extends AnyWordSpec with Matchers with EitherValu
         )
       ) {
         ToolsConfigLoader.loadExaSearchTool().value shouldBe
-          ExaSearchToolConfig("exa-test-key", "https://api.exa.ai", 10, "auto", 3000)
+          ExaSearchToolConfig(Secret("exa-test-key"), "https://api.exa.ai", 10, "auto", 3000)
       }
     }
   }
