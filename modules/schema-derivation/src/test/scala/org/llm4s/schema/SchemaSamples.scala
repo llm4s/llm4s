@@ -7,12 +7,21 @@ package org.llm4s.schema
  * booleans, negative, zero and large numbers - and an object's samples line its properties' samples up side by
  * side, so the count stays the largest of its properties' rather than their product.
  *
+ * An `anyOf`, a sum type, is sampled as every alternative's samples.
+ *
  * A string with no `enum` is sampled as decimal text (`"7"`, `"-12"`): `BigDecimal` and `BigInt` are written as
  * strings, and llm4s-core's schema model has no `pattern` to say that only numeric text reads back.
  */
 object SchemaSamples {
 
-  def of(schema: ujson.Value): List[ujson.Value] = {
+  def of(schema: ujson.Value): List[ujson.Value] =
+    schema.obj.get("anyOf") match {
+      // every alternative's samples: each case of a sum type
+      case Some(alternatives) => alternatives.arr.toList.flatMap(of)
+      case None               => ofOne(schema)
+    }
+
+  private def ofOne(schema: ujson.Value): List[ujson.Value] = {
     val types = schema.obj.get("type").toList.flatMap {
       case ujson.Str(name) => List(name)
       case names           => names.arr.toList.map(_.str)

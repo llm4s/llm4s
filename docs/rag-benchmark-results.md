@@ -580,10 +580,13 @@ Create a JSONL file with the following format:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.rag.benchmark._
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.model.ModelRegistryService
 
 // Initialize clients
 val runner = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   llm <- LLMConnect.getClient(providerConfig)
   (embedProvider, embedConfig) <- Llm4sConfig.embeddings()
   embed <- EmbeddingClient.from(embedProvider, embedConfig)

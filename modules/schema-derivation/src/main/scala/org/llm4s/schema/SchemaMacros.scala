@@ -4,8 +4,8 @@ import scala.quoted.*
 
 /**
  * Compile-time helpers of the derivation. Scala 3's `Mirror` carries a type's field names and types but not its
- * annotations, and cannot walk a type to detect recursion or to see whether a sealed hierarchy has fields, so
- * those three things are done here, confined to this object.
+ * annotations, and cannot walk a type to detect recursion or to see how a sealed hierarchy is built, so
+ * those things are done here, confined to this object.
  *
  * Internal to the module: `inline` code in [[SchemaOf]] expands at the user's call site, and the compiler gives it
  * the access it needs.
@@ -22,14 +22,29 @@ private[schema] object SchemaMacros {
    * The `@upickle.implicits.key` of each case of the enum or sealed hierarchy `A`, by case name: the string uPickle
    * writes for that case instead of its name.
    */
-  inline def caseKeys[A]: Map[String, String] = ${ caseKeysImpl[A] }
+  inline def caseKeys[A]: Map[String, String] = ${ caseAnnotationsImpl[A]("upickle.implicits.key") }
+
+  /** The `@description` of each case of the enum or sealed hierarchy `A` that has one, by case name. */
+  inline def caseDescriptions[A]: Map[String, String] = ${ caseAnnotationsImpl[A]("org.llm4s.schema.description") }
+
+  /**
+   * The key uPickle writes a case of the sum `A` with fields under, which holds the case's tag: the sum's
+   * `@upickle.implicits.key`, else `"$type"`.
+   */
+  inline def discriminator[A]: String = ${ discriminatorImpl[A] }
+
+  /**
+   * Whether every case of the enum or sealed hierarchy `A` is a singleton (an enum case or case object without
+   * fields), which uPickle writes as a bare string. A constant, so that `inline if` can branch on it.
+   */
+  transparent inline def singletons[A]: Boolean = ${ singletonsImpl[A] }
 
   /** The `@description` of the type `A` itself. */
   inline def typeDescription[A]: Option[String] = ${ typeDescriptionImpl[A] }
 
   /**
    * Fails compilation, naming the type, if `A` is a tuple or a named tuple, refers to itself or is (or holds) a
-   * sealed hierarchy with fields. A type with a hand-written `given SchemaOf` of its own, other than the one being
+   * sealed hierarchy nested in another or with a generic case. A type with a hand-written `given SchemaOf` of its own, other than the one being
    * derived, is not looked into: its schema is whatever that given says. When that given itself derives a type
    * that reaches back to `A`, the recursion is not visible here; building the schema then fails at run time
    * instead (see `SchemaOf.product`).
@@ -51,9 +66,9 @@ private[schema] object SchemaMacros {
     Expr.ofList(parameters.map(p => Expr(p.getAnnotation(annotation).flatMap(a => stringArgument(a)))))
   }
 
-  private def caseKeysImpl[A: Type](using q: Quotes): Expr[Map[String, String]] = {
+  private def caseAnnotationsImpl[A: Type](annotationClass: String)(using q: Quotes): Expr[Map[String, String]] = {
     import q.reflect.*
-    val annotation = Symbol.requiredClass("upickle.implicits.key")
+    val annotation = Symbol.requiredClass(annotationClass)
     // An enum case without parameters is a term; a case object is a module, whose annotations sit on its class.
     def key(child: Symbol): Option[String] =
       List(child, child.moduleClass, child.companionModule)
@@ -65,6 +80,17 @@ private[schema] object SchemaMacros {
       key(child).map(written => child.name.stripSuffix("$") -> written)
     }
     Expr(keys.toMap)
+  }
+
+  private def singletonsImpl[A: Type](using q: Quotes): Expr[Boolean] = {
+    import q.reflect.*
+    Expr(TypeRepr.of[A].typeSymbol.children.forall(child => child.isTerm || child.flags.is(Flags.Module)))
+  }
+
+  private def discriminatorImpl[A: Type](using q: Quotes): Expr[String] = {
+    import q.reflect.*
+    val annotation = Symbol.requiredClass("upickle.implicits.key")
+    Expr(TypeRepr.of[A].typeSymbol.getAnnotation(annotation).flatMap(a => stringArgument(a)).getOrElse("$type"))
   }
 
   private def typeDescriptionImpl[A: Type](using q: Quotes): Expr[Option[String]] = {
@@ -146,14 +172,23 @@ private[schema] object SchemaMacros {
           } else if (sym.flags.is(Flags.Case) && sym.isClassDef) {
             sym.caseFields.foreach(field => walk(t.memberType(field), t :: path))
           } else if (sym.flags.is(Flags.Sealed)) {
-            sym.children.foreach { child =>
-              if (!isSingleton(child)) {
+            // A singleton is written as its tag; a case with fields as an object, walked like any case class,
+            // with the sum on the path so that a case holding the sum again is found to be recursive.
+            sym.children.filterNot(isSingleton).foreach { child =>
+              if (!(child.flags.is(Flags.Case) && child.isClassDef)) {
                 fail(
-                  s"Cannot derive SchemaOf[${root.show}]: ${child.name} of ${sym.name} is not a " +
-                    "singleton (it has fields, or is itself a hierarchy). A sealed hierarchy with fields needs a " +
-                    "JSON Schema oneOf, which llm4s-core's schema model cannot express. Only enums and sealed " +
-                    "hierarchies of singletons (case objects) are supported."
+                  s"Cannot derive SchemaOf[${root.show}]: ${child.name} of ${sym.name} is itself a sealed " +
+                    "hierarchy. uPickle writes a nested hierarchy's cases under their own tags, which the derived " +
+                    "schema does not describe: list the cases directly under one sealed trait or enum."
                 )
+              } else if (child.primaryConstructor.paramSymss.flatten.exists(_.isType)) {
+                fail(
+                  s"Cannot derive SchemaOf[${root.show}]: ${child.name} of ${sym.name} is generic. A case of a sum " +
+                    "type with fields must have no type parameters, so that its fields have one schema."
+                )
+              } else {
+                val caseType = child.typeRef
+                child.caseFields.foreach(field => walk(caseType.memberType(field), caseType :: t :: path))
               }
             }
           }

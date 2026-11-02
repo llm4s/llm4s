@@ -112,7 +112,7 @@ jobs:
           cache: 'sbt'
 
       - name: Setup sbt
-        uses: sbt/setup-sbt@ecad189dd245444b9ae0a0cd5922fd938b88906f # v1.5.12
+        uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Setup Pages
         id: pages
@@ -217,6 +217,13 @@ jobs:
           bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
         env:
           JEKYLL_ENV: production
+
+      # sitemap.xml (jekyll-sitemap) lists the guide pages only; the Scaladoc, copied in above, gets its own file (#2318).
+      # The check fails the deploy if sitemap.xml lists a /scaladoc/ URL, a PDF or too many URLs, or robots.txt omits one.
+      - name: Generate and check the sitemaps
+        run: |
+          scripts/generate-scaladoc-sitemap.sh docs/_site
+          scripts/check-site-sitemaps.sh docs/_site
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
