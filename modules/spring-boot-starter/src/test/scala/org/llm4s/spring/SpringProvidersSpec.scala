@@ -637,6 +637,12 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     (error should not).include(key)
   }
 
+  "SpringProviderSource.configSecrets" should "read a Secret held by a vendor config" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val cfg = org.llm4s.llmconnect.config.OpenAIConfig(org.llm4s.security.Secret("sk-config-held-key-123"), "gpt-4o")
+      SpringProviderSource.configSecrets(cfg) should contain("sk-config-held-key-123")
+    }
+
   "SpringProviderSource.configSecrets" should "read every secret-looking text field of a config, set or optional" in {
     final case class SomeConfig(apiKey: String, sessionToken: Option[String], model: String, maxTokens: Int)
         extends org.llm4s.llmconnect.config.ProviderConfig {
