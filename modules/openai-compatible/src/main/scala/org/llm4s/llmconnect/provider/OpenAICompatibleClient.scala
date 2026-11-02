@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.security.Secret
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -78,6 +78,13 @@ class OpenAICompatibleClient(
   OpenAICompatibleClient
     .blankStaticKey(settings)
     .foreach(message => throw new IllegalArgumentException(message))
+
+  // A configured credential header and the exchange's client id are scrubbed from any error built from a reply.
+  OpenAICompatibleClient.registerCredentials(settings, dialect.headers)
+
+  // Each dynamic bearer is registered before it is sent, so an error body echoing it is scrubbed; the generation
+  // before the previous one is released. The provider may be the caller's own code, so it is registered here.
+  private val bearers = new TokenGenerations
 
   // Scoped to the provider package so specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
@@ -333,7 +340,10 @@ class OpenAICompatibleClient(
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
-        CachingAccessTokenProvider.guarded(p.token()).map(Some(_))
+        CachingAccessTokenProvider.guarded(p.token()).map { token =>
+          bearers.rotate(token)
+          Some(token)
+        }
       )
 
   /**
@@ -621,6 +631,18 @@ object OpenAICompatibleClient {
       "is the credential's token - remove the header"
 
   /** Whether `headers` set `Authorization` (in any case) over a `credential` whose token is refreshed. */
+  /**
+   * Registers with `KnownSecrets` what a client built from `settings` and `headers` must keep out of an error:
+   * each header with a credential name (a static `Authorization`, an `x-api-key`), and an exchange's client id.
+   */
+  private[provider] def registerCredentials(settings: Settings, headers: Seq[(String, String)]): Unit = {
+    KnownSecrets.registerHeaders(headers)
+    settings.credential match {
+      case Credential.Exchange(config) => config.clientId.foreach(KnownSecrets.registerIdentifier)
+      case _                           => ()
+    }
+  }
+
   private[provider] def overridesDynamicBearer(credential: Credential, headers: Seq[(String, String)]): Boolean =
     credential match
       case Credential.Dynamic(_) | Credential.Exchange(_) => headers.exists(_._1.equalsIgnoreCase("Authorization"))

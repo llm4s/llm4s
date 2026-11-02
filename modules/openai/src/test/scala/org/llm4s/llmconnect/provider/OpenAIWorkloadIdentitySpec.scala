@@ -105,8 +105,25 @@ class OpenAIWorkloadIdentitySpec
     }
 
     "redact the token exchange's reply, and the registered ids, from an SDK error" in KnownSecrets.isolated {
-      Secret.token("opaque-svid-literal-7")
-      Seq("idp_secret_1", "sa_secret_1", "client_secret_id_1").foreach(KnownSecrets.registerIdentifier)
+      // Registered as a client registers them (#1932): the ids at construction, the subject token as the SDK reads it.
+      val wi = OpenAIWorkloadIdentity(
+        IdentitySource.Literal("opaque-svid-literal-7"),
+        "idp_secret_1",
+        "sa_secret_1",
+        Some(Secret("client_secret_id_1"))
+      )
+      OpenAIClient.registerCredentials(
+        OpenAIConfig(
+          Secret(""),
+          "gpt-4o-mini",
+          None,
+          "https://api.openai.com/v1",
+          128000,
+          4096,
+          workloadIdentity = Some(wi)
+        )
+      )
+      OpenAIClientTransport.sdkWorkloadIdentity(wi).provider().getToken(null, null) shouldBe "opaque-svid-literal-7"
       val sdkMessages = Seq(
         // What the SDK's exchange reports for a reply without an access token.
         "Token exchange response missing 'access_token' field. Response: " +
@@ -126,6 +143,28 @@ class OpenAIWorkloadIdentitySpec
           )
         do (error.message should not).include(secret)
     }
+
+    "mask each subject token it hands the SDK when the exchange's error echoes it bare, keeping two generations (#1932)" in
+      KnownSecrets.isolated {
+        val file = Files.createTempFile("svid", ".jwt")
+        file.toFile.deleteOnExit()
+        val provider = OpenAIClientTransport
+          .sdkWorkloadIdentity(OpenAIWorkloadIdentity(IdentitySource.File(file), "i", "s"))
+          .provider()
+        val subjects = Seq("opaqueSvidGen000001", "opaqueSvidGen000002", "opaqueSvidGen000003")
+        for t <- subjects do
+          Files.writeString(file, t)
+          provider.getToken(null, null) shouldBe t
+          val message = OpenAIClient
+            .mapError(
+              new com.openai.errors.OpenAIInvalidDataException(s"Token exchange failed for subject $t"),
+              "openai"
+            )
+            .message
+          message should include("Token exchange failed")
+          (message should not).include(t)
+        KnownSecrets.scrub(subjects.head, "[X]") shouldBe subjects.head
+      }
 
     "read the identity token for the async path off the common pool" in {
       val file = Files.createTempFile("svid", ".jwt")

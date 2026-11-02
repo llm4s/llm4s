@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.security.Secret
+import org.llm4s.security.{ KnownSecrets, Secret }
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
@@ -134,6 +134,33 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
+  it should "mask a token from the caller's provider that the service's error echoes bare (#1932)" in KnownSecrets
+    .isolated {
+      val token = "opaqueEntraToken00001"
+      // A plain provider, not a caching one: the client itself must register what it sends.
+      val own = new AccessTokenProvider {
+        def token(): Result[String]            = Right("opaqueEntraToken00001")
+        def invalidate(rejected: String): Unit = ()
+      }
+      val authorizations = new ConcurrentLinkedQueue[String]()
+      LocalProviderTestServer.withServer("/") { (exchange: HttpExchange) =>
+        exchange.getRequestBody.readAllBytes()
+        authorizations.add(exchange.getRequestHeaders.getFirst("Authorization"))
+        LocalProviderTestServer.sendJsonResponse(
+          exchange,
+          403,
+          s"""{"error":{"message":"request with $token is denied"}}"""
+        )
+      } { baseUrl =>
+        val client  = OpenAIClient(AzureConfig.keyless(baseUrl, "my-deploy", own)).value
+        val message = client.complete(hello, CompletionOptions()).left.value.message
+        client.close()
+        authorizations.asScala.toList shouldBe List(s"Bearer $token")
+        message should include("denied")
+        (message should not).include(token)
+      }
+    }
+
   it should "stream with the bearer token, and drop one a streamed request is refused with" in {
     val authorizations = new ConcurrentLinkedQueue[String]()
     LocalProviderTestServer.withServer("/") { (exchange: HttpExchange) =>
@@ -203,6 +230,32 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       provider.embed(request).map(_.embeddings) shouldBe Right(Seq(Vector(0.1, 0.2)))
       tokens.invalidated.asScala.toList shouldBe List("token-1")
       authorizations.asScala.toList shouldBe List("Bearer token-1", "Bearer token-2")
+    }
+  }
+
+  it should "mask a token the service's error echoes bare (#1932)" in KnownSecrets.isolated {
+    val token = "opaqueEntraEmbed00001"
+    val own = new AccessTokenProvider {
+      def token(): Result[String]            = Right("opaqueEntraEmbed00001")
+      def invalidate(rejected: String): Unit = ()
+    }
+    val authorizations = new ConcurrentLinkedQueue[String]()
+    LocalProviderTestServer.withServer("/openai/v1/embeddings") { (exchange: HttpExchange) =>
+      exchange.getRequestBody.readAllBytes()
+      authorizations.add(exchange.getRequestHeaders.getFirst("Authorization"))
+      LocalProviderTestServer.sendJsonResponse(
+        exchange,
+        403,
+        s"""{"error":{"message":"request with $token is denied"}}"""
+      )
+    } { baseUrl =>
+      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
+      val provider = OpenAIEmbeddingProvider.fromConfig(config, own)
+      val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
+      val message  = provider.embed(request).left.value.message
+      authorizations.asScala.toList shouldBe List(s"Bearer $token")
+      message should include("denied")
+      (message should not).include(token)
     }
   }
 }

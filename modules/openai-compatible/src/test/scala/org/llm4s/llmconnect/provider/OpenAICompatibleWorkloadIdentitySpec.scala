@@ -300,12 +300,11 @@ class OpenAICompatibleWorkloadIdentitySpec
         val bearer                                 = "opaque-dbx-token-1"
         val clientId                               = "sp-client-5e7d"
         val subject                                = "opaque-svid-literal-42"
-        Secret.token(subject)
-        KnownSecrets.registerIdentifier(clientId)
+        // Nothing is registered by hand, and each value is echoed bare, under no credential key: only the client's
+        // own registration (#1932) can mask them.
         val rejected = HttpResponse(
           403,
-          s"""{"error":{"message":"token $bearer of $clientId (subject $subject) lacks permission"},""" +
-            s""""access_token":"$bearer"}"""
+          s"""{"error":{"message":"request with $bearer of $clientId (subject $subject) lacks permission"}}"""
         )
         for streaming <- Seq(false, true) do
           val http = MockHttpClient(
@@ -334,6 +333,87 @@ class OpenAICompatibleWorkloadIdentitySpec
           error.message should include("lacks permission")
           for secret <- Seq(bearer, clientId, subject) do (error.message should not).include(secret)
           c.close()
+      }
+
+    "keep two generations of exchanged and subject tokens registered across refreshes, and no more (#1932)" in
+      KnownSecrets.isolated {
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val subjects = Seq("opaqueSubjectGen0001", "opaqueSubjectGen0002", "opaqueSubjectGen0003")
+        val access   = Seq("opaqueAccessGen00001", "opaqueAccessGen00002", "opaqueAccessGen00003")
+        val ok = HttpResponse(200, """{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"hi"}}]}""")
+        // expires_in 0: no token is cached, so every request exchanges afresh
+        val http =
+          MockHttpClient(access.flatMap(a => Seq(HttpResponse(200, s"""{"access_token":"$a","expires_in":0}"""), ok)))
+        val svid = svidFile(subjects.head)
+        val config = OpenAICompatibleConfig(
+          model = "m",
+          baseUrl = "https://ws.example/serving-endpoints",
+          tokenExchange = Some(TokenExchangeConfig(IdentitySource.File(svid), "https://ws.example/oidc/v1/token"))
+        )
+        val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
+          override protected[provider] val httpClient: Llm4sHttpClient = http
+        }
+        val sizes = subjects.map { subject =>
+          Files.writeString(svid, subject)
+          c.complete(conversation, CompletionOptions()).isRight shouldBe true
+          KnownSecrets.size
+        }
+        http.posts.collect {
+          case (url, headers, _) if url.endsWith("/chat/completions") => headers("Authorization")
+        } shouldBe
+          access.map(a => s"Bearer $a")
+        for t <- Seq(subjects(1), subjects(2), access(1), access(2)) do KnownSecrets.scrub(t, "[X]") shouldBe "[X]"
+        for t <- Seq(subjects.head, access.head) do KnownSecrets.scrub(t, "[X]") shouldBe t
+        sizes(2) shouldBe sizes(1)
+        c.close()
+      }
+
+    "mask a token from the caller's own Dynamic provider that an error body echoes, on complete or stream (#1932)" in
+      KnownSecrets.isolated {
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val token                                  = "opaqueDynamicToken0001"
+        // A plain provider, not CachingAccessTokenProvider: the client itself must register what it sends.
+        val own = new AccessTokenProvider:
+          def token(): Result[String]            = Right("opaqueDynamicToken0001")
+          def invalidate(rejected: String): Unit = ()
+        for streaming <- Seq(false, true) do
+          val http =
+            MockHttpClient(Seq(HttpResponse(403, s"""{"error":{"message":"request with $token lacks permission"}}""")))
+          val c = new OpenAICompatibleClient(
+            OpenAICompatibleClient
+              .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Dynamic(own), 8192, 2048),
+            OpenAICompatibleDialect.Standard
+          ) {
+            override protected[provider] val httpClient: Llm4sHttpClient = http
+          }
+          val result =
+            if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+            else c.complete(conversation, CompletionOptions())
+          http.posts.head._2("Authorization") shouldBe s"Bearer $token"
+          val message = result.left.value.message
+          message should include("lacks permission")
+          (message should not).include(token)
+          c.close()
+      }
+
+    "mask the token of a static Authorization header that an error body echoes without its scheme (#1932)" in
+      KnownSecrets.isolated {
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val token                                  = "opaqueStaticHeader0001"
+        val http =
+          MockHttpClient(Seq(HttpResponse(403, s"""{"error":{"message":"request with $token lacks permission"}}""")))
+        val c = new OpenAICompatibleClient(
+          OpenAICompatibleClient
+            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Anonymous, 8192, 2048),
+          OpenAICompatibleDialect.standard(Seq("Authorization" -> s"Bearer $token"))
+        ) {
+          override protected[provider] val httpClient: Llm4sHttpClient = http
+        }
+        val message = c.complete(conversation, CompletionOptions()).left.value.message
+        http.posts.head._2("Authorization") shouldBe s"Bearer $token"
+        message should include("lacks permission")
+        (message should not).include(token)
+        c.close()
       }
 
     "return a Left, never overflow, for an API error body nested 100,000 deep, on complete or stream" in {

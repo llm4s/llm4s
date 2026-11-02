@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.security.Secret
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, NetworkError, RateLimitError, ValidationError }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -104,6 +104,23 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
     val denied = client(new MockHttpClient(Seq(iam, HttpResponse(401, """{"errors":[{"message":"nope"}]}"""))))
     denied.complete(hi, CompletionOptions()).left.toOption.exists(_.isInstanceOf[AuthenticationError]) shouldBe true
+  }
+
+  test("an error body echoing the IAM token it was sent with does not carry it into the error (#1932)") {
+    KnownSecrets.isolated {
+      // A shape no pattern heuristic recognises, echoed without its scheme: only registration can mask it.
+      val token = "opaqueIamToken0001abcd"
+      val http = new MockHttpClient(
+        Seq(
+          HttpResponse(200, s"""{"access_token":"$token","expires_in":3600}"""),
+          HttpResponse(500, s"""{"errors":[{"message":"request with $token failed"}]}""")
+        )
+      )
+      val message = client(http).complete(hi, CompletionOptions()).left.toOption.map(_.message).getOrElse(fail("Left"))
+      http.lastHeaders.flatMap(_.get("Authorization")) shouldBe Some(s"Bearer $token")
+      message should include("failed")
+      (message should not).include(token)
+    }
   }
 
   test("a response without choices is a ValidationError") {

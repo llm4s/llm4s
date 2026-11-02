@@ -5,6 +5,7 @@ import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -46,7 +47,7 @@ final case class TokenExchangeConfig private (
 
   override def toString: String =
     s"TokenExchangeConfig($identityToken, tokenUrl=${Redaction.url(tokenUrl)}, " +
-      s"clientId=${Redaction.secretOpt(clientId)}, scope=$scope, audience=$audience)"
+      s"clientId=${clientId.map(_ => "***")}, scope=$scope, audience=$audience)"
 
 object TokenExchangeConfig:
 
@@ -172,18 +173,26 @@ object TokenExchange:
     val h = host.toLowerCase(Locale.ROOT)
     h == "localhost" || h == "[::1]" || (Ipv4Loopback.matches(h) && h.split('.').forall(_.toInt <= 255))
 
-  /** One exchange per call: read the identity token, post it, parse the reply. */
+  /**
+   * One exchange per call: read the identity token, post it, parse the reply. Each subject token is registered
+   * with `KnownSecrets` (through a `TokenGenerations`) before it is posted, and `clientId` as an identifier,
+   * so an endpoint's reply quoting either is scrubbed. The exchanged access token is registered by the client
+   * that sends it.
+   */
   def rfc8693(
     config: TokenExchangeConfig,
     httpClient: Llm4sHttpClient,
     clock: Clock = Clock.systemUTC(),
     timeout: FiniteDuration = DefaultTimeout
   ): () => Result[AccessToken] =
-    val subject = IdentityTokenSource.from(config.identityToken)
+    val subject  = IdentityTokenSource.from(config.identityToken)
+    val subjects = new TokenGenerations
+    config.clientId.foreach(KnownSecrets.registerIdentifier)
     () =>
       for
         _   <- TokenExchangeConfig.validate(config)
         jwt <- subject.fetch()
+        _ = subjects.rotate(jwt)
         response <- httpClient.post(
           config.tokenUrl,
           Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json"),

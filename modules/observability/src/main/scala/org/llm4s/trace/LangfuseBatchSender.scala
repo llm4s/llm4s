@@ -5,8 +5,6 @@ import org.llm4s.error.ExecutionError
 import org.llm4s.http.Llm4sHttpClient
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
-import java.util.Base64
 import scala.concurrent.duration.*
 import org.llm4s.util.Redaction
 
@@ -74,10 +72,7 @@ class DefaultLangfuseBatchSender(
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
-    val credentials =
-      Base64.getEncoder.encodeToString(
-        s"${config.publicKey.reveal}:${config.secretKey.reveal}".getBytes(StandardCharsets.UTF_8)
-      )
+    val credentials  = Secret.basic(config.publicKey.reveal, config.secretKey.reveal).reveal
 
     httpClient.post(
       url = apiUrl,

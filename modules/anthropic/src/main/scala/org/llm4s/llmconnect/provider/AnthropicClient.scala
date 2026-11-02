@@ -45,6 +45,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.security.KnownSecrets
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{
@@ -141,7 +142,8 @@ class AnthropicClient(
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
-  /** The configured credentials, which an error built from a remote reply must not repeat. */
+  // The workload-identity ids, which an error built from a remote reply must not repeat; the key is a Secret.
+  AnthropicClient.registerCredentials(config)
 
   // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
@@ -885,6 +887,16 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  /**
+   * Registers with `KnownSecrets` the workload-identity ids of `config` (federation rule, organisation, service
+   * account, workspace), which the SDK sends and its errors may quote. The API key is a `Secret`, registered already.
+   */
+  private[provider] def registerCredentials(config: AnthropicConfig): Unit =
+    config.workloadIdentity.foreach { wi =>
+      (Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
+        .foreach(KnownSecrets.registerIdentifier)
+    }
 
   /**
    * Routes the SDK's OkHttp client as `network` says: through its proxy unless `baseUrl`'s host bypasses it,

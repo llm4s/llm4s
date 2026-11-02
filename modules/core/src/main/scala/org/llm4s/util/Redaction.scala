@@ -6,13 +6,13 @@ import java.util.Locale
 
 import org.llm4s.security.KnownSecrets
 
-import scala.annotation.{ tailrec, unused }
+import scala.annotation.tailrec
 import scala.util.matching.Regex
 
 /**
  * Utilities for redacting sensitive information from strings and log messages.
  *
- * Provides both simple masking (for toString representations) and pattern-based
+ * Provides URL masking (for toString representations) and pattern-based
  * redaction (for log messages that may contain API keys, auth headers, etc.).
  *
  * Pattern-based redaction automatically detects and masks:
@@ -27,9 +27,6 @@ import scala.util.matching.Regex
  * @example
  * {{{
  * import org.llm4s.util.Redaction
- *
- * // Simple masking for toString
- * Redaction.secret("sk-abc123") // "***"
  *
  * // Pattern-based redaction for log messages
  * Redaction.redact("Authorization: Bearer sk-abc123...")
@@ -47,16 +44,8 @@ private[llm4s] object Redaction {
   val RedactionPlaceholder: String = "[REDACTED]"
 
   // ============================================================
-  // Simple masking (for toString representations)
+  // URL masking (for toString representations)
   // ============================================================
-
-  def secret(@unused value: String): String = "***"
-
-  def secretOpt(value: Option[String]): String =
-    value match {
-      case Some(_) => "Some(***)"
-      case None    => "None"
-    }
 
   /**
    * A URL fit for a `toString` or a log line: scheme, host, port and path are kept; userinfo

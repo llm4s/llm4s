@@ -1,6 +1,6 @@
 package org.llm4s.security
 
-import org.llm4s.util.ExactMatcher
+import org.llm4s.util.{ ExactMatcher, Redaction }
 import org.slf4j.LoggerFactory
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -65,6 +65,23 @@ private[llm4s] object KnownSecrets {
   def registerIdentifier(value: String): Unit = register(value, Kind.Identifier)
 
   /**
+   * Registers, as configured secrets, the value of each header in `headers` with a credential name
+   * (`Redaction.isCredentialName`: `Authorization`, `x-api-key`, ...): the whole value and, for a value with an
+   * auth scheme (`Bearer <token>`, `Basic <b64>`), the credential after the scheme too, since a provider may echo
+   * the token without it.
+   */
+  def registerHeaders(headers: Iterable[(String, String)]): Unit =
+    headers.iterator
+      .collect { case (name, value) if value != null && Redaction.isCredentialName(name) => value.trim }
+      .foreach { v =>
+        register(v, Kind.Configured)
+        v.split("\\s+", 2) match {
+          case Array(scheme, credential) if scheme.forall(_.isLetter) => register(credential, Kind.Configured)
+          case _                                                      => ()
+        }
+      }
+
+  /**
    * Releases one hold on a token. The value stays registered while another holder has it, and a configured key or
    * identifier is never forgotten.
    */
@@ -85,7 +102,7 @@ private[llm4s] object KnownSecrets {
     if (text == null || text.isEmpty) text
     else state.get().matcher.built.fold(text)(_.replaceAll(text, placeholder))
 
-  private[security] def size: Int         = state.get().entries.size
+  private[llm4s] def size: Int            = state.get().entries.size
   private[security] def refusedCount: Int = state.get().refused.size
 
   /**

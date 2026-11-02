@@ -49,6 +49,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -130,7 +131,8 @@ class OpenAIClient private[provider] (
 
   private val displayName: String = OpenAIClient.displayName(provider)
 
-  /** The configured credentials, which an error built from a remote reply must not repeat. */
+  // The workload-identity ids, which an error built from a remote reply must not repeat; the keys are Secrets.
+  OpenAIClient.registerCredentials(config)
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
@@ -776,6 +778,19 @@ class OpenAIClient private[provider] (
 object OpenAIClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service
+   * account, client id), which the SDK sends and its errors may quote. The keys are `Secret`s, registered already.
+   */
+  private[provider] def registerCredentials(config: ProviderConfig): Unit = config match {
+    case openAI: OpenAIConfig =>
+      openAI.workloadIdentity.foreach { wi =>
+        (Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId.map(_.reveal))
+          .foreach(KnownSecrets.registerIdentifier)
+      }
+    case _ => ()
+  }
+
   private[provider] def forTest(
     model: String,
     transport: OpenAIClientTransport,
@@ -1036,13 +1051,23 @@ private[provider] object OpenAIClientTransport {
   /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
   private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
     val source = IdentityTokenSource.from(wi.identityToken)
+    // Each subject token is registered before the SDK sends it, so an exchange error quoting it is scrubbed.
+    val subjects = new TokenGenerations
     val subject = new SubjectTokenProvider {
       override def tokenType(): SubjectTokenType = SubjectTokenType.JWT
 
       // The SDK's callback contract is exceptions. The error rides inside one, whatever the SDK wraps it
       // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
       override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
-        source.fetch().fold(error => throw new IdentityTokenException(error), identity)
+        source
+          .fetch()
+          .fold(
+            error => throw new IdentityTokenException(error),
+            token => {
+              subjects.rotate(token)
+              token
+            }
+          )
 
       // The read is blocking file I/O: it runs on a virtual thread, not on the common pool.
       override def getTokenAsync(httpClient: SdkHttpClient, jsonMapper: JsonMapper): CompletableFuture[String] =
@@ -1100,9 +1125,12 @@ private[provider] object OpenAIClientTransport {
    */
   final private[provider] class EntraIdBearer(tokens: AccessTokenProvider) extends java.util.function.Supplier[String] {
     private val lastIssued = new java.util.concurrent.atomic.AtomicReference[String]()
+    // The provider may be the caller's own code: each token is registered here, before the SDK sends it.
+    private val generations = new TokenGenerations
 
     override def get(): String = {
       val token = tokens.token().fold(error => throw new IdentityTokenException(error), identity)
+      generations.rotate(token)
       lastIssued.set(token)
       token
     }

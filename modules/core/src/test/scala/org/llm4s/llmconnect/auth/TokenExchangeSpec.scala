@@ -130,12 +130,11 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "never echo the client id, an opaque subject token or a credential field in a 400/401/403 error" in KnownSecrets
       .isolated {
-        // Opaque values, so it is the exact-match scrub that removes them, not the general JWT pattern.
+        // Opaque values, so it is the exact-match scrub that removes them, not the general JWT pattern; the exchange
+        // registers both itself (#1932).
         val subject  = "opaque-subject-token-7f3a9c"
         val clientId = "sp-client-4d2e81"
-        Secret.token(subject)
-        KnownSecrets.registerIdentifier(clientId)
-        val cfg = config(Some(clientId)).withIdentityToken(IdentitySource.Literal(subject))
+        val cfg      = config(Some(clientId)).withIdentityToken(IdentitySource.Literal(subject))
         for status <- Seq(400, 401, 403) do
           val body =
             s"""{"error":"invalid_client","error_description":"client $clientId rejected subject $subject",""" +
@@ -151,13 +150,31 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "never echo a credential value repeated outside its field, or the client id, in a 5xx error" in KnownSecrets
       .isolated {
-        val clientId = "sp-client-4d2e81"
-        KnownSecrets.registerIdentifier(clientId)
-        val body    = s"""{"message":"token leaked-access-9b1c for $clientId","access_token":"leaked-access-9b1c"}"""
-        val http    = MockHttpClient(Seq(HttpResponse(503, body)))
-        val message = TokenExchange.rfc8693(config(Some(clientId)), http, clock)().left.value.message
+        val clientId = "sp-client-4d2e81" // registered by the exchange itself (#1932)
+        val body     = s"""{"message":"token leaked-access-9b1c for $clientId","access_token":"leaked-access-9b1c"}"""
+        val http     = MockHttpClient(Seq(HttpResponse(503, body)))
+        val message  = TokenExchange.rfc8693(config(Some(clientId)), http, clock)().left.value.message
         message should include("token")
         for secret <- Seq(clientId, "leaked-access-9b1c") do (message should not).include(secret)
+      }
+
+    "register each subject token before posting it, so an endpoint echoing it outside any field is scrubbed (#1932)" in
+      KnownSecrets.isolated {
+        val dir  = java.nio.file.Files.createTempDirectory("subject")
+        val file = dir.resolve("token")
+        dir.toFile.deleteOnExit(); file.toFile.deleteOnExit()
+        val subjects = Seq("opaqueSubjectOne0001", "opaqueSubjectTwo0002", "opaqueSubjectThree03")
+        val replies  = subjects.map(t => HttpResponse(401, s"subject $t is not trusted"))
+        val http     = MockHttpClient(replies)
+        val exchange = TokenExchange.rfc8693(config().withIdentityToken(IdentitySource.File(file)), http, clock)
+        for t <- subjects do
+          java.nio.file.Files.writeString(file, t)
+          val message = exchange().left.value.message
+          message should include("is not trusted")
+          (message should not).include(t)
+        // Two generations are kept: the first subject token is released, the last two are still scrubbed.
+        KnownSecrets.scrub(subjects.head, "[X]") shouldBe subjects.head
+        for t <- subjects.tail do KnownSecrets.scrub(t, "[X]") shouldBe "[X]"
       }
 
     "truncate a long error body" in {

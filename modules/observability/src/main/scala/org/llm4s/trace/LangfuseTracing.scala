@@ -7,10 +7,9 @@ import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.{ Base64, UUID }
+import java.util.UUID
 import scala.concurrent.duration.*
 import org.llm4s.util.Redaction
 
@@ -108,8 +107,7 @@ class LangfuseTracing(
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
-    val credentials =
-      Base64.getEncoder.encodeToString(s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
+    val credentials  = Secret.basic(publicKey.reveal, secretKey.reveal).reveal
 
     httpClient.post(
       url = apiUrl,
