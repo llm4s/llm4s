@@ -46,6 +46,7 @@ and is run in CI:
 | Category | Count | Description |
 |----------|-------|-------------|
 | [Playground](#playground) | 1 | Offline demo — no API key needed |
+| [Java Offline Example](#java-offline-example) | 1 | Test application code with a scripted model |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
 | [Agent Examples](#agent-examples) | 10 | Multi-turn agents, persistence, built-in tools, the harness exit examples |
 | [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
@@ -62,6 +63,21 @@ and is run in CI:
 | [Other Examples](#other-examples) | 8 | Speech, actions, utilities |
 
 ---
+
+## Java Offline Example
+
+**File:** [`JavaOfflineExample.java`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/java/org/llm4s/samples/java/JavaOfflineExample.java)
+
+A support-ticket classifier accepts a `JLlmClient` and runs against `FakeLlmClient`, without an API key or network
+access. It demonstrates a `BILLING` reply, an unknown reply falling back to `OTHER`, and a `RATE_LIMIT` failure
+handled through `LlmResult`. The program also prints the prompts recorded by the fake.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.java.JavaOfflineExample"
+sbt "samples/testOnly org.llm4s.samples.java.JavaOfflineExampleSpec"
+```
+
+See [Testing your Java code](../guide/java#testing-your-code) for scripting replies, failures and checking calls.
 
 ## Playground
 
