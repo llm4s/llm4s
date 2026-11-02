@@ -29,6 +29,7 @@ getting-started/installation.md | 9a7b01aa6f | skip | sbt build definition, not 
 getting-started/installation.md | 8288e4a556 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 4fedebd19f | skip | sbt build definition, not Scala source
 getting-started/installation.md | 30efc2e8cd | skip | sbt build definition, not Scala source
+getting-started/installation.md | 7e98f06e0a | skip | Mill build definition (build.mill), not Scala source
 getting-started/installation.md | ef30bdb2b3 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 6c4ea7f583 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 3273fe661f | skip | sbt build definition, not Scala source

@@ -148,6 +148,24 @@ No build at all: declare the dependency in the file.
 Add the provider module you use next to `llm4s-core` (`llm4s-openai` above). The
 [Scala CLI quick start](scala-cli) has a complete file that makes a first call.
 
+### Mill
+
+In `build.mill` (Mill 1.x), `::` adds the Scala suffix as `%%` does in sbt:
+
+```scala
+val llm4sVersion = "{{ site.data.project.latest_release }}"
+
+object app extends ScalaModule {
+  def scalaVersion = "3.7.1"
+  def mvnDeps = Seq(
+    mvn"org.llm4s::llm4s-core:$llm4sVersion",
+    mvn"org.llm4s::llm4s-openai:$llm4sVersion"
+  )
+}
+```
+
+The [Mill quick start](mill) has a complete project: a first call, its configuration, and a test that needs no API key.
+
 ### Multi-Module Project
 
 If you have a multi-module project:
@@ -215,6 +233,8 @@ Gradle `platform(...)` treats the BOM versions as recommendations that other dep
 For strict version pinning in an application, use `enforcedPlatform(...)` instead. Publishing libraries
 should generally keep `platform(...)` to avoid forcing their versions on consumers. See the
 [Gradle platform documentation](https://docs.gradle.org/current/userguide/platforms.html#sub:bom_import).
+
+**Mill** imports it with `bomMvnDeps`; the [Mill quick start](mill#aligning-versions-with-llm4s-bom) shows how.
 
 **sbt** has no BOM import, so the BOM is optional there: keep one `val` for the version, as the sections
 below do (`%%` adds the `_3` suffix itself):
