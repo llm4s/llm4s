@@ -2,7 +2,7 @@ package org.llm4s.rag.loader
 
 import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, Redaction }
 import org.llm4s.security.Secret
 
 import java.net.{ HttpURLConnection, URI }
@@ -30,6 +30,14 @@ final case class UrlLoader(
   metadata: Map[String, String] = Map.empty,
   retryCount: Int = 2
 ) extends DocumentLoader {
+
+  /** The case class's form, with each credential-named header's value (`Authorization`, `x-api-key`, ...) masked. */
+  override def toString: String = {
+    val shownHeaders = headers.map { case (name, value) =>
+      name -> (if (Redaction.isCredentialName(name)) "***" else value)
+    }
+    s"UrlLoader(${urls.map(Redaction.url)},$shownHeaders,$timeout,$metadata,$retryCount)"
+  }
 
   // Every failure names its document (the URL is the id): the URL is still in the list, so
   // RAG.sync keeps its indexed version until it is taken out of the list.

@@ -149,4 +149,16 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
     results should have size 2
     results.foreach(_ shouldBe a[LoadResult.Failure])
   }
+
+  it should "mask credential-named headers in its toString (#1932)" in {
+    val loader = UrlLoader(
+      urls = Seq("https://docs.example.com/page"),
+      headers = Map("Authorization" -> "Bearer opaque-loader-token-0001", "Accept" -> "text/html")
+    )
+    val shown = loader.toString
+    (shown should not).include("opaque-loader-token-0001")
+    shown should include("Authorization -> ***")
+    shown should include("Accept -> text/html")
+    shown should include("https://docs.example.com/page")
+  }
 }

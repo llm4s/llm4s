@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore.redis
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.{
   AuthenticationError,
   ConfigurationError,
@@ -131,7 +132,11 @@ private[redis] object JedisConnection {
         .clientConfig(clientConfig(config))
         .build()
     }.toEither.left
-      .map(e => ConfigurationError(s"Cannot create a Redis client for ${config.host}:${config.port}: ${e.getMessage}"))
+      .map(e =>
+        ConfigurationError(
+          s"Cannot create a Redis client for ${config.host}:${config.port}: ${Redaction.scrubKnown(e.getMessage)}"
+        )
+      )
       .map(client => new JedisConnection(client, s"${config.host}:${config.port}", config.timeout))
 
   /** A raw command: its name, then its arguments. */
@@ -148,8 +153,9 @@ private[redis] object JedisConnection {
     case bytes: Array[Byte]      => RedisReply.Bulk(bytes)
     case n: java.lang.Long       => RedisReply.Integer(n.longValue)
     case list: java.util.List[?] => RedisReply.Arr(list.asScala.toSeq.map(fromJedis))
-    case e: JedisDataException   => RedisReply.Error(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
-    case other                   => RedisReply.str(other.toString)
+    case e: JedisDataException =>
+      RedisReply.Error(Option(Redaction.scrubKnown(e.getMessage)).getOrElse(e.getClass.getSimpleName))
+    case other => RedisReply.str(other.toString)
   }
 
   /**
@@ -158,19 +164,23 @@ private[redis] object JedisConnection {
    */
   def toReplyOrError(e: Throwable, endpoint: String, timeout: FiniteDuration): Result[RedisReply] = e match {
     case _: JedisAccessControlException => Left(failure(e, endpoint, timeout))
-    case refused: JedisDataException    => Right(RedisReply.Error(Option(refused.getMessage).getOrElse("error")))
-    case other                          => Left(failure(other, endpoint, timeout))
+    case refused: JedisDataException =>
+      Right(RedisReply.Error(Option(Redaction.scrubKnown(refused.getMessage)).getOrElse("error")))
+    case other => Left(failure(other, endpoint, timeout))
   }
 
   /** The [[org.llm4s.error.LLMError]] for an exception a command or a pipeline threw. */
   def failure(e: Throwable, endpoint: String, timeout: FiniteDuration): LLMError = e match {
     case denied: JedisAccessControlException =>
-      AuthenticationError("redis", s"Redis refused the credentials: ${denied.getMessage}")
+      AuthenticationError("redis", s"Redis refused the credentials: ${Redaction.scrubKnown(denied.getMessage)}")
     case c: JedisConnectionException if Option(c.getCause).exists(_.isInstanceOf[SocketTimeoutException]) =>
       TimeoutError(s"Redis at $endpoint did not answer within $timeout", timeout, "redis")
     case c: JedisConnectionException =>
-      NetworkError(s"Cannot reach Redis at $endpoint: ${c.getMessage}", Some(c), endpoint)
+      NetworkError(s"Cannot reach Redis at $endpoint: ${Redaction.scrubKnown(c.getMessage)}", Some(c), endpoint)
     case other =>
-      ProcessingError("redis-store", s"Redis command failed: ${other.getClass.getSimpleName}: ${other.getMessage}")
+      ProcessingError(
+        "redis-store",
+        s"Redis command failed: ${other.getClass.getSimpleName}: ${Redaction.scrubKnown(other.getMessage)}"
+      )
   }
 }

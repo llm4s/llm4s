@@ -100,7 +100,7 @@ final class QdrantVectorStore private (
       )
       httpPut(collectionsUrl, body)
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to create collection: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to create collection: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def upsert(record: VectorRecord): Result[Unit] =
@@ -129,7 +129,7 @@ final class QdrantVectorStore private (
           val body = ujson.Obj("points" -> points)
           httpPut(s"$pointsUrl?wait=true", body)
         }.toEither.left
-          .map(e => ProcessingError("qdrant-store", s"Failed to upsert: ${e.getMessage}"))
+          .map(e => ProcessingError("qdrant-store", s"Failed to upsert: ${Redaction.scrubKnown(e.getMessage)}"))
           .flatMap(identity)
       }
     }
@@ -169,7 +169,7 @@ final class QdrantVectorStore private (
         }.toSeq
       }
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Search failed: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Search failed: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def get(id: String): Result[Option[VectorRecord]] =
@@ -178,7 +178,7 @@ final class QdrantVectorStore private (
         _.map(_("result")).filterNot(_.isNull).map(pointToRecord)
       }
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to get: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to get: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def getBatch(ids: Seq[String]): Result[Seq[VectorRecord]] =
@@ -193,7 +193,7 @@ final class QdrantVectorStore private (
 
         httpPost(s"$pointsUrl", body).map(response => response("result").arr.map(pointToRecord).toSeq)
       }.toEither.left
-        .map(e => ProcessingError("qdrant-store", s"Failed to get batch: ${e.getMessage}"))
+        .map(e => ProcessingError("qdrant-store", s"Failed to get batch: ${Redaction.scrubKnown(e.getMessage)}"))
         .flatMap(identity)
 
   override def delete(id: String): Result[Unit] =
@@ -208,7 +208,7 @@ final class QdrantVectorStore private (
         )
         httpPost(s"$pointsUrl/delete?wait=true", body).map(_ => ())
       }.toEither.left
-        .map(e => ProcessingError("qdrant-store", s"Failed to delete: ${e.getMessage}"))
+        .map(e => ProcessingError("qdrant-store", s"Failed to delete: ${Redaction.scrubKnown(e.getMessage)}"))
         .flatMap(identity)
 
   override def deleteByPrefix(prefix: String): Result[Long] =
@@ -253,7 +253,7 @@ final class QdrantVectorStore private (
       }
       deleted
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to delete by prefix: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to delete by prefix: ${Redaction.scrubKnown(e.getMessage)}"))
 
   override def deleteByFilter(filter: MetadataFilter): Result[Long] =
     Try {
@@ -265,7 +265,7 @@ final class QdrantVectorStore private (
       )
       httpPost(s"$pointsUrl/delete?wait=true", body).map(_ => countBefore)
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to delete by filter: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to delete by filter: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def count(filter: Option[MetadataFilter]): Result[Long] =
@@ -276,7 +276,7 @@ final class QdrantVectorStore private (
       httpPostOptional(s"$pointsUrl/count", body)
         .map(_.map(_("result")("count").num.toLong).getOrElse(0L))
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to count: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to count: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def list(limit: Int, offset: Int, filter: Option[MetadataFilter]): Result[Seq[VectorRecord]] =
@@ -292,7 +292,7 @@ final class QdrantVectorStore private (
       httpPostOptional(s"$pointsUrl/scroll", body)
         .map(_.map(_("result")("points").arr.map(pointToRecord).toSeq).getOrElse(Seq.empty))
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to list: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to list: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def clear(): Result[Unit] =
@@ -319,7 +319,7 @@ final class QdrantVectorStore private (
           )
       }
     }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to get stats: ${e.getMessage}"))
+      .map(e => ProcessingError("qdrant-store", s"Failed to get stats: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def close(): Unit = {
@@ -585,7 +585,9 @@ object QdrantVectorStore {
   ): Result[QdrantVectorStore] =
     Try {
       new QdrantVectorStore(config.baseUrl, config.collectionName, config.apiKey, httpClient)
-    }.toEither.left.map(e => ProcessingError("qdrant-store", s"Failed to create store: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("qdrant-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /** Create a QdrantVectorStore from configuration with the default JDK HTTP client. */
   def apply(config: Config): Result[QdrantVectorStore] =
@@ -608,7 +610,9 @@ object QdrantVectorStore {
   ): Result[QdrantVectorStore] =
     Try {
       new QdrantVectorStore(baseUrl, collectionName, apiKey, httpClient)
-    }.toEither.left.map(e => ProcessingError("qdrant-store", s"Failed to create store: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("qdrant-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /**
    * Create a QdrantVectorStore with default local settings.

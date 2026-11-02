@@ -490,7 +490,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **Added** `Secret`: every credential llm4s holds (configured keys, runtime tokens) is registered and removed by exact match from all error messages, logs and exchange logs, whatever the syntax around it ([#1932](https://github.com/llm4s/llm4s/issues/1932), [design](docs/superpowers/specs/2026-10-15-layered-redaction-design.md)).
+- **Added** `Secret`: every credential llm4s holds (configured keys, runtime tokens) is registered and removed by exact match, whatever the syntax around it, from the error messages, exchange logs and diagnostic text llm4s builds (traces in a follow-up) ([#1932](https://github.com/llm4s/llm4s/issues/1932), [design](docs/superpowers/specs/2026-10-15-layered-redaction-design.md)).
 - **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
   Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
   regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).

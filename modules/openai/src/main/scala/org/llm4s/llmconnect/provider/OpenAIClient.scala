@@ -1006,6 +1006,11 @@ private[provider] object OpenAIClientTransport {
    * client that registers each request's bearer ([[RegisteringBearer]]). The SDK exchanges the identity token and
    * sends the access token itself; its workload-identity layer wraps the HTTP client given here, so the requests
    * this client sees already carry that token.
+   *
+   * Mirrored by hand from `OpenAIOkHttpClient.Builder.build()` in openai-java 4.69.3 (`Versions.openaiJava`): the
+   * OkHttp client with the SDK's default `Timeout`, its proxy, proxy authenticator and SSL socket factory/trust
+   * manager, then `ClientOptions` with the base URL, organization and workload identity. Re-check this against
+   * `build()` whenever openai-java is bumped: a setting `build()` gains is silently missing here.
    */
   private def workloadIdentityClient(config: OpenAIConfig, wi: OpenAIWorkloadIdentity): SdkClient = {
     val http = OkHttpClient.builder().timeout(Timeout.default())

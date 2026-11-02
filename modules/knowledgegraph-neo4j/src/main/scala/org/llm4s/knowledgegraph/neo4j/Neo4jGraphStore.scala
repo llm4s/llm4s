@@ -1,5 +1,6 @@
 package org.llm4s.knowledgegraph.neo4j
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.knowledgegraph.storage._
@@ -94,7 +95,7 @@ final class Neo4jGraphStore private (
             }
           }
         }.toEither.left
-          .map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${e.getMessage}"))
+          .map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${Redaction.scrubKnown(e.getMessage)}"))
           .flatMap(identity)
       }
     }
@@ -399,7 +400,10 @@ final class Neo4jGraphStore private (
         }
       }
     }.fold(
-      e => logger.warn(s"Could not create LLM4S uniqueness constraint (may already exist): ${e.getMessage}"),
+      e =>
+        logger.warn(
+          s"Could not create LLM4S uniqueness constraint (may already exist): ${Redaction.scrubKnown(e.getMessage)}"
+        ),
       _ => ()
     )
 
@@ -411,7 +415,7 @@ final class Neo4jGraphStore private (
     Try {
       Using.resource(driver.session(sessionConfig))(f)
     }.toEither.left
-      .map(e => ProcessingError("neo4j-store", s"Session error: ${e.getMessage}"))
+      .map(e => ProcessingError("neo4j-store", s"Session error: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   private def recordToNode(n: org.neo4j.driver.types.Node): Node = {
@@ -515,7 +519,9 @@ object Neo4jGraphStore {
         .build()
       val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password.reveal), driverConfig)
       new Neo4jGraphStore(driver, config.database, ownsDriver = true)
-    }.toEither.left.map(e => ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("neo4j-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /** Creates a Neo4jGraphStore from individual connection parameters. */
   def apply(
@@ -538,6 +544,6 @@ object Neo4jGraphStore {
    */
   def apply(driver: Driver, database: String): Result[Neo4jGraphStore] =
     Try(new Neo4jGraphStore(driver, database, ownsDriver = false)).toEither.left.map(e =>
-      ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}")
+      ProcessingError("neo4j-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
     )
 }

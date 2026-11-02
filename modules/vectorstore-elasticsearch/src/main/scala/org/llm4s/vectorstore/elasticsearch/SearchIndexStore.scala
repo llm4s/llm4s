@@ -334,14 +334,14 @@ final private[vectorstore] class SearchIndexStore(
     if (!isSuccess(response)) Left(failure(operation, response))
     else
       Try(ujson.read(response.body)).toEither.left.map(e =>
-        ProcessingError(storeId, s"$product $operation returned unreadable JSON: ${e.getMessage}")
+        ProcessingError(storeId, s"$product $operation returned unreadable JSON: ${scrub(e.getMessage)}")
       )
 
   private def parse[A](operation: String)(thunk: => A): Result[A] =
     Try(thunk).toEither.left.map(e =>
       ProcessingError(
         storeId,
-        s"$product $operation returned an unexpected response: ${e.getClass.getSimpleName}: ${e.getMessage}"
+        s"$product $operation returned an unexpected response: ${e.getClass.getSimpleName}: ${scrub(e.getMessage)}"
       )
     )
 

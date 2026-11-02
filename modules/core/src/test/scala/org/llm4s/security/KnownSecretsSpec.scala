@@ -100,4 +100,48 @@ class KnownSecretsSpec extends AnyFlatSpec with Matchers {
     done.await(30, TimeUnit.SECONDS) shouldBe true
     pool.shutdown()
   }
+
+  it should "evict the oldest token at the cap and keep the newest" in KnownSecrets.isolated {
+    val tokens = (0 to KnownSecrets.Cap).map(i => f"token-$i%08d")
+    tokens.foreach(KnownSecrets.register(_, KnownSecrets.Kind.Token))
+    KnownSecrets.size shouldBe KnownSecrets.Cap
+    KnownSecrets.scrub(tokens.head, P) shouldBe tokens.head
+    KnownSecrets.scrub(tokens.last, P) shouldBe P
+    KnownSecrets.overCapWarned shouldBe false
+  }
+
+  it should "keep a new token when configured keys alone fill the cap, and warn once" in KnownSecrets.isolated {
+    (0 until KnownSecrets.Cap).foreach(i => KnownSecrets.register(f"configured-$i%08d", KnownSecrets.Kind.Configured))
+    KnownSecrets.overCapWarned shouldBe false
+    KnownSecrets.register("token-new-0001", KnownSecrets.Kind.Token)
+    KnownSecrets.scrub("token-new-0001", P) shouldBe P
+    KnownSecrets.overCapWarned shouldBe true
+    // the next token replaces the previous one, which is now the oldest evictable entry
+    KnownSecrets.register("token-new-0002", KnownSecrets.Kind.Token)
+    KnownSecrets.scrub("token-new-0002", P) shouldBe P
+    KnownSecrets.scrub("token-new-0001", P) shouldBe "token-new-0001"
+  }
+
+  it should "move a re-registered token to the most recent end" in KnownSecrets.isolated {
+    val tokens = (0 until KnownSecrets.Cap).map(i => f"token-$i%08d")
+    tokens.foreach(KnownSecrets.register(_, KnownSecrets.Kind.Token))
+    KnownSecrets.register(tokens.head, KnownSecrets.Kind.Token) // still in use: no longer the oldest
+    KnownSecrets.register("token-overflow-0001", KnownSecrets.Kind.Token)
+    KnownSecrets.scrub(tokens.head, P) shouldBe P
+    KnownSecrets.scrub(tokens(1), P) shouldBe tokens(1)
+    KnownSecrets.scrub("token-overflow-0001", P) shouldBe P
+  }
+
+  it should "register an identifier, and never forget it" in KnownSecrets.isolated {
+    KnownSecrets.registerIdentifier("client-id-0123456789")
+    KnownSecrets.scrub("id=client-id-0123456789", P) shouldBe s"id=$P"
+    KnownSecrets.forget("client-id-0123456789")
+    KnownSecrets.scrub("id=client-id-0123456789", P) shouldBe s"id=$P"
+  }
+
+  it should "never evict an identifier at the cap" in KnownSecrets.isolated {
+    KnownSecrets.registerIdentifier("client-id-0123456789")
+    (0 to KnownSecrets.Cap).foreach(i => KnownSecrets.register(f"token-$i%08d", KnownSecrets.Kind.Token))
+    KnownSecrets.scrub("client-id-0123456789", P) shouldBe P
+  }
 }

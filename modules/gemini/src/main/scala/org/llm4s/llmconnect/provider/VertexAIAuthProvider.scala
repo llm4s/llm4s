@@ -128,7 +128,7 @@ class VertexAIAuthProvider(
   private def refreshTokenFlow(json: ujson.Value): Result[CachedToken] = {
     val clientId     = json("client_id").str
     val clientSecret = Secret(json("client_secret").str)
-    val refreshToken = Secret.token(json("refresh_token").str)
+    val refreshToken = Secret(json("refresh_token").str)
 
     val body =
       s"client_id=${enc(clientId)}&client_secret=${enc(clientSecret.reveal)}" +

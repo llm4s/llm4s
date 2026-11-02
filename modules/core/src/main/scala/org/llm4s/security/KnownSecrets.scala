@@ -4,7 +4,7 @@ import org.llm4s.util.{ ExactMatcher, Redaction }
 import org.slf4j.LoggerFactory
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 
 /**
  * Every credential llm4s holds, so that diagnostic text can be scrubbed of it by exact match (layer A of
@@ -35,31 +35,49 @@ private[llm4s] object KnownSecrets {
     }
   }
 
-  /** Insertion-ordered entries, plus the matcher over their forms. */
-  final private case class State(entries: Vector[Entry], matcher: Matcher, refused: Set[String])
+  /**
+   * Entries ordered from least to most recently registered, plus the matcher over their forms. `overCapWarned` is
+   * set once, by the first registration that leaves the registry over [[Cap]], so that the warning is logged once.
+   */
+  final private case class State(
+    entries: Vector[Entry],
+    matcher: Matcher,
+    refused: Set[String],
+    overCapWarned: AtomicBoolean
+  )
 
-  private val empty  = State(Vector.empty, new Matcher(Vector.empty), Set.empty)
+  private def empty  = State(Vector.empty, new Matcher(Vector.empty), Set.empty, new AtomicBoolean(false))
   private val global = new AtomicReference[State](empty)
   // set only by `isolated`; inherited by threads the test body starts
   private val scoped                        = new InheritableThreadLocal[AtomicReference[State]]
   private def state: AtomicReference[State] = Option(scoped.get()).getOrElse(global)
 
   def register(value: String, kind: Kind): Unit = Option(value).map(_.trim).foreach { v =>
-    state.updateAndGet { s =>
+    val after = state.updateAndGet { s =>
       if (v.length < MinLength) {
         if (!s.refused.contains(v)) log.debug(s"Not registering a credential shorter than $MinLength characters")
         s.copy(refused = s.refused + v)
       } else
         s.entries.indexWhere(_.value == v) match {
-          case -1 => rebuild(evict(s.entries :+ Entry(v, kind, 1)), s.refused)
+          case -1 => rebuild(evict(s.entries :+ Entry(v, kind, 1)), s.refused, s.overCapWarned)
           case i  =>
             // Configured outranks Identifier, which outranks Token: a value that is also a configured key is never
-            // evicted or forgotten. The forms are unchanged, so the matcher is kept.
-            val e    = s.entries(i)
-            val kept = if (e.kind == Kind.Configured || kind == Kind.Token) e.kind else kind
-            s.copy(entries = s.entries.updated(i, e.copy(kind = kept, holds = e.holds + 1)))
+            // evicted or forgotten. A token registered again is in use again, so it moves to the most recent end and
+            // is the last to be evicted. The forms are unchanged, so the matcher is kept.
+            val e       = s.entries(i)
+            val kept    = if (e.kind == Kind.Configured || kind == Kind.Token) e.kind else kind
+            val updated = e.copy(kind = kept, holds = e.holds + 1)
+            val entries =
+              if (updated.kind == Kind.Token) s.entries.patch(i, Nil, 1) :+ updated
+              else s.entries.updated(i, updated)
+            s.copy(entries = entries)
         }
-    }: Unit
+    }
+    if (after.entries.size > Cap && after.overCapWarned.compareAndSet(false, true))
+      log.warn(
+        s"llm4s holds ${after.entries.size} credentials, more than $Cap: configured keys and identifiers are never " +
+          "evicted, so the registry grows with each distinct one (logged once)"
+      )
   }
 
   def registerIdentifier(value: String): Unit = register(value, Kind.Identifier)
@@ -93,7 +111,7 @@ private[llm4s] object KnownSecrets {
           val e = s.entries(i)
           if (e.kind != Kind.Token) s
           else if (e.holds > 1) s.copy(entries = s.entries.updated(i, e.copy(holds = e.holds - 1)))
-          else rebuild(s.entries.patch(i, Nil, 1), s.refused)
+          else rebuild(s.entries.patch(i, Nil, 1), s.refused, s.overCapWarned)
       }
     }: Unit
   }
@@ -117,17 +135,25 @@ private[llm4s] object KnownSecrets {
   }
 
   /**
-   * Drops the oldest tokens until the registry is back at [[Cap]]. Configured keys and identifiers are never dropped,
-   * so a process holding more than [[Cap]] of them keeps them all: the cap bounds the runtime tokens only.
+   * Drops the least recently registered tokens until the registry is back at [[Cap]]. The last entry, the one being
+   * added, is never dropped, nor are configured keys and identifiers, so a process holding more than [[Cap]] of them
+   * keeps them all: the cap bounds the runtime tokens only.
    */
   private def evict(entries: Vector[Entry]): Vector[Entry] =
     if (entries.size <= Cap) entries
     else {
-      val overflow  = entries.size - Cap
-      val evictable = entries.zipWithIndex.collect { case (e, i) if e.kind == Kind.Token => i }.take(overflow).toSet
+      val overflow = entries.size - Cap
+      val newest   = entries.size - 1
+      val evictable = entries.zipWithIndex
+        .collect { case (e, i) if e.kind == Kind.Token && i != newest => i }
+        .take(overflow)
+        .toSet
       entries.zipWithIndex.collect { case (e, i) if !evictable(i) => e }
     }
 
-  private def rebuild(entries: Vector[Entry], refused: Set[String]): State =
-    State(entries, new Matcher(entries), refused)
+  /** Whether the over-[[Cap]] warning has been logged for the current registry (tests only). */
+  private[security] def overCapWarned: Boolean = state.get().overCapWarned.get()
+
+  private def rebuild(entries: Vector[Entry], refused: Set[String], warned: AtomicBoolean): State =
+    State(entries, new Matcher(entries), refused, warned)
 }

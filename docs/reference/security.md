@@ -45,13 +45,14 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 ## What llm4s redacts
 
-Every credential llm4s holds is a `Secret`, registered when it is created. A registered credential is removed from diagnostic text (error messages, logs, exchange logs, tracing) by exact match, whatever the syntax around it. The forms covered are the raw value, its JSON-escaped form, its URL-encoded form and its Basic base64 form. Values under 8 characters are not registered. Runtime tokens (exchanged or workload-identity tokens) are kept for one rotation, so the previous token is still masked after a refresh.
+Every credential llm4s holds is a `Secret`, registered when it is created; a provider section's credential-named headers (`Authorization`, `x-api-key`, ...) are registered when the section is read. A registered credential is removed by exact match, whatever the syntax around it, from the error messages, exchange logs and other diagnostic text llm4s builds, store errors included. Your own log lines are not scrubbed, and trace content follows in a later PR (#1932). The forms covered are the raw value, its JSON-escaped form, its URL-encoded form and its Basic base64 form. Values under 8 characters are not registered. Runtime tokens (exchanged or workload-identity tokens) are kept for one rotation, so the previous token is still masked after a refresh.
 
 The heuristics for secrets llm4s was never given (patterns for known key shapes, `key=value` pairs, headers) are best effort. The layered design is completed by follow-up PRs 2-4 (#1932).
 
 Limits:
 - Bedrock credentials stay inside the AWS SDK; llm4s never holds the signed header.
 - In a multi-tenant process the registry is process-wide, so one tenant's secret may be masked in another tenant's output. This is harmless over-masking.
+- Configured keys are never evicted, so a process that registers very many distinct keys (per-tenant BYOK, say) grows the registry, and rebuilds its matcher on each new key; only runtime tokens are bounded (4096).
 
 ## Known Risks and Mitigations
 

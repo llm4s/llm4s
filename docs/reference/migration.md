@@ -28,7 +28,7 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 
 ## Credentials are Secret (#1932)
 
-`ApiKey` is now an opaque type over `org.llm4s.security.Secret`, and every credential field in a config is a `Secret` (or `Option[Secret]`): provider and embedding configs, HTTP proxy and TLS-store passwords, the MCP server key, Langfuse keys, search-tool keys, image, speech, watsonx, jev and Bedrock keys, the Cohere reranker key, and store credentials (Postgres, Neo4j, Qdrant, Elasticsearch/OpenSearch, Redis, the S3 loader, the URL loader token). Every `Secret` is registered, and removed by exact match from error messages, logs and exchange logs.
+`ApiKey` is now an opaque type over `org.llm4s.security.Secret`, and every credential field in a config is a `Secret` (or `Option[Secret]`): provider and embedding configs, HTTP proxy and TLS-store passwords, the MCP server key, Langfuse keys, search-tool keys, image, speech, watsonx, jev and Bedrock keys, the Cohere reranker key, and store credentials (Postgres, Neo4j, Qdrant, Elasticsearch/OpenSearch, Redis, the S3 loader, the URL loader token). Every `Secret` is registered, and removed by exact match from the error messages, exchange logs and diagnostic text llm4s builds (trace content in a follow-up).
 
 Before:
 

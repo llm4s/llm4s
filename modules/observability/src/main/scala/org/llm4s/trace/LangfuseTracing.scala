@@ -103,7 +103,7 @@ class LangfuseTracing(
     }
 
     logger.debug(s"[Langfuse] Sending batch to URL: $apiUrl")
-    logger.debug(s"[Langfuse] Using public key: ${publicKey.reveal.take(10)}...")
+    logger.debug(s"[Langfuse] Public key: ${if (publicKey.reveal.nonEmpty) "configured" else "not configured"}")
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))

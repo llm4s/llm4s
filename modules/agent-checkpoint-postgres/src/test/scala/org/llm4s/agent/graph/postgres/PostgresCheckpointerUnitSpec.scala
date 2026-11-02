@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.postgres
 import com.zaxxer.hikari.HikariDataSource
 import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadId, ThreadQuery, ThreadStatus }
 import org.llm4s.error.{ ProcessingError, ValidationError }
-import org.llm4s.security.Secret
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -375,5 +375,14 @@ class PostgresCheckpointerUnitSpec extends AnyFlatSpec with Matchers with Either
     Proxy
       .newProxyInstance(getClass.getClassLoader, Array(classOf[java.sql.ResultSet]), handler)
       .asInstanceOf[java.sql.ResultSet]
+  }
+
+  it should "keep a registered credential out of the description of a failure (#1932)" in KnownSecrets.isolated {
+    Secret("pg-checkpoint-password-0001")
+    val described = PostgresCheckpointer.describe(
+      new SQLException("FATAL: password authentication failed: pg-checkpoint-password-0001", "28P01")
+    )
+    described should include("password authentication failed")
+    (described should not).include("pg-checkpoint-password-0001")
   }
 }

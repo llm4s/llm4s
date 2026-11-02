@@ -6,7 +6,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, Redaction }
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet, SQLException }
 import java.time.{ Instant, OffsetDateTime, ZoneOffset }
@@ -1073,7 +1073,7 @@ object PostgresCheckpointer:
 
   private[postgres] def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
     Try(body).toEither.left.map(e =>
-      undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
+      undecodable(operation, what, Option(Redaction.scrubKnown(e.getMessage)).getOrElse(e.getClass.getName), Some(e))
     )
 
   private[postgres] def timedOut(callTimeout: FiniteDuration): String =
@@ -1081,7 +1081,7 @@ object PostgresCheckpointer:
 
   /** What went wrong, from an exception: a timeout the server enforced is named as one. */
   private[postgres] def describe(e: Throwable): String =
-    val message = Option(e.getMessage).getOrElse(e.getClass.getName)
+    val message = Option(Redaction.scrubKnown(e.getMessage)).getOrElse(e.getClass.getName)
     sqlState(e) match
       case Some("57014") => s"the call reached its call timeout on the server: $message"
       case Some("55P03") => s"the call waited its whole call timeout for a lock another connection holds: $message"

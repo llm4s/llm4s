@@ -33,4 +33,23 @@ class SecretSpec extends AnyFlatSpec with Matchers {
     val header = java.util.Base64.getEncoder.encodeToString("pk-lf-public-0001:sk-lf-secret-0001".getBytes("UTF-8"))
     KnownSecrets.scrub(s"Authorization: Basic $header", "[REDACTED]") shouldBe "Authorization: Basic [REDACTED]"
   }
+
+  it should "register a runtime token, which can then be forgotten" in KnownSecrets.isolated {
+    val t = Secret.token("ya29.runtime-token-0123456789")
+    t.toString shouldBe "***"
+    t.reveal shouldBe "ya29.runtime-token-0123456789"
+    KnownSecrets.scrub("Bearer ya29.runtime-token-0123456789", "[REDACTED]") shouldBe "Bearer [REDACTED]"
+    KnownSecrets.forget(t.reveal)
+    KnownSecrets.scrub("ya29.runtime-token-0123456789", "[REDACTED]") shouldBe "ya29.runtime-token-0123456789"
+  }
+
+  it should "read a null value as empty: never registered, and safe to hash and compare" in KnownSecrets.isolated {
+    val configured = Secret(null)
+    val token      = Secret.token(null)
+    configured.reveal shouldBe ""
+    token.reveal shouldBe ""
+    configured.hashCode shouldBe Secret("").hashCode
+    configured shouldBe token
+    KnownSecrets.size shouldBe 0
+  }
 }

@@ -64,4 +64,24 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
     val result = Neo4jGraphStore("invalid://localhost:7687")
     result shouldBe a[Left[_, _]]
   }
+
+  test("a registered password in a driver exception never reaches the error (#1932)") {
+    KnownSecrets.isolated {
+      Secret("neo4j-password-0001")
+      val driver = java.lang.reflect.Proxy
+        .newProxyInstance(
+          getClass.getClassLoader,
+          Array(classOf[org.neo4j.driver.Driver]),
+          (_, method, _) =>
+            if (method.getName == "session")
+              throw new IllegalStateException("authentication failed for neo4j/neo4j-password-0001")
+            else null
+        )
+        .asInstanceOf[org.neo4j.driver.Driver]
+      val result = Neo4jGraphStore(driver, "neo4j").flatMap(_.stats())
+      val error  = result.left.getOrElse(fail(s"expected a failure, got $result"))
+      error.message should include("authentication failed")
+      (error.message should not).include("neo4j-password-0001")
+    }
+  }
 }

@@ -27,4 +27,19 @@ final class GeminiCredentialEchoSpec extends AnyFlatSpec with Matchers {
       new GeminiClient(config).complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
     }
   }
+
+  it should "keep the key out of the error when the request URL is rejected before it is sent" in KnownSecrets
+    .isolated {
+      // A space in the model name makes URI.create throw; the JDK's message quotes the whole URL, ?key= included.
+      val config = GeminiConfig(
+        apiKey = Secret(echoKey),
+        model = "gemini 1.5",
+        baseUrl = "http://127.0.0.1:1/v1beta",
+        contextWindow = 1048576,
+        reserveCompletion = 8192
+      )
+      val result = new GeminiClient(config).complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
+      result.isLeft shouldBe true
+      CredentialEchoChecks.assertHidesKey(echoKey, result)
+    }
 }

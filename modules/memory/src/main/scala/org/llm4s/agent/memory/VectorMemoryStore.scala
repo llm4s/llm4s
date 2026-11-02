@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.util.Redaction
 import org.llm4s.types.Result
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.llmconnect.EmbeddingClient
@@ -115,7 +116,7 @@ final class VectorMemoryStore private (
       }.toEither.left.map(e =>
         ProcessingError(
           "vector-store",
-          s"Failed to store ${if (ms.size == 1) "memory" else "memories"}: ${e.getMessage}"
+          s"Failed to store ${if (ms.size == 1) "memory" else "memories"}: ${Redaction.scrubKnown(e.getMessage)}"
         )
       )
     }
@@ -132,7 +133,10 @@ final class VectorMemoryStore private (
       texts.grouped(EmbeddingBatchSize).foldLeft[Result[Vector[Array[Float]]]](Right(Vector.empty)) { (acc, chunk) =>
         acc.flatMap { done =>
           Try(embeddingService.embedBatch(chunk))
-            .fold(e => Left(ProcessingError("vector-store", s"Embedding failed: ${e.getMessage}")), identity)
+            .fold(
+              e => Left(ProcessingError("vector-store", s"Embedding failed: ${Redaction.scrubKnown(e.getMessage)}")),
+              identity
+            )
             .flatMap { embeddings =>
               if (embeddings.size == chunk.size) Right(done ++ embeddings)
               else
@@ -207,12 +211,16 @@ final class VectorMemoryStore private (
           else None
         }
       }
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to get memory: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to get memory: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     Try {
       queryMemories(filter, Some(limit))
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to recall memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to recall memories: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /** Memories matching `filter`, newest first; `limit` applies to the matches, after any in-memory filtering. */
   private def queryMemories(filter: MemoryFilter, limit: Option[Int]): Seq[Memory] = {
@@ -274,7 +282,7 @@ final class VectorMemoryStore private (
             )
         }
       }.toEither.left
-        .map(e => ProcessingError("vector-store", s"Vector search failed: ${e.getMessage}"))
+        .map(e => ProcessingError("vector-store", s"Vector search failed: ${Redaction.scrubKnown(e.getMessage)}"))
         .flatMap(identity)
     }
 
@@ -293,7 +301,9 @@ final class VectorMemoryStore private (
       }
 
       this: MemoryStore
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to delete memory: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to delete memory: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     Try {
@@ -315,7 +325,9 @@ final class VectorMemoryStore private (
       }
 
       this: MemoryStore
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to delete matching memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to delete matching memories: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   private def bindAndUpdate(sql: String, params: Seq[Any]): Int =
     Using.resource(connection.prepareStatement(sql)) { stmt =>
@@ -398,7 +410,9 @@ final class VectorMemoryStore private (
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to count memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to count memories: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def clear(): Result[MemoryStore] =
     Try {
@@ -407,12 +421,16 @@ final class VectorMemoryStore private (
         stmt.execute("DELETE FROM memories_fts")
       }
       this: MemoryStore
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to clear memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to clear memories: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] =
     Try {
       queryMemories(filter, Some(limit))
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to get recent memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to get recent memories: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /**
    * Embed all memories that don't have embeddings.
@@ -435,7 +453,9 @@ final class VectorMemoryStore private (
             memories.toSeq
           }
         }
-      }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to fetch memories: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("vector-store", s"Failed to fetch memories: ${Redaction.scrubKnown(e.getMessage)}")
+      )
 
     def updateEmbedding(memory: Memory, embedding: Array[Float]): Unit = {
       val updateSql = "UPDATE memories SET embedding = ?, embedding_dim = ? WHERE id = ?"
@@ -459,7 +479,9 @@ final class VectorMemoryStore private (
                 updateEmbedding(memory, embedding)
               }
               memories.size
-            }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to update embeddings: ${e.getMessage}"))
+            }.toEither.left.map(e =>
+              ProcessingError("vector-store", s"Failed to update embeddings: ${Redaction.scrubKnown(e.getMessage)}")
+            )
           }
         }
       }
@@ -508,7 +530,9 @@ final class VectorMemoryStore private (
           embeddingDimensions = dims
         )
       }
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to get stats: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to get stats: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /**
    * Close the database connection.
@@ -644,7 +668,9 @@ object VectorMemoryStore {
         Try(connection.close())
         scala.util.Failure(e)
       }.get
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to create vector store: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("vector-store", s"Failed to create vector store: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /**
    * Create an in-memory vector store (for testing).
@@ -660,7 +686,7 @@ object VectorMemoryStore {
       FilterSupport.registerJavaLower(connection)
       new VectorMemoryStore(":memory:", embeddingService, config, connection)
     }.toEither.left.map(e =>
-      ProcessingError("vector-store", s"Failed to create in-memory vector store: ${e.getMessage}")
+      ProcessingError("vector-store", s"Failed to create in-memory vector store: ${Redaction.scrubKnown(e.getMessage)}")
     )
 
   /**
