@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ExecutionError
 import org.llm4s.http.Llm4sHttpClient
 import org.slf4j.LoggerFactory
@@ -37,8 +38,8 @@ trait LangfuseBatchSender {
  */
 case class LangfuseHttpApiCaller(
   langfuseUrl: String,
-  publicKey: String,
-  secretKey: String
+  publicKey: Secret,
+  secretKey: Secret
 )
 
 /**
@@ -58,7 +59,7 @@ class DefaultLangfuseBatchSender(
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def sendBatch(events: Seq[ujson.Obj], config: LangfuseHttpApiCaller): Unit = {
-    if (config.publicKey.isEmpty || config.secretKey.isEmpty) {
+    if (config.publicKey.reveal.isEmpty || config.secretKey.reveal.isEmpty) {
       logger.warn("[Langfuse] Public or secret key not set in environment. Skipping export.")
       logger.warn(s"[Langfuse] Expected environment variables: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
       logger.warn(s"[Langfuse] Current URL: ${config.langfuseUrl}")
@@ -69,12 +70,12 @@ class DefaultLangfuseBatchSender(
     val apiUrl = DefaultLangfuseBatchSender.normalizeIngestionUrl(config.langfuseUrl)
 
     logger.debug(s"[Langfuse] Sending batch to URL: $apiUrl")
-    logger.debug(s"[Langfuse] Using public key: ${config.publicKey.take(10)}...")
+    logger.debug(s"[Langfuse] Using public key: ${config.publicKey.reveal.take(10)}...")
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
     val credentials =
-      Base64.getEncoder.encodeToString(s"${config.publicKey}:${config.secretKey}".getBytes(StandardCharsets.UTF_8))
+      Base64.getEncoder.encodeToString(s"${config.publicKey.reveal}:${config.secretKey.reveal}".getBytes(StandardCharsets.UTF_8))
 
     httpClient.post(
       url = apiUrl,

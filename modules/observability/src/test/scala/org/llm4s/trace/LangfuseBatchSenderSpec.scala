@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,8 +13,8 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
 
   private def testConfig = LangfuseHttpApiCaller(
     langfuseUrl = "https://cloud.langfuse.com/api/public/ingestion",
-    publicKey = "pk-lf-test-key",
-    secretKey = "sk-lf-test-secret"
+    publicKey = Secret("pk-lf-test-key"),
+    secretKey = Secret("sk-lf-test-secret")
   )
 
   private def testEvents = Seq(
@@ -88,7 +89,7 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
   it should "skip export when public key is empty" in {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-    val config     = testConfig.copy(publicKey = "")
+    val config     = testConfig.copy(publicKey = Secret(""))
 
     withLangfuseBatchSenderLoggerSilenced {
       sender.sendBatch(testEvents, config)
@@ -100,7 +101,7 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
   it should "skip export when secret key is empty" in {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
-    val config     = testConfig.copy(secretKey = "")
+    val config     = testConfig.copy(secretKey = Secret(""))
 
     withLangfuseBatchSenderLoggerSilenced {
       sender.sendBatch(testEvents, config)
@@ -171,8 +172,8 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
     val config = LangfuseHttpApiCaller(
       langfuseUrl = "https://langfuse.example.com/api",
-      publicKey = "pk-test",
-      secretKey = "sk-test"
+      publicKey = Secret("pk-test"),
+      secretKey = Secret("sk-test")
     )
 
     sender.sendBatch(testEvents, config)
