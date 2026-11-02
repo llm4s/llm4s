@@ -1,5 +1,6 @@
 package org.llm4s.speech.config
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ReferenceConfig
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.speech.{ SpeechProviderSelector, StubHttpClient }
@@ -47,9 +48,9 @@ class SpeechConfigMatrixSpec extends AnyWordSpec with Matchers with EitherValues
   "SpeechConfigLoader with every provider's credentials present" should {
     "return only the selected provider's key" in {
       val tts = SpeechConfigLoader.tts(env(allKeys :+ ("SPEECH_TTS_MODEL" -> "elevenlabs/v1"): _*)).value
-      tts.apiKey shouldBe "sk-e"
+      tts.apiKey.reveal shouldBe "sk-e"
       tts.provider shouldBe "elevenlabs"
-      SpeechConfigLoader.stt(env(allKeys :+ ("SPEECH_STT_MODEL" -> "azure/de-DE"): _*)).value.apiKey shouldBe "az-k"
+      SpeechConfigLoader.stt(env(allKeys :+ ("SPEECH_STT_MODEL" -> "azure/de-DE"): _*)).value.apiKey.reveal shouldBe "az-k"
     }
   }
 
@@ -114,8 +115,8 @@ class SpeechConfigMatrixSpec extends AnyWordSpec with Matchers with EitherValues
 
   "Cloud config toString" should {
     "never contain the key" in {
-      val tts = TTSConfig("openai", "tts-1", "alloy", "sk-very-secret", "https://x")
-      val stt = STTConfig("openai", "whisper-1", "sk-very-secret", "https://x")
+      val tts = TTSConfig("openai", "tts-1", "alloy", Secret("sk-very-secret"), "https://x")
+      val stt = STTConfig("openai", "whisper-1", Secret("sk-very-secret"), "https://x")
       (tts.toString should not).include("sk-very-secret")
       (stt.toString should not).include("sk-very-secret")
       (tts.copy(region = Some("r")).toString should not).include("sk-very-secret")
@@ -132,7 +133,7 @@ class SpeechConfigMatrixSpec extends AnyWordSpec with Matchers with EitherValues
 
   "Every cloud TTS client" should {
     "reject blank, whitespace-only and newline-only text without sending a request" in {
-      val cfg = TTSConfig("p", "m", "en-US-A", "k", "http://unused", Some("r"))
+      val cfg = TTSConfig("p", "m", "en-US-A", Secret("k"), "http://unused", Some("r"))
       val clients: Seq[(String, StubHttpClient => org.llm4s.speech.tts.TextToSpeech)] = Seq(
         "openai"     -> (h => new OpenAITTSClient(cfg, h)),
         "elevenlabs" -> (h => new ElevenLabsTTSClient(cfg, h)),

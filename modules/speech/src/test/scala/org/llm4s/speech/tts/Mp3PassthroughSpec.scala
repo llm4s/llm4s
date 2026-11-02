@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.speech.{ AudioFormat, AudioMeta, GeneratedAudio, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
@@ -19,11 +20,11 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
   private val mp3      = TTSOptions(outputFormat = AudioFormat.Mp3)
   private val mp3Audio = GeneratedAudio(mp3Bytes, AudioMeta(24000, 1, 0), AudioFormat.Mp3)
 
-  private val openai = TTSConfig("openai", "tts-1", "alloy", "sk-test-key", "https://api.openai.com")
+  private val openai = TTSConfig("openai", "tts-1", "alloy", Secret("sk-test-key"), "https://api.openai.com")
   private val eleven =
-    TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", "el-key", "https://api.elevenlabs.io")
+    TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", Secret("el-key"), "https://api.elevenlabs.io")
   private val azure =
-    TTSConfig("azure", "azure", "en-US-JennyNeural", "az-key", "https://eastus.tts.speech.microsoft.com")
+    TTSConfig("azure", "azure", "en-US-JennyNeural", Secret("az-key"), "https://eastus.tts.speech.microsoft.com")
 
   "OpenAITTSClient" should "request response_format=mp3 and return the bytes untouched" in {
     val http  = new StubHttpClient(body = mp3Bytes)

@@ -1,6 +1,7 @@
 package org.llm4s.speech.config
 
-import org.llm4s.util.Redaction
+import org.llm4s.security.Secret
+
 
 /**
  * Configuration for a cloud TTS provider, as produced by [[SpeechConfigLoader.tts]].
@@ -16,12 +17,12 @@ final case class TTSConfig(
   provider: String,
   model: String,
   voice: String,
-  apiKey: String,
+  apiKey: Secret,
   baseUrl: String,
   region: Option[String] = None
 ) {
   override def toString: String =
-    s"TTSConfig(provider=$provider, model=$model, voice=$voice, apiKey=${Redaction.secret(apiKey)}, " +
+    s"TTSConfig(provider=$provider, model=$model, voice=$voice, apiKey=$apiKey, " +
       s"baseUrl=$baseUrl, region=$region)"
 }
 
@@ -64,12 +65,12 @@ object TTSConfig {
 final case class STTConfig(
   provider: String,
   model: String,
-  apiKey: String,
+  apiKey: Secret,
   baseUrl: String,
   region: Option[String] = None
 ) {
   override def toString: String =
-    s"STTConfig(provider=$provider, model=$model, apiKey=${Redaction.secret(apiKey)}, " +
+    s"STTConfig(provider=$provider, model=$model, apiKey=$apiKey, " +
       s"baseUrl=$baseUrl, region=$region)"
 }
 

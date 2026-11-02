@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
 import org.llm4s.speech.io.WavFileGenerator
 import org.llm4s.speech.processing.AudioPreprocessing
@@ -32,7 +33,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers with 
     buf.array()
   }
 
-  private val tts = TTSConfig("p", "m", "v", "k", "https://tts.example", Some("eastus"))
+  private val tts = TTSConfig("p", "m", "v", Secret("k"), "https://tts.example", Some("eastus"))
 
   private val clients: Seq[(String, Array[Byte] => TextToSpeech)] = Seq(
     "OpenAITTSClient"     -> (pcm => new OpenAITTSClient(tts, new StubHttpClient(body = pcm))),
@@ -86,14 +87,14 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers with 
     val wav   = WavFileGenerator.createWavHeader(audio.data.length, audio.meta).value ++ audio.data
 
     val openAi = StubHttpClient.json(200, """{"text":"hello world"}""")
-    new OpenAISTTClient(STTConfig("openai", "whisper-1", "k", "https://stt.example"), openAi)
+    new OpenAISTTClient(STTConfig("openai", "whisper-1", Secret("k"), "https://stt.example"), openAi)
       .transcribe(AudioInput.BytesAudio(wav, SampleRate))
       .value
       .text shouldBe "hello world"
     openAi.only.fileContents("file") shouldBe wav
 
     val azure = StubHttpClient.json(200, """{"RecognitionStatus":"Success","DisplayText":"Hello world."}""")
-    new AzureSTTClient(STTConfig("azure", "en-US", "k", "https://stt.example", Some("eastus")), azure)
+    new AzureSTTClient(STTConfig("azure", "en-US", Secret("k"), "https://stt.example", Some("eastus")), azure)
       .transcribe(AudioInput.BytesAudio(wav, SampleRate))
       .value
       .text shouldBe "Hello world."

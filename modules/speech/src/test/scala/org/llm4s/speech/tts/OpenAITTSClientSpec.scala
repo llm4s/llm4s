@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.speech.{ AudioFormat, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
@@ -9,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 class OpenAITTSClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = TTSConfig("openai", "tts-1", "alloy", "sk-test-key", "https://api.openai.com")
+  private val cfg = TTSConfig("openai", "tts-1", "alloy", Secret("sk-test-key"), "https://api.openai.com")
 
   "OpenAITTSClient" should "return the response bytes untouched, described as 24 kHz 16-bit mono PCM" in {
     val http   = new StubHttpClient(body = StubHttpClient.binaryAudio)
@@ -27,7 +28,7 @@ class OpenAITTSClientSpec extends AnyFlatSpec with Matchers {
   it should "refuse a blank apiKey before any request, rather than send an empty bearer" in {
     for key <- Seq("", "  ") do
       val http = new StubHttpClient(body = Array[Byte](1, 2, 3))
-      new OpenAITTSClient(cfg.copy(apiKey = key), http)
+      new OpenAITTSClient(cfg.copy(apiKey = Secret(key)), http)
         .synthesize("Say this text")
         .left
         .toOption

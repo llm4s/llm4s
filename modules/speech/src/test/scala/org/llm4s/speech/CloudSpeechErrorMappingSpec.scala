@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.error._
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
@@ -17,8 +18,8 @@ import scala.concurrent.duration._
  */
 class CloudSpeechErrorMappingSpec extends AnyFlatSpec with Matchers {
 
-  private val tts = TTSConfig("p", "m", "v", "sk-secret-123", "https://tts.example", Some("eastus"))
-  private val stt = STTConfig("p", "m", "sk-secret-123", "https://stt.example", Some("eastus"))
+  private val tts = TTSConfig("p", "m", "v", Secret("sk-secret-123"), "https://tts.example", Some("eastus"))
+  private val stt = STTConfig("p", "m", Secret("sk-secret-123"), "https://stt.example", Some("eastus"))
   private val wav = Array.fill[Byte](64)(1)
 
   private val clients: Seq[(String, Llm4sHttpClient => Result[Any])] = Seq(
