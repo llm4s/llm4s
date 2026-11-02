@@ -1,5 +1,6 @@
 package org.llm4s.rag.loader.s3
 
+import org.llm4s.security.Secret
 import org.llm4s.rag.loader.DocumentVersion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -59,8 +60,8 @@ class S3DocumentSourceSpec extends AnyFlatSpec with Matchers {
   "S3DocumentSource.withCredentials" should "create source with explicit credentials" in {
     val source = S3DocumentSource.withCredentials(
       bucket = "private-bucket",
-      accessKeyId = "AKIAIOSFODNN7EXAMPLE",
-      secretAccessKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      accessKeyId = Secret("AKIAIOSFODNN7EXAMPLE"),
+      secretAccessKey = Secret("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"),
       region = "us-west-2",
       prefix = "data/"
     )
@@ -69,6 +70,9 @@ class S3DocumentSourceSpec extends AnyFlatSpec with Matchers {
     source.region shouldBe "us-west-2"
     source.prefix shouldBe "data/"
     source.credentials shouldBe defined
+    val resolved = source.credentials.getOrElse(fail("no credentials")).resolveCredentials()
+    (resolved.accessKeyId, resolved.secretAccessKey) shouldBe
+      ("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
   }
 
   "S3DocumentSource.forLocalStack" should "create source configured for LocalStack" in {
@@ -196,8 +200,8 @@ class S3LoaderSpec extends AnyFlatSpec with Matchers {
   "S3Loader.withCredentials" should "create loader with explicit credentials" in {
     val loader = S3Loader.withCredentials(
       bucket = "bucket",
-      accessKeyId = "key",
-      secretAccessKey = "secret"
+      accessKeyId = Secret("key"),
+      secretAccessKey = Secret("secret")
     )
 
     loader.description should include("bucket")

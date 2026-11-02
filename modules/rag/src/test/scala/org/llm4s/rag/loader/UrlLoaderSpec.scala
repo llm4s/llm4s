@@ -1,5 +1,6 @@
 package org.llm4s.rag.loader
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -54,7 +55,7 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
   }
 
   "UrlLoader.withAuth" should "set authorization header" in {
-    val loader = UrlLoader.withAuth(Seq("http://example.com"), "my-token")
+    val loader = UrlLoader.withAuth(Seq("http://example.com"), Secret("my-token"))
 
     loader.headers should contain("Authorization" -> "Bearer my-token")
     loader.urls shouldBe Seq("http://example.com")
@@ -86,7 +87,7 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
 
   it should "merge with existing headers" in {
     val loader = UrlLoader
-      .withAuth(Seq("http://a.com"), "token")
+      .withAuth(Seq("http://a.com"), Secret("token"))
       .withHeaders(Map("Accept" -> "text/html"))
 
     loader.headers should contain("Authorization" -> "Bearer token")

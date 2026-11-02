@@ -3,6 +3,7 @@ package org.llm4s.rag.loader
 import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 import org.llm4s.util.DurationRounding
+import org.llm4s.security.Secret
 
 import java.net.{ HttpURLConnection, URI }
 import scala.annotation.tailrec
@@ -173,8 +174,8 @@ object UrlLoader {
     UrlLoader(urls.toSeq)
 
   /** Create with authorization header */
-  def withAuth(urls: Seq[String], token: String): UrlLoader =
-    UrlLoader(urls, headers = Map("Authorization" -> s"Bearer $token"))
+  def withAuth(urls: Seq[String], token: Secret): UrlLoader =
+    UrlLoader(urls, headers = Map("Authorization" -> s"Bearer ${token.reveal}"))
 
   /** Create with custom user agent */
   def withUserAgent(urls: Seq[String], userAgent: String): UrlLoader =

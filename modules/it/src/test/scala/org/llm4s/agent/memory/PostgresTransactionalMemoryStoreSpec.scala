@@ -42,7 +42,7 @@ class PostgresTransactionalMemoryStoreSpec extends TransactionalMemoryStoreContr
       val conn = java.sql.DriverManager.getConnection(
         config(store.tableName).jdbcUrl,
         config(store.tableName).user,
-        config(store.tableName).password
+        config(store.tableName).password.reveal
       )
       TransactionalMemoryStoreContract.after(conn.close()) {
         val st = conn.createStatement()

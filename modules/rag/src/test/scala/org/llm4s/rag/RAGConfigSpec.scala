@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
@@ -212,7 +213,7 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
     val config = RAGConfig().withPgVector()
     config.pgVectorConnectionString shouldBe Some("jdbc:postgresql://localhost:5432/postgres")
     config.pgVectorUser shouldBe Some("postgres")
-    config.pgVectorPassword shouldBe Some("")
+    config.pgVectorPassword shouldBe Some(Secret(""))
     config.pgVectorTableName shouldBe Some("vectors")
     config.vectorStorePath shouldBe None
   }
@@ -227,12 +228,12 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
     val config = RAGConfig().withPgVector(
       connectionString = "jdbc:postgresql://myhost:5433/mydb",
       user = "myuser",
-      password = "mypass",
+      password = Secret("mypass"),
       tableName = "embeddings"
     )
     config.pgVectorConnectionString shouldBe Some("jdbc:postgresql://myhost:5433/mydb")
     config.pgVectorUser shouldBe Some("myuser")
-    config.pgVectorPassword shouldBe Some("mypass")
+    config.pgVectorPassword shouldBe Some(Secret("mypass"))
     config.pgVectorTableName shouldBe Some("embeddings")
   }
 

@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -26,7 +27,7 @@ class SearchIndexPgConfigEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "handle empty password" in {
     val config = SearchIndex.PgConfig()
-    config.password shouldBe ""
+    config.password shouldBe Secret("")
   }
 
   it should "handle non-default table names" in {

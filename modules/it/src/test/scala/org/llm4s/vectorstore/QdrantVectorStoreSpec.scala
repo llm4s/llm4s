@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.security.Secret
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -35,7 +36,7 @@ class QdrantVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfte
       store = QdrantVectorStore(
         testUrl.get,
         testCollectionName,
-        sys.env.get("QDRANT_TEST_API_KEY")
+        sys.env.get("QDRANT_TEST_API_KEY").map(Secret(_))
       ).fold(
         e => fail(s"Failed to create store: ${e.formatted}"),
         identity

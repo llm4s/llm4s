@@ -7,6 +7,8 @@ import org.llm4s.types.Result
 import org.llm4s.util.SqlIdentifier
 import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, PgDataSources, ScoredRecord, VectorRecord }
 import org.llm4s.util.RateLimitedLogger
+import org.llm4s.security.Secret
+import org.llm4s.vectorstore.JdbcUrlCredentials
 
 import org.slf4j.LoggerFactory
 
@@ -445,7 +447,7 @@ object PgSearchIndex {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(config.jdbcUrl)
         hikariConfig.setUsername(config.user)
-        hikariConfig.setPassword(config.password)
+        hikariConfig.setPassword(config.password.reveal)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
         hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -489,9 +491,10 @@ object PgSearchIndex {
   def fromJdbcUrl(
     jdbcUrl: String,
     user: String,
-    password: String,
+    password: Secret,
     vectorTableName: String = "vectors"
   ): Result[PgSearchIndex] = {
+    JdbcUrlCredentials.register(jdbcUrl)
     // Parse JDBC URL to extract host, port, database
     val pattern = """jdbc:postgresql://([^:/]+):?(\d+)?/(.+)""".r
     jdbcUrl match {

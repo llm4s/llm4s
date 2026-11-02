@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ProcessingError
@@ -87,7 +88,7 @@ class PgVectorStoreFactoryIntegrationSpec extends AnyFlatSpec with Matchers {
     config.port shouldBe 5432
     config.database shouldBe "postgres"
     config.user shouldBe "postgres"
-    config.password shouldBe ""
+    config.password shouldBe Secret("")
     config.tableName shouldBe "vectors"
     config.maxPoolSize shouldBe 10
   }

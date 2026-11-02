@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.security.Secret
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -38,7 +39,7 @@ class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
       index = PgKeywordIndex(
         testUrl.get,
         sys.env.getOrElse("PGVECTOR_TEST_USER", "postgres"),
-        sys.env.getOrElse("PGVECTOR_TEST_PASSWORD", ""),
+        Secret(sys.env.getOrElse("PGVECTOR_TEST_PASSWORD", "")),
         testTableName
       ).fold(
         e => fail(s"Failed to create index: ${e.formatted}"),

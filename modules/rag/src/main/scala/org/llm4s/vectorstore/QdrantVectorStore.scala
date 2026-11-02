@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import java.util.UUID
 import scala.util.Try
 import org.llm4s.util.Redaction
+import org.llm4s.security.Secret
 
 /**
  * Qdrant vector database implementation of VectorStore.
@@ -35,7 +36,7 @@ import org.llm4s.util.Redaction
 final class QdrantVectorStore private (
   val baseUrl: String,
   val collectionName: String,
-  private val apiKey: Option[String],
+  private val apiKey: Option[Secret],
   private val httpClient: Llm4sHttpClient
 ) extends VectorStore {
 
@@ -425,7 +426,7 @@ final class QdrantVectorStore private (
     }
 
   private def authHeaders: Map[String, String] =
-    apiKey.map(key => Map("api-key" -> key)).getOrElse(Map.empty)
+    apiKey.map(key => Map("api-key" -> key.reveal)).getOrElse(Map.empty)
 
   // ============================================================
   // Conversion Helpers
@@ -562,7 +563,7 @@ object QdrantVectorStore {
     host: String = "localhost",
     port: Int = 6333,
     collectionName: String = "vectors",
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     https: Boolean = false
   ) {
     def baseUrl: String = {
@@ -602,7 +603,7 @@ object QdrantVectorStore {
   def apply(
     baseUrl: String,
     collectionName: String = "vectors",
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   ): Result[QdrantVectorStore] =
     Try {
@@ -635,7 +636,7 @@ object QdrantVectorStore {
    */
   def cloud(
     cloudUrl: String,
-    apiKey: String,
+    apiKey: Secret,
     collectionName: String = "vectors",
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   ): Result[QdrantVectorStore] =

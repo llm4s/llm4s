@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
+import org.llm4s.security.Secret
 
 /**
  * Result from a keyword search operation.
@@ -226,7 +227,7 @@ object KeywordIndex {
   def postgres(
     connectionString: String,
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "documents"
   ): Result[KeywordIndex] =
     PgKeywordIndex(connectionString, user, password, tableName)

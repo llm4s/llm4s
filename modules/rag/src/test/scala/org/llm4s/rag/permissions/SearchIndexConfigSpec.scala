@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -11,7 +12,7 @@ class SearchIndexConfigSpec extends AnyFlatSpec with Matchers {
     config.port shouldBe 5432
     config.database shouldBe "postgres"
     config.user shouldBe "postgres"
-    config.password shouldBe ""
+    config.password shouldBe Secret("")
     config.vectorTableName shouldBe "vectors"
     config.keywordTableName shouldBe "documents"
     config.maxPoolSize shouldBe 10
@@ -33,7 +34,7 @@ class SearchIndexConfigSpec extends AnyFlatSpec with Matchers {
       port = 5555,
       database = "ragdb",
       user = "admin",
-      password = "secret",
+      password = Secret("secret"),
       vectorTableName = "my_vectors",
       keywordTableName = "my_docs",
       maxPoolSize = 20
@@ -42,7 +43,7 @@ class SearchIndexConfigSpec extends AnyFlatSpec with Matchers {
     config.port shouldBe 5555
     config.database shouldBe "ragdb"
     config.user shouldBe "admin"
-    config.password shouldBe "secret"
+    config.password shouldBe Secret("secret")
     config.vectorTableName shouldBe "my_vectors"
     config.keywordTableName shouldBe "my_docs"
     config.maxPoolSize shouldBe 20

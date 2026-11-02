@@ -3,6 +3,7 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.{ LLMError, ProcessingError }
 import org.llm4s.util.SqlIdentifier
+import org.llm4s.security.Secret
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import java.sql.{ Connection, PreparedStatement, ResultSet }
@@ -495,7 +496,7 @@ object PgKeywordIndex {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "documents",
     maxPoolSize: Int = 10,
     language: String = "english"
@@ -508,7 +509,7 @@ object PgKeywordIndex {
     def withHost(h: String): Config                   = copy(host = h)
     def withPort(p: Int): Config                      = copy(port = p)
     def withDatabase(db: String): Config              = copy(database = db)
-    def withCredentials(u: String, p: String): Config = copy(user = u, password = p)
+    def withCredentials(u: String, p: Secret): Config = copy(user = u, password = p)
   }
 
   object Config {
@@ -517,7 +518,8 @@ object PgKeywordIndex {
     def local(tableName: String = "documents"): Config =
       Config(tableName = tableName)
 
-    def fromJdbc(jdbcUrl: String, user: String, password: String, tableName: String = "documents"): Config = {
+    def fromJdbc(jdbcUrl: String, user: String, password: Secret, tableName: String = "documents"): Config = {
+      JdbcUrlCredentials.register(jdbcUrl)
       val pattern = """jdbc:postgresql://([^:/]+):?(\d+)?/(.+)""".r
       jdbcUrl match {
         case pattern(host, portStr, database) =>
@@ -550,7 +552,7 @@ object PgKeywordIndex {
           val hikariConfig = new HikariConfig()
           hikariConfig.setJdbcUrl(config.jdbcUrl)
           hikariConfig.setUsername(config.user)
-          hikariConfig.setPassword(config.password)
+          hikariConfig.setPassword(config.password.reveal)
           hikariConfig.setMaximumPoolSize(config.maxPoolSize)
           hikariConfig.setMinimumIdle(1)
           hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -625,7 +627,7 @@ object PgKeywordIndex {
   def apply(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     tableName: String
   ): Result[PgKeywordIndex] =
     apply(Config.fromJdbc(connectionString, user, password, tableName))

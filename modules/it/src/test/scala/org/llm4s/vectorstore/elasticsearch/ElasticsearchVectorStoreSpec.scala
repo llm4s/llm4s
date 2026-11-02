@@ -34,7 +34,7 @@ class ElasticsearchVectorStoreSpec extends AnyWordSpec with Matchers with Before
       val config = ElasticsearchConfig(
         baseUrl = url,
         index = s"llm4s-it-${System.nanoTime()}",
-        auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(ElasticsearchAuth.ApiKey(Secret(_)))
+        auth = apiKey.fold[ElasticsearchAuth](ElasticsearchAuth.NoAuth)(k => ElasticsearchAuth.ApiKey(Secret(k)))
       )
       store = ElasticsearchVectorStore(config).fold(e => fail(s"Failed to create store: ${e.formatted}"), identity)
     }

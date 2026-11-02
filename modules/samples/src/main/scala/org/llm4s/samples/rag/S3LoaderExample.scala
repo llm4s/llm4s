@@ -1,6 +1,7 @@
 package org.llm4s.samples.rag
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.security.Secret
 import org.llm4s.rag.loader.s3.{ S3DocumentSource, S3Loader }
 import org.llm4s.rag.{ RAG, RAGSearchResult }
 
@@ -183,8 +184,8 @@ object S3LoaderAdvancedExample {
       S3Loader
         .withCredentials(
           bucket = "private-bucket",
-          accessKeyId = env("AWS_ACCESS_KEY_ID").getOrElse("test"),
-          secretAccessKey = env("AWS_SECRET_ACCESS_KEY").getOrElse("test"),
+          accessKeyId = env("AWS_ACCESS_KEY_ID").map(Secret(_)).getOrElse(Secret("test")),
+          secretAccessKey = env("AWS_SECRET_ACCESS_KEY").map(Secret(_)).getOrElse(Secret("test")),
           region = "eu-west-1"
         )
         .tap(l => logger.info("Credentials loader: {}", l.description))

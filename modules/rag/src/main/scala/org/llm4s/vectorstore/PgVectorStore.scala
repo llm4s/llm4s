@@ -3,6 +3,7 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
 import org.llm4s.util.SqlIdentifier
+import org.llm4s.security.Secret
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import java.util.concurrent.atomic.AtomicBoolean
@@ -553,7 +554,7 @@ object PgVectorStore {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "vectors",
     maxPoolSize: Int = 10
   ) {
@@ -572,7 +573,7 @@ object PgVectorStore {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(config.jdbcUrl)
         hikariConfig.setUsername(config.user)
-        hikariConfig.setPassword(config.password)
+        hikariConfig.setPassword(config.password.reveal)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
         hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -596,15 +597,16 @@ object PgVectorStore {
   def apply(
     connectionString: String,
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "vectors"
   ): Result[PgVectorStore] =
     validateTableName(tableName).flatMap { _ =>
+      JdbcUrlCredentials.register(connectionString)
       Try {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(connectionString)
         hikariConfig.setUsername(user)
-        hikariConfig.setPassword(password)
+        hikariConfig.setPassword(password.reveal)
         hikariConfig.setMaximumPoolSize(10)
         hikariConfig.setMinimumIdle(1)
         hikariConfig

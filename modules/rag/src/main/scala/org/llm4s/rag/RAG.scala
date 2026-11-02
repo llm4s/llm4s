@@ -1698,7 +1698,7 @@ object RAG {
     config.pgVectorConnectionString match {
       case Some(connStr) =>
         val user        = config.pgVectorUser.getOrElse("postgres")
-        val password    = config.pgVectorPassword.getOrElse("")
+        val password    = config.pgVectorPassword.getOrElse(Secret(""))
         val vectorTable = config.pgVectorTableName.getOrElse("vectors")
 
         config.pgKeywordTableName match {

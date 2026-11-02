@@ -4,6 +4,7 @@ package org.llm4s.rag.loader.s3
 import org.llm4s.error.{ NetworkError, ProcessingError }
 import org.llm4s.rag.loader.{ DocumentRef, DocumentVersion, RawDocument, SyncableSource }
 import org.llm4s.types.Result
+import org.llm4s.security.Secret
 import org.slf4j.LoggerFactory
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
@@ -262,8 +263,8 @@ object S3DocumentSource {
    */
   def withCredentials(
     bucket: String,
-    accessKeyId: String,
-    secretAccessKey: String,
+    accessKeyId: Secret,
+    secretAccessKey: Secret,
     region: String = "us-east-1",
     prefix: String = ""
   ): S3DocumentSource =
@@ -271,7 +272,8 @@ object S3DocumentSource {
       bucket = bucket,
       prefix = prefix,
       region = region,
-      credentials = Some(StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId, secretAccessKey)))
+      credentials =
+        Some(StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId.reveal, secretAccessKey.reveal)))
     )
 
   /**
