@@ -36,6 +36,8 @@ GEM
       jekyll (>= 3.7, < 5.0)
     jekyll-include-cache (0.2.1)
       jekyll (>= 3.7, < 5.0)
+    jekyll-redirect-from (0.16.0)
+      jekyll (>= 3.3, < 5.0)
     jekyll-sass-converter (1.5.2)
       sass (~> 3.4)
     jekyll-seo-tag (2.8.0)
@@ -84,6 +86,7 @@ DEPENDENCIES
   csv
   jekyll (~> 3.9)
   jekyll-feed (~> 0.17)
+  jekyll-redirect-from (~> 0.16)
   jekyll-seo-tag (~> 2.8)
   jekyll-sitemap (~> 1.4)
   just-the-docs (~> 0.10)

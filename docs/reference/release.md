@@ -251,6 +251,11 @@ it never overwrites. Write whatever the release deserves once it exists.
   `docs/_data/project.yml` in the prepare commit) and runs `./mill app.compile + app.test`; it also runs weekly.
   Locally: `scripts/check-mill-quickstart.sh --central --build`.
 
+- After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
+  Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's
+  pages should not show new crawl errors). The deploy itself fails if `sitemap.xml` lists Scaladoc or PDF URLs
+  (`scripts/check-site-sitemaps.sh`).
+
 ### Discoverability: Scaladex and GitHub
 
 Scala developers look for libraries on [Scaladex](https://index.scala-lang.org). It indexes an artifact by the

@@ -124,6 +124,11 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
+      # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
+      - name: Check llms.txt and llms-full.txt build from the docs
+        run: scripts/check-llms-txt.sh
+
       # The cited-issue check itself needs the network and runs weekly and on docs pull requests
       # (docs-cited-issues.yml); its tests run it against a fake `gh`.
       - name: Test the cited-issue check
@@ -135,6 +140,10 @@ jobs:
       # reaches a shell. It needs jq and ruby, both on the runner.
       - name: Test the release docs-deploy dispatcher
         run: scripts/test-dispatch-docs-deploy.sh
+
+      # The sitemap generator and check that pages.yml runs after the Jekyll build (#2318), on a fake built site.
+      - name: Test the sitemap scripts
+        run: scripts/test-check-site-sitemaps.sh
 
       # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
       # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
