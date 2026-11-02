@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -47,7 +48,7 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
         // api.z.ai's free flash model (listed in the model registry as `zai/glm-4.5-flash`).
         // `GLM-4-Flash` is a bigmodel.cn name that api.z.ai does not serve.
         modelName = "glm-4.5-flash",
-        apiKey = key,
+        apiKey = Secret(key),
         baseUrl = ZaiConfig.DEFAULT_BASE_URL
       )
       .value

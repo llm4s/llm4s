@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ GeminiConfig, ProviderTimeouts, VertexAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -26,7 +27,7 @@ final class GeminiConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   private def hello: Conversation = Conversation(Seq(UserMessage("hello")))
 
   private def gemini(baseUrl: String, timeouts: ProviderTimeouts): GeminiConfig =
-    GeminiConfig("test-key", "gemini-2.0-flash", baseUrl, 1048576, 8192).withTimeouts(timeouts)
+    GeminiConfig(Secret("test-key"), "gemini-2.0-flash", baseUrl, 1048576, 8192).withTimeouts(timeouts)
 
   private def vertex(timeouts: ProviderTimeouts): VertexAIConfig =
     VertexAIConfig("my-project", "us-central1", "gemini-2.0-flash", None, 1048576, 8192).withTimeouts(timeouts)

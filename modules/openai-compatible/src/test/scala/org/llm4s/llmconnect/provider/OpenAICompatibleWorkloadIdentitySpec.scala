@@ -348,7 +348,7 @@ class OpenAICompatibleWorkloadIdentitySpec
         val http = MockHttpClient(Seq(HttpResponse(status, deep)))
         val c = new OpenAICompatibleClient(
           OpenAICompatibleClient
-            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Static(key), 8192, 2048),
+            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Static(Secret(key)), 8192, 2048),
           OpenAICompatibleDialect.Standard
         ) {
           override protected[provider] val httpClient: Llm4sHttpClient = http
@@ -558,7 +558,9 @@ class OpenAICompatibleWorkloadIdentitySpec
         fake.exchanges shouldBe empty
         // A static key is the caller's own, as before: a plain-http base URL is still accepted with one.
         new OpenAICompatibleClient(
-          exchange.withBaseUrl(insecureBaseUrl(fake)).withCredential(OpenAICompatibleClient.Credential.Static("k")),
+          exchange
+            .withBaseUrl(insecureBaseUrl(fake))
+            .withCredential(OpenAICompatibleClient.Credential.Static(Secret("k"))),
           OpenAICompatibleDialect.standard(Nil)
         ).close()
       }
@@ -579,7 +581,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       OpenAICompatibleConfig.fromValues(
         model = "m",
         baseUrl = baseUrl,
-        apiKey = apiKey,
+        apiKey = apiKey.map(Secret(_)),
         headers = headers,
         tokenExchange = Some(tokenExchange)
       )
@@ -640,7 +642,7 @@ class OpenAICompatibleWorkloadIdentitySpec
       val valid = fromValues().value
       val bad = Seq(
         valid.withHeaders(Map("authorization" -> "Bearer stale")),
-        valid.withApiKey("k"),
+        valid.withApiKey(Secret("k")),
         valid.withTokenExchange(exchange.withTokenUrl("http://ws.example/t")),
         valid.withBaseUrl("http://ws.example/v1"),
         OpenAICompatibleConfig(
@@ -744,7 +746,7 @@ class OpenAICompatibleWorkloadIdentitySpec
 
     "accept a static key beside a dialect Authorization header, as before" in {
       new OpenAICompatibleClient(
-        settings(OpenAICompatibleClient.Credential.Static("k")),
+        settings(OpenAICompatibleClient.Credential.Static(Secret("k"))),
         OpenAICompatibleDialect.standard(Seq("Authorization" -> "Bearer x"))
       ).close()
     }

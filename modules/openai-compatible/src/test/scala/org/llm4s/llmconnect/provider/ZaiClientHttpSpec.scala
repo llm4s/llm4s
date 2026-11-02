@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.ZaiConfig
@@ -26,7 +27,7 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
 
   private def localConfig(baseUrl: String): ZaiConfig =
     ZaiConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       model = "GLM-4.7",
       baseUrl = baseUrl,
       contextWindow = 128000,

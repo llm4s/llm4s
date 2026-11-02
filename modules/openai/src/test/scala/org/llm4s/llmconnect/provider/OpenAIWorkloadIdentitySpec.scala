@@ -42,12 +42,12 @@ class OpenAIWorkloadIdentitySpec
     "build an OpenAIConfig carrying the workload identity and no key" in {
       val config = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$section\n}").value
       val openai = config.asInstanceOf[OpenAIConfig]
-      openai.apiKey shouldBe ""
+      openai.apiKey.reveal shouldBe ""
       openai.workloadIdentity.value shouldBe OpenAIWorkloadIdentity(
         IdentitySource.File(Path.of("/var/run/svid").toAbsolutePath),
         "idp_1",
         "sa_1",
-        Some("c_1")
+        Some(Secret("c_1"))
       )
       openai.toString should include("workloadIdentity=Some(OpenAIWorkloadIdentity(")
       for id <- Seq("idp_1", "sa_1", "c_1") do (openai.toString should not).include(id)
@@ -61,7 +61,7 @@ class OpenAIWorkloadIdentitySpec
       val file = Files.createTempFile("svid", ".jwt")
       Files.writeString(file, "eyJ.svid.sig\n")
       val sdk = OpenAIClientTransport.sdkWorkloadIdentity(
-        OpenAIWorkloadIdentity(IdentitySource.File(file), "idp_1", "sa_1", Some("c_1"))
+        OpenAIWorkloadIdentity(IdentitySource.File(file), "idp_1", "sa_1", Some(Secret("c_1")))
       )
       sdk.identityProviderId() shouldBe "idp_1"
       sdk.serviceAccountId() shouldBe "sa_1"
@@ -160,7 +160,7 @@ class OpenAIWorkloadIdentitySpec
           a[ConfigurationError]
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = OpenAIConfig(
-          "",
+          Secret(""),
           "gpt-4o-mini",
           None,
           baseUrl,
@@ -226,7 +226,7 @@ class OpenAIWorkloadIdentitySpec
       baseUrl: String = OpenAIProvider.DEFAULT_BASE_URL,
       providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = None
     ) =
-      OpenAIConfig.fromValues("gpt-4o-mini", apiKey, None, baseUrl, providerId, Some(identity))
+      OpenAIConfig.fromValues("gpt-4o-mini", Secret(apiKey), None, baseUrl, providerId, Some(identity))
 
     "be accepted by fromValues for openai, with no key" in {
       fromValues().value.workloadIdentity.value shouldBe identity
@@ -286,7 +286,7 @@ class OpenAIWorkloadIdentitySpec
       do
         withClue(url) {
           OpenAIConfig(
-            "",
+            Secret(""),
             "gpt-4o-mini",
             None,
             url,
@@ -302,13 +302,13 @@ class OpenAIWorkloadIdentitySpec
     }
 
     "leave a custom baseUrl alone with an apiKey" in {
-      OpenAIConfig.fromValues("gpt-4o-mini", "sk-x", None, "http://proxy.example/v1").isRight shouldBe true
+      OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-x"), None, "http://proxy.example/v1").isRight shouldBe true
     }
 
     "be refused by OpenAIClient and OpenRouterClient when built with apply or changed with a with* setter" in {
       val valid = fromValues().value
       val bad = Seq(
-        valid.withApiKey("sk-x"),
+        valid.withApiKey(Secret("sk-x")),
         valid.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
         valid.withBaseUrl("https://openrouter.ai/api/v1"),
         valid.withBaseUrl("https://attacker.example/v1"),
@@ -334,14 +334,14 @@ class OpenAIWorkloadIdentitySpec
       val blanks = Seq(
         "workloadIdentity.identityProviderId" -> identity.withIdentityProviderId(" "),
         "workloadIdentity.serviceAccountId"   -> identity.withServiceAccountId(""),
-        "workloadIdentity.clientId"           -> identity.withClientId(" "),
+        "workloadIdentity.clientId"           -> identity.withClientId(Secret(" ")),
         "workloadIdentity.identityToken"      -> identity.withIdentityToken(IdentitySource.Literal("")),
         "workloadIdentity.identityTokenFile"  -> identity.withIdentityToken(IdentitySource.File(Path.of("")))
       )
       for (field, blank) <- blanks do
         withClue(field) {
           val error = OpenAIConfig
-            .fromValues("gpt-4o-mini", "", None, OpenAIProvider.DEFAULT_BASE_URL, None, Some(blank))
+            .fromValues("gpt-4o-mini", Secret(""), None, OpenAIProvider.DEFAULT_BASE_URL, None, Some(blank))
             .left
             .value
           error shouldBe a[ConfigurationError]
@@ -356,11 +356,11 @@ class OpenAIWorkloadIdentitySpec
     "leave OpenAIClient refusing a blank apiKey once the identity is removed, rather than send an empty bearer" in {
       val keyless = fromValues().value.withWorkloadIdentity(None)
       Seq("", "   ").foreach { key =>
-        val error = OpenAIClient(keyless.withApiKey(key)).left.value
+        val error = OpenAIClient(keyless.withApiKey(Secret(key))).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
         an[IllegalArgumentException] should be thrownBy new OpenAIClient(
-          keyless.withApiKey(key),
+          keyless.withApiKey(Secret(key)),
           org.llm4s.metrics.MetricsCollector.noop
         )
       }
@@ -369,16 +369,16 @@ class OpenAIWorkloadIdentitySpec
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would send an empty bearer
       Seq("", "  ").foreach { key =>
-        OpenAIClient(OpenAIConfig(key, "gpt-4o-mini")).left.value.message should include("apiKey")
+        OpenAIClient(OpenAIConfig(Secret(key), "gpt-4o-mini")).left.value.message should include("apiKey")
       }
       // the short apply's default base URL is an OpenAI host, so a keyless config with an identity is valid
-      val federated = OpenAIConfig("", "gpt-4o-mini").withWorkloadIdentity(identity)
+      val federated = OpenAIConfig(Secret(""), "gpt-4o-mini").withWorkloadIdentity(identity)
       OpenAIConfig.validate(federated) shouldBe Right(federated)
       OpenAIClient(federated).value.close()
       val bad = Seq(
-        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(identity),
-        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
-        federated.withApiKey("sk-x"),
+        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(identity),
+        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey(Secret("sk-x")),
         federated.withBaseUrl("https://proxy.example/v1"),
         federated.withExplicitProviderId(org.llm4s.types.ProviderModelTypes.ProviderId("requesty")),
         federated.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("openrouter"))),

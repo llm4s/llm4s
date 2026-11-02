@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
 import org.llm4s.llmconnect.config.AnthropicConfig
@@ -18,7 +19,7 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
 
   private lazy val client = new AnthropicClient(
     AnthropicConfig(
-      apiKey = "sk-ant-dummy",
+      apiKey = Secret("sk-ant-dummy"),
       model = "claude-3-5-sonnet-20241022",
       baseUrl = "https://api.anthropic.com",
       contextWindow = 200000,

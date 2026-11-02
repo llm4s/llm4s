@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
@@ -129,7 +130,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
     "return the provider the descriptor builds" in {
       val provider = assertBuildsEmbeddingProvider(
         AcmeEmbeddings,
-        EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-small", "k")
+        EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-small", Secret("k"))
       )
       provider.embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("acme-small", 2))).isRight shouldBe true
     }
@@ -138,7 +139,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
       failureOf(
         assertBuildsEmbeddingProvider(
           AcmeEmbeddings,
-          EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-retired", "k")
+          EmbeddingProviderConfig(AcmeProvider.DefaultBaseUrl, "acme-retired", Secret("k"))
         )
       ) should include("no longer served")
     }

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -328,7 +329,7 @@ class OpenAICompatibleClient(
   /** The current bearer value, if this client sends one. */
   private def bearer(): Result[Option[String]] = settings.credential match
     case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
-    case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key))
+    case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key.reveal))
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
@@ -647,7 +648,7 @@ object OpenAICompatibleClient {
    */
   private[provider] def blankStaticKey(settings: Settings): Option[String] =
     settings.credential match
-      case Credential.Static(key) if key.trim.isEmpty =>
+      case Credential.Static(key) if key.reveal.trim.isEmpty =>
         Some(
           s"${settings.displayName} apiKey must be non-empty: a blank key would be sent as an empty bearer token"
         )
@@ -705,7 +706,7 @@ object OpenAICompatibleClient {
     case Anonymous
 
     /** `Authorization: Bearer <key>`; `key` must not be blank - the client refuses an empty bearer. */
-    case Static(key: String)
+    case Static(key: Secret)
 
     /**
      * `Authorization: Bearer <token>`, the token fetched per request from `provider` and refreshed once
@@ -828,7 +829,7 @@ object OpenAICompatibleClient {
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)
         // A blank key is no key, as `fromValues` treats it: never an empty bearer.
-        case None => config.apiKey.filter(_.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
+        case None => config.apiKey.filter(_.reveal.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
       },
       contextWindow = config.contextWindow,
       reserveCompletion = config.reserveCompletion,

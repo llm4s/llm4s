@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.ProviderConfigSpec
+import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
 import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
@@ -12,6 +13,9 @@ import scala.jdk.CollectionConverters.*
 
 /** Reads the raw providers configuration block from a PureConfig source without validation. */
 private[config] object RawProvidersConfigLoader:
+
+  /** A key as written, trimmed, wrapped at the point it is read so that it is registered for redaction. */
+  private given PureConfigReader[ApiKey] = PureConfigReader[String].map(raw => ApiKey(raw.trim))
 
   private val builtinFieldsReader: PureConfigReader[RawNamedProviderSection] =
     PureConfigReader.forProduct5(

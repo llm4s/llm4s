@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the Anthropic Claude API.
@@ -37,7 +37,7 @@ import org.llm4s.util.Redaction
  */
 @Stable
 final case class AnthropicConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
@@ -53,7 +53,7 @@ final case class AnthropicConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): AnthropicConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): AnthropicConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): AnthropicConfig = copy(reserveCompletion = reserveCompletion)
@@ -63,7 +63,7 @@ final case class AnthropicConfig private (
     copy(workloadIdentity = workloadIdentity)
   def withWebSearch(enabled: Boolean): AnthropicConfig = copy(webSearch = enabled)
   override def toString: String =
-    s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+    s"AnthropicConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity, webSearch=$webSearch)"
 
 object AnthropicConfig {
@@ -84,7 +84,7 @@ object AnthropicConfig {
    * authenticates with `apiKey`.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String,
     contextWindow: Int,
@@ -110,7 +110,7 @@ object AnthropicConfig {
    * Claude models); set them, and the rest, with the `with*` setters, or use [[fromValues]] to
    * consult the bundled model catalogue.
    */
-  def apply(apiKey: String, model: String): AnthropicConfig = {
+  def apply(apiKey: Secret, model: String): AnthropicConfig = {
     val (cw, rc) = anthropicFallback(model)
     apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
   }
@@ -145,12 +145,12 @@ object AnthropicConfig {
   private[llm4s] def validate(config: AnthropicConfig): Result[AnthropicConfig] =
     config.workloadIdentity match
       // Without workload identity the key is the only credential: a blank one would authenticate as nobody.
-      case None => ProviderConfig.nonEmpty("Anthropic", "apiKey", config.apiKey).map(_ => config)
+      case None => ProviderConfig.nonEmpty("Anthropic", "apiKey", config.apiKey.reveal).map(_ => config)
       case Some(identity) =>
         for
           _ <- AnthropicWorkloadIdentity.validate(identity)
           _ <- Either.cond(
-            config.apiKey.trim.isEmpty,
+            config.apiKey.reveal.trim.isEmpty,
             (),
             ConfigurationError(
               "Anthropic config sets both apiKey and workloadIdentity; a config authenticates one way - use one",
@@ -173,12 +173,12 @@ object AnthropicConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[AnthropicConfig] =
     (for {
-      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey)
+      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

@@ -17,6 +17,7 @@ import org.llm4s.llmconnect.config.{
 }
 import org.llm4s.llmconnect.auth.AccessTokenProvider
 import org.llm4s.llmconnect.provider.{ AzureEntraIdSupport, OpenAICompatibleProvider }
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, BaseUrl, ModelName, ProviderId }
 import org.llm4s.types.Result
 
@@ -60,7 +61,7 @@ private[javaapi] object ClientBuilds {
 
   def openAiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
-      apiKey   <- required("apiKey", s.apiKey)
+      apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
       model    <- required("model", s.model)
       resolver <- resolver
       config <- OpenAIConfig.fromValues(
@@ -75,7 +76,7 @@ private[javaapi] object ClientBuilds {
 
   def anthropicConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
-      apiKey   <- required("apiKey", s.apiKey)
+      apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
       model    <- required("model", s.model)
       resolver <- resolver
       config <- AnthropicConfig
@@ -86,7 +87,7 @@ private[javaapi] object ClientBuilds {
 
   def geminiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {
-      apiKey   <- required("apiKey", s.apiKey)
+      apiKey   <- required("apiKey", s.apiKey).map(Secret(_))
       model    <- required("model", s.model)
       resolver <- resolver
       config <- GeminiConfig.fromValues(model, apiKey, present(s.baseUrl).getOrElse(GeminiConfig.DEFAULT_BASE_URL))(
@@ -149,11 +150,11 @@ private[javaapi] object ClientBuilds {
    * The Azure builder's credential: an API key (`Left`), or bearer tokens (`Right`) from its token provider or, for
    * `entraId()`, from `llm4s-azure-identity`'s `DefaultAzureCredential` (#2274). With neither, the API key is required.
    */
-  private def azureCredential(s: ClientSettings): Either[Result[String], Result[AccessTokenProvider]] =
+  private def azureCredential(s: ClientSettings): Either[Result[Secret], Result[AccessTokenProvider]] =
     Option(s.tokenProvider) match {
       case Some(tokens)      => Right(Right(tokens))
       case None if s.entraId => Right(AzureEntraIdSupport.tokenProvider(present(s.entraIdClientId)))
-      case None              => Left(required("apiKey", s.apiKey))
+      case None              => Left(required("apiKey", s.apiKey).map(Secret(_)))
     }
 
   /** The client for `config`, reporting to the builder's collector, or the first thing wrong with what it was told. */
@@ -171,16 +172,16 @@ private[javaapi] object ClientBuilds {
           Some(
             parsed
               .withUsername(present(n.proxyUsername).orElse(parsed.username))
-              .withPassword(Option(n.proxyPassword).orElse(parsed.password))
+              .withPassword(Option(n.proxyPassword).map(Secret(_)).orElse(parsed.password))
               .withNonProxyHosts(Option(n.nonProxyHosts).fold(parsed.nonProxyHosts)(_.asScala.toSeq))
           )
         }
       }
       tls = HttpTls(
         Option(n.trustStore),
-        Option(n.trustStorePassword),
+        Option(n.trustStorePassword).map(Secret(_)),
         Option(n.keyStore),
-        Option(n.keyStorePassword)
+        Option(n.keyStorePassword).map(Secret(_))
       )
       _ <- HttpNetwork.tlsMaterial(tls).left.map { e =>
         ValidationError.invalid(if (e.message.startsWith("tls.keyStore")) "keyStore" else "trustStore", e.message)

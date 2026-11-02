@@ -2,6 +2,7 @@ package org.llm4s.spring
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.javaapi.LlmResult
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 
@@ -56,7 +57,7 @@ object ProviderConfigParser {
       val org     = Some(text(p.organization)).filter(_.nonEmpty)
       LlmResult.success(
         OpenAIConfig(
-          apiKey = apiKey,
+          apiKey = Secret(apiKey),
           model = model,
           organization = org,
           baseUrl = baseUrl,
@@ -75,7 +76,7 @@ object ProviderConfigParser {
       val baseUrl = Some(text(p.baseUrl)).filter(_.nonEmpty).getOrElse("https://api.anthropic.com")
       LlmResult.success(
         AnthropicConfig(
-          apiKey = apiKey,
+          apiKey = Secret(apiKey),
           model = model,
           baseUrl = baseUrl,
           contextWindow = p.contextWindow,

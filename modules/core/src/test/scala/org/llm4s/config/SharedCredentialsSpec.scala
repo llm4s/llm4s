@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
@@ -43,7 +44,9 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     ): Result[ProviderConfig] =
       ProviderDescriptor
         .requireApiKey(providerName, section)
-        .flatMap(FixtureChatConfig.fromValues(section.model.asString, _, FixtureChatProvider.DefaultBaseUrl))
+        .flatMap(key =>
+          FixtureChatConfig.fromValues(section.model.asString, key.reveal, FixtureChatProvider.DefaultBaseUrl)
+        )
 
     def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
       FixtureChatProvider.buildClient(config, options)
@@ -204,7 +207,8 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     }
 
     "be redacted from a resolved key's toString" in {
-      (SharedCredentials.Resolved("sk-secret", "llm4s.credentials.x.apiKey").toString should not).include("sk-secret")
+      (SharedCredentials.Resolved(Secret("sk-secret"), "llm4s.credentials.x.apiKey").toString should not)
+        .include("sk-secret")
     }
 
     "be reported per section by apiKeySources" in {
@@ -234,7 +238,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
 
     "take the vendor's shared key" in {
       val source = ReferenceConfig.withEnv(select + binding, Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared"))
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey shouldBe "sk-shared"
+      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-shared"
     }
 
     "take its own key over the shared one" in {
@@ -242,7 +246,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
         select + binding + "llm4s.embeddings.fixtureembedding.apiKey = \"sk-own\"\n",
         Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared")
       )
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey shouldBe "sk-own"
+      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-own"
     }
 
     "take the canonical id's key when selected by an alias" in {
@@ -250,7 +254,7 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
         s"llm4s.embeddings.model = \"${FixtureEmbeddingProvider.Alias}/fixture-embed-small\"\n" + binding,
         Map(FixtureEmbeddingProvider.ApiKeyEnv -> "sk-shared")
       )
-      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey shouldBe "sk-shared"
+      EmbeddingsConfigLoader.loadProvider(source).value._2.apiKey.reveal shouldBe "sk-shared"
     }
 
     "fail naming the variable and the block when neither is set" in {
@@ -292,6 +296,6 @@ class SharedCredentialsSpec extends AnyWordSpec with Matchers with EitherValues:
     "fail every lookup, and nothing else, when it is not an object" in {
       val credentials = SharedCredentials.read(ConfigSource.string("llm4s.credentials = 42"))
       credentials.apiKey(ProviderId("keyed")).left.value.message should include("llm4s.credentials")
-      credentials.resolve(Some("sk-own"), "p", ProviderId("keyed")).value.map(_.value) shouldBe Some("sk-own")
+      credentials.resolve(Some("sk-own"), "p", ProviderId("keyed")).value.map(_.value.reveal) shouldBe Some("sk-own")
     }
   }

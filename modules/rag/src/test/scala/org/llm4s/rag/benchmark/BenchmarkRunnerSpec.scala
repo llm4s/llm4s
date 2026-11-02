@@ -1,5 +1,6 @@
 package org.llm4s.rag.benchmark
 
+import org.llm4s.security.Secret
 import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -104,7 +105,7 @@ class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
 
   /** Resolves any provider name to a dummy config — tests never hit real endpoints. */
   private val dummyResolve: String => Result[EmbeddingProviderConfig] = _ =>
-    Right(EmbeddingProviderConfig(apiKey = "key", baseUrl = "http://localhost", model = "test"))
+    Right(EmbeddingProviderConfig(apiKey = Secret("key"), baseUrl = "http://localhost", model = "test"))
 
   private def goodEmbed: EmbeddingClient = new EmbeddingClient(new MockEmbeddingProvider())
   private def badEmbed: EmbeddingClient  = new EmbeddingClient(new FailingEmbeddingProvider())

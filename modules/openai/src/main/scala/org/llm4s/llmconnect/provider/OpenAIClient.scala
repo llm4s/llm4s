@@ -983,7 +983,7 @@ private[provider] object OpenAIClientTransport {
       .organization(config.organization.orNull)
     config.workloadIdentity match {
       case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
-      case None     => builder.apiKey(config.apiKey)
+      case None     => builder.apiKey(config.apiKey.reveal)
     }
     sdk(customize(withNetwork(builder, config.network, config.baseUrl)).build(), config.timeouts)
   }
@@ -1004,7 +1004,7 @@ private[provider] object OpenAIClientTransport {
     HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
       builder.proxy(proxy)
       network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
-        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
       }
     }
     HttpNetwork
@@ -1053,7 +1053,7 @@ private[provider] object OpenAIClientTransport {
       .identityProviderId(wi.identityProviderId)
       .serviceAccountId(wi.serviceAccountId)
       .provider(subject)
-    wi.clientId.foreach(builder.clientId)
+    wi.clientId.foreach(id => builder.clientId(id.reveal))
     builder.build()
   }
 
@@ -1083,7 +1083,7 @@ private[provider] object OpenAIClientTransport {
       sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
     config.tokenProvider match {
       case None =>
-        builder.credential(AzureApiKeyCredential.create(config.apiKey))
+        builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))
         transport()
       case Some(tokens) =>
         val bearer = new EntraIdBearer(tokens)

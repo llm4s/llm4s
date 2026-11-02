@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import com.typesafe.config.ConfigUtil
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -38,7 +39,7 @@ import scala.jdk.CollectionConverters.*
  *                   reported by every lookup, and so only by clients that need a shared key.
  */
 final private[llm4s] case class SharedCredentials(
-  entries: Map[ProviderId, Result[String]],
+  entries: Map[ProviderId, Result[Secret]],
   blockError: Option[ConfigurationError] = None
 ):
 
@@ -54,7 +55,7 @@ final private[llm4s] case class SharedCredentials(
    *           a section or block resolved to, so aliases need no handling here.
    * @return `Right(None)` when no key is set, `Left` when the entry cannot be read
    */
-  def apiKey(id: ProviderId): Result[Option[String]] =
+  def apiKey(id: ProviderId): Result[Option[Secret]] =
     blockError match
       case Some(error) => Left(error)
       case None =>
@@ -73,7 +74,7 @@ final private[llm4s] case class SharedCredentials(
    */
   def resolve(own: Option[String], ownPath: String, id: ProviderId): Result[Option[SharedCredentials.Resolved]] =
     own.map(_.trim).filter(_.nonEmpty) match
-      case Some(key) => Right(Some(SharedCredentials.Resolved(key, ownPath)))
+      case Some(key) => Right(Some(SharedCredentials.Resolved(Secret(key), ownPath)))
       case None      => apiKey(id).map(_.map(SharedCredentials.Resolved(_, SharedCredentials.apiKeyPath(id))))
 
 private[llm4s] object SharedCredentials:
@@ -85,7 +86,7 @@ private[llm4s] object SharedCredentials:
    *
    * `toString` redacts the value: this is passed around to be logged, and only `path` may be.
    */
-  final case class Resolved(value: String, path: String):
+  final case class Resolved(value: Secret, path: String):
     override def toString: String = s"Resolved(***,$path)"
 
   /**
@@ -156,14 +157,14 @@ private[llm4s] object SharedCredentials:
         val entries =
           objCursor.objValue.keySet().asScala.toList.flatMap { key =>
             val id = ProviderId(key)
-            val entry: Either[ConfigReaderFailures, Option[String]] =
+            val entry: Either[ConfigReaderFailures, Option[Secret]] =
               for
                 entryCursor <- objCursor.atKey(key).flatMap(_.asObjectCursor)
                 keyCursor = entryCursor.atKeyOrUndefined("apiKey")
                 value <-
                   if keyCursor.isUndefined || keyCursor.isNull then Right(None)
                   else PureConfigReader[String].from(keyCursor).map(Some(_))
-              yield value.map(_.trim).filter(_.nonEmpty)
+              yield value.map(_.trim).filter(_.nonEmpty).map(Secret(_))
 
             entry match
               case Right(None)      => Nil

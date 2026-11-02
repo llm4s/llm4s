@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -34,7 +35,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wi
     OpenAIConfig
       .fromValues(
         modelName = "openai/gpt-4o-mini",
-        apiKey = key,
+        apiKey = Secret(key),
         organization = None,
         baseUrl = "https://openrouter.ai/api/v1"
       )

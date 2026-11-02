@@ -1,6 +1,7 @@
 package org.llm4s.http
 
 import org.llm4s.error.{ ConfigurationError, NetworkError }
+import org.llm4s.security.Secret
 import org.llm4s.testutil.{ RecordingProxy, TestTls }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -73,7 +74,7 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
     Using.resource(Llm4sHttpClient.create(HttpNetworkSettings.default)) { plain =>
       plain.get(url).left.value shouldBe a[NetworkError]
     }
-    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(TestTls.Password)))
+    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password))))
     Using.resource(Llm4sHttpClient.create(trusting)) { client =>
       client.get(url).value.body shouldBe """{"tls":true}"""
     }
@@ -83,11 +84,11 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "present the key store's client certificate to a server that demands one" in {
     val server    = TestTls.httpsServer(body = "mtls", requireClientCertificate = true)
     val url       = s"https://localhost:${server.getAddress.getPort}/"
-    val trustOnly = HttpTls(Some(TestTls.trustStore), Some(TestTls.Password))
+    val trustOnly = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password)))
     Using.resource(Llm4sHttpClient.create(HttpNetworkSettings(tls = trustOnly))) { client =>
       client.get(url).isLeft shouldBe true
     }
-    val withCertificate = trustOnly.withKeyStore(TestTls.clientStore).withKeyStorePassword(TestTls.Password)
+    val withCertificate = trustOnly.withKeyStore(TestTls.clientStore).withKeyStorePassword(Secret(TestTls.Password))
     Using.resource(Llm4sHttpClient.create(HttpNetworkSettings(tls = withCertificate))) { client =>
       client.get(url).value.body shouldBe "mtls"
     }
@@ -96,7 +97,7 @@ class JdkHttpClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValu
 
   "A client whose TLS store cannot be read" should "fail every request with a ConfigurationError, never the password" in {
     val broken = HttpNetworkSettings(tls =
-      HttpTls(trustStore = Some(Path.of("missing-ca.p12")), trustStorePassword = Some("do-not-print"))
+      HttpTls(trustStore = Some(Path.of("missing-ca.p12")), trustStorePassword = Some(Secret("do-not-print")))
     )
     Using.resource(Llm4sHttpClient.create(broken)) { client =>
       val calls = Seq(

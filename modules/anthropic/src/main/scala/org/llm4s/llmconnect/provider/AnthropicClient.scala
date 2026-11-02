@@ -152,7 +152,7 @@ class AnthropicClient(
   private val client = {
     val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
     config.workloadIdentity match {
-      case None => builder.apiKey(config.apiKey)
+      case None => builder.apiKey(config.apiKey.reveal)
       case Some(wi) =>
         val auth = AuthenticationConfig
           .builder()
@@ -902,7 +902,7 @@ object AnthropicClient {
     HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
       builder.proxy(proxy)
       network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
-        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
       }
     }
     HttpNetwork

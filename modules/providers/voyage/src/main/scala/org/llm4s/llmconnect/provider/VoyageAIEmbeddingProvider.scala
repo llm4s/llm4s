@@ -105,7 +105,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
           logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
           val headers = Map(
-            "Authorization" -> s"Bearer ${cfg.apiKey}",
+            "Authorization" -> s"Bearer ${cfg.apiKey.reveal}",
             "Content-Type"  -> "application/json"
           )
 

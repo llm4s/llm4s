@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -163,13 +164,13 @@ object ProviderDescriptor:
    * `llm4s.credentials.<id>.apiKey` when the section set none, so this fails only for a
    * section that did not come through validation - one built in code.
    */
-  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[String] =
+  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[Secret] =
     requireField(
       providerName,
       "api key",
       section.apiKey.map(_.asKey),
       s"llm4s.providers.$providerName.apiKey, or ${SharedCredentials.apiKeyPath(section.provider)}"
-    )
+    ).map(Secret(_))
 
   /**
    * The section's `baseUrl`, falling back to the spec's `defaultBaseUrl`.

@@ -1,6 +1,7 @@
 package org.llm4s.mcp
 
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
+import org.llm4s.security.Secret
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.util.DurationRounding
 import org.slf4j.LoggerFactory
@@ -44,7 +45,7 @@ case class MCPServerOptions(
   path: String,
   name: String,
   version: String,
-  apiKey: Option[String] = None,
+  apiKey: Option[Secret] = None,
   host: String = "127.0.0.1"
 )
 
@@ -72,7 +73,7 @@ case class MCPServerOptions(
  *
  * {{{
  * val tools   = Seq(myTool1, myTool2)
- * val options = MCPServerOptions(8080, "/mcp", "MyServer", "1.0", apiKey = Some("secret"))
+ * val options = MCPServerOptions(8080, "/mcp", "MyServer", "1.0", apiKey = Some(Secret("secret")))
  * val server  = new MCPServer(options, tools)
  * server.start()
  * }}}
@@ -335,7 +336,7 @@ class MCPServer(
               // Constant-time comparison: avoids leaking the key via response-timing side-channels.
               MessageDigest.isEqual(
                 header.substring(7).getBytes(StandardCharsets.UTF_8),
-                key.getBytes(StandardCharsets.UTF_8)
+                key.reveal.getBytes(StandardCharsets.UTF_8)
               )
             }
       }

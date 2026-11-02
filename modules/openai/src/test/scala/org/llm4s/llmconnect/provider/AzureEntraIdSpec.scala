@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
@@ -80,7 +81,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
   "An Azure section" should "still need a key with the default authentication" in {
     load(section("")).left.value.message should include("AZURE_OPENAI_API_KEY")
     val config = load(sharedKey + section("")).value.asInstanceOf[AzureConfig]
-    config.apiKey shouldBe "sk-shared"
+    config.apiKey.reveal shouldBe "sk-shared"
     config.tokenProvider shouldBe None
   }
 
@@ -103,7 +104,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     } { baseUrl =>
       val tokens = new CountingTokens
       val config = AzureConfig.fromTokenProvider("my-deploy", baseUrl, tokens, AzureConfig.DEFAULT_API_VERSION).value
-      config.apiKey shouldBe ""
+      config.apiKey.reveal shouldBe ""
       config.toString should include("auth=entra-id")
       val client = OpenAIClient(config).value
       client.complete(hello, CompletionOptions()).value.content shouldBe "hi"
@@ -173,15 +174,15 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "AzureConfig.withTokenProvider" should "clear the API key, and None go back to it" in {
-    val keyed   = AzureConfig("https://r.openai.azure.com", "k", "gpt-4o")
+    val keyed   = AzureConfig("https://r.openai.azure.com", Secret("k"), "gpt-4o")
     val tokens  = new CountingTokens
     val keyless = keyed.withTokenProvider(tokens)
-    keyless.apiKey shouldBe ""
+    keyless.apiKey.reveal shouldBe ""
     keyless.tokenProvider shouldBe Some(tokens)
     keyless.withTokenProvider(None).tokenProvider shouldBe None
     keyed.toString should include("apiKey=")
-    AzureConfig("e", "k", "m", "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
-    AzureConfig("e", "k", "m", "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey shouldBe ""
+    AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
+    AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey.reveal shouldBe ""
   }
 
   "OpenAIEmbeddingProvider with a token provider" should "send each token as the bearer and drop a rejected one" in {
@@ -195,7 +196,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       else LocalProviderTestServer.sendJsonResponse(exchange, 200, reply)
     } { baseUrl =>
       val tokens   = new CountingTokens
-      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", "")
+      val config   = EmbeddingProviderConfig(s"$baseUrl/openai/v1", "my-embedding-deployment", Secret(""))
       val provider = OpenAIEmbeddingProvider.fromConfig(config, tokens)
       val request  = EmbeddingRequest(Seq("a"), EmbeddingModelConfig("my-embedding-deployment", 2))
       provider.embed(request).isLeft shouldBe true

@@ -2,6 +2,7 @@ package org.llm4s.samples.chat.tui
 
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -30,7 +31,7 @@ class ChatTuiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     cfg.model shouldBe "llama3.2"
     val generic = cfg.asInstanceOf[OpenAICompatibleConfig]
     generic.baseUrl shouldBe "http://localhost:8000/v1"
-    generic.apiKey shouldBe Some("sk-local")
+    generic.apiKey shouldBe Some(Secret("sk-local"))
   }
 
   it should "split on the first / only, so a model id containing / survives" in {

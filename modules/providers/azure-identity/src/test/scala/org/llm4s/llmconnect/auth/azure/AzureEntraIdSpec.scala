@@ -129,7 +129,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
         |}
         |""".stripMargin
     val config = Llm4sConfig.provider(ConfigSource.string(hocon), "azure-prod").value.asInstanceOf[AzureConfig]
-    config.apiKey shouldBe ""
+    config.apiKey.reveal shouldBe ""
     config.tokenProvider should not be empty
     config.endpoint shouldBe "https://my-resource.openai.azure.com"
   }

@@ -114,7 +114,7 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
       valid <- OpenAICompatibleProvider.validatedConfig(SectionLabel, config)(_ => None)
       // A section with `auth` is exchanged once, and lists with the access token as its key.
       bearer <- valid.tokenExchange match
-        case None           => Right(valid.apiKey)
+        case None           => Right(valid.apiKey.map(_.reveal))
         case Some(exchange) => TokenExchange.rfc8693(exchange, httpClient)().map(token => Some(token.value))
       models <- delegate.listModels(
         config

@@ -1,6 +1,7 @@
 package org.llm4s.http
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 import java.io.IOException
@@ -65,7 +66,7 @@ private[llm4s] object HttpNetwork:
       new Authenticator:
         override def getPasswordAuthentication: PasswordAuthentication =
           if getRequestorType == Authenticator.RequestorType.PROXY && getRequestingHost.equalsIgnoreCase(proxy.host)
-          then new PasswordAuthentication(user, password.toCharArray)
+          then new PasswordAuthentication(user, password.reveal.toCharArray)
           else null
     }
 
@@ -95,11 +96,11 @@ private[llm4s] object HttpNetwork:
         }.toEither.left.map(e => ConfigurationError(s"tls: cannot initialise TLS: ${e.getMessage}", List("tls")))
       yield Some(TlsMaterial(context, trust, keyManagers))
 
-  private def load(key: String, path: Path, password: Option[String]): Result[KeyStore] =
+  private def load(key: String, path: Path, password: Option[Secret]): Result[KeyStore] =
     if !Files.isRegularFile(path) then
       Left(ConfigurationError(s"tls.$key: $path does not exist or is not a file", List(s"tls.$key")))
     else
-      Try(KeyStore.getInstance(path.toFile, password.map(_.toCharArray).orNull)).toEither.left.map { e =>
+      Try(KeyStore.getInstance(path.toFile, password.map(_.reveal.toCharArray).orNull)).toEither.left.map { e =>
         // The JDK's messages ("keystore password was incorrect") never carry the password itself.
         val cause = Option(e.getMessage).filter(_.nonEmpty).getOrElse(e.getClass.getSimpleName)
         ConfigurationError(s"tls.$key: cannot read $path: $cause", List(s"tls.$key"))
@@ -113,10 +114,10 @@ private[llm4s] object HttpNetwork:
     }.toOption.flatten
       .toRight(ConfigurationError(s"tls.$key: $source holds no usable trust material", List(s"tls.$key")))
 
-  private def keyManagersOf(path: Path, store: KeyStore, password: Option[String]): Result[Seq[KeyManager]] =
+  private def keyManagersOf(path: Path, store: KeyStore, password: Option[Secret]): Result[Seq[KeyManager]] =
     Try {
       val factory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
-      factory.init(store, password.map(_.toCharArray).orNull)
+      factory.init(store, password.map(_.reveal.toCharArray).orNull)
       factory.getKeyManagers.toSeq
     }.toEither.left.map { e =>
       val cause = Option(e.getMessage).filter(_.nonEmpty).getOrElse(e.getClass.getSimpleName)

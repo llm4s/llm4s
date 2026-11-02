@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.ModelRegistryService
@@ -20,7 +21,7 @@ class ZaiClientDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client =
-    new ZaiClient(ZaiConfig("k", "GLM-4.7", "http://localhost:1/api/paas/v4", 128000, 4096))
+    new ZaiClient(ZaiConfig(Secret("k"), "GLM-4.7", "http://localhost:1/api/paas/v4", 128000, 4096))
 
   "ZaiClient.streamComplete" should "close the response body on an error status" in {
     var closed = false

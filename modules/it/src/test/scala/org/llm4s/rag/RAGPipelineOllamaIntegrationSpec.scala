@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -74,7 +75,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private lazy val embeddingClient: EmbeddingClient =
     new EmbeddingClient(
       OllamaEmbeddingProvider.fromConfig(
-        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = "not-required")
+        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = Secret("not-required"))
       )
     )
 

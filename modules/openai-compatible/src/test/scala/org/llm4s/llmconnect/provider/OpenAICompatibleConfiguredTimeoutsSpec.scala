@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{
   CohereConfig,
@@ -95,12 +96,16 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
   // ---- config -> client ----
 
   "Each client" should "use the configured request and stream timeouts" in {
-    val deepSeek = DeepSeekClient(DeepSeekConfig("k", "m", "http://localhost:1", 128000, 8192).withTimeouts(Configured))
-    val zai      = ZaiClient(ZaiConfig("k", "m", "http://localhost:1", 128000, 8192).withTimeouts(Configured))
-    val mistral  = MistralClient(MistralConfig("k", "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
-    val cohere   = CohereClient(CohereConfig("k", "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
-    val xai      = XaiClient(XaiConfig("k", "m", "http://localhost:1", 131072, 8192).withTimeouts(Configured))
-    val router   = OpenRouterClient(OpenAIConfig("k", "m").withBaseUrl("http://localhost:1").withTimeouts(Configured))
+    val deepSeek =
+      DeepSeekClient(DeepSeekConfig(Secret("k"), "m", "http://localhost:1", 128000, 8192).withTimeouts(Configured))
+    val zai = ZaiClient(ZaiConfig(Secret("k"), "m", "http://localhost:1", 128000, 8192).withTimeouts(Configured))
+    val mistral =
+      MistralClient(MistralConfig(Secret("k"), "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
+    val cohere =
+      CohereClient(CohereConfig(Secret("k"), "m", "http://localhost:1", 128000, 4096).withTimeouts(Configured))
+    val xai = XaiClient(XaiConfig(Secret("k"), "m", "http://localhost:1", 131072, 8192).withTimeouts(Configured))
+    val router =
+      OpenRouterClient(OpenAIConfig(Secret("k"), "m").withBaseUrl("http://localhost:1").withTimeouts(Configured))
     val generic = new OpenAICompatibleClient(
       OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1", None).withTimeouts(Configured)),
       OpenAICompatibleDialect.Standard
@@ -123,7 +128,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
   }
 
   it should "keep its own defaults when no timeout is configured" in {
-    val deepSeek = DeepSeekClient(DeepSeekConfig("k", "m", "http://localhost:1", 128000, 8192)).value
+    val deepSeek = DeepSeekClient(DeepSeekConfig(Secret("k"), "m", "http://localhost:1", 128000, 8192)).value
     deepSeek.requestTimeout shouldBe OpenAICompatibleClient.RequestTimeout
     deepSeek.streamTimeout shouldBe OpenAICompatibleClient.StreamTimeout
     OpenAICompatibleClient.RequestTimeout shouldBe 2.minutes
@@ -132,7 +137,9 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
 
   it should "use a configured request timeout without disturbing the default stream timeout" in {
     val client = DeepSeekClient(
-      DeepSeekConfig("k", "m", "http://localhost:1", 128000, 8192).withTimeouts(ProviderTimeouts(Some(3.seconds), None))
+      DeepSeekConfig(Secret("k"), "m", "http://localhost:1", 128000, 8192).withTimeouts(
+        ProviderTimeouts(Some(3.seconds), None)
+      )
     ).value
     client.requestTimeout shouldBe 3.seconds
     client.streamTimeout shouldBe OpenAICompatibleClient.StreamTimeout
@@ -156,7 +163,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
     withSilentServer { baseUrl =>
       val client =
         DeepSeekClient(
-          DeepSeekConfig("k", "m", baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(Some(300.millis), None))
+          DeepSeekConfig(Secret("k"), "m", baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(Some(300.millis), None))
         ).value
 
       val started = System.nanoTime()
@@ -174,7 +181,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
     withSilentServer { baseUrl =>
       val client =
         DeepSeekClient(
-          DeepSeekConfig("k", "m", baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(None, Some(300.millis)))
+          DeepSeekConfig(Secret("k"), "m", baseUrl, 128000, 8192).withTimeouts(ProviderTimeouts(None, Some(300.millis)))
         ).value
 
       val started = System.nanoTime()
@@ -188,7 +195,7 @@ class OpenAICompatibleConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers w
 
   "The request and stream timeouts" should "be independent: a short request timeout does not shorten a stream" in {
     val client = DeepSeekClient(
-      DeepSeekConfig("k", "m", "http://localhost:1", 128000, 8192)
+      DeepSeekConfig(Secret("k"), "m", "http://localhost:1", 128000, 8192)
         .withTimeouts(ProviderTimeouts(Some(1.second), None))
     ).value
     client.requestTimeout shouldBe 1.second

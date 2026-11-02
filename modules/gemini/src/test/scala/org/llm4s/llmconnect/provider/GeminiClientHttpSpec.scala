@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.GeminiConfig
@@ -19,7 +20,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = GeminiConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "gemini-2.0-flash",
     baseUrl = "https://generativelanguage.googleapis.com/v1beta",
     contextWindow = 1048576,

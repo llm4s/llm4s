@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderModelLister }
 import org.llm4s.error.ConfigurationError
@@ -57,7 +58,7 @@ object AnthropicProvider extends ProviderDescriptor:
     for
       workloadIdentity <- workloadIdentityOf(providerName, section)
       apiKey <-
-        if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
+        if (workloadIdentity.isDefined) Right(Secret("")) else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       search  <- AnthropicWebSearch.webSearch(providerName, section)
       // `fromValues` holds the rules (an https baseUrl with workload identity, ...); a refusal names the section key.

@@ -961,7 +961,7 @@ private[provider] object BedrockNetwork {
           Apache5ProxyConfiguration.builder().useSystemPropertyValues(false).useEnvironmentVariableValues(false)
         config.network.proxyFor(endpointHost(config)).foreach { p =>
           proxy.endpoint(URI.create(s"http://${p.host}:${p.port}"))
-          p.credentials.foreach { case (user, password) => proxy.username(user).password(password) }
+          p.credentials.foreach { case (user, password) => proxy.username(user).password(password.reveal) }
         }
         builder.proxyConfiguration(proxy.build())
       }
@@ -988,7 +988,7 @@ private[provider] object BedrockNetwork {
         val proxy = NettyProxyConfiguration.builder().useSystemPropertyValues(false).useEnvironmentVariableValues(false)
         config.network.proxyFor(endpointHost(config)).foreach { p =>
           proxy.scheme("http").host(p.host).port(p.port)
-          p.credentials.foreach { case (user, password) => proxy.username(user).password(password) }
+          p.credentials.foreach { case (user, password) => proxy.username(user).password(password.reveal) }
         }
         builder.proxyConfiguration(proxy.build())
       }

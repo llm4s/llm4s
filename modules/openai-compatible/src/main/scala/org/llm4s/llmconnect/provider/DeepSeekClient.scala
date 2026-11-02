@@ -56,17 +56,17 @@ object DeepSeekClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[DeepSeekClient] =
     ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult)
 
   def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
     ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new DeepSeekClient(config, metrics)).toResult)
 
   def apply(config: DeepSeekConfig)(using ModelRegistryService): Result[DeepSeekClient] =
     ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult)
 }
 

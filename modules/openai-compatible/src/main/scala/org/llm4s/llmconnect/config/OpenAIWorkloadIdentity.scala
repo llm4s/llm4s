@@ -1,9 +1,9 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * OpenAI workload identity federation: the identity token (e.g. a SPIFFE JWT-SVID) the OpenAI SDK
@@ -20,18 +20,18 @@ final case class OpenAIWorkloadIdentity private (
   identityToken: IdentitySource,
   identityProviderId: String,
   serviceAccountId: String,
-  clientId: Option[String]
+  clientId: Option[Secret]
 ):
   def withIdentityToken(identityToken: IdentitySource): OpenAIWorkloadIdentity = copy(identityToken = identityToken)
   def withIdentityProviderId(identityProviderId: String): OpenAIWorkloadIdentity =
     copy(identityProviderId = identityProviderId)
   def withServiceAccountId(serviceAccountId: String): OpenAIWorkloadIdentity = copy(serviceAccountId = serviceAccountId)
-  def withClientId(clientId: String): OpenAIWorkloadIdentity                 = copy(clientId = Some(clientId))
-  def withClientId(clientId: Option[String]): OpenAIWorkloadIdentity         = copy(clientId = clientId)
+  def withClientId(clientId: Secret): OpenAIWorkloadIdentity                 = copy(clientId = Some(clientId))
+  def withClientId(clientId: Option[Secret]): OpenAIWorkloadIdentity         = copy(clientId = clientId)
 
   override def toString: String =
     s"OpenAIWorkloadIdentity($identityToken, identityProviderId=***, serviceAccountId=***, " +
-      s"clientId=${Redaction.secretOpt(clientId)})"
+      s"clientId=$clientId)"
 
 object OpenAIWorkloadIdentity:
 
@@ -40,7 +40,7 @@ object OpenAIWorkloadIdentity:
     identityToken: IdentitySource,
     identityProviderId: String,
     serviceAccountId: String,
-    clientId: Option[String] = None
+    clientId: Option[Secret] = None
   ): OpenAIWorkloadIdentity =
     new OpenAIWorkloadIdentity(identityToken, identityProviderId, serviceAccountId, clientId)
 
@@ -59,5 +59,5 @@ object OpenAIWorkloadIdentity:
       _ <- ProviderConfig.nonEmptyIdentity("OpenAI", FieldPrefix, identity.identityToken)
       _ <- ProviderConfig.nonEmpty("OpenAI", s"${FieldPrefix}identityProviderId", identity.identityProviderId)
       _ <- ProviderConfig.nonEmpty("OpenAI", s"${FieldPrefix}serviceAccountId", identity.serviceAccountId)
-      _ <- ProviderConfig.nonEmptyIfSet("OpenAI", s"${FieldPrefix}clientId", identity.clientId)
+      _ <- ProviderConfig.nonEmptyIfSet("OpenAI", s"${FieldPrefix}clientId", identity.clientId.map(_.reveal))
     yield identity

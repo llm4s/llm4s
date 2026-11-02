@@ -58,11 +58,13 @@ class CohereClient(
 object CohereClient {
 
   def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
-    ProviderConfig.nonEmpty("Cohere", "apiKey", config.apiKey).flatMap(_ => Try(new CohereClient(config)).toResult)
+    ProviderConfig
+      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
+      .flatMap(_ => Try(new CohereClient(config)).toResult)
 
   def apply(config: CohereConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[CohereClient] =
     ProviderConfig
-      .nonEmpty("Cohere", "apiKey", config.apiKey)
+      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new CohereClient(config, metrics)).toResult)
 
   def apply(
@@ -71,7 +73,7 @@ object CohereClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[CohereClient] =
     ProviderConfig
-      .nonEmpty("Cohere", "apiKey", config.apiKey)
+      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging)).toResult)
 }
 

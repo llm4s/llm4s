@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
@@ -25,7 +26,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = AnthropicConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "claude-sonnet-4-5",
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,

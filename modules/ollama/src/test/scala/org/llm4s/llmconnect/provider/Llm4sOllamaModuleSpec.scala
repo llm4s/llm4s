@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
@@ -139,7 +140,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = "test-key")
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
       }
     }

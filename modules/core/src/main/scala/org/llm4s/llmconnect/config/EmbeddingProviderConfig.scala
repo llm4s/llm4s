@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.util.Redaction
+import org.llm4s.security.Secret
 
 /**
  * Configuration required to connect to an embedding provider endpoint.
@@ -23,7 +23,7 @@ import org.llm4s.util.Redaction
 final case class EmbeddingProviderConfig private (
   baseUrl: String,
   model: String,
-  apiKey: String,
+  apiKey: Secret,
   timeouts: ProviderTimeouts,
   network: HttpNetworkSettings
 ) {
@@ -35,7 +35,7 @@ final case class EmbeddingProviderConfig private (
   def withModel(model: String): EmbeddingProviderConfig = copy(model = model)
 
   /** Sets the authentication key. */
-  def withApiKey(apiKey: String): EmbeddingProviderConfig = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): EmbeddingProviderConfig = copy(apiKey = apiKey)
 
   /** Sets how long an embedding request may take. */
   def withTimeouts(timeouts: ProviderTimeouts): EmbeddingProviderConfig = copy(timeouts = timeouts)
@@ -44,7 +44,7 @@ final case class EmbeddingProviderConfig private (
   def withNetwork(network: HttpNetworkSettings): EmbeddingProviderConfig = copy(network = network)
 
   override def toString: String =
-    s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=${Redaction.secret(apiKey)})"
+    s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=$apiKey)"
 }
 
 object EmbeddingProviderConfig {
@@ -56,13 +56,13 @@ object EmbeddingProviderConfig {
   def apply(
     baseUrl: String,
     model: String,
-    apiKey: String,
+    apiKey: Secret,
     timeouts: ProviderTimeouts = ProviderTimeouts.default,
     network: HttpNetworkSettings = HttpNetworkSettings.default
   ): EmbeddingProviderConfig =
     new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, network)
 
   /** The signature before `network` was added, kept so code compiled against it still links. */
-  def apply(baseUrl: String, model: String, apiKey: String, timeouts: ProviderTimeouts): EmbeddingProviderConfig =
+  def apply(baseUrl: String, model: String, apiKey: Secret, timeouts: ProviderTimeouts): EmbeddingProviderConfig =
     new EmbeddingProviderConfig(baseUrl, model, apiKey, timeouts, HttpNetworkSettings.default)
 }

@@ -1,6 +1,7 @@
 package org.llm4s.samples.mcp
 
 import org.llm4s.mcp.{ MCPServer, MCPServerOptions }
+import org.llm4s.security.Secret
 import org.llm4s.toolapi.{ Schema, SafeParameterExtractor, ToolBuilder }
 import org.slf4j.LoggerFactory
 
@@ -103,7 +104,7 @@ object AuthenticatedMCPServerSample {
       path = "/mcp",
       name = "llm4s-demo",
       version = "1.0.0",
-      apiKey = Some(apiKey),
+      apiKey = Some(Secret(apiKey)),
       // 0.0.0.0 (LAN-accessible) only when a real key is set via MCP_API_KEY; otherwise loopback.
       host = host
     )

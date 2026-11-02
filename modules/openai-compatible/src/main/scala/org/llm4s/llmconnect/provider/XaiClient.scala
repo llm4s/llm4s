@@ -66,7 +66,7 @@ object XaiClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[XaiClient] =
     ProviderConfig
-      .nonEmpty("xAI", "apiKey", config.apiKey)
+      .nonEmpty("xAI", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new XaiClient(config, metrics, exchangeLogging)).toResult)
 }
 

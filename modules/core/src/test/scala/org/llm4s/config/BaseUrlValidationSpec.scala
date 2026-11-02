@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
 import org.llm4s.testutil.FixtureChatConfig
@@ -94,7 +95,7 @@ class BaseUrlValidationSpec extends AnyWordSpec with Matchers with EitherValues:
       provider = Some("fixturechat"),
       model = Some("fixture-model"),
       baseUrl = baseUrl,
-      apiKey = Some("sk-test")
+      apiKey = Some(ApiKey("sk-test"))
     )
 
   private def validateSection(baseUrl: Option[String]) =

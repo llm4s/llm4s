@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 
 import com.typesafe.config.ConfigUtil
 import org.llm4s.config.SharedCredentials
@@ -27,13 +28,13 @@ import scala.jdk.CollectionConverters._
  */
 @Stable
 final case class EmbeddingProviderSection private (
-  apiKey: Option[String],
+  apiKey: Option[Secret],
   baseUrl: Option[String],
   model: Option[String],
   timeouts: ProviderTimeouts
 ) {
-  def withApiKey(apiKey: String): EmbeddingProviderSection               = copy(apiKey = Some(apiKey))
-  def withApiKey(apiKey: Option[String]): EmbeddingProviderSection       = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): EmbeddingProviderSection               = copy(apiKey = Some(apiKey))
+  def withApiKey(apiKey: Option[Secret]): EmbeddingProviderSection       = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): EmbeddingProviderSection             = copy(baseUrl = Some(baseUrl))
   def withBaseUrl(baseUrl: Option[String]): EmbeddingProviderSection     = copy(baseUrl = baseUrl)
   def withModel(model: String): EmbeddingProviderSection                 = copy(model = Some(model))
@@ -45,7 +46,7 @@ object EmbeddingProviderSection:
 
   /** Creates an [[EmbeddingProviderSection]]. Named arguments are the supported way to construct one. */
   def apply(
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     baseUrl: Option[String] = None,
     model: Option[String] = None,
     timeouts: ProviderTimeouts = ProviderTimeouts.default
@@ -189,11 +190,12 @@ object EmbeddingConfigSpec:
     id: ProviderId,
     section: EmbeddingProviderSection,
     spec: EmbeddingConfigSpec
-  ): Result[String] =
-    nonEmpty(section.apiKey)
-      .orElse(spec.defaultApiKey) match
+  ): Result[Secret] =
+    nonEmpty(section.apiKey.map(_.reveal))
+      .orElse(spec.defaultApiKey)
+      .map(Secret(_)) match
       case Some(key)                    => Right(key)
-      case None if !spec.requiresApiKey => Right("")
+      case None if !spec.requiresApiKey => Right(Secret(""))
       case None =>
         Left(
           ConfigurationError(

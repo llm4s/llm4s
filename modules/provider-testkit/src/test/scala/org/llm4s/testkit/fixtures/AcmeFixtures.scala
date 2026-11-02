@@ -47,7 +47,7 @@ object AcmeProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-    yield AcmeConfig(apiKey, section.model.asString, baseUrl)
+    yield AcmeConfig(apiKey.reveal, section.model.asString, baseUrl)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
     ProviderDescriptor.expectConfig[AcmeConfig](id, config).map(AcmeClient(_))

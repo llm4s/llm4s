@@ -82,7 +82,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
   private def requireApiKey(config: EmbeddingProviderConfig): Result[Unit] =
-    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", config.apiKey)
+    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", config.apiKey.reveal)
 
   /**
    * Creates an OpenAI embedding provider from configuration.
@@ -91,7 +91,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    provider(cfg, () => requireApiKey(cfg).map(_ => cfg.apiKey), _ => ())
+    provider(cfg, () => requireApiKey(cfg).map(_ => cfg.apiKey.reveal), _ => ())
 
   /**
    * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key

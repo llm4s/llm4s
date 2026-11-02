@@ -1,5 +1,6 @@
 package org.llm4s.samples.cookbook
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
@@ -130,7 +131,7 @@ object BagOfWordsEmbeddings extends EmbeddingProviderDescriptor {
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(provider)
 
   /** The provider config a pipeline built on this provider needs: it has no endpoint and no key. */
-  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(baseUrl = "", model = Model, apiKey = "")
+  val config: EmbeddingProviderConfig = EmbeddingProviderConfig(baseUrl = "", model = Model, apiKey = Secret(""))
 }
 
 /**

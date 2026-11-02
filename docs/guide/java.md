@@ -198,8 +198,8 @@ essentials and fills in the rest (the default base URL, and a context window and
 model name):
 
 ```java
-LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(apiKey, "gpt-4o-mini"));
-LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(apiKey, "claude-sonnet-4-20250514"));
+LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
+LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
 LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 ```
 

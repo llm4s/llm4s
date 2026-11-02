@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
@@ -25,7 +26,7 @@ class OpenAIEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       seen.add(ujson.read(new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
       sendJsonResponse(ex, 200, """{"data":[{"embedding":[0.1,0.2]},{"embedding":[0.3,0.4]}]}""")
     } { baseUrl =>
-      val provider = OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, "key"))
+      val provider = OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Secret("key")))
       provider.embed(EmbeddingRequest(Seq("a", "b"), model, purpose)).isRight shouldBe true
     }
     seen.asScala.toList

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
@@ -72,7 +73,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   // ---- the value reaches the call ----
 
   private def openAIConfig(baseUrl: String, timeouts: ProviderTimeouts): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", "sk-test", None, baseUrl).value.withTimeouts(timeouts)
+    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).value.withTimeouts(timeouts)
 
   "A configured request timeout" should "end a completion from a server that never answers" in {
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
@@ -147,7 +148,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         EmbeddingProviderConfig(
           baseUrl = baseUrl,
           model = "text-embedding-3-small",
-          apiKey = "sk-test",
+          apiKey = Secret("sk-test"),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

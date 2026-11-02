@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.auth.AuthConfig
@@ -59,7 +60,7 @@ object OpenAIProvider extends ProviderDescriptor:
     for
       workloadIdentity <- workloadIdentityOf(providerName, section)
       apiKey <-
-        if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
+        if (workloadIdentity.isDefined) Right(Secret("")) else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       config <- OpenAIConfig
         .fromValues(
@@ -83,7 +84,7 @@ object OpenAIProvider extends ProviderDescriptor:
         for
           idp <- ProviderDescriptor.requireAuthExtra(providerName, auth, IdentityProviderIdKey)
           sa  <- ProviderDescriptor.requireAuthExtra(providerName, auth, ServiceAccountIdKey)
-        yield Some(OpenAIWorkloadIdentity(auth.identityToken, idp, sa, auth.extra(ClientIdKey)))
+        yield Some(OpenAIWorkloadIdentity(auth.identityToken, idp, sa, auth.extra(ClientIdKey).map(Secret(_))))
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

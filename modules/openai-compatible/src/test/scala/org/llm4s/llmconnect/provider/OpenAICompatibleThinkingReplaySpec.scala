@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ZaiConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -73,7 +74,7 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
     } { baseUrl =>
       val zai = new ZaiClient(
         ZaiConfig(
-          apiKey = "test-key",
+          apiKey = Secret("test-key"),
           model = "glm-4.7",
           baseUrl = baseUrl,
           contextWindow = 128000,

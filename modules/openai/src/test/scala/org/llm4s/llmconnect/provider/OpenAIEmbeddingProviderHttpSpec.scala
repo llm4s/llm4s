@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -18,7 +19,7 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
   private val request = EmbeddingRequest(Seq("a", "b"), EmbeddingModelConfig("text-embedding-3-small", 2))
 
   private def provider(baseUrl: String) =
-    OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", "key"))
+    OpenAIEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", Secret("key")))
 
   /** A local port nothing is listening on, so connecting is refused at once. */
   private def closedPort(): Int = {
@@ -60,7 +61,7 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(ex, 200, """{"data":[{"embedding":[1.0]}]}""")
     } { baseUrl =>
       for key <- Seq("", "  ") do
-        val config = EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", key)
+        val config = EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", Secret(key))
         OpenAIEmbeddingProvider.build(config).left.toOption.get shouldBe a[ConfigurationError]
         OpenAIEmbeddingProvider.fromConfig(config).embed(request).left.toOption.get shouldBe a[ConfigurationError]
     }

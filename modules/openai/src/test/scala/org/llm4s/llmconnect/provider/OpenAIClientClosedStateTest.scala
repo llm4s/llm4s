@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import com.openai.core.http.StreamResponse
@@ -27,7 +28,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
   private def createTestConfig: OpenAIConfig = OpenAIConfig
     .fromValues(
       modelName = "gpt-4",
-      apiKey = "test-api-key-for-closed-state-testing",
+      apiKey = Secret("test-api-key-for-closed-state-testing"),
       organization = None,
       // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
       baseUrl = "https://example.invalid/v1"
@@ -159,7 +160,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
     val config = OpenAIConfig
       .fromValues(
         modelName = modelName,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
         baseUrl = "https://example.invalid/v1"

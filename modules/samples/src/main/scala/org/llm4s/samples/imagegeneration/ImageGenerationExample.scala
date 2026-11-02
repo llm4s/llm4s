@@ -174,7 +174,7 @@ object ImageGenerationExample {
         logger.info("Skipping OpenAI GPT Image example (provider config not available)")
       case Right(providerCfg: org.llm4s.llmconnect.config.OpenAIConfig) =>
         val config = OpenAIConfig(
-          apiKey = providerCfg.apiKey,
+          apiKey = providerCfg.apiKey.reveal,
           model = "gpt-image-1.5"
         )
         val options = ImageGenerationOptions(

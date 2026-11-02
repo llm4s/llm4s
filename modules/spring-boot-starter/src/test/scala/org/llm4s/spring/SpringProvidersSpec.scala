@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.security.Secret
 import org.llm4s.error.APIError
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
@@ -65,7 +66,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
   )
 
   private def openAIKey(e: StandardEnvironment): String =
-    SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig].apiKey
+    SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig].apiKey.reveal
 
   private val geminiReply =
     """{"candidates":[{"content":{"role":"model","parts":[{"text":"gemini says hello"}]},"finishReason":"STOP"}],
@@ -308,7 +309,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .config
     config shouldBe an[AzureConfig]
     config.asInstanceOf[AzureConfig].tokenProvider should not be empty
-    config.asInstanceOf[AzureConfig].apiKey shouldBe ""
+    config.asInstanceOf[AzureConfig].apiKey.reveal shouldBe ""
   }
 
   // ---- how the default section is chosen ----------------------------------------------------------

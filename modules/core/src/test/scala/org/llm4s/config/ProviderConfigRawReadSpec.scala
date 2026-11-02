@@ -37,7 +37,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.provider shouldBe Some("openai")
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
-          provider.apiKey shouldBe Some("sk-test")
+          provider.apiKey.map(_.asKey) shouldBe Some("sk-test")
           // Not a built-in field since #1133: read as a provider-specific key, for the
           // provider's descriptor to accept or report as unknown.
           provider.extras shouldBe Map("organization" -> "org-demo")
@@ -112,7 +112,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.provider shouldBe Some("openai")
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
-          provider.apiKey shouldBe Some("sk-test")
+          provider.apiKey.map(_.asKey) shouldBe Some("sk-test")
           provider.headers shouldBe None
           provider.extras shouldBe empty
         case Left(err) =>

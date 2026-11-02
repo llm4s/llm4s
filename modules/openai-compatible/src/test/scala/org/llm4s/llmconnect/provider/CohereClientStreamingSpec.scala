@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model._
@@ -25,7 +26,7 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVal
 
   private val path = "/compatibility/v1/chat/completions"
 
-  private def config(baseUrl: String) = CohereConfig("test-key", "command-a-03-2025", baseUrl, 256000, 4096)
+  private def config(baseUrl: String) = CohereConfig(Secret("test-key"), "command-a-03-2025", baseUrl, 256000, 4096)
 
   private def event(delta: String, finish: String = "null", usage: String = ""): String =
     s"""data: {"id":"c-s","object":"chat.completion.chunk","created":1700000000,"model":"command-a-03-2025",""" +

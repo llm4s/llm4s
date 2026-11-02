@@ -139,7 +139,7 @@ object Doctor {
    * another shape (a gateway token, a test key) would otherwise reach the output.
    */
   private def knownSecrets(source: ConfigSource): Set[String] = {
-    val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption)
+    val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption).map(_.reveal)
     (shared ::: sectionSecrets(source)).map(_.trim).filter(_.length >= MinSecretLength).toSet
   }
 
@@ -339,7 +339,7 @@ object Doctor {
       DoctorCheck.pass(Key, s"section '$name' authenticates with $setting and needs no API key")
     } else {
       val ownPath = s"llm4s.providers.$name.apiKey"
-      SharedCredentials.read(source).resolve(section.apiKey, ownPath, descriptor.id) match {
+      SharedCredentials.read(source).resolve(section.apiKey.map(_.asKey), ownPath, descriptor.id) match {
         case Right(Some(resolved)) => DoctorCheck.pass(Key, s"found at ${resolved.path} (the value is not shown)")
         case Right(None) =>
           DoctorCheck

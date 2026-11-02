@@ -144,7 +144,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
           a[ConfigurationError]
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = AnthropicConfig(
-          "",
+          Secret(""),
           "claude-test",
           fake.refusedBaseUrl,
           200000,
@@ -220,7 +220,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     val identity = AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "fdrl_1", "org_1")
 
     def fromValues(baseUrl: String, apiKey: String = "") =
-      AnthropicConfig.fromValues("claude-test", apiKey, baseUrl, Some(identity))
+      AnthropicConfig.fromValues("claude-test", Secret(apiKey), baseUrl, Some(identity))
 
     "keep the workload identity and the timeouts independently" in {
       import scala.concurrent.duration.DurationInt
@@ -267,7 +267,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     }
 
     "leave a plain-http baseUrl alone without workload identity" in {
-      AnthropicConfig.fromValues("claude-test", "sk-ant", "http://api.example").isRight shouldBe true
+      AnthropicConfig.fromValues("claude-test", Secret("sk-ant"), "http://api.example").isRight shouldBe true
     }
 
     "be refused by AnthropicClient when built with apply or changed with a with* setter" in {
@@ -275,8 +275,8 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       val bad = Seq(
         valid.withBaseUrl("http://api.example"),
         valid.withBaseUrl("https://gateway.example"),
-        valid.withApiKey("sk-ant"),
-        AnthropicConfig("", "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
+        valid.withApiKey(Secret("sk-ant")),
+        AnthropicConfig(Secret(""), "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
       )
       for config <- bad do
         AnthropicClient(config).left.value shouldBe a[ConfigurationError]
@@ -294,7 +294,8 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       )
       for (field, blank) <- blanks do
         withClue(field) {
-          val error = AnthropicConfig.fromValues("claude-test", "", "https://api.anthropic.com", Some(blank)).left.value
+          val error =
+            AnthropicConfig.fromValues("claude-test", Secret(""), "https://api.anthropic.com", Some(blank)).left.value
           error shouldBe a[ConfigurationError]
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
           error.message should include(field)
@@ -307,23 +308,23 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "leave AnthropicClient refusing a blank apiKey once the identity is removed, rather than send no credential" in {
       val keyless = fromValues("https://api.anthropic.com").value.withWorkloadIdentity(None)
       for key <- Seq("", "  ") do
-        val error = AnthropicClient(keyless.withApiKey(key)).left.value
+        val error = AnthropicClient(keyless.withApiKey(Secret(key))).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
-        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(key))
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(Secret(key)))
     }
 
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would authenticate as nobody
       for key <- Seq("", "  ") do
-        AnthropicClient(AnthropicConfig(key, "claude-test")).left.value.message should include("apiKey")
+        AnthropicClient(AnthropicConfig(Secret(key), "claude-test")).left.value.message should include("apiKey")
       // the short apply's default base URL is api.anthropic.com, so a keyless config with an identity is valid
-      val federated = AnthropicConfig("", "claude-test").withWorkloadIdentity(identity)
+      val federated = AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(identity)
       AnthropicConfig.validate(federated) shouldBe Right(federated)
       val bad = Seq(
-        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(identity),
-        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(Some(identity)),
-        federated.withApiKey("sk-ant"),
+        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(identity),
+        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey(Secret("sk-ant")),
         federated.withBaseUrl("https://gateway.example"),
         federated.withWorkloadIdentity(identity.withOrganizationId("")),
         federated.withWorkloadIdentity(None)
@@ -336,7 +337,9 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
     def configFor(file: Path) =
-      AnthropicConfig("", "claude-test").withWorkloadIdentity(AnthropicWorkloadIdentity(file, "fdrl_1", "org_1"))
+      AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(
+        AnthropicWorkloadIdentity(file, "fdrl_1", "org_1")
+      )
 
     "refuse an identity token file the SDK would read unchecked: a directory or a file larger than a token (#1818)" in {
       val dir = Files.createTempDirectory("svid-dir")
@@ -364,7 +367,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       AnthropicClient(configFor(file)).value.close()
       val missing = file.resolveSibling(s"not-yet-${System.nanoTime()}.jwt")
       AnthropicClient(configFor(missing)).value.close()
-      AnthropicClient(AnthropicConfig("sk-ant", "claude-test")).value.close()
+      AnthropicClient(AnthropicConfig(Secret("sk-ant"), "claude-test")).value.close()
     }
 
     "carry a Stable AnthropicWorkloadIdentity (#1818)" in {

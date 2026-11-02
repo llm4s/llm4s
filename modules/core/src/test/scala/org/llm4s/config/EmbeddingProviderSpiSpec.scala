@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
@@ -83,7 +84,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       config shouldBe EmbeddingProviderConfig(
         baseUrl = "https://tenant.fixture.example/v1",
         model = "fixture-large",
-        apiKey = "fk-test"
+        apiKey = Secret("fk-test")
       )
     }
 
@@ -160,13 +161,13 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
       // the shared `llm4s.credentials.<id>.apiKey` fallback happens in the loader.
       val config = FixtureEmbeddings
-        .buildConfig(EmbeddingProviderSection(apiKey = Some("fk-direct")), Some("m"))
+        .buildConfig(EmbeddingProviderSection(apiKey = Some(Secret("fk-direct"))), Some("m"))
         .value
 
       config shouldBe EmbeddingProviderConfig(
         baseUrl = "https://fixture.example/v1",
         model = "m",
-        apiKey = "fk-direct"
+        apiKey = Secret("fk-direct")
       )
     }
   }
@@ -205,7 +206,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         .value
 
       provider shouldBe "acme.embeddings"
-      config.apiKey shouldBe "ak"
+      config.apiKey.reveal shouldBe "ak"
       config.baseUrl shouldBe "https://tenant.acme.example/v1"
     }
 
@@ -259,7 +260,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
       config.baseUrl shouldBe "http://localhost:9999"
       config.model shouldBe "fixture-default"
-      config.apiKey shouldBe "fixture-not-required"
+      config.apiKey.reveal shouldBe "fixture-not-required"
     }
 
     "still let a section override them" in {

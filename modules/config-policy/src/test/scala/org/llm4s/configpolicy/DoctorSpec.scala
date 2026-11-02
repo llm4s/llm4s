@@ -305,7 +305,9 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       val report  = run(openAi(s"""apiKey = "$SecretKey""""), echoing, DoctorOptions().withLive(true))
       val live    = check(report, "Live call")
 
-      live.detail should include("***")
+      // Configured keys are registered when the config loads, so the registry masks the echo first ([REDACTED]);
+      // the report's own scrub (***) is the second line of defence for a value that was never registered.
+      live.detail should (include("***").or(include("[REDACTED]")))
       (live.detail should not).include(SecretKey)
     }
 

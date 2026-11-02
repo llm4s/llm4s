@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -18,7 +19,7 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   private val client =
-    new CohereClient(CohereConfig("k", "command-a-03-2025", CohereConfig.DEFAULT_BASE_URL, 256000, 4096))
+    new CohereClient(CohereConfig(Secret("k"), "command-a-03-2025", CohereConfig.DEFAULT_BASE_URL, 256000, 4096))
 
   private val schema =
     ujson.Obj("type" -> "object", "properties" -> ujson.Obj("title" -> ujson.Obj("type" -> "string")))
@@ -79,15 +80,15 @@ class CohereDialectSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "CohereConfig.fromValues" should "store the Compatibility API base, so endpointUrl says where requests go" in {
-    val cfg = CohereConfig.fromValues("command-a-03-2025", "key", "https://api.cohere.com").value
+    val cfg = CohereConfig.fromValues("command-a-03-2025", Secret("key"), "https://api.cohere.com").value
     cfg.baseUrl shouldBe "https://api.cohere.com/compatibility/v1"
     cfg.endpointUrl shouldBe Some("https://api.cohere.com/compatibility/v1")
-    CohereConfig.fromValues("command-a-03-2025", "key", CohereConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
+    CohereConfig.fromValues("command-a-03-2025", Secret("key"), CohereConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
       CohereConfig.DEFAULT_BASE_URL
   }
 
   it should "redact the API key" in {
-    val shown = CohereConfig("co-secret-key", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096).toString
+    val shown = CohereConfig(Secret("co-secret-key"), "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096).toString
     (shown should not).include("co-secret-key")
     shown should include("model=command-r")
   }

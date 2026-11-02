@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -10,17 +11,17 @@ import org.scalatest.matchers.should.Matchers
  */
 class OpenAIConfigSpec extends AnyFunSuite with Matchers {
 
-  private val openai = OpenAIConfig("k", "gpt-4o", None, OpenAIConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val openai = OpenAIConfig(Secret("k"), "gpt-4o", None, OpenAIConfig.DEFAULT_BASE_URL, 128000, 4096)
 
   test("OpenAIConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
-    OpenAIConfig("k", "gpt-4o") shouldBe openai
-    OpenAIConfig("k", "gpt-4").contextWindow shouldBe 8192
-    OpenAIConfig("k", "gpt-4o").providerId shouldBe ProviderId("openai")
+    OpenAIConfig(Secret("k"), "gpt-4o") shouldBe openai
+    OpenAIConfig(Secret("k"), "gpt-4").contextWindow shouldBe 8192
+    OpenAIConfig(Secret("k"), "gpt-4o").providerId shouldBe ProviderId("openai")
   }
 
   test("OpenAIConfig's setters each change one field") {
     val adjusted = openai
-      .withApiKey("k2")
+      .withApiKey(Secret("k2"))
       .withOrganization("org-1")
       .withBaseUrl("https://proxy.example.com/v1")
       .withContextWindow(64000)
@@ -28,7 +29,7 @@ class OpenAIConfigSpec extends AnyFunSuite with Matchers {
       .withExplicitProviderId(ProviderId("requesty"))
 
     adjusted shouldBe OpenAIConfig(
-      "k2",
+      Secret("k2"),
       "gpt-4o",
       Some("org-1"),
       "https://proxy.example.com/v1",
