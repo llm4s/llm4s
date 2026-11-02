@@ -29,7 +29,7 @@ final case class TTSConfig(
  * Default values for [[TTSConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
  * when the corresponding setting is absent.
  *
- * `TTSConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ * `TTSConfig#toString` prints the API key as `***`, so a config is safe to log.
  */
 object TTSConfig {
 
@@ -77,7 +77,7 @@ final case class STTConfig(
  * Default values for [[STTConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
  * when the corresponding setting is absent.
  *
- * `STTConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ * `STTConfig#toString` prints the API key as `***`, so a config is safe to log.
  */
 object STTConfig {
 
