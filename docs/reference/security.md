@@ -43,6 +43,16 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 | Memory store reads | **Semi-trusted** | Content was written by the agent but may originate from user or tools |
 | Config / environment | **Trusted** | Read at startup via `Llm4sConfig` |
 
+## What llm4s redacts
+
+Every credential llm4s holds is a `Secret`, registered when it is created. A registered credential is removed from diagnostic text (error messages, logs, exchange logs, tracing) by exact match, whatever the syntax around it. The forms covered are the raw value, its JSON-escaped form, its URL-encoded form and its Basic base64 form. Values under 8 characters are not registered. Runtime tokens (exchanged or workload-identity tokens) are kept for one rotation, so the previous token is still masked after a refresh.
+
+The heuristics for secrets llm4s was never given (patterns for known key shapes, `key=value` pairs, headers) are best effort. The layered design is completed by follow-up PRs 2-4 (#1932).
+
+Limits:
+- Bedrock credentials stay inside the AWS SDK; llm4s never holds the signed header.
+- In a multi-tenant process the registry is process-wide, so one tenant's secret may be masked in another tenant's output. This is harmless over-masking.
+
 ## Known Risks and Mitigations
 
 ### 1. API Key Leakage in Logs and Error Messages

@@ -21,7 +21,7 @@ import org.llm4s.error.LLMError
  * @example
  * {{{
  * val config = StabilityAIConfig(
- *   apiKey = "your-stability-api-key",
+ *   apiKey = Secret("your-stability-api-key"),
  *   model = "stable-diffusion-xl-1024-v1-0"
  * )
  * val client = new StabilityAIClient(config)

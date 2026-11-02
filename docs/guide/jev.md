@@ -63,7 +63,9 @@ llm4s.jev {
 Or build a config in code:
 
 ```scala
-val config = JevConfig(apiKey = "tsk-...")
+import org.llm4s.security.Secret
+
+val config = JevConfig(apiKey = Secret("tsk-..."))
   .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
   .withTimeout(20.seconds)
   .withRetry(JevRetryPolicy(maxRetries = 3))

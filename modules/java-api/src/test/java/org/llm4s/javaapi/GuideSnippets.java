@@ -1,7 +1,5 @@
 package org.llm4s.javaapi;
 
-import org.llm4s.security.Secret;
-
 import java.util.Arrays;
 
 import java.util.List;
@@ -36,6 +34,7 @@ import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.llm4s.security.Secret;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

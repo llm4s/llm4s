@@ -140,7 +140,7 @@ object AzureConfig {
   /**
    * A keyless config (#2274): the endpoint and deployment name, authenticated with Microsoft Entra ID
    * tokens from `tokenProvider` - such as `AzureEntraId.defaultCredential()` from `llm4s-azure-identity` -
-   * every other field at its default, as [[apply(endpoint:String,apiKey:String,model:String)* apply]]
+   * every other field at its default, as [[apply(endpoint:String,apiKey:org.llm4s.security.Secret,model:String)* apply]]
    * gives it. Usable from Java and Kotlin.
    */
   def keyless(endpoint: String, model: String, tokenProvider: AccessTokenProvider): AzureConfig =

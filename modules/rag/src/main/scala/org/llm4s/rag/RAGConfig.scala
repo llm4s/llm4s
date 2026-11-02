@@ -35,7 +35,7 @@ import org.llm4s.security.Secret
  * // Using PostgreSQL with pgvector
  * val config = RAGConfig()
  *   .withEmbeddings("openai")
- *   .withPgVector("jdbc:postgresql://localhost:5432/mydb", "user", "pass", "embeddings")
+ *   .withPgVector("jdbc:postgresql://localhost:5432/mydb", "user", Secret("pass"), "embeddings")
  * }}}
  *
  * @param embeddingProvider id of the embedding provider, resolved through the

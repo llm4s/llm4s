@@ -26,6 +26,30 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
 
+## Credentials are Secret (#1932)
+
+`ApiKey` is now an opaque type over `org.llm4s.security.Secret`, and every credential field in a config is a `Secret` (or `Option[Secret]`): provider and embedding configs, HTTP proxy and TLS-store passwords, the MCP server key, Langfuse keys, search-tool keys, image, speech, watsonx, jev and Bedrock keys, the Cohere reranker key, and store credentials (Postgres, Neo4j, Qdrant, Elasticsearch/OpenSearch, Redis, the S3 loader, the URL loader token). Every `Secret` is registered, and removed by exact match from error messages, logs and exchange logs.
+
+Before:
+
+```scala
+OpenAIConfig(apiKey = "sk-...", model = "gpt-4o", baseUrl = "https://api.openai.com/v1")
+```
+
+After:
+
+```scala
+import org.llm4s.security.Secret
+
+OpenAIConfig(apiKey = Secret("sk-..."), model = "gpt-4o", baseUrl = "https://api.openai.com/v1")
+```
+
+- Read the value with `.reveal`. `toString` prints `***`.
+- Convenience factories that took a `String` still do.
+- `VectorStoreFactory.Config`: pass credentials with `withSecret("password" | "apiKey", Secret(...))`. `withOption("password" | "apiKey", ...)` is refused with a `ConfigurationError`.
+- Values under 8 characters are not registered, so they are not masked by exact match.
+- Java: the builders still take `String`. Constructing a config directly needs `Secret.apply(key)` (`import org.llm4s.security.Secret;`).
+
 ## Multimodal content parts (#1913)
 
 In 0.5.1. Stage 3 slice F8b ([#1913](https://github.com/llm4s/llm4s/issues/1913)) gives user messages and tool results content parts: text, images and documents. Code that builds text messages and reads `content` needs no change. Source breaks, with no shims:

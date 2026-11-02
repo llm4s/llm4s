@@ -41,8 +41,8 @@ import org.llm4s.util.Redaction
  * // Or programmatic configuration
  * val tracing = new LangfuseTracing(
  *   langfuseUrl = "https://cloud.langfuse.com",
- *   publicKey = "pk-lf-...",
- *   secretKey = "sk-lf-...",
+ *   publicKey = Secret("pk-lf-..."),
+ *   secretKey = Secret("sk-lf-..."),
  *   environment = "production",
  *   release = "1.0.0",
  *   version = "1.0.0"

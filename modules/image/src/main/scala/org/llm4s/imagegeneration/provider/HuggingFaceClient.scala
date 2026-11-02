@@ -23,7 +23,7 @@ import org.llm4s.util.Redaction
  * @example
  * {{{
  * val config = HuggingFaceConfig(
- *   apiKey = "your-hf-token",
+ *   apiKey = Secret("your-hf-token"),
  *   model = "stabilityai/stable-diffusion-2-1"
  * )
  * val client = new HuggingFaceClient(config)

@@ -20,8 +20,8 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
  * // With explicit credentials
  * val loader = S3Loader.withCredentials(
  *   bucket = "my-bucket",
- *   accessKeyId = "...",
- *   secretAccessKey = "..."
+ *   accessKeyId = Secret("..."),
+ *   secretAccessKey = Secret("...")
  * )
  *
  * // For LocalStack testing
