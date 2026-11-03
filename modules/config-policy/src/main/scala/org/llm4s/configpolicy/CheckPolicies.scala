@@ -4,6 +4,8 @@ package org.llm4s.configpolicy
 import org.llm4s.config.Llm4sConfig
 import pureconfig.ConfigSource
 
+import java.util.Locale
+
 object CheckPolicies {
   def main(args: Array[String]): Unit = {
     val envName = parseArg(args, "--env").getOrElse("prod")
@@ -41,7 +43,7 @@ object CheckPolicies {
   private[configpolicy] def resolveEnv(
     envName: String
   ): Either[String, (CatalogEnvironment, ConfigPolicy)] =
-    envName.toLowerCase match {
+    envName.toLowerCase(Locale.ROOT) match {
       case "dev" | "dev-sandbox" => Right((CatalogEnvironment.Dev, ConfigPolicy.devSandbox))
       case "staging"             => Right((CatalogEnvironment.Staging, ConfigPolicy.prodSafeDefaults))
       case "prod" | "prod-safe"  => Right((CatalogEnvironment.Prod, ConfigPolicy.prodSafeDefaults))
