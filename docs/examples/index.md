@@ -1037,6 +1037,14 @@ sbt "samples/runMain org.llm4s.samples.embeddingsupport.EmbeddingExample"
 
 ---
 
+### EvalDatasetExample
+
+[EvalDatasetExample.scala](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/EvalDatasetExample.scala) builds a golden set of evaluation questions without an API key. It validates inputs before storing them, selects questions by tag and ID, and shows how a snapshot stays fixed as the dataset grows. A JSONL round trip ends with five imported examples and one skipped line.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.rag.EvalDatasetExample"
+```
+
 ### HybridSearchExample {#hybrid-search}
 
 **File:** [`HybridSearchExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/HybridSearchExample.scala)
