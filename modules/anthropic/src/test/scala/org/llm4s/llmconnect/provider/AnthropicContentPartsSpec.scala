@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
 import org.llm4s.error.UnsupportedContentPartError
@@ -21,7 +22,7 @@ class AnthropicContentPartsSpec extends AnyFlatSpec with Matchers with EitherVal
 
   private val client = new AnthropicClient(
     AnthropicConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       model = "claude-3-5-sonnet-latest",
       baseUrl = "http://localhost:1",
       contextWindow = 200000,

@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.security.Secret
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
@@ -118,7 +119,7 @@ class PgCallerOwnedDataSourceIntegrationSpec extends AnyFlatSpec with Matchers w
   "HybridSearcher.pgvectorShared(connectionString)" should "close the pool it created when the searcher closes" in {
     val vectors  = s"own_pool_hybrid_v_$suffix"
     val keywords = s"own_pool_hybrid_k_$suffix"
-    val searcher = HybridSearcher.pgvectorShared(requirePg(), user, password, vectors, keywords).value
+    val searcher = HybridSearcher.pgvectorShared(requirePg(), user, Secret(password), vectors, keywords).value
     searcher.vectorStore.upsert(record) shouldBe Right(())
     searcher.close()
     // The pool is gone, so the store can no longer reach the database.

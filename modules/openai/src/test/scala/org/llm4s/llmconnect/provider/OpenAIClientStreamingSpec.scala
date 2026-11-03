@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -23,7 +24,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -75,7 +76,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -124,7 +125,7 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )

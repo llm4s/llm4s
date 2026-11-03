@@ -218,7 +218,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
         )
 
         val headers = Map(
-          "Authorization" -> s"Bearer ${cfg.apiKey}",
+          "Authorization" -> s"Bearer ${cfg.apiKey.reveal}",
           "Content-Type"  -> "application/json"
         )
 

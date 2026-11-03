@@ -1,5 +1,6 @@
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.*
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -10,7 +11,7 @@ import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   private def testToolConfig = BraveSearchToolConfig(
-    apiKey = "test-api-key",
+    apiKey = Secret("test-api-key"),
     apiUrl = "https://api.search.brave.com/res/v1",
     count = 5,
     safeSearch = "moderate"

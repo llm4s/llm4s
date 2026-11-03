@@ -1,5 +1,6 @@
 package org.llm4s.jev
 
+import org.llm4s.security.Secret
 import org.llm4s.error.*
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -22,7 +23,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     """{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95}},"usage":{"input_tokens":296,"output_tokens":20}}"""
 
   "The guide's snippets" should "build a config in code" in {
-    val config = JevConfig(apiKey = "tsk-...")
+    val config = JevConfig(apiKey = Secret("tsk-..."))
       .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
       .withTimeout(20.seconds)
       .withRetry(JevRetryPolicy(maxRetries = 3))
@@ -32,7 +33,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "ask questions and read typed answers" in {
     serve(ok(twoAnswers)) { (url, _) =>
-      val config = JevConfig("tsk-...", baseUrl = url)
+      val config = JevConfig(Secret("tsk-..."), baseUrl = url)
 
       val decision = for {
         client <- JevClient(config)
@@ -73,7 +74,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
 
     serve(Reply(401, """{"message":"Invalid API key"}""")) { (url, _) =>
-      val client = JevClient(JevConfig("tsk-...", baseUrl = url, retry = JevRetryPolicy.none)).value
+      val client = JevClient(JevConfig(Secret("tsk-..."), baseUrl = url, retry = JevRetryPolicy.none)).value
 
       client
         .evaluate(JevRequest("s", Map("q" -> JevQuestion.noul("Is it?"))))
@@ -83,7 +84,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "attach a header to a request" in {
     serve(ok(urgentOnly)) { (url, seen) =>
-      val client = JevClient(JevConfig("tsk-...", baseUrl = url)).value
+      val client = JevClient(JevConfig(Secret("tsk-..."), baseUrl = url)).value
       val request = JevRequest("s", Map("urgent" -> JevQuestion.noul("Is it?")))
         .withHeader("X-Correlation-Id", "order-4711")
 

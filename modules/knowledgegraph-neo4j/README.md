@@ -16,11 +16,12 @@ libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % "<version>"
 
 ```scala
 import org.llm4s.knowledgegraph.neo4j.Neo4jGraphStore
+import org.llm4s.security.Secret
 
 val store = Neo4jGraphStore(Neo4jGraphStore.Config(
   uri      = "bolt://localhost:7687",
   user     = "neo4j",
-  password = "my-password",
+  password = Secret("my-password"),
   database = "neo4j",        // optional, default "neo4j"
   maxPoolSize = 10           // optional, default 10
 )).getOrElse(sys.error("Could not connect"))

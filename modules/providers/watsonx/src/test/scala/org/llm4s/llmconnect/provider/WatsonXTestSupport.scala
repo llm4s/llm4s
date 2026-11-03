@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.types.Result
@@ -125,7 +126,7 @@ object WatsonXTestConfig {
   val ApiKey = "SUPERSECRETAPIKEY-0123456789"
 
   val config: WatsonXConfig = WatsonXConfig(
-    apiKey = ApiKey,
+    apiKey = Secret(ApiKey),
     projectId = "project-1",
     spaceId = None,
     model = "ibm/granite-13b-instruct-v2",

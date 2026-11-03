@@ -1,5 +1,6 @@
 package org.llm4s.speech.config
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -10,7 +11,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
       provider = "openai",
       model = "tts-1",
       voice = "alloy",
-      apiKey = "sk-test",
+      apiKey = Secret("sk-test"),
       baseUrl = "https://api.openai.com",
       region = None
     )
@@ -18,7 +19,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
     cfg.provider shouldBe "openai"
     cfg.model shouldBe "tts-1"
     cfg.voice shouldBe "alloy"
-    cfg.apiKey shouldBe "sk-test"
+    cfg.apiKey.reveal shouldBe "sk-test"
     cfg.baseUrl shouldBe "https://api.openai.com"
     cfg.region shouldBe None
   }
@@ -28,7 +29,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
       provider = "azure",
       model = "neural",
       voice = "en-US-JennyNeural",
-      apiKey = "azure-key",
+      apiKey = Secret("azure-key"),
       baseUrl = "default",
       region = Some("eastus")
     )
@@ -41,7 +42,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
       provider = "openai",
       model = "tts-1",
       voice = "alloy",
-      apiKey = "sk-secret-key-12345",
+      apiKey = Secret("sk-secret-key-12345"),
       baseUrl = "https://api.openai.com"
     )
 
@@ -62,14 +63,14 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
     val cfg = STTConfig(
       provider = "openai",
       model = "whisper-1",
-      apiKey = "sk-test",
+      apiKey = Secret("sk-test"),
       baseUrl = "https://api.openai.com",
       region = None
     )
 
     cfg.provider shouldBe "openai"
     cfg.model shouldBe "whisper-1"
-    cfg.apiKey shouldBe "sk-test"
+    cfg.apiKey.reveal shouldBe "sk-test"
     cfg.baseUrl shouldBe "https://api.openai.com"
     cfg.region shouldBe None
   }
@@ -78,7 +79,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
     val cfg = STTConfig(
       provider = "azure",
       model = "conversation",
-      apiKey = "azure-key",
+      apiKey = Secret("azure-key"),
       baseUrl = "default",
       region = Some("westeurope")
     )
@@ -90,7 +91,7 @@ class SpeechConfigSpec extends AnyFlatSpec with Matchers {
     val cfg = STTConfig(
       provider = "openai",
       model = "whisper-1",
-      apiKey = "sk-very-secret-key",
+      apiKey = Secret("sk-very-secret-key"),
       baseUrl = "https://api.openai.com"
     )
 

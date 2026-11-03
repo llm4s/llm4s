@@ -1,5 +1,7 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.security.KnownSecrets
+
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import org.llm4s.error.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -305,9 +307,28 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
       val report  = run(openAi(s"""apiKey = "$SecretKey""""), echoing, DoctorOptions().withLive(true))
       val live    = check(report, "Live call")
 
-      live.detail should include("***")
+      // Configured keys are registered when the config loads, so the registry masks the echo first ([REDACTED]);
+      // the report's own scrub (***) is the second line of defence for a value that was never registered.
+      live.detail should (include("***").or(include("[REDACTED]")))
       (live.detail should not).include(SecretKey)
     }
+
+    "replace, with its own scrub, a secret the config holds that was never registered for redaction" in KnownSecrets
+      .isolated {
+        // The fragment of a base URL is a secret the report hides by value, but nothing registers it with
+        // KnownSecrets, so only the report's own scrub (***) can catch it when an error echoes it bare.
+        val fragment = "opaqueFragmentValue0001"
+        val echoing  = new Probe(live = Left(AuthenticationError("openai", s"Rejected credential: $fragment")))
+        val report = run(
+          openAi(s"""apiKey = "$SecretKey"""", s"""baseUrl = "https://gw.example.com/v1#$fragment""""),
+          echoing,
+          DoctorOptions().withLive(true)
+        )
+        KnownSecrets.scrub(fragment, "[REDACTED]") shouldBe fragment
+        val live = check(report, "Live call")
+        live.detail should include("Rejected credential: ***")
+        (report.renderText should not).include(fragment)
+      }
 
     "hide the shared credentials too, and the keys of sections that are not the default" in {
       val config = openAi() +

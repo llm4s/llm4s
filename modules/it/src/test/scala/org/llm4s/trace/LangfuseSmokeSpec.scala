@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.config.LangfuseConfigLoader
 import org.llm4s.http.Llm4sHttpClient
@@ -46,14 +47,14 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
   private val config: LangfuseConfig = LangfuseConfigLoader.default().value
 
-  private def keys: Option[(String, String)] =
+  private def keys: Option[(Secret, Secret)] =
     for {
       publicKey <- config.publicKey
       secretKey <- config.secretKey
     } yield (publicKey, secretKey)
 
   /** A LangfuseTracing that keeps the result of every batch it sends; the agent swallows them. */
-  private class CheckedLangfuseTracing(publicKey: String, secretKey: String)
+  private class CheckedLangfuseTracing(publicKey: Secret, secretKey: Secret)
       extends LangfuseTracing(config.url, publicKey, secretKey, config.env, config.release, config.version) {
     val results: mutable.Buffer[Result[Unit]] = mutable.Buffer.empty
 
@@ -131,7 +132,9 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     val apiBase = DefaultLangfuseBatchSender.normalizeIngestionUrl(config.url).stripSuffix("/api/public/ingestion")
     val auth =
-      "Basic " + Base64.getEncoder.encodeToString(s"$publicKey:$secretKey".getBytes(StandardCharsets.UTF_8))
+      "Basic " + Base64.getEncoder.encodeToString(
+        s"${publicKey.reveal}:${secretKey.reveal}".getBytes(StandardCharsets.UTF_8)
+      )
     val http = Llm4sHttpClient.create()
 
     eventually {

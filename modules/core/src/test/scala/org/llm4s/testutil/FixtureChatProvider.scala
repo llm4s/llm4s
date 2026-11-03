@@ -50,7 +50,7 @@ object FixtureChatProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- FixtureChatConfig.fromValues(section.model.asString, apiKey.reveal, baseUrl)
     yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using

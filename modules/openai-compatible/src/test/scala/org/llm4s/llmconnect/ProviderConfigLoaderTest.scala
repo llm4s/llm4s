@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config._
 import org.scalatest.funsuite.AnyFunSuite
@@ -18,24 +19,24 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
     val cfg = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "sk-test",
+        apiKey = Secret("sk-test"),
         organization = None,
         baseUrl = DEFAULT_OPENAI_BASE_URL
       )
       .value
     cfg.model shouldBe "gpt-4o"
-    cfg.apiKey shouldBe "sk-test"
+    cfg.apiKey.reveal shouldBe "sk-test"
     cfg.baseUrl shouldBe DEFAULT_OPENAI_BASE_URL
   }
 
   test("OpenAIConfig.load returns Left when api key missing") {
     val res =
-      OpenAIConfig.fromValues("gpt-4o", "", None, DEFAULT_OPENAI_BASE_URL)
+      OpenAIConfig.fromValues("gpt-4o", Secret(""), None, DEFAULT_OPENAI_BASE_URL)
     res.isLeft shouldBe true
   }
 
   test("OpenAIConfig.fromValues constructs an OpenAI config") {
-    val openAi = OpenAIConfig.fromValues("gpt-4o", "sk", None, DEFAULT_OPENAI_BASE_URL).value
+    val openAi = OpenAIConfig.fromValues("gpt-4o", Secret("sk"), None, DEFAULT_OPENAI_BASE_URL).value
     openAi shouldBe a[OpenAIConfig]
   }
 
@@ -43,7 +44,7 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
     val cfg = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "sk",
+        apiKey = Secret("sk"),
         organization = None,
         baseUrl = "https://openrouter.ai/api/v1"
       )

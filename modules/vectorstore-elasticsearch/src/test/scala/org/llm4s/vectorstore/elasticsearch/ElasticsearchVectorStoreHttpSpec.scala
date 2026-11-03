@@ -10,6 +10,7 @@ import org.llm4s.error.{
   ValidationError
 }
 import org.llm4s.http.HttpResponse
+import org.llm4s.security.Secret
 import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, VectorRecord }
@@ -490,7 +491,8 @@ class ElasticsearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Ei
   }
 
   it should "redact credentials an error body echoes, the configured ones included" in {
-    val cfg = config.withBaseUrl("https://es.example.com").withAuth(ElasticsearchAuth.ApiKey("my-encoded-key-123"))
+    val cfg =
+      config.withBaseUrl("https://es.example.com").withAuth(ElasticsearchAuth.ApiKey(Secret("my-encoded-key-123")))
     val (es, _) = store(
       { case ("GET", _) => status(500, EchoedCredentials.Text + " my-encoded-key-123") },
       cfg.withIndex("vectors")
@@ -734,11 +736,19 @@ class ElasticsearchVectorStoreHttpSpec extends AnyFlatSpec with Matchers with Ei
   "Authentication" should "send an API key as ApiKey and a user as Basic" in {
     val (apiKeyStore, apiKeyFake) = store(
       { case ("POST", _) => ok("""{"count":0}""") },
-      ElasticsearchConfig("https://es.example.com", index = "vectors", auth = ElasticsearchAuth.ApiKey("ZW5jb2RlZA=="))
+      ElasticsearchConfig(
+        "https://es.example.com",
+        index = "vectors",
+        auth = ElasticsearchAuth.ApiKey(Secret("ZW5jb2RlZA=="))
+      )
     )
     val (basicStore, basicFake) = store(
       { case ("POST", _) => ok("""{"count":0}""") },
-      ElasticsearchConfig("https://es.example.com", index = "vectors", auth = ElasticsearchAuth.Basic("elastic", "pw"))
+      ElasticsearchConfig(
+        "https://es.example.com",
+        index = "vectors",
+        auth = ElasticsearchAuth.Basic("elastic", Secret("pw"))
+      )
     )
 
     apiKeyStore.count() shouldBe Right(0L)

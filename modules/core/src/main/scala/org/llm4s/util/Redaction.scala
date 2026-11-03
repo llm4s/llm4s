@@ -4,13 +4,15 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
-import scala.annotation.{ tailrec, unused }
+import org.llm4s.security.KnownSecrets
+
+import scala.annotation.tailrec
 import scala.util.matching.Regex
 
 /**
  * Utilities for redacting sensitive information from strings and log messages.
  *
- * Provides both simple masking (for toString representations) and pattern-based
+ * Provides URL masking (for toString representations) and pattern-based
  * redaction (for log messages that may contain API keys, auth headers, etc.).
  *
  * Pattern-based redaction automatically detects and masks:
@@ -25,9 +27,6 @@ import scala.util.matching.Regex
  * @example
  * {{{
  * import org.llm4s.util.Redaction
- *
- * // Simple masking for toString
- * Redaction.secret("sk-abc123") // "***"
  *
  * // Pattern-based redaction for log messages
  * Redaction.redact("Authorization: Bearer sk-abc123...")
@@ -45,16 +44,8 @@ private[llm4s] object Redaction {
   val RedactionPlaceholder: String = "[REDACTED]"
 
   // ============================================================
-  // Simple masking (for toString representations)
+  // URL masking (for toString representations)
   // ============================================================
-
-  def secret(@unused value: String): String = "***"
-
-  def secretOpt(value: Option[String]): String =
-    value match {
-      case Some(_) => "Some(***)"
-      case None    => "None"
-    }
 
   /**
    * A URL fit for a `toString` or a log line: scheme, host, port and path are kept; userinfo
@@ -62,6 +53,9 @@ private[llm4s] object Redaction {
    * replaced by `***`. A value that does not parse as an absolute URL is `***` altogether.
    */
   def url(value: String): String =
+    scrubKnown(urlShown(value))
+
+  private def urlShown(value: String): String =
     scala.util
       .Try(new java.net.URI(value.trim))
       .toOption
@@ -133,14 +127,16 @@ private[llm4s] object Redaction {
    */
   def safeBody(body: String, maxLength: Int = 2048): String =
     if (body == null) "null"
-    else
-      safeBodyPrefix(body, maxLength) match {
+    else {
+      val scrubbed = scrubKnown(body)
+      safeBodyPrefix(scrubbed, maxLength) match {
         case Some(Some((cut, redacted))) =>
           redacted.take(maxLength) +
             s"... (truncated, original length: ${body.length}, redacted from its first $cut chars)"
         case Some(None) => safeBodyOmitted(body)
-        case None       => truncateForLog(redact(body), maxLength)
+        case None       => truncateForLog(redact(scrubbed), maxLength)
       }
+    }
 
   /** The longest body [[safeBody]] redacts whole. */
   private val SafeBodyWholeLimit: Int = 128 * 1024
@@ -575,7 +571,10 @@ private[llm4s] object Redaction {
    */
   def redact(input: String, placeholder: String = RedactionPlaceholder): String =
     if (input == null || input.isEmpty) input
-    else redaction(input, placeholder, singleQuotedFromInput = true, addedReadings = true)._1
+    else {
+      val scrubbed = KnownSecrets.scrub(input, placeholder)
+      redaction(scrubbed, placeholder, singleQuotedFromInput = true, addedReadings = true)._1
+    }
 
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
@@ -2115,26 +2114,27 @@ private[llm4s] object Redaction {
 
   /**
    * A remote reply's body (or an exception message carrying one), fit to put in an `LLMError` or a log
-   * line. In order: every exact occurrence of each of `secrets` - the credentials the request carried,
-   * such as a subject token, client id or bearer - is replaced, as are its URL-encoded and JSON-escaped
-   * forms; so is the string value (of eight characters or more) of every sensitive JSON field
+   * line. In order: every registered credential (`KnownSecrets`: a subject token, client id, bearer, ...) is
+   * replaced, as are its URL-encoded and JSON-escaped forms; so is the string value (of eight characters or more) of every sensitive JSON field
    * (`access_token`, `refresh_token`, `id_token`, `client_secret`, `assertion`, `subject_token`, ...)
    * anywhere in the body, wherever else it is repeated; then [[redact]] applies the general patterns (bearer tokens, JWTs, API keys,
-   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Blank
-   * secrets are ignored. Truncation comes last, so it never cuts a secret in two before it is matched.
+   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Truncation comes last, so it never cuts a secret in two before it is matched.
    */
-  def remoteBody(body: String, secrets: Iterable[String] = Nil, maxLength: Int = 512): String =
+  def remoteBody(body: String, maxLength: Int = 512): String =
     if (body == null || body.isEmpty) ""
-    else redactForLogging(scrubRemote(body, secrets), maxLength)
+    else redactForLogging(scrubRemote(body), maxLength)
 
   /**
    * The exact-match half of [[remoteBody]], untruncated and without the general patterns: `secrets`, and
    * the string values of sensitive JSON fields in `body`, scrubbed. For a body that is parsed afterwards,
    * as `HttpErrorMapper` parses one, which then redacts and truncates the detail it extracts.
    */
-  def scrubRemote(body: String, secrets: Iterable[String] = Nil): String =
+  def scrubRemote(body: String): String =
     if (body == null || body.isEmpty) body
-    else scrub(body, secrets ++ sensitiveJsonValues(body))
+    else scrubEcho(scrubKnown(body), sensitiveJsonValues(body))
+
+  /** Layer A only: removes every credential registered with llm4s, by exact match. Used for trace content. */
+  def scrubKnown(text: String): String = KnownSecrets.scrub(text, RedactionPlaceholder)
 
   /**
    * `input` with every exact occurrence of each non-blank value in `secrets`, and of its URL-encoded and
@@ -2146,134 +2146,22 @@ private[llm4s] object Redaction {
    * length of the forms, however many there are: a body echoing thousands of tokens is scrubbed as
    * quickly as one echoing one.
    */
-  def scrub(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
+  private def scrubEcho(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
     if (input == null || input.isEmpty) input
     else {
       val forms = secrets.iterator
         .filter(_ != null)
         .map(_.trim)
         .filter(_.nonEmpty)
-        .flatMap(secret => Iterator(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), jsonEscaped(secret)))
+        .flatMap(secret =>
+          Iterator(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), ExactMatcher.jsonEscaped(secret))
+        )
         .toSeq
         .distinct
       if (forms.isEmpty) input else ExactMatcher(forms).replaceAll(input, placeholder)
     }
 
-  /**
-   * An Aho-Corasick automaton over the reversed `patterns`. Scanning the input backwards gives, for every
-   * position, the length of the longest pattern that starts there, in time linear in the input; a forward
-   * pass then replaces each maximal run of overlapping occurrences, leftmost first, with the placeholder.
-   * Transitions live in one `LongMap` keyed by `(state, char)` rather than a map per state.
-   */
-  final private class ExactMatcher private (
-    transitions: scala.collection.mutable.LongMap[Int],
-    fail: Array[Int],
-    longestTerminal: Array[Int]
-  ) {
-    private def key(state: Int, c: Char): Long = (state.toLong << 16) | c.toLong
-
-    private def step(from: Int, c: Char): Int = {
-      var state = from
-      while (state != 0 && !transitions.contains(key(state, c))) state = fail(state)
-      transitions.getOrElse(key(state, c), 0)
-    }
-
-    def replaceAll(input: String, placeholder: String): String = {
-      val n = input.length
-      // longestAt(i): the length of the longest pattern that starts at i, or 0.
-      val longestAt = new Array[Int](n)
-      var state     = 0
-      var j         = n - 1
-      while (j >= 0) {
-        state = step(state, input.charAt(j))
-        longestAt(j) = longestTerminal(state)
-        j -= 1
-      }
-      val out = new java.lang.StringBuilder(n)
-      var i   = 0
-      while (i < n)
-        if (longestAt(i) == 0) {
-          out.append(input.charAt(i))
-          i += 1
-        } else {
-          // Extend the run over every occurrence that starts inside it, then mask it once.
-          var end = i + longestAt(i)
-          var k   = i + 1
-          while (k < end) {
-            if (longestAt(k) > 0) end = math.max(end, k + longestAt(k))
-            k += 1
-          }
-          out.append(placeholder)
-          i = end
-        }
-      out.toString
-    }
-  }
-
-  private object ExactMatcher {
-    def apply(patterns: Seq[String]): ExactMatcher = {
-      val transitions                    = scala.collection.mutable.LongMap.empty[Int]
-      val parent                         = scala.collection.mutable.ArrayBuffer(0)
-      val viaChar                        = scala.collection.mutable.ArrayBuffer('\u0000')
-      val depth                          = scala.collection.mutable.ArrayBuffer(0)
-      val terminal                       = scala.collection.mutable.ArrayBuffer(false)
-      def key(state: Int, c: Char): Long = (state.toLong << 16) | c.toLong
-
-      patterns.foreach { pattern =>
-        var state = 0
-        var p     = pattern.length - 1
-        while (p >= 0) {
-          val c = pattern.charAt(p)
-          state = transitions.getOrElseUpdate(
-            key(state, c), {
-              parent += state; viaChar += c; depth += depth(state) + 1; terminal += false
-              parent.length - 1
-            }
-          )
-          p -= 1
-        }
-        terminal(state) = true
-      }
-
-      val size = parent.length
-      // Breadth-first order: every state after its parent and after any shallower state its failure link can be.
-      val order           = (0 until size).sortBy(depth(_)).toArray
-      val fail            = new Array[Int](size)
-      val longestTerminal = new Array[Int](size)
-      order.foreach { s =>
-        if (s != 0) {
-          val p = parent(s)
-          val c = viaChar(s)
-          if (p != 0) {
-            var f = fail(p)
-            while (f != 0 && !transitions.contains(key(f, c))) f = fail(f)
-            fail(s) = transitions.getOrElse(key(f, c), 0)
-          }
-          // A state's string is a suffix (in the reversed text, a prefix) of its own; its failure chain's first
-          // terminal is the longest pattern ending here.
-          longestTerminal(s) = if (terminal(s)) depth(s) else longestTerminal(fail(s))
-        }
-      }
-      new ExactMatcher(transitions, fail, longestTerminal)
-    }
-  }
-
-  private def jsonEscaped(value: String): String = {
-    val rendered = ujson.Str(value).render()
-    rendered.substring(1, rendered.length - 1)
-  }
-
   private val MinRepeatedSecretLength = 8
-
-  /**
-   * Of `ids` - identifiers a request carried that are not themselves credentials, such as a client id, an
-   * identity-provider, organization or federation-rule id - those long enough to scrub by exact match: eight
-   * characters or more, the floor applied to sensitive JSON values. A short id (`app`, `prod`) would garble every
-   * error body it was scrubbed from, so it is left out. Never pass a bearer token, API key, JWT or identity token
-   * through this: those go to [[scrub]] / [[remoteBody]] as they are, whatever their length.
-   */
-  def identifiers(ids: Iterable[String]): Seq[String] =
-    ids.iterator.filter(_ != null).map(_.trim).filter(_.length >= MinRepeatedSecretLength).toSeq
 
   /**
    * The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. The body is a

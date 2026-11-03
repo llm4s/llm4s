@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.model.ModelRegistryTestSupport
 import org.scalatest.funsuite.AnyFunSuite
@@ -13,7 +14,7 @@ class WatsonXConfigSpec extends AnyFunSuite with Matchers:
     project: Option[String] = Some("p-1"),
     space: Option[String] = None,
     baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL
-  ) = WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", apiKey, project, space, baseUrl)
+  ) = WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl)
 
   test("fromValues applies the Dallas endpoint, API version and IAM endpoint by default") {
     val config = build().getOrElse(fail("expected a config"))

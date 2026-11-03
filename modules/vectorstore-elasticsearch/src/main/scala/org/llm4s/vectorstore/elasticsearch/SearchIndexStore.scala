@@ -334,14 +334,14 @@ final private[vectorstore] class SearchIndexStore(
     if (!isSuccess(response)) Left(failure(operation, response))
     else
       Try(ujson.read(response.body)).toEither.left.map(e =>
-        ProcessingError(storeId, s"$product $operation returned unreadable JSON: ${e.getMessage}")
+        ProcessingError(storeId, s"$product $operation returned unreadable JSON: ${exceptionText(e)}")
       )
 
   private def parse[A](operation: String)(thunk: => A): Result[A] =
     Try(thunk).toEither.left.map(e =>
       ProcessingError(
         storeId,
-        s"$product $operation returned an unexpected response: ${e.getClass.getSimpleName}: ${e.getMessage}"
+        s"$product $operation returned an unexpected response: ${e.getClass.getSimpleName}: ${exceptionText(e)}"
       )
     )
 
@@ -361,6 +361,10 @@ final private[vectorstore] class SearchIndexStore(
       case status    => ServiceError(status, backend.errorId, s"$product $operation failed: $body")
     }
   }
+
+  /** An exception's message, scrubbed as a body is; its class name when it has no message. */
+  private def exceptionText(e: Throwable): String =
+    Option(e.getMessage).fold(e.getClass.getSimpleName)(scrub)
 
   /** Masks the configured credentials wherever a body echoes them, then applies the shared redaction. */
   private def scrub(text: String): String =

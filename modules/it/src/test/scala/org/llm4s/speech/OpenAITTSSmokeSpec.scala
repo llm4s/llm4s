@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.speech.config.SpeechConfigLoader
@@ -56,7 +57,7 @@ class OpenAITTSSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "reject an invalid key with an authentication error" in {
     Tier.require(config.isRight, "OPENAI_API_KEY not set")
-    val rejected = new OpenAITTSClient(config.value.copy(apiKey = "sk-invalid-llm4s-smoke-test"))
+    val rejected = new OpenAITTSClient(config.value.copy(apiKey = Secret("sk-invalid-llm4s-smoke-test")))
 
     rejected.synthesize("Hello").left.value shouldBe an[org.llm4s.error.AuthenticationError]
   }

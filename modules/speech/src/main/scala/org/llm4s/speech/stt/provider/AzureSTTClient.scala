@@ -44,7 +44,7 @@ final class AzureSTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm4
         s"${config.baseUrl}/speech/recognition/conversation/cognitiveservices/v1" +
           s"?language=${URLEncoder.encode(language, StandardCharsets.UTF_8)}&format=simple",
         Map(
-          "Ocp-Apim-Subscription-Key" -> config.apiKey,
+          "Ocp-Apim-Subscription-Key" -> config.apiKey.reveal,
           "Content-Type"              -> s"audio/wav; codecs=audio/pcm; samplerate=$sampleRate",
           "Accept"                    -> "application/json"
         ),

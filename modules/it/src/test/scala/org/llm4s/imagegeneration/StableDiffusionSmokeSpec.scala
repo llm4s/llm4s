@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.scalatest.EitherValues
@@ -28,7 +29,7 @@ class StableDiffusionSmokeSpec extends AnyFlatSpec with Matchers with EitherValu
 
     val result = ImageGeneration.generateImage(
       prompt = "a red square on a white background",
-      config = StabilityAIConfig(apiKey = apiKey.get, model = "stable-diffusion-xl-1024-v1-0"),
+      config = StabilityAIConfig(apiKey = Secret(apiKey.get), model = "stable-diffusion-xl-1024-v1-0"),
       options = ImageGenerationOptions(size = ImageSize.Square1024)
     )
 
@@ -49,7 +50,8 @@ class StableDiffusionSmokeSpec extends AnyFlatSpec with Matchers with EitherValu
   it should "reject an invalid API key" in {
     val result = ImageGeneration.generateImage(
       prompt = "a red square on a white background",
-      config = StabilityAIConfig(apiKey = "sk-invalid-key-for-testing", model = "stable-diffusion-xl-1024-v1-0"),
+      config =
+        StabilityAIConfig(apiKey = Secret("sk-invalid-key-for-testing"), model = "stable-diffusion-xl-1024-v1-0"),
       options = ImageGenerationOptions(size = ImageSize.Square1024)
     )
 

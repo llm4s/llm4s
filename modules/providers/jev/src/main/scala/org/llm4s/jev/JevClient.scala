@@ -66,7 +66,7 @@ final class JevClient private (
 
   private def requestHeaders(request: JevRequest): Map[String, String] =
     JevHeaders.merge(config.headers, request.headers) ++ Map(
-      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Authorization" -> s"Bearer ${config.apiKey.reveal}",
       "Content-Type"  -> "application/json",
       "Accept"        -> "application/json"
     )

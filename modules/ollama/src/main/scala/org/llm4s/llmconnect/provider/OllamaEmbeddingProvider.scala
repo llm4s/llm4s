@@ -101,7 +101,8 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
       logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
 
       val auth =
-        if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") Map("Authorization" -> s"Bearer ${cfg.apiKey}")
+        if (cfg.apiKey.reveal.nonEmpty && cfg.apiKey.reveal != "not-required")
+          Map("Authorization" -> s"Bearer ${cfg.apiKey.reveal}")
         else Map.empty
       val headers = Map("Content-Type" -> "application/json") ++ auth
 

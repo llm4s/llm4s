@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.error._
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
@@ -66,7 +67,7 @@ class CloudSpeechFixesSpec extends AnyFlatSpec with Matchers {
   "AzureSTTClient" should "declare the rate of a WAV that has a LIST chunk before fmt" in {
     val wav  = riff(chunk("LIST", ascii("INFOISFT") ++ le32(4) ++ ascii("lav ")), fmt(44100), data)
     val http = StubHttpClient.json(200, """{"RecognitionStatus":"Success","DisplayText":"hi"}""")
-    val cfg  = STTConfig("azure", "en-US", "k", "https://eastus.stt.speech.microsoft.com", Some("eastus"))
+    val cfg  = STTConfig("azure", "en-US", Secret("k"), "https://eastus.stt.speech.microsoft.com", Some("eastus"))
 
     new AzureSTTClient(cfg, http).transcribe(AudioInput.BytesAudio(wav, 16000))
 
@@ -84,8 +85,8 @@ class CloudSpeechFixesSpec extends AnyFlatSpec with Matchers {
   // ------------------------------------------------------------ secret scrubbing
 
   private val secretKey = "0123456789abcdef0123456789abcdef"
-  private val ttsCfg    = TTSConfig("p", "m", "en-US-A", secretKey, "https://tts.example", Some("eastus"))
-  private val sttCfg    = STTConfig("p", "m", secretKey, "https://stt.example", Some("eastus"))
+  private val ttsCfg    = TTSConfig("p", "m", "en-US-A", Secret(secretKey), "https://tts.example", Some("eastus"))
+  private val sttCfg    = STTConfig("p", "m", Secret(secretKey), "https://stt.example", Some("eastus"))
   private val wav       = riff(fmt(16000), data)
 
   private val calls: Seq[(String, Llm4sHttpClient => Result[Any])] = Seq(
@@ -109,7 +110,7 @@ class CloudSpeechFixesSpec extends AnyFlatSpec with Matchers {
 
   // ------------------------------------------------------------ OpenAI request limits
 
-  private val openAi = TTSConfig("openai", "tts-1", "alloy", "sk-test", "https://api.openai.com")
+  private val openAi = TTSConfig("openai", "tts-1", "alloy", Secret("sk-test"), "https://api.openai.com")
 
   "OpenAITTSClient" should "reject a speaking rate outside OpenAI's 0.25 to 4.0 without sending a request" in {
     Seq(0.0, 0.1, 0.2499, 4.0001, 5.0, -1.0, Double.NaN, Double.PositiveInfinity).foreach { rate =>

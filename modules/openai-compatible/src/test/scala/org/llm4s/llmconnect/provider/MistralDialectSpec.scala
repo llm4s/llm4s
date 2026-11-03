@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -16,7 +17,7 @@ class MistralDialectSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val client =
-    new MistralClient(MistralConfig("k", "mistral-small-latest", "http://localhost:1", 128000, 4096))
+    new MistralClient(MistralConfig(Secret("k"), "mistral-small-latest", "http://localhost:1", 128000, 4096))
 
   "MistralDialect.encodeToolCallId" should "pass one of Mistral's own ids through unchanged" in {
     MistralDialect.encodeToolCallId("D681PevKs") shouldBe "D681PevKs"

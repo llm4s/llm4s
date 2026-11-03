@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
@@ -24,7 +25,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   private val apiKey  = "sk-test"
   private val baseUrl = "https://api.example.com"
 
-  private val gemini   = GeminiConfig("k", "gemini-2.0-flash", "https://x.invalid/v1beta", 1048576, 8192)
+  private val gemini   = GeminiConfig(Secret("k"), "gemini-2.0-flash", "https://x.invalid/v1beta", 1048576, 8192)
   private val vertexai = VertexAIConfig("proj", "us-central1", "gemini-2.0-flash", None, 1048576, 8192)
 
   // ---- GeminiConfig.fromValues: base URL normalisation (from ProviderConfigSpec) ----
@@ -33,7 +34,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val config = GeminiConfig
       .fromValues(
         modelName = "gemini-1.5-flash",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = "https://generativelanguage.googleapis.com"
       )
       .value
@@ -45,7 +46,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val config = GeminiConfig
       .fromValues(
         modelName = "gemini-1.5-flash",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = "https://generativelanguage.googleapis.com/v1beta"
       )
       .value
@@ -54,7 +55,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("GeminiConfig.DEFAULT_BASE_URL is already versioned, so fromValues keeps it as is") {
-    GeminiConfig.fromValues("gemini-2.0-flash", apiKey, GeminiConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
+    GeminiConfig.fromValues("gemini-2.0-flash", Secret(apiKey), GeminiConfig.DEFAULT_BASE_URL).value.baseUrl shouldBe
       GeminiConfig.DEFAULT_BASE_URL
   }
 
@@ -62,37 +63,37 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   // Model names use a "patch-cov-" prefix so the registry misses and the fallback runs.
 
   test("GeminiConfig fallback returns 1048576 for gemini-2-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-2", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-gemini-2", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-1.5-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.5-pro", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.5-pro", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 32768 for gemini-1.0-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.0", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.0", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 32768
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-pro-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-pro", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-gemini-pro", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for gemini-flash-like model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-flash", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-gemini-flash", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
 
   test("GeminiConfig fallback returns 1048576 for unknown model") {
-    val cfg = GeminiConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
+    val cfg = GeminiConfig.fromValues("patch-cov-unknown", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 1048576
     cfg.reserveCompletion shouldBe 8192
   }
@@ -112,7 +113,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     val gemini = GeminiConfig
       .fromValues(
         modelName = "gemini-1.5-pro",
-        apiKey = secret,
+        apiKey = Secret(secret),
         baseUrl = "https://example.invalid"
       )
       .value
@@ -157,8 +158,8 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("fromValues returns a Left naming the provider and field for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "Gemini apiKey"       -> GeminiConfig.fromValues("gemini-2.0-flash", " ", "https://example.invalid"),
-      "Gemini baseUrl"      -> GeminiConfig.fromValues("gemini-2.0-flash", "key", " "),
+      "Gemini apiKey"       -> GeminiConfig.fromValues("gemini-2.0-flash", Secret(" "), "https://example.invalid"),
+      "Gemini baseUrl"      -> GeminiConfig.fromValues("gemini-2.0-flash", Secret("key"), " "),
       "Vertex AI projectId" -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = " "),
       "Vertex AI location"  -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = "p", location = " ")
     )
@@ -185,16 +186,16 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("GeminiConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
-    GeminiConfig("k", "gemini-2.0-flash") shouldBe
-      GeminiConfig("k", "gemini-2.0-flash", GeminiConfig.DEFAULT_BASE_URL, 1048576, 8192)
-    GeminiConfig("k", "gemini-1.0-pro").contextWindow shouldBe 32768
-    GeminiConfig("k", "gemini-2.0-flash").providerId shouldBe ProviderId("gemini")
+    GeminiConfig(Secret("k"), "gemini-2.0-flash") shouldBe
+      GeminiConfig(Secret("k"), "gemini-2.0-flash", GeminiConfig.DEFAULT_BASE_URL, 1048576, 8192)
+    GeminiConfig(Secret("k"), "gemini-1.0-pro").contextWindow shouldBe 32768
+    GeminiConfig(Secret("k"), "gemini-2.0-flash").providerId shouldBe ProviderId("gemini")
   }
 
   test("GeminiConfig's setters each change one field") {
     val timeouts = ProviderTimeouts(request = Some(30.seconds))
     val adjusted = gemini
-      .withApiKey("k2")
+      .withApiKey(Secret("k2"))
       .withModel("gemini-2.5-pro")
       .withBaseUrl("https://proxy.example.com/v1beta")
       .withContextWindow(64000)
@@ -203,7 +204,7 @@ class GeminiConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .withGoogleSearch(true)
 
     adjusted shouldBe GeminiConfig(
-      "k2",
+      Secret("k2"),
       "gemini-2.5-pro",
       "https://proxy.example.com/v1beta",
       64000,

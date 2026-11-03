@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.metrics._
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
@@ -149,7 +150,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   "InstrumentedImageGenerationClient" should "record metrics on successful generation" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new MockImageClient(),
       config,
@@ -181,7 +182,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "record cost metrics when pricing is available" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new MockImageClient(),
       config,
@@ -202,7 +203,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "record metrics on failed generation" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new FailingImageClient(),
       config,
@@ -224,7 +225,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "record image generation error counter on failure" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new FailingImageClient(),
       config,
@@ -245,7 +246,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "record duration histogram" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new MockImageClient(),
       config,
@@ -266,7 +267,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
   it should "record multiple images count correctly" in {
     val prometheusMetrics = PrometheusMetrics.create()
     val tracing           = new TracingCollector()
-    val config            = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config            = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new MockImageClient(),
       config,
@@ -301,7 +302,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
   it should "emit ImageGenerationCompleted trace event on success" in {
     val tracing = new TracingCollector()
-    val config  = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config  = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new MockImageClient(),
       config,
@@ -325,7 +326,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
 
   it should "emit error trace event on failure" in {
     val tracing = new TracingCollector()
-    val config  = OpenAIConfig(apiKey = "test-key", model = "dall-e-3")
+    val config  = OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3")
     val instrumented = new InstrumentedImageGenerationClient(
       new FailingImageClient(),
       config,

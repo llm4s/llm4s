@@ -2,9 +2,9 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for IBM watsonx.ai.
@@ -27,7 +27,7 @@ import org.llm4s.util.Redaction
  *                      value keeps the client's own default ([[ProviderTimeouts]]).
  */
 final case class WatsonXConfig(
-  apiKey: String,
+  apiKey: Secret,
   projectId: String,
   spaceId: Option[String],
   model: String,
@@ -45,7 +45,7 @@ final case class WatsonXConfig(
   override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
   override def toString: String =
-    s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, spaceId=$spaceId, model=$model, " +
+    s"WatsonXConfig(apiKey=$apiKey, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, timeouts=$timeouts)"
 
@@ -96,7 +96,7 @@ object WatsonXConfig:
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     projectId: Option[String],
     spaceId: Option[String] = None,
     baseUrl: String = DEFAULT_BASE_URL,
@@ -105,7 +105,7 @@ object WatsonXConfig:
   )(using resolver: ContextWindowResolver): Result[WatsonXConfig] =
     // A trailing slash would put `//` in every endpoint (`$baseUrl/ml/v1/...`); stray whitespace
     // would make the URL unparseable.
-    val key     = apiKey.trim
+    val key     = apiKey.reveal.trim
     val base    = baseUrl.trim.replaceAll("/+$", "")
     val version = apiVersion.trim
     val iam     = iamUrl.trim
@@ -137,7 +137,7 @@ object WatsonXConfig:
         fallbackResolver = watsonxFallback
       )
       WatsonXConfig(
-        apiKey = key,
+        apiKey = Secret(key),
         projectId = project.getOrElse(""),
         spaceId = space,
         model = modelName,

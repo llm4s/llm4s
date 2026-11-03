@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing
 
+import org.llm4s.security.Secret
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -7,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 class ImageProcessingGeminiSpec extends AnyFlatSpec with Matchers {
 
   "GeminiVisionConfig" should "use default values" in {
-    val cfg = GeminiVisionConfig(apiKey = "key")
+    val cfg = GeminiVisionConfig(apiKey = Secret("key"))
     cfg.model shouldBe "gemini-3.6-flash"
     // Google shut these down (ai.google.dev/gemini-api/docs/changelog: 1.5 on 2025-09-29, 2.0 on 2026-06-01).
     val shutDown = Set(
@@ -26,7 +27,7 @@ class ImageProcessingGeminiSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accept custom values" in {
-    val cfg = GeminiVisionConfig("key", "gemini-1.0", "https://custom.url", 5, 10)
+    val cfg = GeminiVisionConfig(Secret("key"), "gemini-1.0", "https://custom.url", 5, 10)
     cfg.model shouldBe "gemini-1.0"
     cfg.baseUrl shouldBe "https://custom.url"
     cfg.connectTimeoutSeconds shouldBe 5
@@ -34,7 +35,7 @@ class ImageProcessingGeminiSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be an ImageProcessingConfig" in {
-    val cfg = GeminiVisionConfig(apiKey = "key")
+    val cfg = GeminiVisionConfig(apiKey = Secret("key"))
     cfg shouldBe a[org.llm4s.imageprocessing.config.ImageProcessingConfig]
   }
 

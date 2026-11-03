@@ -170,7 +170,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
   private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Result[String] =
     // A blank key would be sent as `Authorization: Bearer `: refused before any request.
     ProviderConfig
-      .nonEmpty("OpenAI vision", "apiKey", config.apiKey)
+      .nonEmpty("OpenAI vision", "apiKey", config.apiKey.reveal)
       .flatMap(_ => callOpenAIVisionAPIWithKey(base64Image, prompt, mediaType))
 
   private def callOpenAIVisionAPIWithKey(
@@ -188,7 +188,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         mediaType = mediaType
       )
     ).toEither.left.map(e => visionFailed(e.getMessage)).flatMap { requestBody =>
-      val headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer ${config.apiKey}")
+      val headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer ${config.apiKey.reveal}")
       httpClient.post(s"${config.baseUrl}/chat/completions", headers, requestBody, config.requestTimeout) match {
         case Left(cancelled: CancelledError) => Left(cancelled)
         case Left(error) =>

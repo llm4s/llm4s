@@ -10,6 +10,7 @@ import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.Secret
 import org.springframework.core.env.{ ConfigurableEnvironment, EnumerablePropertySource }
 import pureconfig.ConfigSource
 
@@ -261,6 +262,7 @@ private[spring] object SpringProviderSource {
       value match {
         case text: String =>
           if (secret) text +: SchemeToken.findFirstMatchIn(text).map(_.group(1)).toVector else Vector.empty
+        case s: Secret   => Vector(s.reveal)
         case Some(inner) => credentialsIn(inner, secret, depth + 1)
         case map: scala.collection.Map[?, ?] =>
           readSafely(map.toVector.flatMap { case (name, inner) =>

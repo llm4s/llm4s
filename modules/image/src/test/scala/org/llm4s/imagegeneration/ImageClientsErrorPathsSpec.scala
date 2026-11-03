@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.error.LLMError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration.provider.{
@@ -98,10 +99,10 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
     result.left.getOrElse(fail("expected a Left")).message
 
   private def clients(http: HttpClient): Seq[(String, ImageGenerationClient)] = Seq(
-    "openai"           -> new OpenAIImageClient(OpenAIConfig(apiKey = "k"), http),
-    "stability-ai"     -> new StabilityAIClient(StabilityAIConfig(apiKey = "k"), http),
+    "openai"           -> new OpenAIImageClient(OpenAIConfig(apiKey = Secret("k")), http),
+    "stability-ai"     -> new StabilityAIClient(StabilityAIConfig(apiKey = Secret("k")), http),
     "stable-diffusion" -> new StableDiffusionClient(StableDiffusionConfig(baseUrl = "http://localhost:1"), http),
-    "huggingface"      -> new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), http)
+    "huggingface"      -> new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret("k")), http)
   )
 
   // ---- a transport failure the client reports
@@ -126,7 +127,7 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
   }
 
   "OpenAIImageClient" should "report a failed upload from editImage as a Left" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "k"), Failing)
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("k")), Failing)
     val result = client.editImage(png(), "make it blue")
     message(result) should include("the connection broke")
   }
@@ -145,7 +146,7 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
   }
 
   "HuggingFace and Stability AI editImageAsync" should "return an ImageUnknownError when editImage throws, not a failed future" in {
-    val huggingFace = new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), Failing) {
+    val huggingFace = new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret("k")), Failing) {
       override def editImage(
         imagePath: Path,
         prompt: String,
@@ -153,7 +154,7 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
         options: ImageEditOptions
       ): Either[LLMError, Seq[GeneratedImage]] = throw boom
     }
-    val stability = new StabilityAIClient(StabilityAIConfig(apiKey = "k"), Failing) {
+    val stability = new StabilityAIClient(StabilityAIConfig(apiKey = Secret("k")), Failing) {
       override def editImage(
         imagePath: Path,
         prompt: String,
@@ -175,7 +176,7 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
   // ---- HuggingFace's own steps report a failure inside them as a Left
 
   "HuggingFaceClient" should "report a failure while encoding, building the payload or assembling images as an ImageServiceError" in {
-    val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), Failing)
+    val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret("k")), Failing)
 
     val encoded   = client.convertToBase64(null)
     val payload   = client.buildPayload("a cat", null)

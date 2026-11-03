@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.jev.{ JevClient, JevConfig, JevRetryPolicy }
 import org.scalatest.EitherValues
@@ -26,25 +27,25 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
   "The Jev config loader" should "read the key from the shared credentials and default everything else" in {
     val config = load("llm4s.credentials.typesafe.apiKey = tsk-shared").value
 
-    config shouldBe JevConfig("tsk-shared")
+    config shouldBe JevConfig(Secret("tsk-shared"))
   }
 
   it should "read the key from llm4s.jev itself" in {
-    load("llm4s.jev.apiKey = tsk-own").value.apiKey shouldBe "tsk-own"
+    load("llm4s.jev.apiKey = tsk-own").value.apiKey.reveal shouldBe "tsk-own"
   }
 
   it should "prefer the client's own key to the shared one" in {
     load("""
       llm4s.credentials.typesafe.apiKey = tsk-shared
       llm4s.jev.apiKey = tsk-own
-    """).value.apiKey shouldBe "tsk-own"
+    """).value.apiKey.reveal shouldBe "tsk-own"
   }
 
   it should "treat a blank own key as unset and fall back to the shared one" in {
     load("""
       llm4s.credentials.typesafe.apiKey = tsk-shared
       llm4s.jev.apiKey = "  "
-    """).value.apiKey shouldBe "tsk-shared"
+    """).value.apiKey.reveal shouldBe "tsk-shared"
   }
 
   it should "say which variable and which setting provide the key, when there is none" in {
@@ -72,7 +73,7 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
     """).value
 
     config shouldBe JevConfig(
-      apiKey = "tsk",
+      apiKey = Secret("tsk"),
       baseUrl = "https://gw.example/jev",
       model = "jev-1.13.0",
       timeout = 12.seconds,
@@ -167,6 +168,6 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     resolved.getString("llm4s.credentials.typesafe.apiKey") shouldBe "tsk-from-env"
     resolved.hasPath("llm4s.credentials.jev") shouldBe false
-    JevConfigLoader.load(ConfigSource.fromConfig(resolved)).value.apiKey shouldBe "tsk-from-env"
+    JevConfigLoader.load(ConfigSource.fromConfig(resolved)).value.apiKey.reveal shouldBe "tsk-from-env"
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
@@ -17,7 +18,7 @@ class AnthropicRoutingTest extends AnyFunSuite with Matchers {
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
   private val anthropic: ProviderConfig = AnthropicConfig(
-    apiKey = "key",
+    apiKey = Secret("key"),
     model = "claude-3-sonnet",
     baseUrl = "https://api.anthropic.com",
     contextWindow = 200000,

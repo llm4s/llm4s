@@ -69,7 +69,7 @@ object CredentialsRoundTrip:
   def embeddingsKey(provider: String, model: String, env: Map[String, String])(using
     ProviderRegistry
   ): Result[String] =
-    ProviderTestConfig.loadEmbeddings(s"""llm4s.embeddings.model = "$provider/$model"""", env).map(_._2.apiKey)
+    ProviderTestConfig.loadEmbeddings(s"""llm4s.embeddings.model = "$provider/$model"""", env).map(_._2.apiKey.reveal)
 
   /**
    * [[chatBindings]] for an embedding descriptor: every entry should be

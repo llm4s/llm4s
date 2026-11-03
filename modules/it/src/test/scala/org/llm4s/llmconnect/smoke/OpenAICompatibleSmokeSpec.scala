@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -46,7 +48,7 @@ class OpenAICompatibleSmokeSpec extends AnyFlatSpec with Matchers with EitherVal
   private val localModel: Option[String]   = env("OPENAI_COMPATIBLE_MODEL")
 
   private def config(key: Option[String], baseUrl: String = GroqBaseUrl, modelName: String = model) =
-    OpenAICompatibleConfig.fromValues(model = modelName, baseUrl = baseUrl, apiKey = key)
+    OpenAICompatibleConfig.fromValues(model = modelName, baseUrl = baseUrl, apiKey = key.map(Secret(_)))
 
   private def client(key: Option[String]): Result[LLMClient] = config(key).flatMap(OpenAICompatibleClient(_))
 

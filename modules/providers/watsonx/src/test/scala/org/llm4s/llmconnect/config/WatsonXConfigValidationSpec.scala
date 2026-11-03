@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.provider.WatsonXProvider
@@ -19,7 +20,8 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
     baseUrl: String = WatsonXConfig.DEFAULT_BASE_URL,
     apiVersion: String = WatsonXConfig.DEFAULT_API_VERSION,
     iamUrl: String = WatsonXConfig.DEFAULT_IAM_URL
-  ) = WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", apiKey, project, space, baseUrl, apiVersion, iamUrl)
+  ) =
+    WatsonXConfig.fromValues("ibm/granite-13b-instruct-v2", Secret(apiKey), project, space, baseUrl, apiVersion, iamUrl)
 
   test(
     "each of apiKey, baseUrl, apiVersion and iamUrl, blank or whitespace, is a ConfigurationError naming the field"
@@ -55,8 +57,8 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
   test("ids and the api key are trimmed (a trailing newline from an env file must not reach IAM)") {
     val config = build(apiKey = "key\n", project = Some(" p "), space = None).getOrElse(fail("expected a config"))
     config.projectId shouldBe "p"
-    config.apiKey shouldBe "key"
-    build(apiKey = "  k2 \r\n").map(_.apiKey) shouldBe Right("k2")
+    config.apiKey.reveal shouldBe "key"
+    build(apiKey = "  k2 \r\n").map(_.apiKey.reveal) shouldBe Right("k2")
   }
 
   test("baseUrl and iamUrl: https is accepted; http only for localhost, 127.0.0.1 and ::1; the rest is refused") {

@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.security.Secret
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
@@ -347,7 +348,7 @@ object BraveSearchTool {
   ): Result[ToolFunction[Map[String, Any], R]] = {
     // Hardcoded defaults when using withApiKey
     val braveTool = BraveSearchToolConfig(
-      apiKey = apiKey,
+      apiKey = Secret(apiKey),
       apiUrl = apiUrl,
       count = 5,
       safeSearch = "moderate"
@@ -382,7 +383,7 @@ object BraveSearchTool {
           headers = Map(
             "Accept"               -> "application/json",
             "Accept-Encoding"      -> "gzip",
-            "X-Subscription-Token" -> braveTool.apiKey,
+            "X-Subscription-Token" -> braveTool.apiKey.reveal,
             "User-Agent"           -> "llm4s-brave-search/1.0"
           ),
           timeout = config.timeout

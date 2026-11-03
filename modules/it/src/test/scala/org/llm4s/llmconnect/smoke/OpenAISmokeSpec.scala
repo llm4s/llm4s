@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -40,7 +41,7 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = key,
+        apiKey = Secret(key),
         organization = None,
         baseUrl = "https://api.openai.com/v1"
       )

@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
@@ -45,7 +46,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   private val pgUrl      = sys.env.get("PGVECTOR_TEST_URL")
   private val pgUser     = sys.env.getOrElse("PGVECTOR_USER", "postgres")
-  private val pgPassword = sys.env.getOrElse("PGVECTOR_PASSWORD", "postgres")
+  private val pgPassword = Secret(sys.env.getOrElse("PGVECTOR_PASSWORD", "postgres"))
 
   private val vectorTable  = "rag_pipeline_ollama_vectors"
   private val keywordTable = "rag_pipeline_ollama_keywords"
@@ -74,7 +75,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private lazy val embeddingClient: EmbeddingClient =
     new EmbeddingClient(
       OllamaEmbeddingProvider.fromConfig(
-        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = "not-required")
+        EmbeddingProviderConfig(baseUrl = ollamaBaseUrl, model = embeddingModel, apiKey = Secret("not-required"))
       )
     )
 
@@ -202,7 +203,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private def ownTablesPresent(): List[String] =
     pgUrl.toList.flatMap { url =>
       Try {
-        Using.resource(java.sql.DriverManager.getConnection(url, pgUser, pgPassword)) { conn =>
+        Using.resource(java.sql.DriverManager.getConnection(url, pgUser, pgPassword.reveal)) { conn =>
           List(vectorTable, keywordTable).filter { table =>
             Using.resource(conn.prepareStatement("SELECT to_regclass(?) IS NOT NULL")) { stmt =>
               stmt.setString(1, table)
@@ -226,7 +227,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private def dropOwnTables(): Unit =
     pgUrl.foreach { url =>
       Try {
-        Using.resource(java.sql.DriverManager.getConnection(url, pgUser, pgPassword)) { conn =>
+        Using.resource(java.sql.DriverManager.getConnection(url, pgUser, pgPassword.reveal)) { conn =>
           Using.resource(conn.createStatement()) { stmt =>
             stmt.execute(s"DROP TABLE IF EXISTS $vectorTable")
             stmt.execute(s"DROP TABLE IF EXISTS $keywordTable")

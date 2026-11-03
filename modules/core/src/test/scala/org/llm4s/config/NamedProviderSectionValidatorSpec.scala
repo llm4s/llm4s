@@ -42,7 +42,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     apiKey: Option[String] = None,
     extras: Map[String, String] = Map.empty
   ): RawNamedProviderSection =
-    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey, extras = extras)
+    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey.map(ApiKey(_)), extras = extras)
 
   private def errorFrom(result: org.llm4s.types.Result[NamedProviderConfig]): String =
     result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message

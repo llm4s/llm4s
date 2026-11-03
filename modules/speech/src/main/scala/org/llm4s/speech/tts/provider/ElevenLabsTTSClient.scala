@@ -33,7 +33,7 @@ final class ElevenLabsTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient =
       voiceId = URLEncoder.encode(options.voice.getOrElse(config.voice), StandardCharsets.UTF_8).replace("+", "%20")
       response <- httpClient.postRaw(
         s"${config.baseUrl}/v1/text-to-speech/$voiceId?output_format=${ElevenLabsTTSClient.outputFormat(options.outputFormat)}",
-        Map("xi-api-key" -> config.apiKey, "Content-Type" -> "application/json"),
+        Map("xi-api-key" -> config.apiKey.reveal, "Content-Type" -> "application/json"),
         ujson.write(ujson.Obj("text" -> input, "model_id" -> config.model)),
         60.seconds
       )

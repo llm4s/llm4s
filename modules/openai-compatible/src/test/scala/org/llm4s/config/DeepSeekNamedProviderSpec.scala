@@ -39,7 +39,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-main") match
         case Right(deepseek: DeepSeekConfig) =>
           deepseek.model shouldBe "deepseek-chat"
-          deepseek.apiKey shouldBe "deepseek-key"
+          deepseek.apiKey.reveal shouldBe "deepseek-key"
           deepseek.baseUrl shouldBe DeepSeekConfig.DEFAULT_BASE_URL
         case other =>
           fail(s"Expected DeepSeekConfig, got $other")

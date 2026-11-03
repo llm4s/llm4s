@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.LLMError
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, WatsonXConfig }
@@ -94,7 +95,7 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
   test("a trailing slash or stray whitespace on baseUrl does not produce a double slash in the endpoint") {
     Seq("https://wx.example.com/", "https://wx.example.com//", "  https://wx.example.com ").foreach { base =>
       val cfg = WatsonXConfig
-        .fromValues("m", ApiKey, Some("p"), baseUrl = base)
+        .fromValues("m", Secret(ApiKey), Some("p"), baseUrl = base)
         .getOrElse(fail(s"config for '$base' should be valid"))
       val http = routed(_ => Right(iamToken()), _ => Right(chatReply))
       new WatsonXClient(cfg, httpClient = http).complete(hi, CompletionOptions())

@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,7 +37,7 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
 
     val pingTool = buildPingTool()
 
-    val authOpts = MCPServerOptions(0, "/mcp", "AuthTestServer", "1.0", apiKey = Some(apiKey))
+    val authOpts = MCPServerOptions(0, "/mcp", "AuthTestServer", "1.0", apiKey = Some(Secret(apiKey)))
     authServer = new MCPServer(authOpts, Seq(pingTool))
     authServer.start().fold(e => throw e, _ => ())
     authPort = authServer.boundPort
@@ -149,9 +150,10 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
   describe("MCPServer with host=0.0.0.0") {
 
     it("should rewrite 0.0.0.0 to 127.0.0.1 in SSE endpoint event") {
-      val wildcardOpts = MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(apiKey), host = "0.0.0.0")
-      val tool         = buildPingTool()
-      val srv          = new MCPServer(wildcardOpts, Seq(tool))
+      val wildcardOpts =
+        MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(Secret(apiKey)), host = "0.0.0.0")
+      val tool = buildPingTool()
+      val srv  = new MCPServer(wildcardOpts, Seq(tool))
       srv.start().fold(e => throw e, _ => ())
       val srvPort = srv.boundPort
 

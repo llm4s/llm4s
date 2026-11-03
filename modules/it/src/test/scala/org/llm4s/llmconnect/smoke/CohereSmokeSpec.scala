@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver }
@@ -39,7 +40,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     CohereConfig
       .fromValues(
         modelName = "command-a-03-2025",
-        apiKey = key,
+        apiKey = Secret(key),
         baseUrl = CohereConfig.DEFAULT_BASE_URL
       )
       .value

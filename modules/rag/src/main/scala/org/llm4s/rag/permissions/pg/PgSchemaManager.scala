@@ -2,7 +2,7 @@ package org.llm4s.rag.permissions.pg
 
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
-import org.llm4s.util.SqlIdentifier
+import org.llm4s.util.{ SqlIdentifier, Redaction }
 import org.llm4s.vectorstore.PgVectorTableSchema
 
 import java.sql.Connection
@@ -88,7 +88,9 @@ object PgSchemaManager {
 
       ()
     }
-  }.toEither.left.map(e => ProcessingError("pg-schema-init", s"Failed to initialize schema: ${e.getMessage}"))
+  }.toEither.left.map(e =>
+    ProcessingError("pg-schema-init", s"Failed to initialize schema: ${Redaction.scrubKnown(e.getMessage)}")
+  )
 
   /**
    * Create or upgrade the vectors table and add the permission columns to it.
@@ -153,7 +155,9 @@ object PgSchemaManager {
 
       ()
     }
-  }.toEither.left.map(e => ProcessingError("pg-schema-extend", s"Failed to extend vectors table: ${e.getMessage}"))
+  }.toEither.left.map(e =>
+    ProcessingError("pg-schema-extend", s"Failed to extend vectors table: ${Redaction.scrubKnown(e.getMessage)}")
+  )
 
   /**
    * Create a default public collection for migrating existing data.
@@ -178,7 +182,7 @@ object PgSchemaManager {
       }
     }
   }.toEither.left.map(e =>
-    ProcessingError("pg-schema-default", s"Failed to create default collection: ${e.getMessage}")
+    ProcessingError("pg-schema-default", s"Failed to create default collection: ${Redaction.scrubKnown(e.getMessage)}")
   )
 
   /**
@@ -200,7 +204,9 @@ object PgSchemaManager {
       stmt.setInt(1, defaultCollectionId)
       stmt.executeUpdate().toLong
     }
-  }.toEither.left.map(e => ProcessingError("pg-schema-migrate", s"Failed to migrate existing vectors: ${e.getMessage}"))
+  }.toEither.left.map(e =>
+    ProcessingError("pg-schema-migrate", s"Failed to migrate existing vectors: ${Redaction.scrubKnown(e.getMessage)}")
+  )
 
   /**
    * Run the full migration: initialize schema, extend vectors, create default collection, migrate data.
@@ -243,7 +249,9 @@ object PgSchemaManager {
         rs.getBoolean(1)
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-schema-check", s"Failed to check schema: ${e.getMessage}"))
+  }.toEither.left.map(e =>
+    ProcessingError("pg-schema-check", s"Failed to check schema: ${Redaction.scrubKnown(e.getMessage)}")
+  )
 
   /**
    * Drop all permission-related tables and sequences.
@@ -283,7 +291,9 @@ object PgSchemaManager {
 
       ()
     }
-  }.toEither.left.map(e => ProcessingError("pg-schema-drop", s"Failed to drop schema: ${e.getMessage}"))
+  }.toEither.left.map(e =>
+    ProcessingError("pg-schema-drop", s"Failed to drop schema: ${Redaction.scrubKnown(e.getMessage)}")
+  )
 }
 
 /**

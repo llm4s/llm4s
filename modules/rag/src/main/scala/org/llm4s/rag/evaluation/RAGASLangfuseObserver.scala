@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.llmconnect.utils.CodePointBoundary
 import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller }
@@ -38,8 +39,8 @@ import java.util.UUID
  */
 class RAGASLangfuseObserver(
   langfuseUrl: String,
-  publicKey: String,
-  secretKey: String,
+  publicKey: Secret,
+  secretKey: Secret,
   environment: String = "development",
   release: String = "1.0.0",
   version: String = "1.0",
@@ -280,8 +281,8 @@ object RAGASLangfuseObserver {
   def from(config: LangfuseConfig): RAGASLangfuseObserver =
     new RAGASLangfuseObserver(
       langfuseUrl = config.url,
-      publicKey = config.publicKey.getOrElse(""),
-      secretKey = config.secretKey.getOrElse(""),
+      publicKey = config.publicKey.getOrElse(Secret("")),
+      secretKey = config.secretKey.getOrElse(Secret("")),
       environment = config.env,
       release = config.release,
       version = config.version
@@ -296,8 +297,8 @@ object RAGASLangfuseObserver {
    * @return A configured observer
    */
   def apply(
-    publicKey: String,
-    secretKey: String,
+    publicKey: Secret,
+    secretKey: Secret,
     url: String = "https://cloud.langfuse.com"
   ): RAGASLangfuseObserver =
     new RAGASLangfuseObserver(

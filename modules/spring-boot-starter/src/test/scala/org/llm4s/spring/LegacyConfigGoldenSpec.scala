@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig, ProviderConfig }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -62,7 +63,7 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
         reserveCompletion = 2000
       )
     ) shouldBe OpenAIConfig(
-      apiKey = "sk-x",
+      apiKey = Secret("sk-x"),
       model = "gpt-4o",
       organization = Some("org-1"),
       baseUrl = "https://example.invalid/v1",
@@ -73,7 +74,7 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
 
   it should "default the base URL, the organisation and the context sizes" in {
     parsed(props("openai", "gpt-4o", "sk-x")) shouldBe OpenAIConfig(
-      apiKey = "sk-x",
+      apiKey = Secret("sk-x"),
       model = "gpt-4o",
       organization = None,
       baseUrl = "https://api.openai.com/v1",
@@ -84,7 +85,7 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
 
   it should "trim every value and read the provider id in any case" in {
     parsed(props("  OpenAI ", " gpt-4o ", " sk-x ", " https://example.invalid/v1 ", " org-1 ")) shouldBe OpenAIConfig(
-      apiKey = "sk-x",
+      apiKey = Secret("sk-x"),
       model = "gpt-4o",
       organization = Some("org-1"),
       baseUrl = "https://example.invalid/v1",
@@ -98,14 +99,14 @@ class LegacyConfigGoldenSpec extends AnyFlatSpec with Matchers {
       props("anthropic", "claude-x", "sk-ant", "https://proxy.invalid", contextWindow = 64000, reserveCompletion = 1000)
     ) shouldBe
       AnthropicConfig(
-        apiKey = "sk-ant",
+        apiKey = Secret("sk-ant"),
         model = "claude-x",
         baseUrl = "https://proxy.invalid",
         contextWindow = 64000,
         reserveCompletion = 1000
       )
     parsed(props("anthropic", "claude-x", "sk-ant")) shouldBe AnthropicConfig(
-      apiKey = "sk-ant",
+      apiKey = Secret("sk-ant"),
       model = "claude-x",
       baseUrl = "https://api.anthropic.com",
       contextWindow = 128000,

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig, ProviderConfig }
@@ -32,10 +33,10 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       |"completion_tokens_details":{"reasoning_tokens":32}}}""".stripMargin
 
   private def openAI(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, "sk-test", None, "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(model, Secret("sk-test"), None, "https://example.invalid/v1").value
 
   private def azure(deployment: String, apiVersion: String = AzureConfig.DEFAULT_API_VERSION): AzureConfig =
-    AzureConfig.fromValues(deployment, "https://r.openai.azure.com", "azure-key", apiVersion).value
+    AzureConfig.fromValues(deployment, "https://r.openai.azure.com", Secret("azure-key"), apiVersion).value
 
   /** The request body `complete` sends for `config` and `options`, as the SDK would serialise it. */
   private def sentBody(config: ProviderConfig, model: String, options: CompletionOptions): Body = {

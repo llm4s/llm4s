@@ -4,6 +4,7 @@ import org.llm4s.agent.graph.{ EventRecord, GraphRuntime, RunEvent, ThreadId }
 import org.llm4s.agent.graph.postgres.{ PgCheckpointerDb, PostgresCheckpointer, PostgresCheckpointerConfig }
 import org.llm4s.agent.service.{ EntryId, EntryOutcome, QueueEntry, RunSubmitter }
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.{ Signaler, ThreadSignaler, TimeLimitedTests }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -182,7 +183,7 @@ class MultiMachineExitSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
         .open(
           PgCheckpointerDb.jdbcUrl,
           PgCheckpointerDb.user,
-          PgCheckpointerDb.password,
+          Secret(PgCheckpointerDb.password),
           PostgresCheckpointerConfig(schema)
         )
         .fold(e => throw new IllegalStateException(e.message), identity)

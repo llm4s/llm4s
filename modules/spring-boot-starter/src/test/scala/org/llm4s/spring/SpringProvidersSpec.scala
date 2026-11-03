@@ -1,5 +1,6 @@
 package org.llm4s.spring
 
+import org.llm4s.security.Secret
 import org.llm4s.error.APIError
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
@@ -65,7 +66,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
   )
 
   private def openAIKey(e: StandardEnvironment): String =
-    SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig].apiKey
+    SpringProviderSource.resolve(e, "").get().config.asInstanceOf[OpenAIConfig].apiKey.reveal
 
   private val geminiReply =
     """{"candidates":[{"content":{"role":"model","parts":[{"text":"gemini says hello"}]},"finishReason":"STOP"}],
@@ -308,7 +309,7 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
       .config
     config shouldBe an[AzureConfig]
     config.asInstanceOf[AzureConfig].tokenProvider should not be empty
-    config.asInstanceOf[AzureConfig].apiKey shouldBe ""
+    config.asInstanceOf[AzureConfig].apiKey.reveal shouldBe ""
   }
 
   // ---- how the default section is chosen ----------------------------------------------------------
@@ -635,6 +636,12 @@ class SpringProvidersSpec extends AnyFlatSpec with Matchers {
     error should include("rejected credential")
     (error should not).include(key)
   }
+
+  "SpringProviderSource.configSecrets" should "read a Secret held by a vendor config" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val cfg = org.llm4s.llmconnect.config.OpenAIConfig(org.llm4s.security.Secret("sk-config-held-key-123"), "gpt-4o")
+      SpringProviderSource.configSecrets(cfg) should contain("sk-config-held-key-123")
+    }
 
   "SpringProviderSource.configSecrets" should "read every secret-looking text field of a config, set or optional" in {
     final case class SomeConfig(apiKey: String, sessionToken: Option[String], model: String, maxTokens: Int)

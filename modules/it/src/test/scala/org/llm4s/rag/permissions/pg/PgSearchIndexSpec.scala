@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions.pg
 
+import org.llm4s.security.Secret
 import org.llm4s.rag.permissions._
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
@@ -24,7 +25,7 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
 
   private val pgUrl      = sys.env.get("PGVECTOR_TEST_URL")
   private val pgUser     = sys.env.getOrElse("PGVECTOR_USER", "postgres")
-  private val pgPassword = sys.env.getOrElse("PGVECTOR_PASSWORD", "postgres")
+  private val pgPassword = Secret(sys.env.getOrElse("PGVECTOR_PASSWORD", "postgres"))
 
   private val testTableName                      = "test_permission_vectors"
   private var searchIndex: Option[PgSearchIndex] = None

@@ -510,10 +510,20 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   }
 
   test("an error frame's message never carries the API key or the bearer token") {
-    val leaky = ibmError(Some(500), message = s"bad key ${WatsonXTestConfig.ApiKey} with token tok-1")
-    val error = run(bytes(errorFrame(leaky)))._1.left.toOption.getOrElse(fail("expected Left"))
+    // At least 8 characters: a shorter token is not registered, so not masked by exact match (#1932).
+    val token = "tok-SECRETTOKEN-1234"
+    val leaky = ibmError(Some(500), message = s"bad key ${WatsonXTestConfig.ApiKey} with token $token")
+    val http = new StubHttp(
+      _ => Right(iamToken(token)),
+      _ => Right(org.llm4s.http.StreamingHttpResponse(200, bytes(errorFrame(leaky))))
+    )
+    val error = new WatsonXClient(config, httpClient = http)
+      .streamComplete(hi, CompletionOptions(), _ => ())
+      .left
+      .toOption
+      .getOrElse(fail("expected Left"))
     (error.message should not).include(WatsonXTestConfig.ApiKey)
-    (error.message should not).include("tok-1")
+    (error.message should not).include(token)
     error.message should include("[REDACTED]")
   }
 

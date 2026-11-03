@@ -8,6 +8,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 
 /**
  * Integration tests for Neo4jGraphStore.
@@ -36,7 +37,7 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
   private val neo4jPass = sys.env.getOrElse("NEO4J_PASSWORD", "neo4j")
 
   override def beforeAll(): Unit =
-    Neo4jGraphStore(neo4jUri, neo4jUser, neo4jPass) match {
+    Neo4jGraphStore(neo4jUri, neo4jUser, Secret(neo4jPass)) match {
       case Right(s) =>
         store = s
         // Probe with a quick query to confirm the server is actually reachable

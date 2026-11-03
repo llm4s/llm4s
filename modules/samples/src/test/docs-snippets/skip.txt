@@ -93,7 +93,7 @@ guide/vector-store.md | 6d038549b2 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | 81578bed66 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | dd3f42e9a1 | with | import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.MetadataFilter._
-guide/vector-store.md | 84a5714593 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | 7cfa35e8f5 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | df1066d8ee | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
 reliability-guide.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block

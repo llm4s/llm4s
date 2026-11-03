@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testutil.{ LinearTime, PerformanceTest }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -26,22 +27,25 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     result.get.getOrElse(fail("did not finish"))
   }
 
-  private val Depth  = 100000
-  private val Secret = "opaque-bearer-deep-1"
+  private val Depth      = 100000
+  private val DeepSecret = "opaque-bearer-deep-1"
   private val deepBody =
-    s"""{"error":{"message":"bad bearer $Secret"},"nested":""" + "[" * Depth + s""""$Secret"""" + "]" * Depth + "}"
-  private val deepArray = "[" * Depth + s""""$Secret"""" + "]" * Depth
+    s"""{"error":{"message":"bad bearer $DeepSecret"},"nested":""" + "[" * Depth + s""""$DeepSecret"""" + "]" * Depth + "}"
+  private val deepArray = "[" * Depth + s""""$DeepSecret"""" + "]" * Depth
 
   "Redaction.remoteBody" should "scrub every configured secret by exact match, URL-encoded and JSON-escaped" in {
     val secret  = "s3cr+t/\"value\"-1234"
     val encoded = URLEncoder.encode(secret, StandardCharsets.UTF_8)
     val escaped = secret.replace("\"", "\\\"")
     val body    = s"""{"detail":"$escaped"} raw=$secret form=$encoded"""
-    val out     = Redaction.remoteBody(body, Seq(secret))
-    (out should not).include(secret)
-    (out should not).include(encoded)
-    (out should not).include("s3cr")
-    out should include("[REDACTED]")
+    KnownSecrets.isolated {
+      Secret(secret)
+      val out = Redaction.remoteBody(body)
+      (out should not).include(secret)
+      (out should not).include(encoded)
+      (out should not).include("s3cr")
+      out should include("[REDACTED]")
+    }
   }
 
   it should "redact OAuth credential fields by key, wherever their values recur" in {
@@ -215,8 +219,8 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     (out should not).include("tail-part")
   }
 
-  it should "ignore blank secrets and truncate long bodies" in {
-    val out = Redaction.remoteBody("y" * 5000, Seq("", "  "), maxLength = 100)
+  it should "truncate long bodies" in {
+    val out = Redaction.remoteBody("y" * 5000, maxLength = 100)
     out should startWith("y" * 100)
     out should include("truncated")
   }
@@ -231,19 +235,24 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
 
   "Redaction.scrubRemote" should "keep the body's JSON parseable for later extraction" in {
     val body = """{"error":{"message":"bad bearer opaque-bearer-99"},"access_token":"opaque-bearer-99"}"""
-    val out  = Redaction.scrubRemote(body, Seq("opaque-bearer-99"))
-    (out should not).include("opaque-bearer-99")
-    ujson.read(out)("error")("message").str shouldBe "bad bearer [REDACTED]"
+    KnownSecrets.isolated {
+      Secret("opaque-bearer-99")
+      val out = Redaction.scrubRemote(body)
+      (out should not).include("opaque-bearer-99")
+      ujson.read(out)("error")("message").str shouldBe "bad bearer [REDACTED]"
+    }
   }
 
   "Redaction.scrubRemote and remoteBody" should "return for a body nested 100,000 deep on a small stack, never repeating a secret" in {
-    for body <- Seq(deepBody, deepArray) do {
-      val scrubbed = onSmallStack(Redaction.scrubRemote(body, Seq(Secret)))
-      val remote   = onSmallStack(Redaction.remoteBody(body, Seq(Secret)))
-      (scrubbed should not).include(Secret)
-      (remote should not).include(Secret)
-      scrubbed.length should be > Depth
-    }
+    for body <- Seq(deepBody, deepArray) do
+      KnownSecrets.isolated {
+        Secret(DeepSecret)
+        val scrubbed = onSmallStack(Redaction.scrubRemote(body))
+        val remote   = onSmallStack(Redaction.remoteBody(body))
+        (scrubbed should not).include(DeepSecret)
+        (remote should not).include(DeepSecret)
+        scrubbed.length should be > Depth
+      }
   }
 
   it should "still find a sensitive JSON value in a body nested within the bound" in {
@@ -251,24 +260,6 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
       """{"access_token":"opaque-access-tok-9"}""" + "]" * 400 + "}"
     val out = onSmallStack(Redaction.scrubRemote(body))
     (out should not).include("opaque-access-tok-9")
-  }
-
-  "Redaction.identifiers" should "keep identifiers of eight characters or more and drop shorter ones" in {
-    Redaction.identifiers(Seq("app", "prod", " ab12345 ", "sp-client-4d2e81", null, "")) shouldBe
-      Seq("sp-client-4d2e81")
-    Redaction.identifiers(Seq("org_1234")) shouldBe Seq("org_1234")
-  }
-
-  it should "leave a body readable when a short identifier occurs in it, and scrub a long one" in {
-    val body = """{"error":{"message":"app prod rejected for client sp-client-4d2e81"}}"""
-    val out  = Redaction.remoteBody(body, Redaction.identifiers(Seq("app", "prod", "sp-client-4d2e81")))
-    out should include("app prod rejected")
-    (out should not).include("sp-client-4d2e81")
-  }
-
-  it should "never weaken the scrub of a credential passed as a secret, however short" in {
-    val out = Redaction.remoteBody("token k9x echoed", Seq("k9x"))
-    (out should not).include("k9x")
   }
 }
 

@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpRawResponse, HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration.provider.{
   HttpClient,
@@ -76,12 +77,12 @@ class ImageClientsCancellationSpec extends AnyFlatSpec {
   // ---- image generation
 
   "OpenAIImageClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "k", baseUrl = url + "/v1"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("k"), baseUrl = url + "/v1"), HttpClient.create())
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("openai-image generateImage")(client.generateImage("a cat"))
   }
 
   "StabilityAIClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new StabilityAIClient(StabilityAIConfig(apiKey = "k", baseUrl = url), HttpClient.create())
+    val client = new StabilityAIClient(StabilityAIConfig(apiKey = Secret("k"), baseUrl = url), HttpClient.create())
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("stability-ai generateImage")(client.generateImage("a cat"))
   }
 
@@ -93,24 +94,24 @@ class ImageClientsCancellationSpec extends AnyFlatSpec {
   }
 
   "HuggingFaceClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), new Redirecting(url))
+    val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = Secret("k")), new Redirecting(url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("huggingface generateImage")(client.generateImage("a cat"))
   }
 
   // ---- image processing
 
   "OpenAIVisionClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new OpenAIVisionClient(OpenAIVisionConfig(apiKey = "k", baseUrl = url + "/v1"))
+    val client = new OpenAIVisionClient(OpenAIVisionConfig(apiKey = Secret("k"), baseUrl = url + "/v1"))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("openai-vision analyzeImage")(client.analyzeImage(png()))
   }
 
   "AnthropicVisionClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new AnthropicVisionClient(AnthropicVisionConfig(apiKey = "k", baseUrl = url))
+    val client = new AnthropicVisionClient(AnthropicVisionConfig(apiKey = Secret("k"), baseUrl = url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("anthropic-vision analyzeImage")(client.analyzeImage(png()))
   }
 
   "GeminiVisionClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = "k", baseUrl = url))
+    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret("k"), baseUrl = url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("gemini-vision analyzeImage")(client.analyzeImage(png()))
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,7 +18,7 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
     val cfg = EmbeddingProviderConfig(
       baseUrl = "https://example.invalid",
       model = "text-embedding-3-large",
-      apiKey = secret
+      apiKey = Secret(secret)
     )
 
     (cfg.toString should not).include(secret)

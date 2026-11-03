@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ NetworkError, RateLimitError, TimeoutError, UnknownError }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -28,7 +29,7 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
   private def client(baseUrl: String, timeouts: ProviderTimeouts = ProviderTimeouts.default): AnthropicClient =
     new AnthropicClient(
       AnthropicConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         model = "claude-3-5-haiku-latest",
         baseUrl = baseUrl,
         contextWindow = 200000,
@@ -90,11 +91,11 @@ final class AnthropicTransportErrorSpec extends AnyFlatSpec with Matchers with E
 
   "AnthropicClient.mapError" should "map an SDK I/O failure by its cause" in {
     val io = new com.anthropic.errors.AnthropicIoException("Request failed", new ConnectException("refused"))
-    AnthropicClient.mapError(io, Nil) shouldBe a[NetworkError]
+    AnthropicClient.mapError(io) shouldBe a[NetworkError]
   }
 
   it should "leave an SDK I/O failure without a cause an UnknownError" in {
-    AnthropicClient.mapError(new com.anthropic.errors.AnthropicIoException("Request failed"), Nil) shouldBe
+    AnthropicClient.mapError(new com.anthropic.errors.AnthropicIoException("Request failed")) shouldBe
       an[UnknownError]
   }
 }

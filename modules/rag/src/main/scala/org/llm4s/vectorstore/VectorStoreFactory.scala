@@ -1,7 +1,8 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
-import org.llm4s.error.NotFoundError
+import org.llm4s.error.{ ConfigurationError, NotFoundError }
+import org.llm4s.security.Secret
 
 /**
  * Factory for creating VectorStore instances.
@@ -57,7 +58,8 @@ object VectorStoreFactory {
     backend: Backend = Backend.SQLite,
     path: Option[String] = None,
     connectionString: Option[String] = None,
-    options: Map[String, String] = Map.empty
+    options: Map[String, String] = Map.empty,
+    secrets: Map[String, Secret] = Map.empty
   ) {
 
     /**
@@ -89,6 +91,10 @@ object VectorStoreFactory {
      */
     def withOption(key: String, value: String): Config =
       copy(options = options + (key -> value))
+
+    /** A credential (`password`, `apiKey`), kept apart from [[options]] so it prints masked. */
+    def withSecret(key: String, value: Secret): Config =
+      copy(secrets = secrets + (key -> value))
   }
 
   object Config {
@@ -118,17 +124,20 @@ object VectorStoreFactory {
       connectionString: String,
       tableName: String = "vectors",
       user: Option[String] = None,
-      password: Option[String] = None
+      password: Option[Secret] = None
     ): Config = {
       val baseOptions = Map("tableName" -> tableName)
 
       // ++ appends to the map.
       // .map transforms the Option into a key-value pair IF it exists.
-      val finalOptions = baseOptions ++
-        user.map("user" -> _) ++
-        password.map("password" -> _)
+      val finalOptions = baseOptions ++ user.map("user" -> _)
 
-      Config(Backend.PgVector, Some(connectionString), options = finalOptions)
+      Config(
+        Backend.PgVector,
+        Some(connectionString),
+        options = finalOptions,
+        secrets = password.map("password" -> _).toMap
+      )
     }
 
     /**
@@ -151,11 +160,12 @@ object VectorStoreFactory {
      * @param apiKey Qdrant API key
      * @param collectionName Collection name (default: "vectors")
      */
-    def qdrantCloud(cloudUrl: String, apiKey: String, collectionName: String = "vectors"): Config =
+    def qdrantCloud(cloudUrl: String, apiKey: Secret, collectionName: String = "vectors"): Config =
       Config(
         Backend.Qdrant,
         connectionString = Some(cloudUrl),
-        options = Map("collectionName" -> collectionName, "apiKey" -> apiKey)
+        options = Map("collectionName" -> collectionName),
+        secrets = Map("apiKey" -> apiKey)
       )
   }
 
@@ -165,7 +175,21 @@ object VectorStoreFactory {
    * @param config The store configuration
    * @return The vector store or error
    */
-  def create(config: Config): Result[VectorStore] = config.backend match {
+  def create(config: Config): Result[VectorStore] =
+    config.options.keys.find(CredentialKeys.contains) match {
+      case Some(key) =>
+        Left(
+          ConfigurationError(
+            s"VectorStoreFactory.Config option '$key' is a credential: set it with withSecret(\"$key\", Secret(...))",
+            List(key)
+          )
+        )
+      case None => createChecked(config)
+    }
+
+  private val CredentialKeys = Set("password", "apiKey")
+
+  private def createChecked(config: Config): Result[VectorStore] = config.backend match {
     case Backend.SQLite =>
       config.path match {
         case Some(path) => SQLiteVectorStore(path)
@@ -177,7 +201,7 @@ object VectorStoreFactory {
       config.connectionString match {
         case Some(connStr) =>
           val user     = config.options.getOrElse("user", "postgres")
-          val password = config.options.getOrElse("password", "")
+          val password = config.secrets.getOrElse("password", Secret(""))
           PgVectorStore(connStr, user, password, tableName)
         case None =>
           // Use default local connection
@@ -186,7 +210,7 @@ object VectorStoreFactory {
 
     case Backend.Qdrant =>
       val collectionName = config.options.getOrElse("collectionName", "vectors")
-      val apiKey         = config.options.get("apiKey")
+      val apiKey         = config.secrets.get("apiKey")
       config.connectionString match {
         case Some(url) =>
           apiKey match {
@@ -268,7 +292,7 @@ object VectorStoreFactory {
   def pgvector(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     tableName: String
   ): Result[VectorStore] =
     PgVectorStore(connectionString, user, password, tableName)
@@ -304,7 +328,7 @@ object VectorStoreFactory {
    */
   def qdrantCloud(
     cloudUrl: String,
-    apiKey: String,
+    apiKey: Secret,
     collectionName: String = "vectors"
   ): Result[VectorStore] =
     QdrantVectorStore.cloud(cloudUrl, apiKey, collectionName)

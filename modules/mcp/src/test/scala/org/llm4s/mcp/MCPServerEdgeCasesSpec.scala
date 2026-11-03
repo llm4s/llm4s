@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.funspec.AnyFunSpec
@@ -234,7 +235,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       // Binding 0.0.0.0 requires an apiKey (start() refuses a public bind otherwise).
       val key = "wildcard-key"
       val s = new MCPServer(
-        MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(key), host = "0.0.0.0"),
+        MCPServerOptions(0, "/mcp", "WildcardServer", "1.0", apiKey = Some(Secret(key)), host = "0.0.0.0"),
         Seq(buildPingTool())
       )
       s.start().fold(e => throw e, _ => ())

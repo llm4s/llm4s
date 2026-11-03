@@ -1,13 +1,13 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the OpenAI API and providers that implement the
@@ -45,7 +45,7 @@ import org.llm4s.util.Redaction
  */
 @Stable
 final case class OpenAIConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   organization: Option[String],
   baseUrl: String,
@@ -78,7 +78,7 @@ final case class OpenAIConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OpenAIConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
   def withOrganization(organization: Option[String]): OpenAIConfig = copy(organization = organization)
   def withBaseUrl(baseUrl: String): OpenAIConfig                   = copy(baseUrl = baseUrl)
@@ -92,7 +92,7 @@ final case class OpenAIConfig private (
   def withWorkloadIdentity(workloadIdentity: Option[OpenAIWorkloadIdentity]): OpenAIConfig =
     copy(workloadIdentity = workloadIdentity)
   override def toString: String =
-    s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
+    s"OpenAIConfig(apiKey=$apiKey, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
       s"workloadIdentity=$workloadIdentity)"
 
@@ -109,7 +109,7 @@ object OpenAIConfig {
    * `apiKey`.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     organization: Option[String],
     baseUrl: String,
@@ -138,7 +138,7 @@ object OpenAIConfig {
    * (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*` setters,
    * or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(apiKey: String, model: String): OpenAIConfig = {
+  def apply(apiKey: Secret, model: String): OpenAIConfig = {
     val (cw, rc) = openAIFallback(model)
     apply(apiKey, model, None, DEFAULT_BASE_URL, cw, rc)
   }
@@ -189,12 +189,12 @@ object OpenAIConfig {
   private[llm4s] def validate(config: OpenAIConfig): Result[OpenAIConfig] =
     config.workloadIdentity match
       // Without workload identity the key is the only credential: a blank one would send `Authorization: Bearer `.
-      case None => ProviderConfig.nonEmpty("OpenAI", "apiKey", config.apiKey).map(_ => config)
+      case None => ProviderConfig.nonEmpty("OpenAI", "apiKey", config.apiKey.reveal).map(_ => config)
       case Some(identity) =>
         for
           _ <- OpenAIWorkloadIdentity.validate(identity)
           _ <- Either.cond(
-            config.apiKey.trim.isEmpty,
+            config.apiKey.reveal.trim.isEmpty,
             (),
             ConfigurationError(
               "OpenAI config sets both apiKey and workloadIdentity; a config authenticates one way - use one",
@@ -239,14 +239,14 @@ object OpenAIConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     organization: Option[String],
     baseUrl: String,
     providerId: Option[ProviderId] = None,
     workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
     (for {
-      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
+      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

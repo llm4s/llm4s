@@ -1,5 +1,6 @@
 package org.llm4s.speech.stt.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.speech.{ AudioInput, AudioMeta, StubHttpClient }
 import org.llm4s.speech.config.STTConfig
 import org.llm4s.speech.io.WavFileGenerator
@@ -11,7 +12,7 @@ import java.nio.file.Files
 
 class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = STTConfig("openai", "whisper-1", "sk-test-key", "https://api.openai.com")
+  private val cfg = STTConfig("openai", "whisper-1", Secret("sk-test-key"), "https://api.openai.com")
 
   private val pcm = Array.fill[Byte](3200)(7)
   private val wav =
@@ -35,7 +36,7 @@ class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
   it should "refuse a blank apiKey before any request, rather than send an empty bearer" in {
     for key <- Seq("", "  ") do
       val http = StubHttpClient.json(200, """{"text":"hi"}""")
-      new OpenAISTTClient(cfg.copy(apiKey = key), http)
+      new OpenAISTTClient(cfg.copy(apiKey = Secret(key)), http)
         .transcribe(AudioInput.BytesAudio(wav, 16000))
         .left
         .toOption

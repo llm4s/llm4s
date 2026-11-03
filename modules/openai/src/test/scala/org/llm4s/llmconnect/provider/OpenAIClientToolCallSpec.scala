@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -24,7 +25,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -67,7 +68,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -97,7 +98,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -133,7 +134,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )

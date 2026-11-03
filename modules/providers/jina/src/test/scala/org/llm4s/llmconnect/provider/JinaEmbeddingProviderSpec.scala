@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -28,7 +29,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
   private val cfg = EmbeddingProviderConfig(
     baseUrl = "http://jina-test",
     model = "jina-embeddings-v3",
-    apiKey = "jina-test-key"
+    apiKey = Secret("jina-test-key")
   )
 
   private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)

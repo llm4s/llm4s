@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import com.typesafe.config.{ ConfigObject, ConfigValueType }
 import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
@@ -122,7 +123,7 @@ private[config] object HttpNetworkReader:
           Some(
             parsed
               .withUsername(username.orElse(parsed.username))
-              .withPassword(password.orElse(parsed.password))
+              .withPassword(password.map(Secret(_)).orElse(parsed.password))
               .withNonProxyHosts(bypass.getOrElse(parsed.nonProxyHosts))
           )
         }
@@ -132,7 +133,9 @@ private[config] object HttpNetworkReader:
       keyStore           <- string("tls.keyStore")
       keyStorePassword   <- string("tls.keyStorePassword")
       tls <- pathOf(trustStore, "tls.trustStore", fail).flatMap(ts =>
-        pathOf(keyStore, "tls.keyStore", fail).map(ks => HttpTls(ts, trustStorePassword, ks, keyStorePassword))
+        pathOf(keyStore, "tls.keyStore", fail).map(ks =>
+          HttpTls(ts, trustStorePassword.map(Secret(_)), ks, keyStorePassword.map(Secret(_)))
+        )
       )
       // Opened now, so a missing store or a wrong password fails the load, not the first request.
       _ <- HttpNetwork.tlsMaterial(tls).left.map {

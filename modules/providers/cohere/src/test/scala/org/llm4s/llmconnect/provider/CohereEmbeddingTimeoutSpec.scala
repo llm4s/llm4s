@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.EmbeddingRequest
@@ -18,7 +19,7 @@ class CohereEmbeddingTimeoutSpec extends AnyFlatSpec with Matchers {
     EmbeddingProviderConfig(
       baseUrl = "http://localhost:1",
       model = "embed-english-v3.0",
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       timeouts = timeouts
     )
 

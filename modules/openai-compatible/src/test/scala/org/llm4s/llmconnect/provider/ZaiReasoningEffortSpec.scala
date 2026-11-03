@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
@@ -46,7 +47,7 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
     def zai(baseUrl: String) =
       new ZaiClient(
         ZaiConfig(
-          apiKey = "test-key",
+          apiKey = Secret("test-key"),
           model = model,
           baseUrl = baseUrl,
           contextWindow = 128000,

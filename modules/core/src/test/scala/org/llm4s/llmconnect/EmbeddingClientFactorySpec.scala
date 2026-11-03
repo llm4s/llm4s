@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.EmbeddingRequest
@@ -18,7 +19,7 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "https://embeddings.example.test",
         model = "fixture-embed-small",
-        apiKey = "vk-test"
+        apiKey = Secret("vk-test")
       )
       val res = EmbeddingClient.from("fixtureembedding", cfg)
       res.isRight shouldBe true
@@ -28,14 +29,14 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "http://localhost",
         model = "m",
-        apiKey = "k"
+        apiKey = Secret("k")
       )
       val res = EmbeddingClient.from("unknown", cfg)
       res.isLeft shouldBe true
     }
 
     "name the registered embedding providers when one is unknown" in {
-      val cfg = EmbeddingProviderConfig(baseUrl = "http://localhost", model = "m", apiKey = "k")
+      val cfg = EmbeddingProviderConfig(baseUrl = "http://localhost", model = "m", apiKey = Secret("k"))
 
       val message = EmbeddingClient
         .from("unknown", cfg)
@@ -56,7 +57,7 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       // here without llm4s-core knowing it exists.
       given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings)
 
-      val cfg = EmbeddingProviderConfig(baseUrl = "http://fixture", model = "m", apiKey = "k")
+      val cfg = EmbeddingProviderConfig(baseUrl = "http://fixture", model = "m", apiKey = Secret("k"))
       val client = EmbeddingClient
         .from("fixtureembed", cfg)
         .getOrElse(fail("expected the registered fixture provider to resolve"))
@@ -76,7 +77,7 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "https://embeddings.example.test",
         model = "fixture-embed-small",
-        apiKey = "vk-test"
+        apiKey = Secret("vk-test")
       )
       val service = summon[ModelRegistryService]
 
@@ -87,7 +88,7 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "https://embeddings.example.test",
         model = "fixture-embed-small",
-        apiKey = "vk-test"
+        apiKey = Secret("vk-test")
       )
 
       EmbeddingClient.from("fixture-embedding-ai", cfg).isRight shouldBe true

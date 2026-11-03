@@ -4,9 +4,11 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
-import org.llm4s.util.SqlIdentifier
+import org.llm4s.util.{ SqlIdentifier, Redaction }
 import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, PgDataSources, ScoredRecord, VectorRecord }
 import org.llm4s.util.RateLimitedLogger
+import org.llm4s.security.Secret
+import org.llm4s.vectorstore.JdbcUrlCredentials
 
 import org.slf4j.LoggerFactory
 
@@ -174,7 +176,7 @@ final class PgSearchIndex private (
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-search-index-query", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-search-index-query", Redaction.scrubKnown(e.getMessage)))
 
   override def ingest(
     collectionPath: CollectionPath,
@@ -263,7 +265,7 @@ final class PgSearchIndex private (
         }.get
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-search-index-insert", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-search-index-insert", Redaction.scrubKnown(e.getMessage)))
 
   override def deleteDocument(collectionPath: CollectionPath, documentId: String): Result[Long] =
     for {
@@ -285,7 +287,7 @@ final class PgSearchIndex private (
         stmt.executeUpdate().toLong
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-search-index-delete-doc", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-search-index-delete-doc", Redaction.scrubKnown(e.getMessage)))
 
   override def clearCollection(collectionPath: CollectionPath): Result[Long] =
     for {
@@ -305,7 +307,7 @@ final class PgSearchIndex private (
         stmt.executeUpdate().toLong
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-search-index-clear", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-search-index-clear", Redaction.scrubKnown(e.getMessage)))
 
   override def initializeSchema(): Result[Unit] =
     withConnection { conn =>
@@ -445,7 +447,7 @@ object PgSearchIndex {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(config.jdbcUrl)
         hikariConfig.setUsername(config.user)
-        hikariConfig.setPassword(config.password)
+        hikariConfig.setPassword(config.password.reveal)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
         hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -454,7 +456,7 @@ object PgSearchIndex {
 
         val dataSource = new HikariDataSource(hikariConfig)
         new PgSearchIndex(dataSource, config.vectorTableName, Some(config), ownsDataSource = true)
-      }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
+      }.toEither.left.map(e => ProcessingError("pg-search-index-create", Redaction.scrubKnown(e.getMessage)))
     }
 
   /**
@@ -489,9 +491,10 @@ object PgSearchIndex {
   def fromJdbcUrl(
     jdbcUrl: String,
     user: String,
-    password: String,
+    password: Secret,
     vectorTableName: String = "vectors"
   ): Result[PgSearchIndex] = {
+    JdbcUrlCredentials.register(jdbcUrl)
     // Parse JDBC URL to extract host, port, database
     val pattern = """jdbc:postgresql://([^:/]+):?(\d+)?/(.+)""".r
     jdbcUrl match {

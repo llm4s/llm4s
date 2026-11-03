@@ -1,5 +1,6 @@
 package org.llm4s.samples.dashboard.providersetup
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -183,7 +184,8 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with Eith
         defaultProviderName = ProviderName("anthropic-main"),
         providerConfigs = Map.empty,
         providerErrors = Map.empty,
-        defaultProvider = OpenAIConfig.fromValues("gpt-4o-mini", "test-key", None, "https://api.openai.com/v1").value,
+        defaultProvider =
+          OpenAIConfig.fromValues("gpt-4o-mini", Secret("test-key"), None, "https://api.openai.com/v1").value,
         discoveredModels = Map.empty,
         exchangeLogging = ProviderExchangeLogging.Disabled
       ),

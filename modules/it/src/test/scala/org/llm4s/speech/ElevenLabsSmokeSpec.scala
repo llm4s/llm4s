@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -45,7 +46,7 @@ class ElevenLabsSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "reject an invalid key with an authentication error" in {
     Tier.require(config.isRight, "ELEVENLABS_API_KEY not set")
-    val rejected = new ElevenLabsTTSClient(config.value.copy(apiKey = "invalid-llm4s-smoke-test-key"))
+    val rejected = new ElevenLabsTTSClient(config.value.copy(apiKey = Secret("invalid-llm4s-smoke-test-key")))
 
     rejected.synthesize("Hello").left.value shouldBe an[AuthenticationError]
   }

@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import java.time.Instant
 import scala.concurrent.duration.*
 import org.llm4s.media.{ ImageMediaType, MediaType }
@@ -262,7 +263,7 @@ case class StableDiffusionConfig(
   /** Base URL of the Stable Diffusion server (e.g., http://localhost:7860) */
   baseUrl: String = "http://localhost:7860",
   /** API key if required */
-  apiKey: Option[String] = None,
+  apiKey: Option[Secret] = None,
   /** Model name (informational for Stable Diffusion web UI) */
   model: String = "stable-diffusion-v1-5",
   /** Request timeout */
@@ -270,7 +271,7 @@ case class StableDiffusionConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StableDiffusion
   override def toString: String =
-    s"StableDiffusionConfig(baseUrl=$baseUrl, apiKey=${apiKey.map(_ => "***")}, timeout=$timeout)"
+    s"StableDiffusionConfig(baseUrl=$baseUrl, apiKey=$apiKey, timeout=$timeout)"
 }
 
 /**
@@ -282,14 +283,14 @@ case class StableDiffusionConfig(
  */
 case class HuggingFaceConfig(
   /** HuggingFace API token */
-  apiKey: String,
+  apiKey: Secret,
   /** Model to use (default: stable-diffusion-xl-base-1.0) */
   model: String = "stabilityai/stable-diffusion-xl-base-1.0",
   /** Request timeout */
   override val timeout: FiniteDuration = 2.minutes
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
-  override def toString: String         = s"HuggingFaceConfig(apiKey=***, model=$model, timeout=$timeout)"
+  override def toString: String         = s"HuggingFaceConfig(apiKey=$apiKey, model=$model, timeout=$timeout)"
 }
 
 /**
@@ -301,7 +302,7 @@ case class HuggingFaceConfig(
  */
 case class OpenAIConfig(
   /** OpenAI API key */
-  apiKey: String,
+  apiKey: Secret,
   /** Model to use (dall-e-2, dall-e-3, or gpt-image-1) */
   model: String = "dall-e-2",
   /** Base URL for OpenAI API */
@@ -310,7 +311,7 @@ case class OpenAIConfig(
   override val timeout: FiniteDuration = 30.seconds
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
-  override def toString: String         = s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+  override def toString: String = s"OpenAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
 }
 
 /**
@@ -322,14 +323,14 @@ case class OpenAIConfig(
  * @param timeout Request timeout.
  */
 case class StabilityAIConfig(
-  apiKey: String,
+  apiKey: Secret,
   model: String = "stable-diffusion-xl-1024-v1-0",
   baseUrl: String = "https://api.stability.ai",
   /** Request timeout */
   override val timeout: FiniteDuration = 2.minutes
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
-  override def toString: String = s"StabilityAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+  override def toString: String = s"StabilityAIConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
 }
 
 // ===== CLIENT INTERFACE =====
@@ -492,7 +493,7 @@ object ImageGeneration {
     baseUrl: String = "http://localhost:7860",
     apiKey: Option[String] = None
   ): Either[LLMError, ImageGenerationClient] = {
-    val config = StableDiffusionConfig(baseUrl = baseUrl, apiKey = apiKey)
+    val config = StableDiffusionConfig(baseUrl = baseUrl, apiKey = apiKey.map(Secret(_)))
     client(config)
   }
 
@@ -510,7 +511,7 @@ object ImageGeneration {
     apiKey: String,
     model: String = "stabilityai/stable-diffusion-xl-base-1.0"
   ): Either[LLMError, ImageGenerationClient] = {
-    val config = HuggingFaceConfig(apiKey = apiKey, model = model)
+    val config = HuggingFaceConfig(apiKey = Secret(apiKey), model = model)
     client(config)
   }
 
@@ -528,7 +529,7 @@ object ImageGeneration {
     apiKey: String,
     model: String = "dall-e-2"
   ): Either[LLMError, ImageGenerationClient] = {
-    val config = OpenAIConfig(apiKey = apiKey, model = model)
+    val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     client(config)
   }
 
@@ -549,7 +550,7 @@ object ImageGeneration {
     options: ImageGenerationOptions = ImageGenerationOptions(),
     model: String = "dall-e-2"
   ): Either[LLMError, GeneratedImage] = {
-    val config = OpenAIConfig(apiKey = apiKey, model = model)
+    val config = OpenAIConfig(apiKey = Secret(apiKey), model = model)
     generateImage(prompt, config, options)
   }
 
@@ -567,7 +568,7 @@ object ImageGeneration {
     apiKey: String,
     model: String = "stable-diffusion-xl-1024-v1-0"
   ): Either[LLMError, ImageGenerationClient] = {
-    val config = StabilityAIConfig(apiKey = apiKey, model = model)
+    val config = StabilityAIConfig(apiKey = Secret(apiKey), model = model)
     client(config)
   }
 
@@ -578,7 +579,7 @@ object ImageGeneration {
     options: ImageGenerationOptions = ImageGenerationOptions(),
     model: String = "stable-diffusion-xl-1024-v1-0"
   ): Either[LLMError, GeneratedImage] = {
-    val config = StabilityAIConfig(apiKey = apiKey, model = model)
+    val config = StabilityAIConfig(apiKey = Secret(apiKey), model = model)
     generateImage(prompt, config, options)
   }
 

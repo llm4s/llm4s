@@ -3,6 +3,7 @@ package org.llm4s.config
 
 import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions.SearchIndex
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
@@ -18,6 +19,9 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  * because `SearchIndex` lives in `llm4s-rag` and `Llm4sConfig` lives in `llm4s-core`.
  */
 object PgSearchIndexConfigLoader {
+
+  implicit private val secretReader: PureConfigReader[Secret] =
+    PureConfigReader[String].map(Secret(_))
 
   implicit private val pgConfigReader: PureConfigReader[SearchIndex.PgConfig] =
     PureConfigReader.forProduct8(

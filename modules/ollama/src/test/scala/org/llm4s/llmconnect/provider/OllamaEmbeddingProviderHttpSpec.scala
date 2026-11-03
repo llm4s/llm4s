@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
@@ -18,7 +19,7 @@ class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
   private val request = EmbeddingRequest(Seq("first", "second"), EmbeddingModelConfig("nomic-embed-text", 2))
 
   private def provider(baseUrl: String, apiKey: String = "not-required") =
-    OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "nomic-embed-text", apiKey))
+    OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, "nomic-embed-text", Secret(apiKey)))
 
   /** A local port nothing is listening on, so connecting is refused at once. */
   private def closedPort(): Int = {

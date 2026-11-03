@@ -60,13 +60,14 @@ The store is configured using `PostgresMemoryStore.Config`.
 
 ```scala
 import org.llm4s.agent.memory.PostgresMemoryStore
+import org.llm4s.security.Secret
 
 val config = PostgresMemoryStore.Config(
   host = "localhost",
   port = 5432,
   database = "my_app_db",
   user = "postgres",
-  password = "secure_password",
+  password = Secret("secure_password"),
   tableName = "agent_memories"
 )
 
@@ -258,13 +259,14 @@ This section shows how a developer would use `PostgresMemoryStore` in a real app
 ```scala
 import java.time.Instant
 import org.llm4s.agent.memory.{PostgresMemoryStore, Memory, MemoryFilter, MemoryId, MemoryType}
+import org.llm4s.security.Secret
 
 val config = PostgresMemoryStore.Config(
   host = "localhost",
   port = 5432,
   database = "my_app_db",
   user = "postgres",
-  password = "secure_password",
+  password = Secret("secure_password"),
   tableName = "agent_memories"
 )
 

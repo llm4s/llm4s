@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.config.ProvidersConfigModel.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -16,7 +17,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             provider = Some(" fixturechat "),
             model = Some(" fixture-model "),
             baseUrl = Some(" https://fixturechat.invalid/v2 "),
-            apiKey = Some(" sk-fixture-primary "),
+            apiKey = Some(ApiKey(" sk-fixture-primary ")),
             // `organization` is OpenAI's key, not a built-in: a provider that does not declare
             // it, as the fixture does not, gets it reported as unknown and dropped.
             extras = Map("organization" -> " org-demo ")
@@ -25,7 +26,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             provider = Some("fixturechat"),
             model = Some("fixture-model"),
             baseUrl = Some("https://fixturechat.invalid/v1"),
-            apiKey = Some("fixture-key"),
+            apiKey = Some(ApiKey("fixture-key")),
           )
         )
       )
@@ -58,7 +59,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             provider = Some("fixturechat"),
             model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("fixture-key"),
+            apiKey = Some(ApiKey("fixture-key")),
           )
         )
       )
@@ -80,7 +81,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             provider = Some("fixturechat"),
             model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("sk-fixture-primary"),
+            apiKey = Some(ApiKey("sk-fixture-primary")),
           )
         )
       )
@@ -100,7 +101,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             provider = None,
             model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("sk-fixture-primary"),
+            apiKey = Some(ApiKey("sk-fixture-primary")),
           )
         )
       )

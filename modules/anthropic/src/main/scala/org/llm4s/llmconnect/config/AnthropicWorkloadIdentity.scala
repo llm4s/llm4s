@@ -4,7 +4,6 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.IdentityTokenSource
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 import java.nio.file.{ Files, Path }
 import scala.util.Try
@@ -44,7 +43,7 @@ final case class AnthropicWorkloadIdentity private (
 
   override def toString: String =
     s"AnthropicWorkloadIdentity(identityTokenFile=$identityTokenFile, federationRuleId=***, organizationId=***, " +
-      s"serviceAccountId=${Redaction.secretOpt(serviceAccountId)}, workspaceId=${Redaction.secretOpt(workspaceId)})"
+      s"serviceAccountId=${serviceAccountId.map(_ => "***")}, workspaceId=${workspaceId.map(_ => "***")})"
 
 object AnthropicWorkloadIdentity:
 

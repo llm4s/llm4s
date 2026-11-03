@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.types.Result
@@ -12,8 +13,8 @@ class LangfuseTracingCacheEventsSpec extends AnyFunSuite with Matchers {
   class LangfuseTracingSpy
       extends LangfuseTracing(
         "http://mock-url",
-        "mock-public-key",
-        "mock-secret-key",
+        Secret("mock-public-key"),
+        Secret("mock-secret-key"),
         "test-env",
         "v1.0.0",
         "1.0.0"

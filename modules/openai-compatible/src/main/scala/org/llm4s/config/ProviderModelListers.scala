@@ -68,7 +68,7 @@ object ProviderModelListers:
                 HttpResponse.serviceError(
                   response,
                   provider.asString,
-                  Redaction.remoteBody(response.body, apiKey.map(_.asKey).toSeq)
+                  Redaction.remoteBody(response.body)
                 )
               )
           json   <- readBody(okResponse.body)

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
@@ -27,7 +28,7 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val geminiConfig = GeminiConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "gemini-2.0-flash",
     baseUrl = "https://generativelanguage.googleapis.com/v1beta",
     contextWindow = 1048576,

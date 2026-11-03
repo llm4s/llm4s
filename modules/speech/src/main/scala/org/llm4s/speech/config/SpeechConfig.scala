@@ -1,6 +1,6 @@
 package org.llm4s.speech.config
 
-import org.llm4s.util.Redaction
+import org.llm4s.security.Secret
 
 /**
  * Configuration for a cloud TTS provider, as produced by [[SpeechConfigLoader.tts]].
@@ -16,12 +16,12 @@ final case class TTSConfig(
   provider: String,
   model: String,
   voice: String,
-  apiKey: String,
+  apiKey: Secret,
   baseUrl: String,
   region: Option[String] = None
 ) {
   override def toString: String =
-    s"TTSConfig(provider=$provider, model=$model, voice=$voice, apiKey=${Redaction.secret(apiKey)}, " +
+    s"TTSConfig(provider=$provider, model=$model, voice=$voice, apiKey=$apiKey, " +
       s"baseUrl=$baseUrl, region=$region)"
 }
 
@@ -29,7 +29,7 @@ final case class TTSConfig(
  * Default values for [[TTSConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
  * when the corresponding setting is absent.
  *
- * `TTSConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ * `TTSConfig#toString` prints the API key as `***`, so a config is safe to log.
  */
 object TTSConfig {
 
@@ -64,12 +64,12 @@ object TTSConfig {
 final case class STTConfig(
   provider: String,
   model: String,
-  apiKey: String,
+  apiKey: Secret,
   baseUrl: String,
   region: Option[String] = None
 ) {
   override def toString: String =
-    s"STTConfig(provider=$provider, model=$model, apiKey=${Redaction.secret(apiKey)}, " +
+    s"STTConfig(provider=$provider, model=$model, apiKey=$apiKey, " +
       s"baseUrl=$baseUrl, region=$region)"
 }
 
@@ -77,7 +77,7 @@ final case class STTConfig(
  * Default values for [[STTConfig]], one set per cloud provider. [[SpeechConfigLoader]] falls back to them
  * when the corresponding setting is absent.
  *
- * `STTConfig#toString` redacts the API key (through `Redaction.secret`), so a config is safe to log.
+ * `STTConfig#toString` prints the API key as `***`, so a config is safe to log.
  */
 object STTConfig {
 

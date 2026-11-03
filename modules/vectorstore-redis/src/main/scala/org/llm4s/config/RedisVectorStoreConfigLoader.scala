@@ -2,6 +2,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.redis.{ RedisConfig, RedisDistanceMetric, RedisVectorAlgorithm }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -114,7 +115,7 @@ object RedisVectorStoreConfigLoader {
         tls = s.tls.getOrElse(false),
         database = s.database.getOrElse(0),
         username = nonEmpty(s.username),
-        password = nonEmpty(s.password),
+        password = nonEmpty(s.password).map(Secret(_)),
         index = nonEmpty(s.index).getOrElse(RedisConfig.DefaultIndex),
         keyPrefix = nonEmpty(s.keyPrefix),
         algorithm = algorithm,

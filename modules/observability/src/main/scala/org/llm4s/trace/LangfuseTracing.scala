@@ -1,15 +1,15 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ ExecutionError, UnknownError }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.{ Base64, UUID }
+import java.util.UUID
 import scala.concurrent.duration.*
 import org.llm4s.util.Redaction
 
@@ -41,8 +41,8 @@ import org.llm4s.util.Redaction
  * // Or programmatic configuration
  * val tracing = new LangfuseTracing(
  *   langfuseUrl = "https://cloud.langfuse.com",
- *   publicKey = "pk-lf-...",
- *   secretKey = "sk-lf-...",
+ *   publicKey = Secret("pk-lf-..."),
+ *   secretKey = Secret("sk-lf-..."),
  *   environment = "production",
  *   release = "1.0.0",
  *   version = "1.0.0"
@@ -74,8 +74,8 @@ import org.llm4s.util.Redaction
  */
 class LangfuseTracing(
   langfuseUrl: String,
-  publicKey: String,
-  secretKey: String,
+  publicKey: Secret,
+  secretKey: Secret,
   environment: String,
   release: String,
   version: String,
@@ -88,7 +88,7 @@ class LangfuseTracing(
   private def uuid: String   = UUID.randomUUID().toString
 
   protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
-    if (publicKey.isEmpty || secretKey.isEmpty) {
+    if (publicKey.reveal.isEmpty || secretKey.reveal.isEmpty) {
       logger.warn("[Langfuse] Public or secret key not set in environment. Skipping export.")
       logger.warn(s"[Langfuse] Expected environment variables: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
       logger.warn(s"[Langfuse] Current URL: $langfuseUrl")
@@ -103,11 +103,11 @@ class LangfuseTracing(
     }
 
     logger.debug(s"[Langfuse] Sending batch to URL: $apiUrl")
-    logger.debug(s"[Langfuse] Using public key: ${publicKey.take(10)}...")
+    logger.debug(s"[Langfuse] Public key: ${if (publicKey.reveal.nonEmpty) "configured" else "not configured"}")
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
-    val credentials  = Base64.getEncoder.encodeToString(s"$publicKey:$secretKey".getBytes(StandardCharsets.UTF_8))
+    val credentials  = Secret.basic(publicKey.reveal, secretKey.reveal).reveal
 
     httpClient.post(
       url = apiUrl,
@@ -796,8 +796,8 @@ object LangfuseTracing {
   def from(cfg: org.llm4s.llmconnect.config.LangfuseConfig): LangfuseTracing =
     new LangfuseTracing(
       langfuseUrl = cfg.url,
-      publicKey = cfg.publicKey.getOrElse(""),
-      secretKey = cfg.secretKey.getOrElse(""),
+      publicKey = cfg.publicKey.getOrElse(Secret("")),
+      secretKey = cfg.secretKey.getOrElse(Secret("")),
       environment = cfg.env,
       release = cfg.release,
       version = cfg.version

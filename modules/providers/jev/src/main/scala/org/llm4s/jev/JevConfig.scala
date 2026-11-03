@@ -1,6 +1,7 @@
 package org.llm4s.jev
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 import java.net.URI
@@ -35,7 +36,7 @@ import scala.util.Try
  *                content type and `Accept` header itself and refuses to have them replaced
  */
 final case class JevConfig private (
-  apiKey: String,
+  apiKey: Secret,
   baseUrl: String,
   model: String,
   timeout: FiniteDuration,
@@ -43,7 +44,7 @@ final case class JevConfig private (
   headers: Map[String, String]
 ) {
 
-  def withApiKey(apiKey: String): JevConfig                = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): JevConfig                = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): JevConfig              = copy(baseUrl = baseUrl)
   def withModel(model: String): JevConfig                  = copy(model = model)
   def withTimeout(timeout: FiniteDuration): JevConfig      = copy(timeout = timeout)
@@ -61,7 +62,7 @@ final case class JevConfig private (
   /** Checks the config; the first problem is reported, naming the setting. */
   def validate: Result[JevConfig] =
     for {
-      _ <- JevConfig.checkApiKey(apiKey)
+      _ <- JevConfig.checkApiKey(apiKey.reveal)
       _ <- JevConfig.checkBaseUrl(baseUrl)
       _ <-
         if (model.trim.nonEmpty && !model.exists(_.isControl)) Right(())
@@ -90,7 +91,7 @@ object JevConfig {
 
   /** Creates a config for `apiKey`. Named arguments are the supported way to set the rest. */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String = DefaultBaseUrl,
     model: String = DefaultModel,
     timeout: FiniteDuration = DefaultTimeout,

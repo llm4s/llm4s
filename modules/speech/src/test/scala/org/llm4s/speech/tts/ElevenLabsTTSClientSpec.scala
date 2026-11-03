@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.speech.{ AudioFormat, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
@@ -9,7 +10,8 @@ import org.scalatest.matchers.should.Matchers
 
 class ElevenLabsTTSClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", "el-key", "https://api.elevenlabs.io")
+  private val cfg =
+    TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", Secret("el-key"), "https://api.elevenlabs.io")
 
   "ElevenLabsTTSClient" should "return the response bytes untouched, described as 24 kHz 16-bit mono PCM" in {
     val http   = new StubHttpClient(body = StubHttpClient.binaryAudio)

@@ -34,7 +34,7 @@ object ProvidersConfigModel:
     provider: Option[String],
     model: Option[String],
     baseUrl: Option[String],
-    apiKey: Option[String],
+    apiKey: Option[ApiKey],
     headers: Option[Map[String, String]] = None,
     extras: Map[String, String] = Map.empty,
     timeouts: Option[ProviderTimeouts] = None,

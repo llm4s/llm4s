@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
@@ -17,7 +18,7 @@ class LLMConnectEnvReaderRoutingTest extends AnyFunSuite with Matchers with Eith
     val cfg = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "sk-test",
+        apiKey = Secret("sk-test"),
         organization = None,
         baseUrl = "https://openrouter.ai/api/v1"
       )

@@ -10,6 +10,7 @@ import org.llm4s.trace.Tracing
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.vectorstore.FusionStrategy
 import org.llm4s.rag.transform.QueryTransformer
+import org.llm4s.security.Secret
 
 /**
  * Configuration for RAG pipeline.
@@ -34,7 +35,7 @@ import org.llm4s.rag.transform.QueryTransformer
  * // Using PostgreSQL with pgvector
  * val config = RAGConfig()
  *   .withEmbeddings("openai")
- *   .withPgVector("jdbc:postgresql://localhost:5432/mydb", "user", "pass", "embeddings")
+ *   .withPgVector("jdbc:postgresql://localhost:5432/mydb", "user", Secret("pass"), "embeddings")
  * }}}
  *
  * @param embeddingProvider id of the embedding provider, resolved through the
@@ -65,7 +66,7 @@ final case class RAGConfig(
   // PgVector settings
   pgVectorConnectionString: Option[String] = None,
   pgVectorUser: Option[String] = None,
-  pgVectorPassword: Option[String] = None,
+  pgVectorPassword: Option[Secret] = None,
   pgVectorTableName: Option[String] = None,
   // Pg Keyword Index settings (for full PostgreSQL hybrid search)
   pgKeywordTableName: Option[String] = None,
@@ -190,7 +191,7 @@ final case class RAGConfig(
    * Uses "vectors" as the default table name.
    */
   def withPgVector(): RAGConfig =
-    withPgVector("jdbc:postgresql://localhost:5432/postgres", "postgres", "", "vectors")
+    withPgVector("jdbc:postgresql://localhost:5432/postgres", "postgres", Secret(""), "vectors")
 
   /**
    * Use PostgreSQL with pgvector extension for vector storage.
@@ -200,7 +201,7 @@ final case class RAGConfig(
    * @param tableName Table name for vectors
    */
   def withPgVector(tableName: String): RAGConfig =
-    withPgVector("jdbc:postgresql://localhost:5432/postgres", "postgres", "", tableName)
+    withPgVector("jdbc:postgresql://localhost:5432/postgres", "postgres", Secret(""), tableName)
 
   /**
    * Use PostgreSQL with pgvector extension for vector storage.
@@ -213,7 +214,7 @@ final case class RAGConfig(
   def withPgVector(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     tableName: String
   ): RAGConfig =
     copy(
@@ -247,7 +248,7 @@ final case class RAGConfig(
   def withPgHybrid(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     vectorTableName: String = "vectors",
     keywordTableName: String = "documents"
   ): RAGConfig =
@@ -270,7 +271,7 @@ final case class RAGConfig(
     vectorTableName: String = "vectors",
     keywordTableName: String = "documents"
   ): RAGConfig =
-    withPgHybrid("jdbc:postgresql://localhost:5432/postgres", "postgres", "", vectorTableName, keywordTableName)
+    withPgHybrid("jdbc:postgresql://localhost:5432/postgres", "postgres", Secret(""), vectorTableName, keywordTableName)
 
   // ========== Answer Generation Configuration ==========
 
@@ -426,7 +427,7 @@ final case class RAGConfig(
   def withPgVectorPermissions(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     vectorTableName: String = "vectors"
   ): RAGConfig =
     copy(
