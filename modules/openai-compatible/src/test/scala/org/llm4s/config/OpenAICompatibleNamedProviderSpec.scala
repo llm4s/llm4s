@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMConnect
@@ -33,7 +34,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("deepseek"),
           model = Some("deepseek-chat"),
           baseUrl = Some("https://api.deepseek.com"),
-          apiKey = Some("deepseek-key"),
+          apiKey = Some(ApiKey("deepseek-key")),
         )
       ) match
         case Right(cfg) =>
@@ -51,7 +52,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("openrouter"),
           model = Some("openai/gpt-4o-mini"),
           baseUrl = Some("https://openrouter.ai/api/v1"),
-          apiKey = Some("or-key"),
+          apiKey = Some(ApiKey("or-key")),
         )
       ) match
         case Right(cfg) =>
@@ -69,7 +70,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("zai"),
           model = Some("GLM-4.7"),
           baseUrl = Some("https://api.z.ai/api/paas/v4"),
-          apiKey = Some("zai-key"),
+          apiKey = Some(ApiKey("zai-key")),
         )
       ) match
         case Right(cfg) =>
@@ -87,7 +88,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("mistral"),
           model = Some("mistral-large-latest"),
           baseUrl = Some("https://api.mistral.ai"),
-          apiKey = Some("mistral-key"),
+          apiKey = Some(ApiKey("mistral-key")),
         )
       ) match
         case Right(cfg) =>
@@ -105,7 +106,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("cohere"),
           model = Some("command-r-plus"),
           baseUrl = Some("https://api.cohere.com"),
-          apiKey = Some("cohere-key"),
+          apiKey = Some(ApiKey("cohere-key")),
         )
       ) match
         case Right(cfg) =>
@@ -298,7 +299,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "groq-main") match
         case Right(cfg: OpenAICompatibleConfig) =>
           cfg.model shouldBe "openai/gpt-oss-120b"
-          cfg.apiKey shouldBe Some("gsk-test")
+          cfg.apiKey shouldBe Some(Secret("gsk-test"))
           cfg.contextWindow shouldBe 131072
           cfg.reserveCompletion shouldBe 8192
           cfg.headers shouldBe Map("X-Team" -> "search", "X-Gateway-Token" -> "secret-token")

@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions.pg
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
@@ -57,7 +58,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-create", e.getMessage)).flatMap(identity)
+  }.toEither.left.map(e => ProcessingError("pg-principal-create", Redaction.scrubKnown(e.getMessage))).flatMap(identity)
 
   override def getOrCreateBatch(externals: Seq[ExternalPrincipal]): Result[Map[ExternalPrincipal, PrincipalId]] =
     // First lookup all existing
@@ -92,7 +93,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-lookup", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-lookup", Redaction.scrubKnown(e.getMessage)))
 
   override def lookupBatch(externals: Seq[ExternalPrincipal]): Result[Map[ExternalPrincipal, PrincipalId]] = {
     if (externals.isEmpty) {
@@ -120,7 +121,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-principal-lookup-batch", e.getMessage))
+    }.toEither.left.map(e => ProcessingError("pg-principal-lookup-batch", Redaction.scrubKnown(e.getMessage)))
   }
 
   override def getExternalId(id: PrincipalId): Result[Option[ExternalPrincipal]] = Try {
@@ -140,7 +141,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-reverse", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-reverse", Redaction.scrubKnown(e.getMessage)))
 
   override def delete(external: ExternalPrincipal): Result[Unit] = Try {
     withConnection { conn =>
@@ -154,7 +155,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         ()
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-delete", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-delete", Redaction.scrubKnown(e.getMessage)))
 
   override def list(principalType: String, limit: Int, offset: Int): Result[Seq[ExternalPrincipal]] = Try {
     withConnection { conn =>
@@ -178,7 +179,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-list", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-list", Redaction.scrubKnown(e.getMessage)))
 
   override def count(principalType: String): Result[Long] = Try {
     withConnection { conn =>
@@ -194,7 +195,7 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-count", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-count", Redaction.scrubKnown(e.getMessage)))
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(getConnection())(f)

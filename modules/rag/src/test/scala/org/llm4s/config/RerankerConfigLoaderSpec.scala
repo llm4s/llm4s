@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.reranker.{ CohereReranker, RerankProviderConfig }
 import org.llm4s.testkit.CredentialsRoundTrip
@@ -30,7 +31,7 @@ class RerankerConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       RerankerConfigLoader
         .load(ReferenceConfig.withEnv("", cohereSelected + ("COHERE_API_KEY" -> "co-shared")))
         .value shouldBe Some(
-        RerankProviderConfig(CohereReranker.DEFAULT_BASE_URL, "co-shared", CohereReranker.DEFAULT_MODEL)
+        RerankProviderConfig(CohereReranker.DEFAULT_BASE_URL, Secret("co-shared"), CohereReranker.DEFAULT_MODEL)
       )
     }
 
@@ -39,7 +40,7 @@ class RerankerConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       RerankerConfigLoader
         .load(ReferenceConfig.withEnv(hocon, cohereSelected + ("COHERE_API_KEY" -> "co-shared")))
         .value
-        .map(_.apiKey) shouldBe Some("co-reranker-account")
+        .map(_.apiKey.reveal) shouldBe Some("co-reranker-account")
     }
 
     "read the model and base URL variables" in {
@@ -49,7 +50,7 @@ class RerankerConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
         "COHERE_RERANK_BASE_URL" -> "https://cohere.example"
       )
       RerankerConfigLoader.load(ReferenceConfig.withEnv("", env)).value shouldBe Some(
-        RerankProviderConfig("https://cohere.example", "co-shared", "rerank-v3.5")
+        RerankProviderConfig("https://cohere.example", Secret("co-shared"), "rerank-v3.5")
       )
     }
 
@@ -79,7 +80,7 @@ class RerankerConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
     "serve both the Cohere reranker and a Cohere chat section" in {
       val env = cohereSelected + ("COHERE_API_KEY" -> "co-shared")
 
-      RerankerConfigLoader.load(ReferenceConfig.withEnv("", env)).value.map(_.apiKey) shouldBe Some("co-shared")
+      RerankerConfigLoader.load(ReferenceConfig.withEnv("", env)).value.map(_.apiKey.reveal) shouldBe Some("co-shared")
       CredentialsRoundTrip.chatSectionKey("cohere", env) shouldBe Right(Some("co-shared"))
     }
   }

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 // scalafix:off DisableSyntax.NoConfigFactory
+import org.llm4s.security.Secret
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.config.LangfuseConfigLoader
@@ -61,8 +62,8 @@ class LangfuseConfigSpec extends AnyWordSpec with Matchers {
       withProps(props) {
         val cfg = LangfuseConfigLoader.default().fold(err => fail(err.toString), identity)
         cfg.url shouldBe "https://example.com/api"
-        cfg.publicKey shouldBe Some("pub")
-        cfg.secretKey shouldBe Some("sec")
+        cfg.publicKey shouldBe Some(Secret("pub"))
+        cfg.secretKey shouldBe Some(Secret("sec"))
         cfg.env shouldBe "staging"
         cfg.release shouldBe "2.0.0"
         cfg.version shouldBe "2.1.3"
@@ -83,8 +84,8 @@ class LangfuseConfigSpec extends AnyWordSpec with Matchers {
         )
       ) shouldBe LangfuseConfig(
         "https://custom.langfuse.com/api/public/ingestion",
-        Some("pk-test-123"),
-        Some("sk-test-456"),
+        Some(Secret("pk-test-123")),
+        Some(Secret("sk-test-456")),
         "staging",
         "2.0.0",
         "2.1.0"
@@ -100,7 +101,7 @@ class LangfuseConfigSpec extends AnyWordSpec with Matchers {
       val cfg = LangfuseConfig.fromExtras(
         Map("publicKey" -> "  pk-with-spaces  ", "secretKey" -> "", "env" -> "  development  ", "url" -> "   ")
       )
-      cfg.publicKey shouldBe Some("pk-with-spaces")
+      cfg.publicKey shouldBe Some(Secret("pk-with-spaces"))
       cfg.secretKey shouldBe None
       cfg.env shouldBe "development"
       cfg.url shouldBe LangfuseConfig.DEFAULT_URL
@@ -114,8 +115,8 @@ class LangfuseConfigSpec extends AnyWordSpec with Matchers {
     "not leak keys" in {
       val cfg = LangfuseConfig(
         url = "https://example.invalid",
-        publicKey = Some(secret),
-        secretKey = Some(secret),
+        publicKey = Some(Secret(secret)),
+        secretKey = Some(Secret(secret)),
         env = "dev",
         release = "local",
         version = "0"

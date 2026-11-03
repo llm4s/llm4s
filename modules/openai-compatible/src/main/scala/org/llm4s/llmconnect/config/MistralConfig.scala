@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the Mistral AI API.
@@ -31,7 +31,7 @@ import org.llm4s.util.Redaction
  */
 @Experimental
 final case class MistralConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
@@ -45,12 +45,12 @@ final case class MistralConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): MistralConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): MistralConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): MistralConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
-    s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+    s"MistralConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
 @Experimental
@@ -68,7 +68,7 @@ object MistralConfig:
    * from the model. Every field after `model` has a default.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
@@ -89,7 +89,7 @@ object MistralConfig:
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: String, model: String): MistralConfig =
+  def apply(apiKey: Secret, model: String): MistralConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val mistralFallback: String => (Int, Int) =
@@ -109,11 +109,11 @@ object MistralConfig:
 
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[MistralConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

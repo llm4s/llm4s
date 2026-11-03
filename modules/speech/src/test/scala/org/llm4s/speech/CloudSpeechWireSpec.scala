@@ -1,5 +1,6 @@
 package org.llm4s.speech.stt.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error._
 import org.llm4s.speech._
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
@@ -36,9 +37,9 @@ class CloudSpeechWireSpec extends AnyFlatSpec with Matchers {
   private val nasty = "héllo 日本語 \"quoted\" back\\slash\nnew\r\nline\ttab 😀 </speak> & 'x'"
 
   private def tts(provider: String, base: String, voice: String = "alloy", model: String = "tts-1") =
-    TTSConfig(provider, model, voice, secretKey, base, Some("eastus"))
+    TTSConfig(provider, model, voice, Secret(secretKey), base, Some("eastus"))
   private def stt(provider: String, base: String, model: String = "whisper-1") =
-    STTConfig(provider, model, secretKey, base, Some("eastus"))
+    STTConfig(provider, model, Secret(secretKey), base, Some("eastus"))
 
   private def wavAt(rate: Int, pcm: Array[Byte]): Array[Byte] =
     WavFileGenerator.createWavHeader(pcm.length, AudioMeta(rate, 1, 16)).toOption.get ++ pcm

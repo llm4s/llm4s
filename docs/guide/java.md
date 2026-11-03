@@ -198,8 +198,8 @@ essentials and fills in the rest (the default base URL, and a context window and
 model name):
 
 ```java
-LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(apiKey, "gpt-4o-mini"));
-LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(apiKey, "claude-sonnet-4-20250514"));
+LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
+LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
 LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 ```
 
@@ -329,6 +329,7 @@ import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.llm4s.security.Secret;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -845,6 +846,9 @@ that does not answer in time `TIMEOUT`; any other failure with no status, such a
 [Java RAG](java-rag) (`llm4s-java-rag`).
 
 ## Testing your code
+
+For a complete runnable example, see the [Java offline ticket classifier](../examples/#java-offline-example).
+It injects a `JLlmClient`, handles unknown replies and provider failures, and checks recorded prompts in its test.
 
 `FakeLlmClient` is a fake model for your own tests: it answers from a script, records every prompt your code sent, and
 needs no network or API key. Its `client()` is a real `JLlmClient`, so the code under test needs no interface or mock -

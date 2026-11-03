@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.trace.TracingMode
-import org.llm4s.util.Redaction
 
 /**
  * Connection and metadata settings for the Langfuse tracing backend.
@@ -27,14 +27,14 @@ import org.llm4s.util.Redaction
  */
 case class LangfuseConfig(
   url: String = LangfuseConfig.DEFAULT_URL,
-  publicKey: Option[String] = None,
-  secretKey: Option[String] = None,
+  publicKey: Option[Secret] = None,
+  secretKey: Option[Secret] = None,
   env: String = LangfuseConfig.DEFAULT_ENV,
   release: String = LangfuseConfig.DEFAULT_RELEASE,
   version: String = LangfuseConfig.DEFAULT_VERSION
 ) {
   override def toString: String =
-    s"LangfuseConfig(url=$url, publicKey=${Redaction.secretOpt(publicKey)}, secretKey=${Redaction.secretOpt(secretKey)}, " +
+    s"LangfuseConfig(url=$url, publicKey=$publicKey, secretKey=$secretKey, " +
       s"env=$env, release=$release, version=$version)"
 }
 
@@ -66,8 +66,8 @@ object LangfuseConfig {
     def value(key: String): Option[String] = extras.get(key).map(_.trim).filter(_.nonEmpty)
     LangfuseConfig(
       url = value("url").getOrElse(DEFAULT_URL),
-      publicKey = value("publicKey"),
-      secretKey = value("secretKey"),
+      publicKey = value("publicKey").map(Secret(_)),
+      secretKey = value("secretKey").map(Secret(_)),
       env = value("env").getOrElse(DEFAULT_ENV),
       release = value("release").getOrElse(DEFAULT_RELEASE),
       version = value("version").getOrElse(DEFAULT_VERSION)

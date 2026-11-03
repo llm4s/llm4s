@@ -3,6 +3,7 @@ package org.llm4s.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.Secret
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider, FixtureEmbeddingProvider, RecordingProxy, TestTls }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -39,14 +40,16 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
     val listed = network(
       """llm4s.http.proxy { url = "http://proxy.corp:3128", username = alice, password = s3cret, nonProxyHosts = ["localhost", "*.internal"] }"""
     ).value.proxy.get
-    (listed.host, listed.port, listed.credentials) shouldBe (("proxy.corp", 3128, Some(("alice", "s3cret"))))
+    (listed.host, listed.port, listed.credentials) shouldBe (("proxy.corp", 3128, Some(("alice", Secret("s3cret")))))
     listed.nonProxyHosts shouldBe Seq("localhost", "*.internal")
     val noProxyVariable = network(
       """llm4s.http.proxy { url = "http://u:p@proxy.corp:3128", nonProxyHosts = "localhost, .corp.example,," }"""
     ).value.proxy.get
     noProxyVariable.nonProxyHosts shouldBe Seq("localhost", ".corp.example")
-    noProxyVariable.credentials shouldBe Some(("u", "p"))
-    network("""llm4s.http.proxy { url = "proxy:1", password = 123 }""").value.proxy.get.password shouldBe Some("123")
+    noProxyVariable.credentials shouldBe Some(("u", Secret("p")))
+    network("""llm4s.http.proxy { url = "proxy:1", password = 123 }""").value.proxy.get.password shouldBe Some(
+      Secret("123")
+    )
   }
 
   it should "read the TLS stores, and fail the load for one it cannot open" in {
@@ -55,7 +58,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
       s"""llm4s.http.tls { trustStore = "${hocon(trust)}", trustStorePassword = ${TestTls.Password} }"""
     ).value.tls
     tls.trustStore shouldBe Some(trust)
-    tls.trustStorePassword shouldBe Some(TestTls.Password)
+    tls.trustStorePassword shouldBe Some(Secret(TestTls.Password))
     val wrong = network(
       s"""llm4s.http.tls { trustStore = "${hocon(trust)}", trustStorePassword = "not-the-password" }"""
     ).left.value
@@ -92,7 +95,7 @@ class HttpNetworkConfigSpec extends AnyFlatSpec with Matchers with EitherValues 
       llm4s.http.proxy { url = "http://proxy.corp:3128", username = alice, password = s3cret }
       llm4s.providers.main.http.proxy.url = "http://gateway-proxy:8080"
     """).proxy.get
-    (merged.host, merged.port, merged.credentials) shouldBe (("gateway-proxy", 8080, Some(("alice", "s3cret"))))
+    (merged.host, merged.port, merged.credentials) shouldBe (("gateway-proxy", 8080, Some(("alice", Secret("s3cret")))))
     providerNetwork(s"""$section
       llm4s.http.proxy.url = "http://proxy.corp:3128"
       llm4s.providers.main.http.proxy.url = ""

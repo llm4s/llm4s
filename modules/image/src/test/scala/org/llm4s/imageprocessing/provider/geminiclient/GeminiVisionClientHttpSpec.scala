@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.imageprocessing.provider.geminiclient
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
@@ -145,7 +146,7 @@ class GeminiVisionClientHttpSpec extends AnyFlatSpec with Matchers with BeforeAn
 
   private def cfg(key: String = Key, model: String = "gemini-test", request: Int = 10) =
     GeminiVisionConfig(
-      apiKey = key,
+      apiKey = Secret(key),
       model = model,
       baseUrl = baseUrl,
       connectTimeoutSeconds = 5,

@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -16,7 +17,7 @@ class ChatTuiCommandsSpec extends AnyFlatSpec with Matchers {
 
   private val stubConfig = ChatTuiConfig(
     providerConfig = OpenAIConfig(
-      apiKey = "test",
+      apiKey = Secret("test"),
       model = "gpt-4o-mini",
       organization = None,
       baseUrl = "https://api.openai.com/v1",

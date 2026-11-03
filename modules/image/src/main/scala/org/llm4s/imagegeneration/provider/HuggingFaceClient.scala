@@ -23,7 +23,7 @@ import org.llm4s.util.Redaction
  * @example
  * {{{
  * val config = HuggingFaceConfig(
- *   apiKey = "your-hf-token",
+ *   apiKey = Secret("your-hf-token"),
  *   model = "stabilityai/stable-diffusion-2-1"
  * )
  * val client = new HuggingFaceClient(config)
@@ -211,7 +211,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   override def health(): Either[LLMError, ServiceStatus] = {
     val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
     val headers = Map(
-      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Authorization" -> s"Bearer ${config.apiKey.reveal}",
       "Content-Type"  -> "application/json"
     )
 
@@ -272,7 +272,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   def makeHttpRequest(payload: String): Either[LLMError, Array[Byte]] = {
     val url = s"https://api-inference.huggingface.co/models/${config.model}"
     val headers = Map(
-      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Authorization" -> s"Bearer ${config.apiKey.reveal}",
       "Content-Type"  -> "application/json"
     )
 

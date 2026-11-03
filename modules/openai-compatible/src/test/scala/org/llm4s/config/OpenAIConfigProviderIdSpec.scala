@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.provider.{ OpenRouterClient, OpenRouterProvider }
 import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
@@ -24,7 +25,7 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
   private given ContextWindowResolver = ContextWindowResolver(summon[ModelRegistryService])
 
   private def config(baseUrl: String, providerId: Option[ProviderId] = None) =
-    OpenAIConfig.fromValues("gpt-4o-mini", "sk-test", None, baseUrl, providerId).value
+    OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-test"), None, baseUrl, providerId).value
 
   "OpenAIConfig.providerId" should {
 
@@ -47,7 +48,7 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
     }
 
     "default to None when built with the primary constructor" in {
-      OpenAIConfig("k", "m", None, "https://api.openai.com/v1", 8192, 4096).explicitProviderId shouldBe None
+      OpenAIConfig(Secret("k"), "m", None, "https://api.openai.com/v1", 8192, 4096).explicitProviderId shouldBe None
     }
   }
 

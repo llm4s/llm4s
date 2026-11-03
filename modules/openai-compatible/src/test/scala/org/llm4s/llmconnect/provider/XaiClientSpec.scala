@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -23,7 +24,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def config(baseUrl: String, model: String = "grok-4.7"): XaiConfig =
     XaiConfig(
-      apiKey = "xai-test-key",
+      apiKey = Secret("xai-test-key"),
       model = model,
       baseUrl = baseUrl,
       contextWindow = 500000,
@@ -237,7 +238,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
   // ---- construction ----
 
   "XaiClient.apply" should "refuse a blank API key, and build a client from a valid config" in {
-    XaiClient(config("http://localhost:1").withApiKey("")).isLeft shouldBe true
+    XaiClient(config("http://localhost:1").withApiKey(Secret(""))).isLeft shouldBe true
     XaiClient(config("http://localhost:1")).isRight shouldBe true
     XaiClient(config("http://localhost:1"), org.llm4s.metrics.MetricsCollector.noop).isRight shouldBe true
   }

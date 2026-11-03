@@ -28,7 +28,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("anthropic"),
           model = Some("claude-sonnet-4-20250514"),
           baseUrl = Some("https://api.anthropic.com"),
-          apiKey = Some("sk-ant-test"),
+          apiKey = Some(ApiKey("sk-ant-test")),
         )
       ) match
         case Right(cfg) =>
@@ -100,7 +100,7 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "anthropic-main") match
         case Right(anthropic: AnthropicConfig) =>
           anthropic.model shouldBe "claude-sonnet-4-5"
-          anthropic.apiKey shouldBe "anthropic-key"
+          anthropic.apiKey.reveal shouldBe "anthropic-key"
           anthropic.baseUrl shouldBe AnthropicConfig.DEFAULT_BASE_URL
         case other =>
           fail(s"Expected AnthropicConfig, got $other")

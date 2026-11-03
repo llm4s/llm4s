@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ReferenceConfig
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
 import org.llm4s.speech.io.WavFileGenerator
@@ -34,7 +35,7 @@ class CloudSpeechPipelineWireSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   private def ttsConfig(provider: String, base: String, voice: String) =
-    TTSConfig(provider, "tts-1", voice, "key", base, Some("eastus"))
+    TTSConfig(provider, "tts-1", voice, Secret("key"), base, Some("eastus"))
 
   /** The part of a multipart body after the `filename=` part headers, up to the next delimiter. */
   private def uploadedFile(req: WireRequest): Array[Byte] = {
@@ -78,7 +79,7 @@ class CloudSpeechPipelineWireSpec extends AnyFlatSpec with Matchers with EitherV
 
           val (pcm16k, meta) = AudioPreprocessing.resamplePcm16(audio.data, audio.meta, 16000).value
           val wav            = WavFileGenerator.createWavHeader(pcm16k.length, meta).value ++ pcm16k
-          new OpenAISTTClient(STTConfig("openai", "whisper-1", "key", stt.baseUrl))
+          new OpenAISTTClient(STTConfig("openai", "whisper-1", Secret("key"), stt.baseUrl))
             .transcribe(AudioInput.BytesAudio(wav, 16000))
             .value
             .text shouldBe "hello world"
@@ -105,7 +106,7 @@ class CloudSpeechPipelineWireSpec extends AnyFlatSpec with Matchers with EitherV
       ) { stt =>
         val audio = new AzureTTSClient(ttsConfig("azure", tts.baseUrl, "en-US-JennyNeural")).synthesize("hi").value
         val wav   = WavFileGenerator.createWavHeader(audio.data.length, audio.meta).value ++ audio.data
-        val text = new AzureSTTClient(STTConfig("azure", "en-US", "key", stt.baseUrl, Some("eastus")))
+        val text = new AzureSTTClient(STTConfig("azure", "en-US", Secret("key"), stt.baseUrl, Some("eastus")))
           .transcribe(AudioInput.BytesAudio(wav, 8000))
           .value
           .text

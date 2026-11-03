@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore.redis
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord, VectorStore, VectorStoreStats }
@@ -330,7 +331,9 @@ final class RedisVectorStore private (
     ProcessingError("redis-store", s"Redis $operation returned an unexpected reply: $detail")
 
   private def parse[A](operation: String)(thunk: => A): Result[A] =
-    Try(thunk).toEither.left.map(e => unexpected(operation, s"${e.getClass.getSimpleName}: ${e.getMessage}"))
+    Try(thunk).toEither.left.map(e =>
+      unexpected(operation, s"${e.getClass.getSimpleName}: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   private def score(distance: Double): Double = {
     val s = config.distanceMetric match {

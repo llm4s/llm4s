@@ -32,7 +32,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some(" openai "),
           model = Some(" gpt-4o-mini "),
           baseUrl = Some(" https://api.openai.com/v1 "),
-          apiKey = Some(" sk-test "),
+          apiKey = Some(ApiKey(" sk-test ")),
           extras = Map("organization" -> " org-demo ")
         )
       ) match
@@ -53,7 +53,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("azure"),
           model = Some("gpt-4o"),
           baseUrl = None,
-          apiKey = Some("azure-key"),
+          apiKey = Some(ApiKey("azure-key")),
           extras = Map("endpoint" -> "https://my-resource.openai.azure.com", "apiVersion" -> "2024-02-01")
         )
       ) match
@@ -74,7 +74,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("openai"),
           model = Some("gpt-4o-mini"),
           baseUrl = None,
-          apiKey = Some("   "),
+          apiKey = Some(ApiKey("   ")),
         )
       ) match
         case Left(err) =>
@@ -92,7 +92,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("azure"),
           model = Some("gpt-4o"),
           baseUrl = None,
-          apiKey = Some("azure-key"),
+          apiKey = Some(ApiKey("azure-key")),
           extras = Map("endpoint" -> "   ")
         )
       ) match
@@ -111,7 +111,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
         provider = Some("azure"),
         model = Some("gpt-4o"),
         baseUrl = None,
-        apiKey = Some("azure-key"),
+        apiKey = Some(ApiKey("azure-key")),
         extras = Map("endpoint" -> "https://x.openai.azure.com", "organization" -> "org-1")
       )
 
@@ -147,7 +147,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.defaultProvider(ConfigSource.string(hocon)) match
         case Right(openai: OpenAIConfig) =>
           openai.model shouldBe "gpt-4o-mini"
-          openai.apiKey shouldBe "named-openai-key"
+          openai.apiKey.reveal shouldBe "named-openai-key"
           openai.baseUrl shouldBe OpenAIProvider.DEFAULT_BASE_URL
         case other =>
           fail(s"Expected OpenAIConfig, got $other")

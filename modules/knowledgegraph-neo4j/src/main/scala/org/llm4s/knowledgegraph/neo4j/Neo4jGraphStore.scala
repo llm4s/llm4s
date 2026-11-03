@@ -1,9 +1,11 @@
 package org.llm4s.knowledgegraph.neo4j
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.knowledgegraph.storage._
 import org.llm4s.types.Result
+import org.llm4s.security.Secret
 import org.neo4j.driver._
 import org.slf4j.LoggerFactory
 
@@ -93,7 +95,7 @@ final class Neo4jGraphStore private (
             }
           }
         }.toEither.left
-          .map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${e.getMessage}"))
+          .map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${Redaction.scrubKnown(e.getMessage)}"))
           .flatMap(identity)
       }
     }
@@ -398,7 +400,10 @@ final class Neo4jGraphStore private (
         }
       }
     }.fold(
-      e => logger.warn(s"Could not create LLM4S uniqueness constraint (may already exist): ${e.getMessage}"),
+      e =>
+        logger.warn(
+          s"Could not create LLM4S uniqueness constraint (may already exist): ${Redaction.scrubKnown(e.getMessage)}"
+        ),
       _ => ()
     )
 
@@ -410,7 +415,7 @@ final class Neo4jGraphStore private (
     Try {
       Using.resource(driver.session(sessionConfig))(f)
     }.toEither.left
-      .map(e => ProcessingError("neo4j-store", s"Session error: ${e.getMessage}"))
+      .map(e => ProcessingError("neo4j-store", s"Session error: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   private def recordToNode(n: org.neo4j.driver.types.Node): Node = {
@@ -500,7 +505,7 @@ object Neo4jGraphStore {
   final case class Config(
     uri: String = "bolt://localhost:7687",
     user: String = "neo4j",
-    password: String = "",
+    password: Secret = Secret(""),
     database: String = "neo4j",
     maxPoolSize: Int = 10
   )
@@ -512,20 +517,22 @@ object Neo4jGraphStore {
         .builder()
         .withMaxConnectionPoolSize(config.maxPoolSize)
         .build()
-      val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password), driverConfig)
+      val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password.reveal), driverConfig)
       new Neo4jGraphStore(driver, config.database, ownsDriver = true)
-    }.toEither.left.map(e => ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("neo4j-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   /** Creates a Neo4jGraphStore from individual connection parameters. */
   def apply(
     uri: String,
     user: String = "neo4j",
-    password: String = "",
+    password: Secret = Secret(""),
     database: String = "neo4j"
   ): Result[Neo4jGraphStore] = apply(Config(uri, user, password, database))
 
   /** Connects to bolt://localhost:7687 with the given credentials. */
-  def local(user: String = "neo4j", password: String = "neo4j"): Result[Neo4jGraphStore] =
+  def local(user: String = "neo4j", password: Secret = Secret("neo4j")): Result[Neo4jGraphStore] =
     apply(Config(user = user, password = password))
 
   /**
@@ -537,6 +544,6 @@ object Neo4jGraphStore {
    */
   def apply(driver: Driver, database: String): Result[Neo4jGraphStore] =
     Try(new Neo4jGraphStore(driver, database, ownsDriver = false)).toEither.left.map(e =>
-      ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}")
+      ProcessingError("neo4j-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
     )
 }

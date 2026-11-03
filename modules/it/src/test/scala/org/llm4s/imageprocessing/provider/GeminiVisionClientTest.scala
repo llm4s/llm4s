@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.geminiclient.GeminiVisionClient
 import org.llm4s.it.Tier
@@ -38,7 +39,7 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
   "GeminiVisionClient" should "analyze an image with the real Gemini API" in {
     Tier.require(apiKey.isDefined, "GOOGLE_API_KEY (or GEMINI_API_KEY) not set")
 
-    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = apiKey.get, model = Model))
+    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret(apiKey.get), model = Model))
 
     val analysis =
       client.analyzeImage(testImage.toString, Some("Describe this image in one sentence")).value
@@ -48,7 +49,7 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
   }
 
   it should "return Left for an invalid API key" in {
-    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = "invalid-key-for-testing", model = Model))
+    val client = new GeminiVisionClient(GeminiVisionConfig(apiKey = Secret("invalid-key-for-testing"), model = Model))
 
     val result = client.analyzeImage(testImage.toString, None)
 

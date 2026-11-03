@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import io.netty.bootstrap.ServerBootstrap
 import io.netty.buffer.Unpooled
@@ -173,7 +174,8 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
         |"content":[{"type":"text","text":"hi from fake anthropic"}],"stop_reason":"end_turn",
         |"stop_sequence":null,"usage":{"input_tokens":3,"output_tokens":4}}""".stripMargin
     withJson("/v1/messages", body) { (base, seen) =>
-      val client = AnthropicConfig.fromValues("claude-3-5-sonnet-latest", "k", base).flatMap(AnthropicClient(_)).value
+      val client =
+        AnthropicConfig.fromValues("claude-3-5-sonnet-latest", Secret("k"), base).flatMap(AnthropicClient(_)).value
       val result = client.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
       withClue(okHttpOrigin) {
         result.map(_.content) shouldBe Right("hi from fake anthropic")
@@ -200,7 +202,8 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
         |data: {"type":"message_stop"}""".stripMargin
     )
     withSse("/v1/messages", events) { base =>
-      val client = AnthropicConfig.fromValues("claude-3-5-sonnet-latest", "k", base).flatMap(AnthropicClient(_)).value
+      val client =
+        AnthropicConfig.fromValues("claude-3-5-sonnet-latest", Secret("k"), base).flatMap(AnthropicClient(_)).value
       val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
       withClue(okHttpOrigin)(result.map(_.content) shouldBe Right("hi stream"))
     }
@@ -213,7 +216,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
         |"logprobs":null,"finish_reason":"stop"}],
         |"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}""".stripMargin
     withJson("/v1/chat/completions", body) { (base, seen) =>
-      val client = OpenAIConfig.fromValues("gpt-4o-mini", "k", None, s"$base/v1").flatMap(OpenAIClient(_)).value
+      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), None, s"$base/v1").flatMap(OpenAIClient(_)).value
       val result = client.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
       withClue(okHttpOrigin) {
         result.map(_.content) shouldBe Right("hi from fake openai")
@@ -230,7 +233,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
       "data: [DONE]"
     )
     withSse("/v1/chat/completions", events) { base =>
-      val client = OpenAIConfig.fromValues("gpt-4o-mini", "k", None, s"$base/v1").flatMap(OpenAIClient(_)).value
+      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), None, s"$base/v1").flatMap(OpenAIClient(_)).value
       val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
       withClue(okHttpOrigin)(result.map(_.content) shouldBe Right("hi stream"))
     }

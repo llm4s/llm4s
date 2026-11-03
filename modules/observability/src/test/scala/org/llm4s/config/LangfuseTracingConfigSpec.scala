@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.trace.{ LangfuseTracing, NoOpTracing, Tracing, TracingMode }
 import org.scalatest.EitherValues
@@ -29,8 +30,8 @@ class LangfuseTracingConfigSpec extends AnyWordSpec with Matchers with EitherVal
 
   private val expected = LangfuseConfig(
     "https://self-hosted.example/api/public/ingestion",
-    Some("pk-lf-env"),
-    Some("sk-lf-env"),
+    Some(Secret("pk-lf-env")),
+    Some(Secret("sk-lf-env")),
     "staging",
     "2.0.0",
     "2.1.0"
@@ -71,8 +72,8 @@ class LangfuseTracingConfigSpec extends AnyWordSpec with Matchers with EitherVal
           |""".stripMargin
       val s = settings(ReferenceConfig.withEnv(hocon, allVariables))
 
-      LangfuseConfig.fromExtras(s.extras).publicKey shouldBe Some("pk-from-conf")
-      LangfuseConfig.fromExtras(s.extras).secretKey shouldBe Some("sk-lf-env")
+      LangfuseConfig.fromExtras(s.extras).publicKey shouldBe Some(Secret("pk-from-conf"))
+      LangfuseConfig.fromExtras(s.extras).secretKey shouldBe Some(Secret("sk-lf-env"))
     }
   }
 
@@ -88,8 +89,8 @@ class LangfuseTracingConfigSpec extends AnyWordSpec with Matchers with EitherVal
           |""".stripMargin
       val cfg = LangfuseConfig.fromExtras(settings(ConfigSource.string(hocon)).extras)
 
-      cfg.publicKey shouldBe Some("pk-minimal")
-      cfg.secretKey shouldBe Some("sk-minimal")
+      cfg.publicKey shouldBe Some(Secret("pk-minimal"))
+      cfg.secretKey shouldBe Some(Secret("sk-minimal"))
       cfg.url shouldBe LangfuseConfig.DEFAULT_URL
       cfg.env shouldBe LangfuseConfig.DEFAULT_ENV
     }
@@ -104,7 +105,7 @@ class LangfuseTracingConfigSpec extends AnyWordSpec with Matchers with EitherVal
           |""".stripMargin
       val cfg = LangfuseConfig.fromExtras(settings(ConfigSource.string(hocon)).extras)
 
-      cfg.publicKey shouldBe Some("pk-with-spaces")
+      cfg.publicKey shouldBe Some(Secret("pk-with-spaces"))
       cfg.secretKey shouldBe None
       cfg.env shouldBe "development"
     }

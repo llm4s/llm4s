@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the xAI (Grok) API.
@@ -29,7 +29,7 @@ import org.llm4s.util.Redaction
  */
 @Experimental
 final case class XaiConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
@@ -43,12 +43,12 @@ final case class XaiConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): XaiConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): XaiConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): XaiConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
-    s"XaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+    s"XaiConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
 @Experimental
@@ -69,7 +69,7 @@ object XaiConfig {
    * from the model. Every field after `model` has a default.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
@@ -90,7 +90,7 @@ object XaiConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: String, model: String): XaiConfig =
+  def apply(apiKey: Secret, model: String): XaiConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val HalfMillionWindow = """grok-4\.[5-9](?:-.*)?""".r
@@ -120,11 +120,11 @@ object XaiConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[XaiConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("xAI", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("xAI", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("xAI", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

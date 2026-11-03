@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.security.Secret
 
 /**
  * Unit tests for QdrantVectorStore HTTP methods.
@@ -47,6 +48,15 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       case Right(store) => store
       case Left(err)    => fail(s"Failed to create store: ${err.formatted}")
     }
+  }
+
+  "A store with an API key" should "send the real key in the api-key header" in {
+    val mockClient = createMockClient()
+    (mockClient.get _)
+      .when(collectionsUrl, Map("api-key" -> "qdrant-key-real-1"), *, *)
+      .returns(Right(httpResponse(404, "Not found")))
+
+    QdrantVectorStore(testConfig.copy(apiKey = Some(Secret("qdrant-key-real-1"))), mockClient).isRight shouldBe true
   }
 
   // ============================================================

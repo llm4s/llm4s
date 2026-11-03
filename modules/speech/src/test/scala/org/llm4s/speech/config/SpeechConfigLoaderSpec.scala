@@ -1,5 +1,6 @@
 package org.llm4s.speech.config
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ReferenceConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.speech.SpeechProviderSelector
@@ -20,7 +21,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
     "select OpenAI from OPENAI_API_KEY, defaulting the voice and base URL" in {
       SpeechConfigLoader
         .tts(env("SPEECH_TTS_MODEL" -> "openai/tts-1-hd", "OPENAI_API_KEY" -> "sk-1"))
-        .value shouldBe TTSConfig("openai", "tts-1-hd", "alloy", "sk-1", "https://api.openai.com")
+        .value shouldBe TTSConfig("openai", "tts-1-hd", "alloy", Secret("sk-1"), "https://api.openai.com")
     }
 
     "honour SPEECH_TTS_VOICE and OPENAI_SPEECH_BASE_URL" in {
@@ -33,7 +34,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
             "OPENAI_SPEECH_BASE_URL" -> "https://proxy.example/"
           )
         )
-        .value shouldBe TTSConfig("openai", "tts-1", "nova", "sk-1", "https://proxy.example")
+        .value shouldBe TTSConfig("openai", "tts-1", "nova", Secret("sk-1"), "https://proxy.example")
     }
 
     "take the ElevenLabs voice id from the model spec and the model id from config" in {
@@ -43,7 +44,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
         "elevenlabs",
         "eleven_multilingual_v2",
         "voice123",
-        "el-1",
+        Secret("el-1"),
         "https://api.elevenlabs.io"
       )
 
@@ -72,7 +73,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
         "azure",
         "en-US-JennyNeural",
         "en-US-JennyNeural",
-        "az-1",
+        Secret("az-1"),
         "https://westeurope.tts.speech.microsoft.com",
         Some("westeurope")
       )
@@ -129,7 +130,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
     "select OpenAI" in {
       SpeechConfigLoader
         .stt(env("SPEECH_STT_MODEL" -> "openai/whisper-1", "OPENAI_API_KEY" -> "sk-1"))
-        .value shouldBe STTConfig("openai", "whisper-1", "sk-1", "https://api.openai.com")
+        .value shouldBe STTConfig("openai", "whisper-1", Secret("sk-1"), "https://api.openai.com")
     }
 
     "use the Azure model part as the default language" in {
@@ -144,7 +145,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
         .value shouldBe STTConfig(
         "azure",
         "de-DE",
-        "az-1",
+        Secret("az-1"),
         "https://eastus.stt.speech.microsoft.com",
         Some("eastus")
       )
@@ -168,7 +169,7 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
     "read only the credentials, not llm4s.speech.tts.model" in {
       SpeechConfigLoader
         .tts("openai/tts-1-hd", env("OPENAI_API_KEY" -> "sk-1", "SPEECH_TTS_MODEL" -> "azure/ignored"))
-        .value shouldBe TTSConfig("openai", "tts-1-hd", "alloy", "sk-1", "https://api.openai.com")
+        .value shouldBe TTSConfig("openai", "tts-1-hd", "alloy", Secret("sk-1"), "https://api.openai.com")
 
       SpeechConfigLoader
         .stt("azure/fr-FR", env("AZURE_SPEECH_KEY" -> "az", "AZURE_SPEECH_REGION" -> "eastus"))

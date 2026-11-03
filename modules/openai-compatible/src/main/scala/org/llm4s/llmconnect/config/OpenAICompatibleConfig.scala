@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the generic `openai-compatible` provider: any endpoint
@@ -54,7 +54,7 @@ import org.llm4s.util.Redaction
 final case class OpenAICompatibleConfig private (
   model: String,
   baseUrl: String,
-  apiKey: Option[String],
+  apiKey: Option[Secret],
   contextWindow: Int,
   reserveCompletion: Int,
   headers: Map[String, String],
@@ -70,8 +70,8 @@ final case class OpenAICompatibleConfig private (
   override def withNetwork(network: HttpNetworkSettings): OpenAICompatibleConfig = copy(network = network)
 
   def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
-  def withApiKey(apiKey: String): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
-  def withApiKey(apiKey: Option[String]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
+  def withApiKey(apiKey: Option[Secret]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
   def withContextWindow(contextWindow: Int): OpenAICompatibleConfig = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): OpenAICompatibleConfig =
     copy(reserveCompletion = reserveCompletion)
@@ -85,7 +85,7 @@ final case class OpenAICompatibleConfig private (
   def withTokenExchange(tokenExchange: Option[TokenExchangeConfig]): OpenAICompatibleConfig =
     copy(tokenExchange = tokenExchange)
   override def toString: String =
-    s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
+    s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=$apiKey, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +
       s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")}, streamUsage=$streamUsage, " +
       s"tokenExchange=$tokenExchange)"
@@ -114,7 +114,7 @@ object OpenAICompatibleConfig {
   def apply(
     model: String,
     baseUrl: String,
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     headers: Map[String, String] = Map.empty,
@@ -169,7 +169,7 @@ object OpenAICompatibleConfig {
       case Some(exchange) =>
         for
           _ <- Either.cond(
-            config.apiKey.forall(_.trim.isEmpty),
+            config.apiKey.forall(_.reveal.trim.isEmpty),
             (),
             ConfigurationError(
               "OpenAI-compatible config sets both apiKey and tokenExchange; use one",
@@ -210,7 +210,7 @@ object OpenAICompatibleConfig {
   def fromValues(
     model: String,
     baseUrl: String,
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
     headers: Map[String, String] = Map.empty,
@@ -239,7 +239,7 @@ object OpenAICompatibleConfig {
         OpenAICompatibleConfig(
           model = model.trim,
           baseUrl = baseUrl.trim.stripSuffix("/"),
-          apiKey = apiKey.map(_.trim).filter(_.nonEmpty),
+          apiKey = apiKey.map(_.reveal.trim).filter(_.nonEmpty).map(Secret(_)),
           contextWindow = window,
           reserveCompletion = reserve,
           headers = headers,

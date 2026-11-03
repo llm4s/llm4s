@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider.geminiclient
 
+import org.llm4s.security.Secret
 import org.llm4s.error.NetworkError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.imageprocessing._
@@ -45,7 +46,7 @@ class MockGeminiVisionClient(config: GeminiVisionConfig, mockResponse: Try[(Int,
 class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   private val testConfig = GeminiVisionConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "gemini-3.6-flash",
     connectTimeoutSeconds = 5,
     requestTimeoutSeconds = 10

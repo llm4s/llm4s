@@ -1,7 +1,6 @@
 package org.llm4s.vectorstore.opensearch
 
-import java.nio.charset.StandardCharsets
-import java.util.Base64
+import org.llm4s.security.Secret
 
 /**
  * How [[OpenSearchVectorStore]] authenticates to the cluster. Credentials are never printed by `toString`.
@@ -28,18 +27,18 @@ object OpenSearchAuth {
   }
 
   /** HTTP basic authentication, for a user of the security plugin such as `admin`. */
-  final case class Basic(username: String, password: String) extends OpenSearchAuth {
-    private def token: String =
-      Base64.getEncoder.encodeToString(s"$username:$password".getBytes(StandardCharsets.UTF_8))
-    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic $token")
-    private[opensearch] def secrets: Seq[String]         = Seq(password, token)
+  final case class Basic(username: String, password: Secret) extends OpenSearchAuth {
+    // Secret.basic registers the password and the base64 token, so an error body echoing either is scrubbed
+    private val token: Secret                            = Secret.basic(username, password.reveal)
+    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Basic ${token.reveal}")
+    private[opensearch] def secrets: Seq[String]         = Seq(password.reveal, token.reveal)
     override def toString: String                        = s"Basic($username, ***)"
   }
 
   /** A bearer token, sent as `Authorization: Bearer <token>`: a JWT the security plugin's JWT backend accepts. */
-  final case class BearerToken(token: String) extends OpenSearchAuth {
-    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Bearer $token")
-    private[opensearch] def secrets: Seq[String]         = Seq(token)
+  final case class BearerToken(token: Secret) extends OpenSearchAuth {
+    private[opensearch] def headers: Map[String, String] = Map("Authorization" -> s"Bearer ${token.reveal}")
+    private[opensearch] def secrets: Seq[String]         = Seq(token.reveal)
     override def toString: String                        = "BearerToken(***)"
   }
 }

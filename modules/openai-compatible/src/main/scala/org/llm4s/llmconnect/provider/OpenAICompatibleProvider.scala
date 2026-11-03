@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
@@ -231,7 +232,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
         .fromValues(
           model = section.model.asString,
           baseUrl = baseUrl,
-          apiKey = section.apiKey.map(_.asKey),
+          apiKey = section.apiKey.map(k => Secret(k.asKey)),
           contextWindow = contextWindow.orElse(registryWindow(baseUrl)),
           reserveCompletion = reserveCompletion,
           headers = section.headers,

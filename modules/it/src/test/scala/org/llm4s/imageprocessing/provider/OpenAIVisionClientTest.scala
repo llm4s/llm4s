@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -30,7 +31,7 @@ class OpenAIVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAft
   override def beforeEach(): Unit = {
     tempFile = Files.createTempFile("test", ".png")
     config = OpenAIVisionConfig(
-      apiKey = "test-api-key",
+      apiKey = Secret("test-api-key"),
       baseUrl = UnreachableBaseUrl,
       model = "gpt-4-vision-preview"
     )

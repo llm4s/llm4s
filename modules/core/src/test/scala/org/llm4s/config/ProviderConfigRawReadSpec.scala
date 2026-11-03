@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.security.KnownSecrets
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -37,13 +38,38 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.provider shouldBe Some("openai")
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
-          provider.apiKey shouldBe Some("sk-test")
+          provider.apiKey.map(_.asKey) shouldBe Some("sk-test")
           // Not a built-in field since #1133: read as a provider-specific key, for the
           // provider's descriptor to accept or report as unknown.
           provider.extras shouldBe Map("organization" -> "org-demo")
         case Left(err) =>
           fail(s"Expected RawProvidersConfig, got error: ${err.message}")
     }
+
+    "register a section's credential-named headers when it is read, whether or not a client is built (#1932)" in
+      KnownSecrets.isolated {
+        val hocon =
+          """
+            |llm4s.providers {
+            |  gateway {
+            |    provider = "openai-compatible"
+            |    model = "m"
+            |    headers {
+            |      Authorization = "Bearer gateway-token-0123456789"
+            |      x-api-key = "gateway-key-0123456789"
+            |      X-Trace-Tag = "not-a-credential-0001"
+            |    }
+            |  }
+            |}
+            |""".stripMargin
+
+        RawProvidersConfigLoader.loadSections(ConfigSource.string(hocon)).isRight shouldBe true
+        val p = "[X]"
+        KnownSecrets.scrub("Bearer gateway-token-0123456789", p) shouldBe p // the whole header value
+        KnownSecrets.scrub("gateway-token-0123456789", p) shouldBe p
+        KnownSecrets.scrub("gateway-key-0123456789", p) shouldBe p
+        KnownSecrets.scrub("not-a-credential-0001", p) shouldBe "not-a-credential-0001"
+      }
 
     "read multiple named providers while keeping the selected provider as a ProviderName" in {
       val hocon =
@@ -112,7 +138,7 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.provider shouldBe Some("openai")
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
-          provider.apiKey shouldBe Some("sk-test")
+          provider.apiKey.map(_.asKey) shouldBe Some("sk-test")
           provider.headers shouldBe None
           provider.extras shouldBe empty
         case Left(err) =>

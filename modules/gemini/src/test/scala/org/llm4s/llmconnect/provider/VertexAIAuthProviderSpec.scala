@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.security.KnownSecrets
 import org.llm4s.types.Result
 import org.llm4s.testutil.EchoedCredentials
 import org.scalamock.scalatest.MockFactory
@@ -167,6 +168,56 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     message should include("[REDACTED]")
     EchoedCredentials.leaked(message) shouldBe empty
   }
+
+  it should "mask an access token it issued when a later refresh's error body echoes it (#1932)" in KnownSecrets
+    .isolated {
+      val credFileContent =
+        """{"type":"authorized_user","client_id":"test-client-id","client_secret":"test-secret","refresh_token":"test-refresh-token"}"""
+      // A shape no pattern heuristic recognises: only its registration can mask it.
+      val issued   = "opaqueVertexAccess0001xyz"
+      val calls    = new java.util.concurrent.atomic.AtomicInteger(0)
+      val mockHttp = stub[Llm4sHttpClient]
+      (mockHttp.post _)
+        .when(*, *, *, *)
+        .onCall { (_, _, _, _) =>
+          // expires_in 0: the first token is stale at once, so the next call refreshes
+          if (calls.getAndIncrement() == 0)
+            Right(HttpResponse(200, s"""{"access_token":"$issued","expires_in":0}""", Map.empty))
+          else Right(HttpResponse(400, s"refresh refused; the grant behind $issued was revoked", Map.empty))
+        }
+
+      val provider = new VertexAIAuthProvider(
+        credentialFilePath = Some("/fake/path/creds.json"),
+        httpClient = mockHttp,
+        envReader = _ => None,
+        fileReader = _ => Right(credFileContent)
+      )
+
+      provider.getAccessToken() shouldBe Right(issued)
+      val message = provider.getAccessToken().left.toOption.get.message
+      message should include("Token refresh failed")
+      (message should not).include(issued)
+      KnownSecrets.scrub(issued, "[X]") shouldBe "[X]"
+    }
+
+  it should "register the refresh token as a configured credential, which is never forgotten (#1932)" in KnownSecrets
+    .isolated {
+      val credFileContent =
+        """{"type":"authorized_user","client_id":"test-client-id","client_secret":"test-secret","refresh_token":"opaqueRefresh0001xyz"}"""
+      val mockHttp = stub[Llm4sHttpClient]
+      (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
+      val provider = new VertexAIAuthProvider(
+        credentialFilePath = Some("/fake/path/creds.json"),
+        httpClient = mockHttp,
+        envReader = _ => None,
+        fileReader = _ => Right(credFileContent)
+      )
+
+      provider.getAccessToken().isRight shouldBe true
+      // a runtime token would be released by its last forget; a configured credential stays registered
+      KnownSecrets.forget("opaqueRefresh0001xyz")
+      KnownSecrets.scrub("opaqueRefresh0001xyz", "[X]") shouldBe "[X]"
+    }
 
   it should "return AuthenticationError for unsupported credential type" in {
     val credFileContent = """{"type": "external_account"}"""

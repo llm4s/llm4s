@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
@@ -10,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
 
   private val modelCfg = EmbeddingModelConfig("jina-embeddings-v3", 1024)
-  private val cfg      = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", "k")
+  private val cfg      = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", Secret("k"))
 
   private def run(body: String, n: Int) =
     JinaEmbeddingProvider
@@ -43,7 +44,7 @@ class JinaEmbeddingProviderRegressionSpec extends AnyFlatSpec with Matchers {
     val secret = "jina-SECRET-key-123"
     val http   = new MockHttpClient(HttpResponse(401, s"""{"detail":"invalid key Bearer $secret"}""", Map.empty))
     val err = JinaEmbeddingProvider
-      .forTest(cfg.withApiKey(secret), http)
+      .forTest(cfg.withApiKey(Secret(secret)), http)
       .embed(EmbeddingRequest(Seq("a"), modelCfg))
       .left
       .toOption

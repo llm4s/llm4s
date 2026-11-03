@@ -97,7 +97,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       httpClient
         .postMultipart(
           editUrl,
-          headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+          headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}"),
           data = parts.toSeq,
           timeout = config.timeout
         )
@@ -204,7 +204,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         httpClient
           .get(
             healthUrl,
-            headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+            headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}"),
             timeout = 5.seconds
           )
           .toEither
@@ -228,7 +228,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
   /** A blank `apiKey` would be sent as `Authorization: Bearer `: refused before any request. */
   private def requireApiKey: Either[LLMError, Unit] =
-    ProviderConfig.nonEmpty("OpenAI image", "apiKey", config.apiKey)
+    ProviderConfig.nonEmpty("OpenAI image", "apiKey", config.apiKey.reveal)
 
   private def validatePrompt(prompt: String): Either[LLMError, String] =
     if (prompt.trim.isEmpty) {
@@ -352,7 +352,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       .post(
         url,
         headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
+          "Authorization" -> s"Bearer ${config.apiKey.reveal}",
           "Content-Type"  -> "application/json"
         ),
         data = requestBody.toString,

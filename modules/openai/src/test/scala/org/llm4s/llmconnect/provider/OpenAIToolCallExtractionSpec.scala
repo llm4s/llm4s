@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -20,7 +21,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -87,7 +88,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -147,7 +148,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = model,
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )

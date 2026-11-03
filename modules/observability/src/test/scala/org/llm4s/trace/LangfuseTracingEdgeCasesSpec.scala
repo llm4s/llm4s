@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.llmconnect.model._
@@ -15,8 +16,8 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   private def makeTracing(mockClient: MockHttpClient) = new LangfuseTracing(
     langfuseUrl = "https://cloud.langfuse.com",
-    publicKey = "pk-test",
-    secretKey = "sk-test",
+    publicKey = Secret("pk-test"),
+    secretKey = Secret("sk-test"),
     environment = "test",
     release = "v1.0.0",
     version = "1.0.0",
@@ -422,8 +423,8 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   "LangfuseTracing.from" should "create instance from LangfuseConfig" in {
     val config = LangfuseConfig(
       url = "https://custom.langfuse.com",
-      publicKey = Some("pk-test"),
-      secretKey = Some("sk-test"),
+      publicKey = Some(Secret("pk-test")),
+      secretKey = Some(Secret("sk-test")),
       env = "production",
       release = "2.0.0",
       version = "2.0.0"

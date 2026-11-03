@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.security.Secret
 import org.llm4s.toolapi._
 import org.llm4s.util.DurationRounding
 import upickle.default._
@@ -186,7 +187,7 @@ object ExaSearchTool {
   //
   // ConfigurationError is converted to ValidationError for consistency with tool error types.
 
-  private[llm4s] def validateApiKey(key: String): Result[String] =
+  private[llm4s] def validateApiKey(key: Secret): Result[Secret] =
     ExaSearchToolConfig
       .validateApiKey(key)
       .left
@@ -395,7 +396,7 @@ object ExaSearchTool {
   ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate only the parameters this function receives
     for {
-      validatedApiKey <- validateApiKey(apiKey)
+      validatedApiKey <- validateApiKey(Secret(apiKey))
       validatedApiUrl <- validateHttps(apiUrl)
 
       toolConfig = ExaSearchToolConfig(
@@ -427,7 +428,7 @@ object ExaSearchTool {
           url = url,
           headers = Map(
             "Content-Type" -> "application/json",
-            "x-api-key"    -> toolConfig.apiKey,
+            "x-api-key"    -> toolConfig.apiKey.reveal,
             "User-Agent"   -> "llm4s-exa-search/1.0"
           ),
           body = ujson.write(body),

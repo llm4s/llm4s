@@ -3,6 +3,7 @@ package org.llm4s.kotlin
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.security.Secret
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -14,7 +15,7 @@ class ProviderConfigConstructionTest {
 
     @Test
     fun `OpenAIConfig is built from the API key and model, then adjusted with setters`() {
-        val config = OpenAIConfig.apply("sk-test", "gpt-4o")
+        val config = OpenAIConfig.apply(Secret.apply("sk-test"), "gpt-4o")
             .withOrganization("org-1")
             .withBaseUrl("https://proxy.example.com/v1")
             .withContextWindow(64000)
@@ -31,7 +32,7 @@ class ProviderConfigConstructionTest {
 
     @Test
     fun `AnthropicConfig is built from the API key and model, then adjusted with setters`() {
-        val config = AnthropicConfig.apply("sk-ant-test", "claude-sonnet-4-5").withReserveCompletion(2048)
+        val config = AnthropicConfig.apply(Secret.apply("sk-ant-test"), "claude-sonnet-4-5").withReserveCompletion(2048)
 
         assertEquals(AnthropicConfig.DEFAULT_BASE_URL(), config.baseUrl())
         assertEquals(200000, config.contextWindow())

@@ -3,6 +3,7 @@ package org.llm4s.agent.memory
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.postgresql.ds.PGSimpleDataSource
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -90,7 +91,7 @@ class PostgresMemoryStoreDataSourceIntegrationSpec extends AnyFlatSpec with Matc
     requirePg()
     val table = s"own_pool_memories_$suffix"
     val store = PostgresMemoryStore(
-      PostgresMemoryStore.Config(host, port, database, user, password, table, maxPoolSize = 2)
+      PostgresMemoryStore.Config(host, port, database, user, Secret(password), table, maxPoolSize = 2)
     ).value
     store.close()
     store.count().isLeft shouldBe true

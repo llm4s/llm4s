@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 
 /**
@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory
  */
 @Stable
 final case class DeepSeekConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
@@ -43,12 +43,12 @@ final case class DeepSeekConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): DeepSeekConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): DeepSeekConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): DeepSeekConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): DeepSeekConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): DeepSeekConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): DeepSeekConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
-    s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+    s"DeepSeekConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
 object DeepSeekConfig {
@@ -68,7 +68,7 @@ object DeepSeekConfig {
    * from the model. Every field after `model` has a default.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
@@ -89,7 +89,7 @@ object DeepSeekConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: String, model: String): DeepSeekConfig =
+  def apply(apiKey: Secret, model: String): DeepSeekConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private def deepSeekFallback(modelName: String): (Int, Int) =
@@ -123,11 +123,11 @@ object DeepSeekConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[DeepSeekConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

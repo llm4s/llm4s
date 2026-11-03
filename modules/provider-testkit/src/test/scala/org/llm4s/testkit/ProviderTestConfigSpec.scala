@@ -76,7 +76,7 @@ class ProviderTestConfigSpec extends AnyWordSpec with Matchers with EitherValues
 
       id shouldBe AcmeEmbeddings.id.asString
       config.model shouldBe "acme-small"
-      config.apiKey shouldBe "sk-acme"
+      config.apiKey.reveal shouldBe "sk-acme"
       config.baseUrl shouldBe AcmeProvider.DefaultBaseUrl
     }
 

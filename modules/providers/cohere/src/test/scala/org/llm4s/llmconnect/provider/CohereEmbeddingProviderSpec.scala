@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -29,7 +30,7 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
   private val secretKey = "cohere-SECRET-key-123"
 
   private def cfg(base: String = "http://cohere-test") =
-    EmbeddingProviderConfig(baseUrl = base, model = "embed-english-v3.0", apiKey = secretKey)
+    EmbeddingProviderConfig(baseUrl = base, model = "embed-english-v3.0", apiKey = Secret(secretKey))
 
   /** A v2 response: `embeddings` keyed by type, with the billed input tokens in `meta` when given. */
   private def body(vectors: Seq[Seq[Double]], billed: Option[Int] = None): String = {

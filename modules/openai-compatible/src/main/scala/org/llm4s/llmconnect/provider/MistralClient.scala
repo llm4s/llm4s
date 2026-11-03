@@ -57,11 +57,13 @@ class MistralClient(
 object MistralClient {
 
   def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig.nonEmpty("Mistral", "apiKey", config.apiKey).flatMap(_ => Try(new MistralClient(config)).toResult)
+    ProviderConfig
+      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
+      .flatMap(_ => Try(new MistralClient(config)).toResult)
 
   def apply(config: MistralConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[MistralClient] =
     ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey)
+      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new MistralClient(config, metrics)).toResult)
 
   def apply(
@@ -70,7 +72,7 @@ object MistralClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[MistralClient] =
     ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey)
+      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging)).toResult)
 }
 

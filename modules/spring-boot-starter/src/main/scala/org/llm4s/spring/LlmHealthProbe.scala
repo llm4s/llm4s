@@ -4,6 +4,7 @@ import org.llm4s.error.CancelledError
 import org.llm4s.javaapi.{ ConversationBuilder, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 import org.springframework.core.env.ConfigurableEnvironment
 
 import java.time.Duration
@@ -153,7 +154,8 @@ final private[spring] class LlmHealthProbe(
     redact(s"${t.getClass.getSimpleName}: ${Option(t.getMessage).getOrElse("")}")
 
   private def redact(message: String): String = {
-    val withoutKnown = settings.secrets.foldLeft(Option(message).getOrElse(""))((m, s) => m.replace(s, "***"))
+    val registered   = Redaction.scrubKnown(Option(message).getOrElse(""))
+    val withoutKnown = settings.secrets.foldLeft(registered)((m, s) => m.replace(s, "***"))
     tokenLike.replaceAllIn(withoutKnown, "***").take(200)
   }
 }

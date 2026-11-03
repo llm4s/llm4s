@@ -507,7 +507,7 @@ private[llm4s] object HttpFailures {
    */
   def toLLMError(t: Throwable, method: String, url: String, timeout: FiniteDuration): LLMError = {
     val endpoint = safeEndpoint(url)
-    val detail   = Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getSimpleName)
+    val detail   = Option(t.getMessage).filter(_.nonEmpty).map(Redaction.redact(_)).getOrElse(t.getClass.getSimpleName)
     t match {
       case e if CancelledError.isCancellation(e) =>
         CancelledError(s"http.$method", Some(e))

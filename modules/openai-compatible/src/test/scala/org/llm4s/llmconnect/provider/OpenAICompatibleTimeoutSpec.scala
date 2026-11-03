@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -39,7 +40,7 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
   }
 
   it should "give every dialect's client the same timeouts" in {
-    val deepSeek = new DeepSeekClient(DeepSeekConfig("k", "deepseek-chat", "http://localhost:1", 128000, 8192))
+    val deepSeek = new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", "http://localhost:1", 128000, 8192))
     deepSeek.requestTimeout shouldBe OpenAICompatibleClient.RequestTimeout
     deepSeek.streamTimeout shouldBe OpenAICompatibleClient.StreamTimeout
   }

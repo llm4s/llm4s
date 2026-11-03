@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.auth
 
 import org.llm4s.error.{ AuthenticationError, CancelledError, NetworkError }
+import org.llm4s.http.{ HttpResponse, MockHttpClient }
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -251,6 +253,29 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       provider.token() shouldBe Right("t2")
       calls.get shouldBe 2
     }
+
+    "leave an access token to the client that sends it: a refresh error echoing it is scrubbed once the client has rotated it (#1932)" in
+      KnownSecrets.isolated {
+        val clock  = MutableClock(start)
+        val issued = "opaqueExchangedAccess01"
+        val http = MockHttpClient(
+          Seq(
+            HttpResponse(200, s"""{"access_token":"$issued","expires_in":60}"""),
+            HttpResponse(401, s"token $issued was revoked, refusing a new one")
+          )
+        )
+        val config   = TokenExchangeConfig(IdentitySource.Literal("opaqueSubjectLiteral01"), "https://ws.example/token")
+        val provider = CachingAccessTokenProvider(TokenExchange.rfc8693(config, http, clock), 1.minute, clock)
+        // What every AccessTokenProvider consumer does with each token, before it sends it.
+        val sent  = new TokenGenerations
+        val token = provider.token()
+        token shouldBe Right(issued)
+        token.foreach(sent.rotate)
+        clock.advance(2.minutes)
+        val message = provider.token().left.toOption.map(_.message).getOrElse(fail("expected a Left"))
+        message should include("was revoked")
+        (message should not).include(issued)
+      }
 
     "redact the token value in AccessToken.toString" in {
       (AccessToken("secret", start).toString should not).include("secret")

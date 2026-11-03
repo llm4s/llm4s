@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.spi.{
   EmbeddingProviderSection,
   ProviderRegistry
 }
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -45,6 +46,10 @@ private[config] object EmbeddingsConfigLoader {
   implicit private val embeddingsRootReader: PureConfigReader[EmbeddingsRoot] =
     PureConfigReader.forProduct1("embeddings")(EmbeddingsRoot.apply)
 
+  /** A key as written, trimmed and registered for redaction where it is read. */
+  implicit private val secretReader: PureConfigReader[Secret] =
+    PureConfigReader[String].map(raw => Secret(raw.trim))
+
   /** The uniform `llm4s.embeddings.<id>` shape, read for whichever provider was selected. */
   implicit private val providerSectionReader: PureConfigReader[EmbeddingProviderSection] =
     PureConfigReader.fromCursor { cursor =>
@@ -52,7 +57,7 @@ private[config] object EmbeddingsConfigLoader {
         objCursor <- cursor.asObjectCursor
         fields <- PureConfigReader
           .forProduct3("apiKey", "baseUrl", "model")(
-            (apiKey: Option[String], baseUrl: Option[String], model: Option[String]) =>
+            (apiKey: Option[Secret], baseUrl: Option[String], model: Option[String]) =>
               EmbeddingProviderSection(apiKey, baseUrl, model)
           )
           .from(objCursor)
@@ -230,7 +235,7 @@ private[config] object EmbeddingsConfigLoader {
     // An unreadable credentials entry fails only a section that falls back to it.
     SharedCredentials
       .read(source)
-      .resolve(section.apiKey, EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"), descriptor.id)
+      .resolve(section.apiKey.map(_.reveal), EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"), descriptor.id)
 
   private def trimmed(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)

@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.FiniteDuration
 
 import org.llm4s.imagegeneration.{ ImageEditOptions, OpenAIConfig, ProviderImageEditOptions, ImageValidationError }
@@ -16,7 +17,7 @@ import scala.util.Using
 class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
 
   "editImage" should "fail when source image does not exist" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), HttpClient.create())
 
     val result = client.editImage(
       imagePath = java.nio.file.Path.of("does-not-exist.png"),
@@ -27,7 +28,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when response format is unsupported" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), HttpClient.create())
 
     val result = client.editImage(
       imagePath = java.nio.file.Path.of("does-not-matter.png"),
@@ -43,7 +44,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when mask dimensions do not match source image dimensions" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), HttpClient.create())
 
     withTempFiles("openai-source", "openai-mask") { (source, mask) =>
       writePng(source, width = 64, height = 64)
@@ -60,7 +61,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when provider options are for another provider" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), HttpClient.create())
 
     val result = client.editImage(
       imagePath = java.nio.file.Path.of("does-not-matter.png"),
@@ -74,7 +75,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
   }
 
   it should "fail early when edit output size is unsupported" in {
-    val client = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), HttpClient.create())
+    val client = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), HttpClient.create())
 
     withTempFiles("openai-source-size", "openai-mask-size") { (source, _) =>
       writePng(source, width = 300, height = 300)
@@ -90,7 +91,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
 
   it should "fail when edit endpoint returns no images" in {
     val mockHttpClient = new MockEditHttpClient("""{"data": []}""")
-    val client         = new OpenAIImageClient(OpenAIConfig(apiKey = "test-key"), mockHttpClient)
+    val client         = new OpenAIImageClient(OpenAIConfig(apiKey = Secret("test-key")), mockHttpClient)
 
     withTempFiles("openai-source-empty", "openai-mask-empty") { (source, _) =>
       writePng(source, width = 512, height = 512)

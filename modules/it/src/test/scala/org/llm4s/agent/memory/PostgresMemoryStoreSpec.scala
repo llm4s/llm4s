@@ -10,6 +10,7 @@ import java.util.UUID
 import scala.util.Try
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 
 /**
  * Integration tests for PostgresMemoryStore.
@@ -41,7 +42,7 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     port = sys.env.getOrElse("POSTGRES_PORT", "5432").toInt,
     database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
     user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
-    password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
+    password = Secret(sys.env.getOrElse("POSTGRES_PASSWORD", "password")),
     tableName = tableName,
     maxPoolSize = 4
   )

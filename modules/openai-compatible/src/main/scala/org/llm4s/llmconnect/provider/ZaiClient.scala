@@ -59,7 +59,9 @@ object ZaiClient {
     config: ZaiConfig,
     metrics: MetricsCollector = MetricsCollector.noop
   )(using ModelRegistryService): Result[ZaiClient] =
-    ProviderConfig.nonEmpty("Z.ai", "apiKey", config.apiKey).flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
+    ProviderConfig
+      .nonEmpty("Z.ai", "apiKey", config.apiKey.reveal)
+      .flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
 
   def apply(
     config: ZaiConfig,
@@ -67,7 +69,7 @@ object ZaiClient {
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[ZaiClient] =
     ProviderConfig
-      .nonEmpty("Z.ai", "apiKey", config.apiKey)
+      .nonEmpty("Z.ai", "apiKey", config.apiKey.reveal)
       .flatMap(_ => Try(new ZaiClient(config, metrics, exchangeLogging)).toResult)
 }
 

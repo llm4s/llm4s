@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -77,7 +78,7 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
       val config = load("""baseUrl = "https://example.invalid/v1"
                           |timeouts { request = 45s }""".stripMargin).value
       config.baseUrl shouldBe "https://example.invalid/v1"
-      config.apiKey shouldBe "vk-test-key"
+      config.apiKey.reveal shouldBe "vk-test-key"
       config.timeouts.request shouldBe Some(45.seconds)
     }
   }
@@ -90,7 +91,7 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
         val id                  = FixtureEmbeddingProvider.id
         override val configSpec = FixtureEmbeddingProvider.configSpec
         override def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]) =
-          Right(EmbeddingProviderConfig("http://x", modelOverride.getOrElse("m"), "k"))
+          Right(EmbeddingProviderConfig("http://x", modelOverride.getOrElse("m"), Secret("k")))
         def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = FixtureEmbeddingProvider.build(config)
 
       given ProviderRegistry = ProviderRegistry.ofEmbeddings(Overriding)
@@ -109,7 +110,7 @@ class EmbeddingTimeoutsConfigSpec extends AnyWordSpec with Matchers with EitherV
 
   "EmbeddingProviderConfig" should {
     "default to no timeouts, so a config built by hand behaves as before" in {
-      EmbeddingProviderConfig("http://x", "m", "k").timeouts shouldBe ProviderTimeouts.default
+      EmbeddingProviderConfig("http://x", "m", Secret("k")).timeouts shouldBe ProviderTimeouts.default
     }
   }
 }

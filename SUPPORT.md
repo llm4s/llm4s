@@ -24,6 +24,10 @@ Use GitHub private vulnerability reporting from the repository
 [Security tab](https://github.com/llm4s/llm4s/security) when available; otherwise ask a Security Committee
 member on [Discord](https://discord.gg/4uvTPn6qww) to arrange a private channel, without posting details publicly.
 
+## Which versions get fixes
+
+See the [support policy](docs/reference/support-policy.md): supported lines, platform support and end of support.
+
 ## I want to contribute
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Issues labelled
@@ -33,7 +37,8 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUC
 
 The [enterprise evaluation](https://llm4s.org/reference/enterprise-evaluation) page answers the questions an
 open-source intake form asks (licence, governance, release and support, security, supply chain, data protection),
-each with a link to its evidence, and lists the known gaps with their issues.
+each with a link to its evidence, and lists the known gaps with their issues. Legal and IP questions (licence,
+copyright, DCO, patents, third-party licences) are in the [Legal and IP FAQ](https://llm4s.org/reference/legal-faq).
 
 ## I want to be listed as a user
 

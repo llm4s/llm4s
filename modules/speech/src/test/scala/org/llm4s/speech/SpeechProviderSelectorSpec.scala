@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -14,7 +15,7 @@ class SpeechProviderSelectorSpec extends AnyFlatSpec with Matchers {
     provider = "openai",
     model = "tts-1",
     voice = "alloy",
-    apiKey = "sk-key",
+    apiKey = Secret("sk-key"),
     baseUrl = "https://api.openai.com"
   )
 
@@ -22,7 +23,7 @@ class SpeechProviderSelectorSpec extends AnyFlatSpec with Matchers {
     provider = "elevenlabs",
     model = "eleven_multilingual_v2",
     voice = "voiceId123",
-    apiKey = "el-key",
+    apiKey = Secret("el-key"),
     baseUrl = "https://api.elevenlabs.io"
   )
 
@@ -30,7 +31,7 @@ class SpeechProviderSelectorSpec extends AnyFlatSpec with Matchers {
     provider = "azure",
     model = "neural",
     voice = "en-US-JennyNeural",
-    apiKey = "azure-key",
+    apiKey = Secret("azure-key"),
     baseUrl = "default",
     region = Some("westus")
   )
@@ -77,14 +78,14 @@ class SpeechProviderSelectorSpec extends AnyFlatSpec with Matchers {
   private val openAiSTTCfg = STTConfig(
     provider = "openai",
     model = "whisper-1",
-    apiKey = "sk-key",
+    apiKey = Secret("sk-key"),
     baseUrl = "https://api.openai.com"
   )
 
   private val azureSTTCfg = STTConfig(
     provider = "azure",
     model = "conversation",
-    apiKey = "azure-key",
+    apiKey = Secret("azure-key"),
     baseUrl = "default",
     region = Some("eastus")
   )

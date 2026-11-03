@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.EitherValues
@@ -16,12 +17,12 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   "XaiConfig.fromValues" should "refuse a blank apiKey or baseUrl" in {
-    XaiConfig.fromValues("grok-4.7", "", XaiConfig.DEFAULT_BASE_URL).isLeft shouldBe true
-    XaiConfig.fromValues("grok-4.7", "k", " ").isLeft shouldBe true
+    XaiConfig.fromValues("grok-4.7", Secret(""), XaiConfig.DEFAULT_BASE_URL).isLeft shouldBe true
+    XaiConfig.fromValues("grok-4.7", Secret("k"), " ").isLeft shouldBe true
   }
 
   it should "build a config for the xai provider at the given base URL" in {
-    val config = XaiConfig.fromValues("grok-4.7", "k", XaiConfig.DEFAULT_BASE_URL).value
+    val config = XaiConfig.fromValues("grok-4.7", Secret("k"), XaiConfig.DEFAULT_BASE_URL).value
     config.providerId shouldBe ProviderId("xai")
     config.model shouldBe "grok-4.7"
     config.baseUrl shouldBe "https://api.x.ai/v1"
@@ -33,7 +34,7 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "take a model's window from the registry when it lists the model" in {
     // the registry lists xai/grok-3-mini
-    XaiConfig.fromValues("grok-3-mini", "k", XaiConfig.DEFAULT_BASE_URL).value.contextWindow should be > 0
+    XaiConfig.fromValues("grok-3-mini", Secret("k"), XaiConfig.DEFAULT_BASE_URL).value.contextWindow should be > 0
   }
 
   "the fallback window" should "follow xAI's models page" in {
@@ -47,7 +48,8 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "XaiConfig.toString" should "redact the API key" in {
-    val rendered = XaiConfig("xai-secret-key-123456", "grok-4.7", XaiConfig.DEFAULT_BASE_URL, 500000, 8192).toString
+    val rendered =
+      XaiConfig(Secret("xai-secret-key-123456"), "grok-4.7", XaiConfig.DEFAULT_BASE_URL, 500000, 8192).toString
     (rendered should not).include("xai-secret-key-123456")
     rendered should include("grok-4.7")
   }
@@ -64,7 +66,7 @@ class XaiConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     Llm4sConfig.provider(ConfigSource.string(hocon), "grok").value match {
       case xai: XaiConfig =>
         xai.baseUrl shouldBe XaiConfig.DEFAULT_BASE_URL
-        xai.apiKey shouldBe "xai-key"
+        xai.apiKey.reveal shouldBe "xai-key"
         xai.model shouldBe "grok-4.7"
       case other => fail(s"Expected XaiConfig, got $other")
     }

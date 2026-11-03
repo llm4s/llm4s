@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ GeminiConfig, ProviderConfig, VertexAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -15,7 +16,7 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
 
   test("Gemini provider with GeminiConfig returns GeminiClient") {
     val cfg: ProviderConfig = GeminiConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "gemini-2.0-flash",
       baseUrl = "https://example.invalid/v1beta",
       contextWindow = 1048576,
@@ -45,7 +46,8 @@ class GeminiRoutingTest extends AnyFunSuite with Matchers {
   }
 
   test("a GeminiConfig routed to the vertexai provider is refused") {
-    val cfg: ProviderConfig = GeminiConfig("key", "gemini-2.0-flash", "https://example.invalid/v1beta", 1048576, 8192)
+    val cfg: ProviderConfig =
+      GeminiConfig(Secret("key"), "gemini-2.0-flash", "https://example.invalid/v1beta", 1048576, 8192)
     LLMConnect.getClient(ProviderId("vertexai"), cfg).isLeft shouldBe true
   }
 }

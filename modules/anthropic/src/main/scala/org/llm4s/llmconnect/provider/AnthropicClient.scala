@@ -45,6 +45,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{
@@ -141,8 +142,8 @@ class AnthropicClient(
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
-  /** The configured credentials, which an error built from a remote reply must not repeat. */
-  private val credentialSecrets: Seq[String] = AnthropicClient.credentialSecrets(config)
+  // The workload-identity ids, which an error built from a remote reply must not repeat; the key is a Secret.
+  AnthropicClient.registerCredentials(config)
 
   // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
@@ -153,7 +154,7 @@ class AnthropicClient(
   private val client = {
     val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
     config.workloadIdentity match {
-      case None => builder.apiKey(config.apiKey)
+      case None => builder.apiKey(config.apiKey.reveal)
       case Some(wi) =>
         val auth = AuthenticationConfig
           .builder()
@@ -167,7 +168,11 @@ class AnthropicClient(
           .baseUrl(config.baseUrl)
           .organizationId(wi.organizationId)
         wi.workspaceId.foreach(profile.workspaceId)
-        builder.configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+        builder
+          .configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+          // The SDK exchanges the identity token and sends the access token itself: this sees each request after
+          // the SDK has added its bearer, and registers it before it is sent.
+          .addInterceptor(new AnthropicClient.RegisteringBearer)
     }
     AnthropicClient.withNetwork(builder, config.network, config.baseUrl).build()
   }
@@ -243,7 +248,7 @@ class AnthropicClient(
         // Make API call
         val attempt = Try(
           requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
-        ).toEither.left.map(AnthropicClient.mapError(_, credentialSecrets))
+        ).toEither.left.map(AnthropicClient.mapError(_))
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
@@ -488,7 +493,7 @@ curl https://api.anthropic.com/v1/messages \
             }
           }
         }.toEither.left
-          .map(AnthropicClient.mapError(_, credentialSecrets))
+          .map(AnthropicClient.mapError(_))
 
         // Return the accumulated completion
         val result = attempt.flatMap(_ =>
@@ -888,6 +893,52 @@ curl https://api.anthropic.com/v1/messages \
 object AnthropicClient {
 
   /**
+   * Registers the bearer token of each request it passes on, through its own [[TokenGenerations]], so an error
+   * body echoing a workload-identity access token the SDK obtained is scrubbed. The SDK's interceptors sit beneath
+   * its authorizing layer, so they see the `Authorization` header it adds.
+   */
+  final private[provider] class RegisteringBearer extends com.anthropic.core.http.Interceptor {
+    private val generations = new TokenGenerations
+
+    private def register(request: com.anthropic.core.http.HttpRequest): Unit =
+      request
+        .headers()
+        .values("Authorization")
+        .asScala
+        .collect { case value if value.regionMatches(true, 0, "Bearer ", 0, 7) => value.drop(7).trim }
+        .foreach(generations.rotate)
+
+    override def intercept(next: com.anthropic.core.http.HttpClient): com.anthropic.core.http.HttpClient =
+      new com.anthropic.core.http.HttpClient {
+        override def execute(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): com.anthropic.core.http.HttpResponse = {
+          register(request)
+          next.execute(request, options)
+        }
+        override def executeAsync(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): java.util.concurrent.CompletableFuture[com.anthropic.core.http.HttpResponse] = {
+          register(request)
+          next.executeAsync(request, options)
+        }
+        override def close(): Unit = next.close()
+      }
+  }
+
+  /**
+   * Registers with `KnownSecrets` the workload-identity ids of `config` (federation rule, organisation, service
+   * account, workspace), which the SDK sends and its errors may quote. The API key is a `Secret`, registered already.
+   */
+  private[provider] def registerCredentials(config: AnthropicConfig): Unit =
+    config.workloadIdentity.foreach { wi =>
+      (Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
+        .foreach(KnownSecrets.registerIdentifier)
+    }
+
+  /**
    * Routes the SDK's OkHttp client as `network` says: through its proxy unless `baseUrl`'s host bypasses it,
    * answering the proxy's challenge with its Basic credentials, and trusting its extra CAs (with the JDK's) and
    * presenting its client certificate. [[HttpNetworkSettings.default]] leaves the builder as it was.
@@ -903,7 +954,7 @@ object AnthropicClient {
     HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
       builder.proxy(proxy)
       network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
-        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
       }
     }
     HttpNetwork
@@ -1006,15 +1057,15 @@ object AnthropicClient {
   /**
    * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
    * reply - or, with workload identity, the federation token endpoint's - which may repeat a credential:
-   * every message that becomes part of the error is scrubbed of `secrets` and of credential JSON fields,
+   * every message that becomes part of the error is scrubbed of registered credentials and of credential JSON fields,
    * passed through the general redactor and truncated.
    */
-  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError =
+  private[provider] def mapError(e: Throwable): LLMError =
     // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
-    TroubleshootingLinks.annotate(mapSdkError(e, secrets))
+    TroubleshootingLinks.annotate(mapSdkError(e))
 
-  private def mapSdkError(e: Throwable, secrets: Seq[String]): LLMError = {
-    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
+  private def mapSdkError(e: Throwable): LLMError = {
+    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
     e match {
       case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", safe(e.getMessage))
       // the service's Retry-After, as HttpErrorMapper reads it for the other providers, so ReliableClient waits that long
@@ -1031,7 +1082,7 @@ object AnthropicClient {
         ServiceError(e.statusCode(), "anthropic", safe(e.getMessage))
       // the SDK wraps every I/O failure - a refused connection, a timeout - in one exception: map it by its
       // cause, as OpenAIClient does, so it is a recoverable NetworkError or TimeoutError, not an UnknownError
-      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause, secrets)
+      case io: com.anthropic.errors.AnthropicIoException if io.getCause != null => mapSdkError(io.getCause)
       case e =>
         e.toLLMError match {
           case unknown: UnknownError => UnknownError(safe(unknown.message), e)
@@ -1044,17 +1095,6 @@ object AnthropicClient {
   private def headerMap(headers: com.anthropic.core.http.Headers): Map[String, Seq[String]] =
     headers.names().asScala.map(name => name -> headers.values(name).asScala.toSeq).toMap
 
-  /**
-   * The configured values an error must not repeat: the API key, or with workload identity the ids
-   * `AnthropicWorkloadIdentity.toString` redacts, when long enough to scrub without garbling the body
-   * ([[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
-    config.workloadIdentity match {
-      case None => Seq(config.apiKey)
-      case Some(wi) =>
-        Redaction.identifiers(Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
-    }
   import org.llm4s.types.TryOps
 
   /** A thinking or redacted-thinking block being assembled from a stream. */

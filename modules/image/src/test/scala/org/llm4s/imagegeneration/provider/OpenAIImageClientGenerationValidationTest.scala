@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.FiniteDuration
 
 import org.llm4s.error.ConfigurationError
@@ -66,7 +67,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     new OpenAIImageClient(config, httpClient)
 
   "generateImages" should "reject counts above 1 for dall-e-3 before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = "test-key", model = "dall-e-3"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3"))
 
     val result = c.generateImages(prompt = "a test prompt", count = 2)
 
@@ -76,14 +77,14 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   it should "refuse a blank apiKey before any remote call, rather than send an empty bearer" in {
     for key <- Seq("", "  ") do
       val http = new StubHttpClient()
-      val c    = client(OpenAIConfig(apiKey = key, model = "gpt-image-1"), http)
+      val c    = client(OpenAIConfig(apiKey = Secret(key), model = "gpt-image-1"), http)
       c.generateImages(prompt = "a test prompt", count = 1).left.toOption.get shouldBe a[ConfigurationError]
       c.health().left.toOption.get shouldBe a[ConfigurationError]
       http.lastPostBody shouldBe None
   }
 
   it should "reject empty prompts before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = "test-key"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key")))
 
     val result = c.generateImages(prompt = "   ", count = 1)
 
@@ -91,7 +92,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "enforce 1000-char prompt limit for dall-e-2" in {
-    val c      = client(OpenAIConfig(apiKey = "test-key", model = "dall-e-2"))
+    val c      = client(OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-2"))
     val prompt = "x" * 1001
 
     val result = c.generateImages(prompt = prompt, count = 1)
@@ -100,7 +101,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "enforce 32000-char prompt limit for gpt-image models" in {
-    val c      = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1.5"))
+    val c      = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1.5"))
     val prompt = "x" * 32001
 
     val result = c.generateImages(prompt = prompt, count = 1)
@@ -109,7 +110,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "reject unsupported generation response format before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"))
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -122,7 +123,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "reject an unsupported output format before any remote call" in {
     val stub = new StubHttpClient()
-    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -135,7 +136,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   }
 
   it should "reject out-of-range output compression before any remote call" in {
-    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"))
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"))
 
     val result = c.generateImages(
       prompt = "a test prompt",
@@ -148,7 +149,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "not send response_format when caller does not set it" in {
     val stub = new StubHttpClient()
-    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     c.generateImages(prompt = "prompt", count = 1) shouldBe a[Right[_, _]]
 
@@ -159,7 +160,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "apply dall-e-3 default quality and size mapping" in {
     val stub = new StubHttpClient()
-    val c    = client(OpenAIConfig(apiKey = "test-key", model = "dall-e-3"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "dall-e-3"), stub)
 
     c.generateImages(
       prompt = "prompt",
@@ -174,7 +175,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "derive image format from requested output_format when response is url" in {
     val stub = new StubHttpClient(postResponse = HttpResponse(200, """{"data":[{"url":"https://x/y.png"}]}"""))
-    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     val result = c.generateImages(
       prompt = "prompt",
@@ -194,7 +195,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     val stub = new StubHttpClient(
       postResponse = HttpResponse(400, """{"error":{"message":"bad request details"}}""")
     )
-    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
@@ -205,7 +206,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     val stub = new StubHttpClient(
       postResponse = HttpResponse(503, """{"error":{"message":"overloaded"}}""")
     )
-    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
@@ -215,7 +216,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
   it should "map malformed response body to ImageUnknownError" in {
     val stub = new StubHttpClient(postResponse = HttpResponse(200, "not-json"))
-    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+    val c    = client(OpenAIConfig(apiKey = Secret("test-key"), model = "gpt-image-1"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 

@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -31,7 +32,7 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
   override def beforeEach(): Unit = {
     tempFile = Files.createTempFile("test", ".png")
     config = AnthropicVisionConfig(
-      apiKey = "test-api-key",
+      apiKey = Secret("test-api-key"),
       baseUrl = UnreachableBaseUrl,
       model = "claude-3-sonnet-20240229"
     )

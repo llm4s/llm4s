@@ -20,7 +20,7 @@ If you forget, sign off your most recent commit with:
 git commit --amend -s --no-edit
 ```
 
-Pull requests are checked for DCO sign-off automatically in CI.
+Pull requests are checked for DCO sign-off automatically in CI. The [Legal and IP FAQ](https://llm4s.org/reference/legal-faq) explains what the sign-off certifies and what the project has not decided.
 
 ## Getting Started as a Contributor
 

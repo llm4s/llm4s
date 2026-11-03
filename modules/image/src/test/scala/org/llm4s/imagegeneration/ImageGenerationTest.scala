@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.media.MediaType
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -192,14 +193,14 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
-    val config = HuggingFaceConfig(apiKey = "test-key")
+    val config = HuggingFaceConfig(apiKey = Secret("test-key"))
     val client = ImageGeneration.client(config)
 
     client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
   }
 
   test("ImageGeneration creates correct client for OpenAI config") {
-    val config = OpenAIConfig(apiKey = "test-key")
+    val config = OpenAIConfig(apiKey = Secret("test-key"))
     val client = ImageGeneration.client(config)
 
     client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
@@ -239,12 +240,12 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     sdConfig.timeout shouldBe 60000.millis
     sdConfig.provider shouldBe ImageGenerationProvider.StableDiffusion
 
-    val hfConfig = HuggingFaceConfig(apiKey = "test-key")
+    val hfConfig = HuggingFaceConfig(apiKey = Secret("test-key"))
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
     hfConfig.timeout shouldBe 120000.millis
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
 
-    val openAIConfig = OpenAIConfig(apiKey = "test-key")
+    val openAIConfig = OpenAIConfig(apiKey = Secret("test-key"))
     openAIConfig.model shouldBe "dall-e-2"
     openAIConfig.timeout shouldBe 30000.millis
     openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
@@ -253,16 +254,16 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   test("Config objects can be customized") {
     val customSdConfig = StableDiffusionConfig(
       baseUrl = "http://custom:9000",
-      apiKey = Some("custom-key"),
+      apiKey = Some(Secret("custom-key")),
       timeout = 120000.millis
     )
 
     customSdConfig.baseUrl shouldBe "http://custom:9000"
-    customSdConfig.apiKey shouldBe Some("custom-key")
+    customSdConfig.apiKey shouldBe Some(Secret("custom-key"))
     customSdConfig.timeout shouldBe 120000.millis
 
     val customHfConfig = HuggingFaceConfig(
-      apiKey = "custom-key",
+      apiKey = Secret("custom-key"),
       model = "custom-model",
       timeout = 120000.millis
     )

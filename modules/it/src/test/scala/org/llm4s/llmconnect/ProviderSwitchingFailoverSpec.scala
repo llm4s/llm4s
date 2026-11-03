@@ -141,13 +141,13 @@ final class ProviderSwitchingFailoverSpec extends AnyWordSpec with Matchers with
       openAI shouldBe a[OpenAIConfig]
       openAI.model shouldBe "gpt-4o-mini"
       openAI.asInstanceOf[OpenAIConfig].baseUrl shouldBe "http://openai.invalid/v1"
-      openAI.asInstanceOf[OpenAIConfig].apiKey shouldBe OpenAIKey
+      openAI.asInstanceOf[OpenAIConfig].apiKey.reveal shouldBe OpenAIKey
 
       val anthropic = load("claude-it", hocon).value
       anthropic shouldBe a[AnthropicConfig]
       anthropic.model shouldBe "claude-3-5-haiku-latest"
       anthropic.asInstanceOf[AnthropicConfig].baseUrl shouldBe "http://anthropic.invalid"
-      anthropic.asInstanceOf[AnthropicConfig].apiKey shouldBe AnthropicKey
+      anthropic.asInstanceOf[AnthropicConfig].apiKey.reveal shouldBe AnthropicKey
 
       val ollama = load("ollama-it", hocon).value
       ollama shouldBe a[OllamaConfig]

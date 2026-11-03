@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 
 /**
@@ -38,7 +38,7 @@ import org.slf4j.LoggerFactory
  */
 @Experimental
 final case class CohereConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
@@ -52,12 +52,12 @@ final case class CohereConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
 
-  def withApiKey(apiKey: String): CohereConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): CohereConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): CohereConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
-    s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+    s"CohereConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
 @Experimental
@@ -84,7 +84,7 @@ object CohereConfig {
    * from the model. Every field after `model` has a default.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
@@ -105,7 +105,7 @@ object CohereConfig {
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: String, model: String): CohereConfig =
+  def apply(apiKey: Secret, model: String): CohereConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val cohereFallback: String => (Int, Int) = _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
@@ -137,11 +137,11 @@ object CohereConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[CohereConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

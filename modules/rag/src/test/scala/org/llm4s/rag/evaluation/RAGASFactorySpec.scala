@@ -1,5 +1,6 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
@@ -164,7 +165,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
     FixtureChatConfig("k", "fixture-model")
 
   private def embeddings(model: String) =
-    "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, "key")
+    "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, Secret("key"))
 
   "RAGASFactory.fromConfigs" should "resolve the embedding model's dimensions through its provider" in {
     given ProviderRegistry = withFixture

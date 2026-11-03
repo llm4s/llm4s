@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
@@ -149,7 +150,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     val config = OpenAIConfig
       .fromValues(
         modelName = "test-model",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         organization = None,
         baseUrl = "https://example.invalid/v1"
       )
@@ -165,7 +166,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     def openAIClientAt(baseUrl: String): LLMClient =
       OpenAIConfig
-        .fromValues("gpt-4o", "sk-test", None, baseUrl)
+        .fromValues("gpt-4o", Secret("sk-test"), None, baseUrl)
         .flatMap(OpenAIClient(_)) match
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
@@ -194,12 +195,15 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       )(openAIClientAt)
       assertContentParts("openai", respond)(supported*)(openAIClientAt)
       assertContentParts("requesty", respond)(supported*) { baseUrl =>
-        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", "rq-key", None, baseUrl).toOption.get
+        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), None, baseUrl).toOption.get
         RequestyProvider.buildClient(config, LlmClientOptions.default).toOption.get
       }
       assertContentParts("azure", respond)(supported*) { baseUrl =>
         val config =
-          AzureConfig.fromValues("my-deploy", baseUrl, "azure-key", AzureConfig.DEFAULT_API_VERSION).toOption.get
+          AzureConfig
+            .fromValues("my-deploy", baseUrl, Secret("azure-key"), AzureConfig.DEFAULT_API_VERSION)
+            .toOption
+            .get
         AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
       }
     }
@@ -254,7 +258,8 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = "test-key")
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
       }
     }

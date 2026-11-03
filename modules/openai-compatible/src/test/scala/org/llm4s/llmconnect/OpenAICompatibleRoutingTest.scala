@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -18,7 +19,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("OpenRouter provider with OpenAIConfig returns OpenRouterClient") {
     val cfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "openrouter/test-model",
       organization = None,
       baseUrl = "https://openrouter.ai/api/v1",
@@ -34,7 +35,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("DeepSeek provider with DeepSeekConfig returns DeepSeekClient") {
     val cfg: ProviderConfig = DeepSeekConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "deepseek-chat",
       baseUrl = "https://example.invalid/v1",
       contextWindow = 128000,
@@ -49,7 +50,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("Zai provider with ZaiConfig returns ZaiClient") {
     val cfg: ProviderConfig = ZaiConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "GLM-4.7",
       baseUrl = "https://api.z.ai/api/paas/v4",
       contextWindow = 128000,
@@ -64,7 +65,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("Mistral provider with MistralConfig returns MistralClient") {
     val cfg: ProviderConfig = MistralConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "mistral-small-latest",
       baseUrl = "https://example.invalid",
       contextWindow = 128000,
@@ -79,7 +80,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("Cohere provider with CohereConfig returns CohereClient") {
     val cfg: ProviderConfig = CohereConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "command-r",
       baseUrl = "https://example.invalid",
       contextWindow = 128000,
@@ -109,7 +110,7 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
 
   test("Zai provider with non-ZaiConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "gpt-4o",
       organization = None,
       baseUrl = "https://api.openai.com/v1",

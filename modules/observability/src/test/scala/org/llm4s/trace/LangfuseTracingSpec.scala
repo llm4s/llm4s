@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -30,8 +31,8 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     restoreInterrupt: () => Unit = () => ()
   ) = new LangfuseTracing(
     langfuseUrl = langfuseUrl,
-    publicKey = publicKey,
-    secretKey = secretKey,
+    publicKey = Secret(publicKey),
+    secretKey = Secret(secretKey),
     environment = "test",
     release = "v0.1.0",
     version = "1.0.0",

@@ -1,5 +1,6 @@
 package org.llm4s.rag.permissions.pg
 
+import org.llm4s.util.Redaction
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
@@ -61,7 +62,9 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-create", e.getMessage)).flatMap(identity)
+  }.toEither.left
+    .map(e => ProcessingError("pg-collection-create", Redaction.scrubKnown(e.getMessage)))
+    .flatMap(identity)
 
   private def markAsNonLeaf(path: CollectionPath): Result[Unit] = Try {
     withConnection { conn =>
@@ -75,7 +78,7 @@ final class PgCollectionStore(
         ()
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-update", Redaction.scrubKnown(e.getMessage)))
 
   override def get(path: CollectionPath): Result[Option[Collection]] = Try {
     withConnection { conn =>
@@ -91,7 +94,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-get", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-get", Redaction.scrubKnown(e.getMessage)))
 
   override def getById(id: Int): Result[Option[Collection]] = Try {
     withConnection { conn =>
@@ -107,7 +110,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-get-by-id", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-get-by-id", Redaction.scrubKnown(e.getMessage)))
 
   override def list(pattern: CollectionPattern): Result[Seq[Collection]] = Try {
     withConnection { conn =>
@@ -127,7 +130,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-list", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-list", Redaction.scrubKnown(e.getMessage)))
 
   override def findAccessible(
     auth: UserAuthorization,
@@ -190,7 +193,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-find-accessible", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-find-accessible", Redaction.scrubKnown(e.getMessage)))
 
   override def updatePermissions(
     path: CollectionPath,
@@ -235,7 +238,9 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update-perms", e.getMessage)).flatMap(identity)
+  }.toEither.left
+    .map(e => ProcessingError("pg-collection-update-perms", Redaction.scrubKnown(e.getMessage)))
+    .flatMap(identity)
 
   override def updateMetadata(
     path: CollectionPath,
@@ -259,7 +264,9 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update-metadata", e.getMessage)).flatMap(identity)
+  }.toEither.left
+    .map(e => ProcessingError("pg-collection-update-metadata", Redaction.scrubKnown(e.getMessage)))
+    .flatMap(identity)
 
   override def delete(path: CollectionPath): Result[Unit] =
     for {
@@ -287,7 +294,7 @@ final class PgCollectionStore(
         ()
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-delete", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-delete", Redaction.scrubKnown(e.getMessage)))
 
   override def getEffectivePermissions(path: CollectionPath): Result[Set[PrincipalId]] =
     for {
@@ -350,7 +357,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-list-children", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-list-children", Redaction.scrubKnown(e.getMessage)))
 
   override def countDocuments(path: CollectionPath): Result[Long] = Try {
     withConnection { conn =>
@@ -368,7 +375,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-count-docs", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-count-docs", Redaction.scrubKnown(e.getMessage)))
 
   override def countChunks(path: CollectionPath): Result[Long] = Try {
     withConnection { conn =>
@@ -385,7 +392,7 @@ final class PgCollectionStore(
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-count-chunks", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-count-chunks", Redaction.scrubKnown(e.getMessage)))
 
   override def stats(path: CollectionPath): Result[CollectionStats] =
     for {

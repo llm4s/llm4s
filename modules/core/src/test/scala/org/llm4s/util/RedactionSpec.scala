@@ -5,18 +5,6 @@ import org.scalatest.matchers.should.Matchers
 
 class RedactionSpec extends AnyFlatSpec with Matchers {
 
-  "Redaction.secret" should "mask any string value" in {
-    Redaction.secret("sk-abc123") shouldBe "***"
-  }
-
-  "Redaction.secretOpt" should "mask Some values" in {
-    Redaction.secretOpt(Some("secret")) shouldBe "Some(***)"
-  }
-
-  it should "show None" in {
-    Redaction.secretOpt(None) shouldBe "None"
-  }
-
   "Redaction.truncateForLog" should "return short strings unchanged" in {
     Redaction.truncateForLog("short") shouldBe "short"
   }

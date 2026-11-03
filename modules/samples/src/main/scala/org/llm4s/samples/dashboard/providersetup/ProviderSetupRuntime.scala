@@ -1,5 +1,6 @@
 package org.llm4s.samples.dashboard.providersetup
 
+import org.llm4s.security.Secret
 import org.llm4s.config.DiscoveredModel
 import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.llmconnect.config.*
@@ -353,8 +354,8 @@ private[providersetup] object ProviderSetupRuntime:
   private def requiredModel(input: ProviderSessionInput, message: String): Either[String, String] =
     input.model.toRight(message)
 
-  private def requiredApiKey(input: ProviderSessionInput, message: String): Either[String, String] =
-    input.apiKey.toRight(message)
+  private def requiredApiKey(input: ProviderSessionInput, message: String): Either[String, Secret] =
+    input.apiKey.map(Secret(_)).toRight(message)
 
   private def requiredBaseUrl(input: ProviderSessionInput, message: String): Either[String, String] =
     input.baseUrl.toRight(message)
@@ -375,19 +376,19 @@ private[providersetup] object ProviderSetupRuntime:
       case cfg: OpenAIConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withOrganization(input.flatMap(_.organization).orElse(cfg.organization))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: AzureConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
           .withEndpoint(input.flatMap(_.endpoint).getOrElse(cfg.endpoint))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withApiVersion(input.flatMap(_.apiVersion).getOrElse(cfg.apiVersion))
       case cfg: AnthropicConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: OllamaConfig =>
         cfg
@@ -396,27 +397,27 @@ private[providersetup] object ProviderSetupRuntime:
       case cfg: GeminiConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: DeepSeekConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: CohereConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: MistralConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: ZaiConfig =>
         cfg
           .withModel(input.flatMap(_.model).getOrElse(cfg.model))
-          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withApiKey(input.flatMap(_.apiKey).map(Secret(_)).getOrElse(cfg.apiKey))
           .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: VertexAIConfig =>
         cfg

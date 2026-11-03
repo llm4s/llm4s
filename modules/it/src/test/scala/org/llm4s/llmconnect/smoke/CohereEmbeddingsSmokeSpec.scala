@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -27,7 +28,7 @@ class CohereEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String, inputType: CohereInputType = CohereInputType.default): EmbeddingProvider =
     CohereEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = Model, apiKey = apiKey),
+      EmbeddingProviderConfig(baseUrl = "https://api.cohere.com", model = Model, apiKey = Secret(apiKey)),
       inputType
     )
 

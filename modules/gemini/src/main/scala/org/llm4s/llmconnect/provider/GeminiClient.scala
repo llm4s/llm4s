@@ -118,7 +118,7 @@ class GeminiClient(
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+        val url = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey.reveal}"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
@@ -168,7 +168,7 @@ class GeminiClient(
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
+        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey.reveal}&alt=sse"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")

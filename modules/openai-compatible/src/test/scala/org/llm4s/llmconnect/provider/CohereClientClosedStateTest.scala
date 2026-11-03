@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage }
@@ -19,7 +20,7 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: CohereConfig = CohereConfig(
-    apiKey = "test-api-key-for-closed-state-testing",
+    apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = "command-r",
     baseUrl = "https://example.invalid",
     contextWindow = 128000,

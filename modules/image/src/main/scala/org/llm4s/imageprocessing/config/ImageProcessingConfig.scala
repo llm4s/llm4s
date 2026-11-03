@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing.config
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.*
 
 /**
@@ -17,7 +18,7 @@ sealed trait ImageProcessingConfig
  * @param requestTimeout Request timeout (default: 60 seconds)
  */
 case class OpenAIVisionConfig(
-  apiKey: String,
+  apiKey: Secret,
   model: String = "gpt-4-vision-preview",
   baseUrl: String = "https://api.openai.com/v1",
   connectTimeout: FiniteDuration = 30.seconds,
@@ -34,7 +35,7 @@ case class OpenAIVisionConfig(
  * @param requestTimeout Request timeout (default: 60 seconds)
  */
 case class AnthropicVisionConfig(
-  apiKey: String,
+  apiKey: Secret,
   model: String = "claude-3-sonnet-20240229",
   baseUrl: String = "https://api.anthropic.com",
   connectTimeout: FiniteDuration = 30.seconds,
@@ -51,16 +52,16 @@ case class AnthropicVisionConfig(
  * @param requestTimeoutSeconds Request timeout in seconds (default: 60)
  */
 case class GeminiVisionConfig(
-  apiKey: String,
+  apiKey: Secret,
   model: String = "gemini-3.6-flash",
   baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
   connectTimeoutSeconds: Int = 30,
   requestTimeoutSeconds: Int = 60
 ) extends ImageProcessingConfig {
 
-  /** Never prints the API key. */
+  /** Prints the API key as `***`. */
   override def toString: String =
-    s"GeminiVisionConfig(apiKey=***,model=$model,baseUrl=$baseUrl,connectTimeoutSeconds=$connectTimeoutSeconds,requestTimeoutSeconds=$requestTimeoutSeconds)"
+    s"GeminiVisionConfig(apiKey=$apiKey,model=$model,baseUrl=$baseUrl,connectTimeoutSeconds=$connectTimeoutSeconds,requestTimeoutSeconds=$requestTimeoutSeconds)"
 }
 
 /**

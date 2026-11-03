@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.opensearch
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -36,7 +37,7 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     val config = OpenSearchConfig()
       .withBaseUrl("https://search.example.com/proxy/")
       .withIndex("docs")
-      .withAuth(OpenSearchAuth.Basic("admin", "pw"))
+      .withAuth(OpenSearchAuth.Basic("admin", Secret("pw")))
       .withSpaceType(OpenSearchSpaceType.L2)
       .withEngine(OpenSearchEngine.Faiss)
       .withDimensions(8)
@@ -64,11 +65,14 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse credentials over plain http to a remote host, and accept them for loopback or https" in {
-    val basic = OpenSearchAuth.Basic("admin", "pw")
+    val basic = OpenSearchAuth.Basic("admin", Secret("pw"))
     refused(OpenSearchConfig("http://search.example.com:9200", auth = basic)) should
       (include("OpenSearch baseUrl").and(include("must be https")))
     OpenSearchConfig("http://localhost:9200", auth = basic).validate.isRight shouldBe true
-    OpenSearchConfig("https://search.example.com", auth = OpenSearchAuth.BearerToken("t")).validate.isRight shouldBe
+    OpenSearchConfig(
+      "https://search.example.com",
+      auth = OpenSearchAuth.BearerToken(Secret("t"))
+    ).validate.isRight shouldBe
       true
     OpenSearchConfig("http://opensearch:9200").validate.isRight shouldBe true
     refused(OpenSearchConfig("https://user:pw@search.example.com")) should include("must not carry credentials")
@@ -80,10 +84,10 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse unusable credentials and limits" in {
-    refused(OpenSearchConfig(auth = OpenSearchAuth.BearerToken(" "))) should include("token")
-    refused(OpenSearchConfig(auth = OpenSearchAuth.BearerToken("a b"))) should include("token")
-    refused(OpenSearchConfig(auth = OpenSearchAuth.Basic("", "pw"))) should include("username")
-    refused(OpenSearchConfig(auth = OpenSearchAuth.Basic("a:b", "pw"))) should include("username")
+    refused(OpenSearchConfig(auth = OpenSearchAuth.BearerToken(Secret(" ")))) should include("token")
+    refused(OpenSearchConfig(auth = OpenSearchAuth.BearerToken(Secret("a b")))) should include("token")
+    refused(OpenSearchConfig(auth = OpenSearchAuth.Basic("", Secret("pw")))) should include("username")
+    refused(OpenSearchConfig(auth = OpenSearchAuth.Basic("a:b", Secret("pw")))) should include("username")
     refused(OpenSearchConfig(dimensions = Some(0))) should include("dimensions")
     refused(OpenSearchConfig(dimensions = Some(16001))) should include("dimensions")
     OpenSearchConfig(dimensions = Some(16000)).validate.isRight shouldBe true
@@ -95,8 +99,8 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "OpenSearchAuth" should "never print a credential" in {
-    OpenSearchAuth.BearerToken("secret-token").toString shouldBe "BearerToken(***)"
-    OpenSearchAuth.Basic("admin", "secret-pw").toString shouldBe "Basic(admin, ***)"
+    OpenSearchAuth.BearerToken(Secret("secret-token")).toString shouldBe "BearerToken(***)"
+    OpenSearchAuth.Basic("admin", Secret("secret-pw")).toString shouldBe "Basic(admin, ***)"
     OpenSearchAuth.NoAuth.headers shouldBe empty
     OpenSearchAuth.NoAuth.secrets shouldBe empty
   }
@@ -129,4 +133,12 @@ class OpenSearchConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "keep l2's score, already in (0, 1]" in {
     OpenSearchSpaceType.L2.normalise(0.2) shouldBe 0.2
   }
+
+  it should "register the derived basic token so an error body echoing it is scrubbed" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val b64  = java.util.Base64.getEncoder.encodeToString("elastic:basic-pw-register-1".getBytes("UTF-8"))
+      val auth = OpenSearchAuth.Basic("elastic", Secret("basic-pw-register-1"))
+      auth.headers("Authorization") shouldBe s"Basic $b64"
+      (org.llm4s.util.Redaction.safeBody(s"Basic $b64") should not).include(b64)
+    }
 }

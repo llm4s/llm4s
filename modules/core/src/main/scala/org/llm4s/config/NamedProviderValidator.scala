@@ -341,7 +341,7 @@ private[llm4s] object NamedProviderConfigValidator:
         providerName,
         descriptor,
         if noKey then normalized
-        else normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
+        else normalized.withApiKey(resolved.map(key => ApiKey(key.value.reveal)))
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))

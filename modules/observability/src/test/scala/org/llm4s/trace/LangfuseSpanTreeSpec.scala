@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.model.{ AssistantMessage, UsageSummary, UserMessage }
 import org.llm4s.types.Result
@@ -16,8 +17,8 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
   private class Recording
       extends LangfuseTracing(
         langfuseUrl = "https://langfuse.example.com",
-        publicKey = "pk-lf-test",
-        secretKey = "sk-lf-test",
+        publicKey = Secret("pk-lf-test"),
+        secretKey = Secret("sk-lf-test"),
         environment = "test",
         release = "v0",
         version = "1",

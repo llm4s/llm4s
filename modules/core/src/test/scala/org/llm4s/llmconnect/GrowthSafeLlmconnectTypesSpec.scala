@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.caching.{ CacheEntry, CacheStats }
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions }
@@ -74,13 +75,13 @@ class GrowthSafeLlmconnectTypesSpec extends AnyFlatSpec with Matchers {
     section.timeouts shouldBe ProviderTimeouts.default
 
     val timeouts = ProviderTimeouts(request = Some(3.seconds))
-    val set      = section.withApiKey("k").withBaseUrl("http://b").withModel("m").withTimeouts(timeouts)
-    set shouldBe EmbeddingProviderSection(Some("k"), Some("http://b"), Some("m"), timeouts)
+    val set      = section.withApiKey(Secret("k")).withBaseUrl("http://b").withModel("m").withTimeouts(timeouts)
+    set shouldBe EmbeddingProviderSection(Some(Secret("k")), Some("http://b"), Some("m"), timeouts)
 
     val cleared = set.withApiKey(None).withBaseUrl(None).withModel(None)
     cleared shouldBe EmbeddingProviderSection(timeouts = timeouts)
-    set.withApiKey(Some("k2")).withBaseUrl(Some("http://c")).withModel(Some("m2")) shouldBe
-      EmbeddingProviderSection(Some("k2"), Some("http://c"), Some("m2"), timeouts)
+    set.withApiKey(Some(Secret("k2"))).withBaseUrl(Some("http://c")).withModel(Some("m2")) shouldBe
+      EmbeddingProviderSection(Some(Secret("k2")), Some("http://c"), Some("m2"), timeouts)
   }
 
   "ProviderConfigKey" should "default to optional with no default, env or aliases" in {

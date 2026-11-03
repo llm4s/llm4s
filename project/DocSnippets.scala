@@ -27,12 +27,14 @@ object DocSnippets {
 
   /** The pages whose snippets are compiled. Paths are relative to `docs/`. */
   val pages: Seq[String] = Seq(
+    "ai-assistants.md",
     "getting-started/configuration.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
     "getting-started/next-steps.md",
     "getting-started/ollama-quickstart.md",
     "getting-started/testing-guide.md",
+    "guide/agents/handoffs.md",
     "guide/basic-usage.md",
     "guide/custom-tools.md",
     "guide/data-protection.md",

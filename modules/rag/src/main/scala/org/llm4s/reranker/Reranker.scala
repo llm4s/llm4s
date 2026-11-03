@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 /**
@@ -66,7 +67,7 @@ final case class RerankError(
  */
 final case class RerankProviderConfig(
   baseUrl: String,
-  apiKey: String,
+  apiKey: Secret,
   model: String
 )
 

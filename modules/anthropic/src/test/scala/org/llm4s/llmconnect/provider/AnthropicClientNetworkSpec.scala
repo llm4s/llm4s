@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -28,7 +29,7 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
   private val BaseUrl = "http://api.anthropic.test"
 
   private def config(baseUrl: String, network: HttpNetworkSettings): AnthropicConfig =
-    AnthropicConfig("sk-ant-test", "claude-sonnet-4-5").withBaseUrl(baseUrl).withNetwork(network)
+    AnthropicConfig(Secret("sk-ant-test"), "claude-sonnet-4-5").withBaseUrl(baseUrl).withNetwork(network)
 
   private def via(proxy: HttpProxy) = HttpNetworkSettings(proxy = Some(proxy.withNonProxyHosts(Nil)))
 
@@ -73,7 +74,7 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
     val plain   = AnthropicClient(config(baseUrl, HttpNetworkSettings.default)).value
     plain.complete(hello, CompletionOptions()).isLeft shouldBe true
     plain.close()
-    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(TestTls.Password)))
+    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password))))
     val client   = AnthropicClient(config(baseUrl, trusting)).value
     client.complete(hello, CompletionOptions()).value.content shouldBe "over tls"
     client.close()
@@ -81,7 +82,7 @@ final class AnthropicClientNetworkSpec extends AnyFlatSpec with Matchers with Ei
   }
 
   "AnthropicClient with a trust store it cannot read" should "refuse to build, never naming the password" in {
-    val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some("never-printed")))
+    val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some(Secret("never-printed"))))
     val error  = AnthropicClient(config(BaseUrl, broken)).left.value
     error.message should (include("tls.trustStore").and(not).include("never-printed"))
   }

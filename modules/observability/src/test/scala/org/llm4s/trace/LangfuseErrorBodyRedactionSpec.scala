@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.testutil.EchoedCredentials.{ leaked, logged }
@@ -18,7 +19,10 @@ class LangfuseErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
   "DefaultLangfuseBatchSender" should "redact credentials echoed in an error body before logging it" in {
     val sender = new DefaultLangfuseBatchSender(new MockHttpClient(HttpResponse(500, EchoedCredentials.Text)), () => ())
     val (_, lines) = logged(
-      sender.sendBatch(events, LangfuseHttpApiCaller("https://cloud.langfuse.com", "pk-lf-test", "sk-lf-test"))
+      sender.sendBatch(
+        events,
+        LangfuseHttpApiCaller("https://cloud.langfuse.com", Secret("pk-lf-test"), Secret("sk-lf-test"))
+      )
     )
     lines.exists(_.contains("[REDACTED]")) shouldBe true
     lines.flatMap(leaked) shouldBe empty
@@ -27,8 +31,8 @@ class LangfuseErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
   "LangfuseTracing" should "redact credentials echoed in an error body before logging it" in {
     val tracing = new LangfuseTracing(
       langfuseUrl = "https://cloud.langfuse.com",
-      publicKey = "pk-test",
-      secretKey = "sk-test",
+      publicKey = Secret("pk-test"),
+      secretKey = Secret("sk-test"),
       environment = "test",
       release = "v1",
       version = "1",

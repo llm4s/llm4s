@@ -1,16 +1,11 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{
-  AccessTokenProvider,
-  CachingAccessTokenProvider,
-  IdentitySource,
-  TokenExchange,
-  TokenExchangeConfig
-}
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, CachingAccessTokenProvider, TokenExchange, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -84,6 +79,13 @@ class OpenAICompatibleClient(
     .blankStaticKey(settings)
     .foreach(message => throw new IllegalArgumentException(message))
 
+  // A configured credential header and the exchange's client id are scrubbed from any error built from a reply.
+  OpenAICompatibleClient.registerCredentials(settings, dialect.headers)
+
+  // Each dynamic bearer is registered before it is sent, so an error body echoing it is scrubbed; the generation
+  // before the previous one is released. The provider may be the caller's own code, so it is registered here.
+  private val bearers = new TokenGenerations
+
   // Scoped to the provider package so specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -117,7 +119,7 @@ class OpenAICompatibleClient(
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
-                  Redaction.scrubRemote(body, credentialSecrets(headers)),
+                  Redaction.scrubRemote(body),
                   providerName,
                   response.headers
                 )
@@ -148,8 +150,7 @@ class OpenAICompatibleClient(
                 response.body,
                 rawStream,
                 onChunk,
-                response.headers,
-                credentialSecrets(headers)
+                response.headers
               )
             )
             .map(bindThinking(_, conversation, options))
@@ -163,23 +164,22 @@ class OpenAICompatibleClient(
    * Turns a streaming response into a completion, closing `body` on every path: an error
    * status, a malformed event, an exception from `onChunk`, or success. (Two of the three
    * clients this replaced leaked the body on an error status.) Everything read is appended to
-   * `rawStream` for the exchange log. An error body is scrubbed of `secrets`, the credentials the request
-   * carried, before it is mapped to an error.
+   * `rawStream` for the exchange log. An error body is scrubbed of registered credentials before it is
+   * mapped to an error.
    */
   protected[provider] def consumeStream(
     statusCode: Int,
     body: InputStream,
     rawStream: StringBuilder,
     onChunk: StreamedChunk => Unit,
-    headers: Map[String, Seq[String]] = Map.empty,
-    secrets: Seq[String] = Nil
+    headers: Map[String, Seq[String]] = Map.empty
   ): Result[Completion] =
     if (statusCode != 200) {
       val errorBody =
         Try(Using.resource(body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)))
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
-      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody, secrets), providerName, headers)
+      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody), providerName, headers)
     } else
       // A failure while reading the open body is classified as a transport failure would be
       Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
@@ -336,11 +336,14 @@ class OpenAICompatibleClient(
   /** The current bearer value, if this client sends one. */
   private def bearer(): Result[Option[String]] = settings.credential match
     case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
-    case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key))
+    case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key.reveal))
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
-        CachingAccessTokenProvider.guarded(p.token()).map(Some(_))
+        CachingAccessTokenProvider.guarded(p.token()).map { token =>
+          bearers.rotate(token)
+          Some(token)
+        }
       )
 
   /**
@@ -354,26 +357,6 @@ class OpenAICompatibleClient(
       OpenAICompatibleClient.combineRepeated(dialect.headers)
 
   /**
-   * The credentials a request with `requestHeaders` carried, which an error body must not repeat: the
-   * bearer token sent, and for an exchange its literal identity token and its client id (when long enough to
-   * scrub without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private def credentialSecrets(requestHeaders: Map[String, String]): Seq[String] = {
-    val bearer = requestHeaders.collect {
-      case (name, value) if name.equalsIgnoreCase("Authorization") => value.stripPrefix("Bearer ").trim
-    }
-    val exchange = settings.credential match {
-      case OpenAICompatibleClient.Credential.Exchange(config) =>
-        Redaction.identifiers(config.clientId) ++ (config.identityToken match {
-          case IdentitySource.Literal(token) => Seq(token)
-          case IdentitySource.File(_)        => Nil
-        })
-      case _ => Nil
-    }
-    bearer.toSeq ++ exchange
-  }
-
-  /**
    * Sends with the current token; when the credential is dynamic and the reply is a 401, reports the
    * token rejected, fetches a fresh one and sends exactly once more. A 403 is not retried: the token
    * was accepted and it is the permission that is missing, which a new token does not change. A
@@ -383,7 +366,11 @@ class OpenAICompatibleClient(
    */
   private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] = {
     def attempt(token: Option[String]): Result[A] = {
-      val result = send(requestHeaders(token))
+      // A refreshed token stays registered until this request's reply has been scrubbed and logged, however many
+      // newer requests rotate past it meanwhile.
+      val result = (token, tokenProvider) match
+        case (Some(t), Some(_)) => bearers.holding(t)(send(requestHeaders(token)))
+        case _                  => send(requestHeaders(token))
       (result, token) match
         case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
           tokenProvider.foreach(p => Try(p.invalidate(rejected)))
@@ -648,6 +635,18 @@ object OpenAICompatibleClient {
       "is the credential's token - remove the header"
 
   /** Whether `headers` set `Authorization` (in any case) over a `credential` whose token is refreshed. */
+  /**
+   * Registers with `KnownSecrets` what a client built from `settings` and `headers` must keep out of an error:
+   * each header with a credential name (a static `Authorization`, an `x-api-key`), and an exchange's client id.
+   */
+  private[provider] def registerCredentials(settings: Settings, headers: Seq[(String, String)]): Unit = {
+    KnownSecrets.registerHeaders(headers)
+    settings.credential match {
+      case Credential.Exchange(config) => config.clientId.foreach(KnownSecrets.registerIdentifier)
+      case _                           => ()
+    }
+  }
+
   private[provider] def overridesDynamicBearer(credential: Credential, headers: Seq[(String, String)]): Boolean =
     credential match
       case Credential.Dynamic(_) | Credential.Exchange(_) => headers.exists(_._1.equalsIgnoreCase("Authorization"))
@@ -675,7 +674,7 @@ object OpenAICompatibleClient {
    */
   private[provider] def blankStaticKey(settings: Settings): Option[String] =
     settings.credential match
-      case Credential.Static(key) if key.trim.isEmpty =>
+      case Credential.Static(key) if key.reveal.trim.isEmpty =>
         Some(
           s"${settings.displayName} apiKey must be non-empty: a blank key would be sent as an empty bearer token"
         )
@@ -733,7 +732,7 @@ object OpenAICompatibleClient {
     case Anonymous
 
     /** `Authorization: Bearer <key>`; `key` must not be blank - the client refuses an empty bearer. */
-    case Static(key: String)
+    case Static(key: Secret)
 
     /**
      * `Authorization: Bearer <token>`, the token fetched per request from `provider` and refreshed once
@@ -856,7 +855,7 @@ object OpenAICompatibleClient {
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)
         // A blank key is no key, as `fromValues` treats it: never an empty bearer.
-        case None => config.apiKey.filter(_.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
+        case None => config.apiKey.filter(_.reveal.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
       },
       contextWindow = config.contextWindow,
       reserveCompletion = config.reserveCompletion,

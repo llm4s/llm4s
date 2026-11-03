@@ -27,7 +27,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("gemini"),
           model = Some("gemini-2.5-flash"),
           baseUrl = Some("https://generativelanguage.googleapis.com/v1beta"),
-          apiKey = Some("google-key"),
+          apiKey = Some(ApiKey("google-key")),
         )
       ) match
         case Right(cfg) =>
@@ -45,7 +45,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("Google"),
           model = Some("gemini-2.5-flash"),
           baseUrl = None,
-          apiKey = Some("google-key"),
+          apiKey = Some(ApiKey("google-key")),
         )
       ) match
         case Right(cfg) => cfg.provider shouldBe ProviderId("gemini")
@@ -81,7 +81,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           provider = Some("vertexai"),
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
-          apiKey = Some("/path/to/credentials.json"),
+          apiKey = Some(ApiKey("/path/to/credentials.json")),
           extras = Map("project" -> "my-gcp-project", "location" -> "europe-west4")
         )
       ) match
@@ -206,7 +206,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "gemini-main") match
         case Right(gemini: GeminiConfig) =>
           gemini.model shouldBe "gemini-2.0-flash"
-          gemini.apiKey shouldBe "google-key"
+          gemini.apiKey.reveal shouldBe "google-key"
           gemini.baseUrl shouldBe GeminiConfig.DEFAULT_BASE_URL
         case other =>
           fail(s"Expected GeminiConfig, got $other")

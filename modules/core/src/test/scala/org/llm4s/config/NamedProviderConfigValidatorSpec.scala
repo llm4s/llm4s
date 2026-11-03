@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.config.ProvidersConfigModel.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -63,7 +64,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           provider = Some("fixturechat"),
           model = Some("   "),
           baseUrl = None,
-          apiKey = Some("sk-test"),
+          apiKey = Some(ApiKey("sk-test")),
         )
       ) match
         case Left(err) =>

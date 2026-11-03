@@ -1,5 +1,6 @@
 package org.llm4s.speech.stt.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.speech.{ AudioInput, AudioMeta, StubHttpClient }
 import org.llm4s.speech.config.STTConfig
 import org.llm4s.speech.io.WavFileGenerator
@@ -11,7 +12,8 @@ import java.nio.file.Files
 
 class AzureSTTClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = STTConfig("azure", "en-US", "azure-key", "https://eastus.stt.speech.microsoft.com", Some("eastus"))
+  private val cfg =
+    STTConfig("azure", "en-US", Secret("azure-key"), "https://eastus.stt.speech.microsoft.com", Some("eastus"))
 
   private def wavAt(rate: Int): Array[Byte] = {
     val pcm = Array.fill[Byte](3200)(5)

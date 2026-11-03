@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.agent.AgentFixture._
@@ -85,7 +86,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .render()
     }
     def client(baseUrl: String): LLMClient =
-      OpenAIConfig.fromValues("gpt-4o", "sk-test", None, baseUrl).flatMap(OpenAIClient(_)) match {
+      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).flatMap(OpenAIClient(_)) match {
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
       }
@@ -114,7 +115,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
     def client(baseUrl: String): LLMClient =
       new AnthropicClient(
         AnthropicConfig(
-          apiKey = "test-key",
+          apiKey = Secret("test-key"),
           model = model,
           baseUrl = baseUrl,
           contextWindow = 200000,

@@ -1,5 +1,6 @@
 package org.llm4s.toolapi.builtin
 
+import org.llm4s.security.Secret
 import com.typesafe.config.ConfigFactory
 import org.llm4s.config.{ BraveSearchToolConfig, DuckDuckGoSearchToolConfig, ExaSearchToolConfig, ToolsConfigLoader }
 import org.llm4s.toolapi._
@@ -93,11 +94,11 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     DuckDuckGoSearchTool.create(DuckDuckGoSearchToolConfig("https://api.duckduckgo.com/")).value,
     BraveSearchTool
       .create[BraveWebSearchResult](
-        BraveSearchToolConfig("test-key", "https://api.search.brave.com/res/v1", 5, "moderate"),
+        BraveSearchToolConfig(Secret("test-key"), "https://api.search.brave.com/res/v1", 5, "moderate"),
         BraveSearchCategory.Web
       )
       .value,
-    ExaSearchTool.create(ExaSearchToolConfig("test-key", "https://api.exa.ai", 10, "auto", 500)).value
+    ExaSearchTool.create(ExaSearchToolConfig(Secret("test-key"), "https://api.exa.ai", 10, "auto", 500)).value
   )
 
   "The parameter table of the guide" should "list the parameters each tool really declares" in {
@@ -510,11 +511,11 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     val source = ConfigSource.fromConfig(config)
 
     ToolsConfigLoader.loadBraveSearchTool(source).value shouldBe
-      BraveSearchToolConfig("brave-key", "https://api.search.brave.com/res/v1", 3, "strict")
+      BraveSearchToolConfig(Secret("brave-key"), "https://api.search.brave.com/res/v1", 3, "strict")
     ToolsConfigLoader.loadDuckDuckGoSearchTool(source).value shouldBe
       DuckDuckGoSearchToolConfig("https://api.duckduckgo.com/")
     ToolsConfigLoader.loadExaSearchTool(source).value shouldBe
-      ExaSearchToolConfig("exa-key", "https://api.exa.ai", 4, "neural", 300)
+      ExaSearchToolConfig(Secret("exa-key"), "https://api.exa.ai", 4, "neural", 300)
   }
 
   it should "be built from the loaded configuration and registered next to a bundle" in {
@@ -535,7 +536,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   it should "refuse an empty Exa API key when the tool is built" in {
-    ExaSearchTool.create(ExaSearchToolConfig("", "https://api.exa.ai", 10, "auto", 500)).isLeft shouldBe true
+    ExaSearchTool.create(ExaSearchToolConfig(Secret(""), "https://api.exa.ai", 10, "auto", 500)).isLeft shouldBe true
   }
 
   "A call with a missing parameter" should "come back as a Left that names the parameter" in {

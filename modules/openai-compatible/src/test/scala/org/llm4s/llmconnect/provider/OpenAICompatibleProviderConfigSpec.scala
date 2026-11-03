@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config._
@@ -19,7 +20,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
   // ============================ fromValues VALIDATION ============================
 
   test("fromValues names the provider and the field, and reports the field as missing") {
-    val error = OpenAIConfig.fromValues("gpt-4o", "   ", None, "https://api.openai.com/v1").left.value
+    val error = OpenAIConfig.fromValues("gpt-4o", Secret("   "), None, "https://api.openai.com/v1").left.value
 
     error.message shouldBe "OpenAI apiKey must be non-empty"
     error match {
@@ -29,16 +30,20 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
   }
 
   test("fromValues reports the first blank field when several are blank") {
-    DeepSeekConfig.fromValues("deepseek-chat", "", "").left.value.message shouldBe "DeepSeek apiKey must be non-empty"
+    DeepSeekConfig
+      .fromValues("deepseek-chat", Secret(""), "")
+      .left
+      .value
+      .message shouldBe "DeepSeek apiKey must be non-empty"
   }
 
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
-      "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
-      "Mistral apiKey"   -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL),
-      "Cohere apiKey"    -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
-      "Cohere baseUrl"   -> CohereConfig.fromValues("command-r", "key", " "),
+      "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", Secret(" "), DeepSeekConfig.DEFAULT_BASE_URL),
+      "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", Secret("key"), " "),
+      "Mistral apiKey" -> MistralConfig.fromValues("mistral-small-latest", Secret(" "), MistralConfig.DEFAULT_BASE_URL),
+      "Cohere apiKey"  -> CohereConfig.fromValues("command-r", Secret(" "), CohereConfig.DEFAULT_BASE_URL),
+      "Cohere baseUrl" -> CohereConfig.fromValues("command-r", Secret("key"), " "),
       "OpenAI-compatible model"   -> OpenAICompatibleConfig.fromValues(" ", "http://localhost:8000/v1"),
       "OpenAI-compatible baseUrl" -> OpenAICompatibleConfig.fromValues("m", " ")
     )
@@ -56,14 +61,14 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         organization = Some("test-org"),
         baseUrl = "https://api.openai.com/v1"
       )
       .value
 
     config.model shouldBe "gpt-4o"
-    config.apiKey shouldBe "test-key"
+    config.apiKey.reveal shouldBe "test-key"
     config.organization shouldBe Some("test-org")
   }
 
@@ -71,7 +76,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         organization = None,
         baseUrl = "https://api.openai.com/v1"
       )
@@ -84,7 +89,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = OpenAIConfig
       .fromValues(
         modelName = "gpt-4",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         organization = None,
         baseUrl = "https://api.openai.com/v1"
       )
@@ -97,7 +102,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "",
+        apiKey = Secret(""),
         organization = None,
         baseUrl = "https://api.openai.com/v1"
       )
@@ -109,7 +114,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     OpenAIConfig
       .fromValues(
         modelName = "gpt-4o",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         organization = None,
         baseUrl = ""
       )
@@ -123,13 +128,13 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = ZaiConfig
       .fromValues(
         modelName = "GLM-4.7",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = "https://api.z.ai/api/paas/v4"
       )
       .value
 
     config.model shouldBe "GLM-4.7"
-    config.apiKey shouldBe "test-key"
+    config.apiKey.reveal shouldBe "test-key"
     config.baseUrl shouldBe "https://api.z.ai/api/paas/v4"
   }
 
@@ -137,7 +142,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = ZaiConfig
       .fromValues(
         modelName = "GLM-4.7",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = "https://api.z.ai/api/paas/v4"
       )
       .value
@@ -149,7 +154,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     val config = ZaiConfig
       .fromValues(
         modelName = "GLM-4.5-air",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = "https://api.z.ai/api/paas/v4"
       )
       .value
@@ -161,7 +166,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     ZaiConfig
       .fromValues(
         modelName = "GLM-4.7",
-        apiKey = "",
+        apiKey = Secret(""),
         baseUrl = "https://api.z.ai/api/paas/v4"
       )
       .left
@@ -172,7 +177,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
     ZaiConfig
       .fromValues(
         modelName = "GLM-4.7",
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         baseUrl = ""
       )
       .left
@@ -180,16 +185,17 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
   }
 
   test("ZaiConfig.fromValues sets reserveCompletion for all models") {
-    val config = ZaiConfig.fromValues("GLM-4.7", "test-key", "https://api.z.ai/api/paas/v4").value
+    val config = ZaiConfig.fromValues("GLM-4.7", Secret("test-key"), "https://api.z.ai/api/paas/v4").value
     config.reserveCompletion should be > 0
   }
 
   // ================================= PROVIDER CONFIG TRAIT =================================
 
   test("All config types implement ProviderConfig trait") {
-    val openai: ProviderConfig = OpenAIConfig.fromValues("gpt-4o", "key", None, "https://api.openai.com/v1").value
+    val openai: ProviderConfig =
+      OpenAIConfig.fromValues("gpt-4o", Secret("key"), None, "https://api.openai.com/v1").value
     val zai: ProviderConfig =
-      ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4").value
+      ZaiConfig.fromValues("GLM-4.7", Secret("key"), "https://api.z.ai/api/paas/v4").value
 
     openai.model shouldBe "gpt-4o"
     zai.model shouldBe "GLM-4.7"
@@ -199,8 +205,13 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
 
   test("OpenAICompatibleConfig.fromValues needs no API key, and treats a blank one as none") {
     OpenAICompatibleConfig.fromValues("m", "http://localhost:8000/v1").value.apiKey shouldBe None
-    OpenAICompatibleConfig.fromValues("m", "http://localhost:8000/v1", apiKey = Some("  ")).value.apiKey shouldBe None
-    OpenAICompatibleConfig.fromValues("m", "http://h/v1", apiKey = Some(" k ")).value.apiKey shouldBe Some("k")
+    OpenAICompatibleConfig
+      .fromValues("m", "http://localhost:8000/v1", apiKey = Some(Secret("  ")))
+      .value
+      .apiKey shouldBe None
+    OpenAICompatibleConfig.fromValues("m", "http://h/v1", apiKey = Some(Secret(" k "))).value.apiKey shouldBe Some(
+      Secret("k")
+    )
   }
 
   test("OpenAICompatibleConfig.fromValues defaults the window and reserve conservatively") {

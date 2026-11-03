@@ -4,7 +4,8 @@
 
 Security fixes are made on the `main` branch and shipped in the **latest published release** of LLM4S (see
 [Releases](https://github.com/llm4s/llm4s/releases)). Older releases are not patched, so please upgrade to the latest
-release before reporting, and say in your report which version you tested.
+release before reporting, and say in your report which version you tested. The current lines and their status are in the
+[support policy](docs/reference/support-policy.md).
 
 How a fix may change the API follows the [compatibility policy](docs/reference/compatibility-policy.md):
 

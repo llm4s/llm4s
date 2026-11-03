@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import com.typesafe.config.ConfigFactory
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.elasticsearch.{ ElasticsearchAuth, ElasticsearchConfig, ElasticsearchSimilarity }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -44,7 +45,7 @@ class ElasticsearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers
     config shouldBe ElasticsearchConfig(
       baseUrl = "https://es.example.com:9243",
       index = "docs",
-      auth = ElasticsearchAuth.ApiKey("ZW5jb2RlZA=="),
+      auth = ElasticsearchAuth.ApiKey(Secret("ZW5jb2RlZA==")),
       similarity = ElasticsearchSimilarity.DotProduct,
       dimensions = Some(384),
       numCandidates = Some(64),
@@ -56,7 +57,7 @@ class ElasticsearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers
   it should "read a username and password as basic authentication" in {
     load("""
       llm4s.vectorstore.elasticsearch { username = elastic, password = changeme }
-    """).value.auth shouldBe ElasticsearchAuth.Basic("elastic", "changeme")
+    """).value.auth shouldBe ElasticsearchAuth.Basic("elastic", Secret("changeme"))
   }
 
   it should "treat blank values, as an unset variable binds, as unset" in {
@@ -113,6 +114,6 @@ class ElasticsearchVectorStoreConfigLoaderSpec extends AnyFlatSpec with Matchers
     val config = ElasticsearchVectorStoreConfigLoader.load(ConfigSource.fromConfig(resolved)).value
     config.baseUrl shouldBe "https://es.example.com"
     config.index shouldBe "docs"
-    config.auth shouldBe ElasticsearchAuth.Basic("elastic", "pw")
+    config.auth shouldBe ElasticsearchAuth.Basic("elastic", Secret("pw"))
   }
 }

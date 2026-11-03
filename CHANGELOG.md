@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `ApiKey` and every config credential field (`apiKey`, Langfuse keys, search-tool keys) are `org.llm4s.security.Secret`, not `String`; [migration](docs/reference/migration.md#credentials-are-secret-1932).
 - `FileConfig()` blocks more by default: each platform's system and credential locations (`FileConfig.DefaultBlockedPaths`),
   matched regardless of case; [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
 - `HTTPS_PROXY` and `NO_PROXY` are now honoured by every provider client (`llm4s.http.proxy`), `http` is a built-in
@@ -229,6 +230,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Configuration
 
+- **Added** `Llm4sConfig.from(config)` (experimental): an `Llm4sSettings` with `Llm4sConfig`'s methods, reading a `Config` the app already
+  has (Play, Pekko, per tenant or test) in place of `application.conf` [#2340](https://github.com/llm4s/llm4s/issues/2340).
 - **Fixed** `CheckPolicies` CLI now rejects unknown `--env` arguments with exit code 2 before loading any
   configuration, and maps aliases such as `dev-sandbox` and `prod-safe` to their canonical environment [#2260](https://github.com/llm4s/llm4s/issues/2260).
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
@@ -345,6 +348,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   core's tool API. A derived `Long` is now described through `NumberSchema(isInteger = true)`, whose JSON is the same
   `integer` [#1473](https://github.com/llm4s/llm4s/issues/1473); [guide](docs/guide/derived-schemas.md#typed-tools),
   sample `TypedCalculatorExample`.
+- **Added** sum types to `llm4s-schema-derivation`: enums and sealed traits whose cases have fields derive an `anyOf`
+  tagged with uPickle's discriminator, which `completeStructuredOf` sends wrapped in a `value` property and unwraps
+  [#2327](https://github.com/llm4s/llm4s/issues/2327); [guide](docs/guide/derived-schemas.md#sum-types).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).
@@ -360,6 +366,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** the [support policy](docs/reference/support-policy.md): current lines and their status (`docs/_data/support.yml`), platform
+  support and end of support; cadence and post-1.0 lines are marked to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+- **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
+  unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
+- **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per
+  minor release, and the [AI coding assistants](docs/ai-assistants.md) page ([#2287](https://github.com/llm4s/llm4s/issues/2287)).
+- **Added** a split sitemap for llm4s.org (`sitemap.xml` for the guide, `scaladoc-sitemap.xml` for the API pages, both in
+  `robots.txt`, checked in the Pages deploy), a custom 404 page, and `redirect_from` for a moved page ([#2318](https://github.com/llm4s/llm4s/issues/2318)).
+- **Added** the [Mill quick start](docs/getting-started/mill.md) and its `build.mill` sample (`modules/samples/mill`), built
+  and tested against Maven Central by `mill-quickstart.yml`, with an offline check that it pins `latest_release` ([#2293](https://github.com/llm4s/llm4s/issues/2293)).
 - **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with
   `llm4s-java-api` workarounds; a CI workflow runs the 2.13 probes against the build and fails on any outcome change ([#2301](https://github.com/llm4s/llm4s/issues/2301)).
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
@@ -367,6 +383,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
 - **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
   their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
+- **Added** [Legal and IP FAQ](docs/reference/legal-faq.md): licence, copyright, DCO, patents, third-party licences and provider terms, with what the project has not decided ([#2309](https://github.com/llm4s/llm4s/issues/2309)).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
@@ -478,6 +495,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Added** `Secret`: every credential llm4s holds (configured keys, runtime tokens) is registered and removed by exact match, whatever the syntax around it, from the error messages, exchange logs and diagnostic text llm4s builds (traces in a follow-up) ([#1932](https://github.com/llm4s/llm4s/issues/1932), [design](docs/superpowers/specs/2026-10-15-layered-redaction-design.md)).
 - **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
   Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
   regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
@@ -555,6 +573,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#380](https://github.com/llm4s/llm4s/issues/380).
 - **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
+- **Added** `@Cloud` smoke suites for Azure OpenAI (classic, custom-domain and `/openai/v1` endpoints), Requesty, the generic
+  `openai-compatible` provider (Groq, plus a keyless local run), Voyage embeddings and Vertex AI, and Mistral dialect checks [#1213](https://github.com/llm4s/llm4s/issues/1213).
 - **Changed** CI runs the `@Workspace` tier on PRs that change the workspace, and All Tests Pass requires it there; a manual
   run picks its tiers with `-f tier=workspace|mcp-reference|cloud-smoke|all|none` [#1982](https://github.com/llm4s/llm4s/issues/1982).
 - **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,

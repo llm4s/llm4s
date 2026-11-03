@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.redis
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -39,7 +40,7 @@ class RedisConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
       .withTls(true)
       .withDatabase(2)
       .withUsername("app")
-      .withPassword("secret")
+      .withPassword(Secret("secret"))
       .withIndex("docs")
       .withKeyPrefix("d:")
       .withAlgorithm(RedisVectorAlgorithm.Flat)
@@ -53,7 +54,7 @@ class RedisConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
       true,
       2,
       Some("app"),
-      Some("secret"),
+      Some(Secret("secret")),
       "docs",
       Some("d:"),
       RedisVectorAlgorithm.Flat,
@@ -81,7 +82,7 @@ class RedisConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "never print the password" in {
-    val shown = RedisConfig(username = Some("app"), password = Some("sekrit")).toString
+    val shown = RedisConfig(username = Some("app"), password = Some(Secret("sekrit"))).toString
     (shown should not).include("sekrit")
     shown should (include("***").and(include("app")))
     RedisConfig().toString should (include("password=none").and(include("dimensions=auto")))
@@ -94,9 +95,9 @@ class RedisConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     refused(RedisConfig(port = 0)) should include("port")
     refused(RedisConfig(port = 70000)) should include("port")
     refused(RedisConfig(database = -1)) should include("database")
-    refused(RedisConfig(username = Some(""), password = Some("p"))) should include("username")
+    refused(RedisConfig(username = Some(""), password = Some(Secret("p")))) should include("username")
     refused(RedisConfig(username = Some("u"))) should include("without a password")
-    refused(RedisConfig(password = Some(""))) should include("password")
+    refused(RedisConfig(password = Some(Secret("")))) should include("password")
     refused(RedisConfig(index = "")) should include("index")
     refused(RedisConfig(index = "a\tb")) should include("index")
     refused(RedisConfig(keyPrefix = Some(""))) should include("keyPrefix")
@@ -107,6 +108,6 @@ class RedisConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "accept a password without a username" in {
-    RedisConfig(password = Some("p")).validate.isRight shouldBe true
+    RedisConfig(password = Some(Secret("p"))).validate.isRight shouldBe true
   }
 }

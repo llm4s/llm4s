@@ -1,5 +1,6 @@
 package org.llm4s.samples.cache
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }
@@ -67,7 +68,7 @@ object SemanticCachingSample extends App {
 
   private def loadApiKey(): Result[String] =
     Llm4sConfig.defaultProvider().flatMap {
-      case cfg: OpenAIConfig => Right(cfg.apiKey)
+      case cfg: OpenAIConfig => Right(cfg.apiKey.reveal)
       case _ =>
         Left(
           ConfigurationError(
@@ -83,7 +84,7 @@ object SemanticCachingSample extends App {
     OpenAIConfig
       .fromValues(
         modelName = "gpt-4o-mini",
-        apiKey = apiKey,
+        apiKey = Secret(apiKey),
         organization = None,
         baseUrl = "https://api.openai.com"
       )
@@ -94,7 +95,7 @@ object SemanticCachingSample extends App {
     val embeddingConfig = EmbeddingProviderConfig(
       baseUrl = "https://api.openai.com",
       model = "text-embedding-3-small",
-      apiKey = apiKey
+      apiKey = Secret(apiKey)
     )
     EmbeddingClient.from("openai", embeddingConfig)
   }

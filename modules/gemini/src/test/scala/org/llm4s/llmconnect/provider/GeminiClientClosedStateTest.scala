@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -19,7 +20,7 @@ class GeminiClientClosedStateTest extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: GeminiConfig = GeminiConfig(
-    apiKey = "test-api-key-for-closed-state-testing",
+    apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = "gemini-2.0-flash",
     baseUrl = "https://example.invalid/v1beta",
     contextWindow = 1048576,

@@ -1,5 +1,6 @@
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.security.Secret
 import scala.concurrent.duration.*
 
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,7 +13,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   "ExaSearchTool" should "have correct name and description" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -29,7 +30,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject non-HTTPS API URL" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         apiUrl = "http://api.exa.ai", // HTTP instead of HTTPS
         numResults = 10,
         searchType = "auto",
@@ -45,7 +46,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject empty API key" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "",
+        apiKey = Secret(""),
         apiUrl = "https://api.exa.ai",
         numResults = 10,
         searchType = "auto",
@@ -62,7 +63,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject whitespace-only API key" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "   ",
+        apiKey = Secret("   "),
         apiUrl = "https://api.exa.ai",
         numResults = 10,
         searchType = "auto",
@@ -79,7 +80,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject negative numResults" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         apiUrl = "https://api.exa.ai",
         numResults = -5,
         searchType = "auto",
@@ -96,7 +97,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject zero numResults" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         apiUrl = "https://api.exa.ai",
         numResults = 0,
         searchType = "auto",
@@ -113,7 +114,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject negative maxCharacters" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         apiUrl = "https://api.exa.ai",
         numResults = 10,
         searchType = "auto",
@@ -130,7 +131,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "reject zero maxCharacters" in {
     val result = ExaSearchTool.create(
       ExaSearchToolConfig(
-        apiKey = "test-key",
+        apiKey = Secret("test-key"),
         apiUrl = "https://api.exa.ai",
         numResults = 10,
         searchType = "auto",
@@ -681,7 +682,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(successResponse.statusCode, successResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -704,7 +705,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(successResponse.statusCode, successResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -734,7 +735,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "invalid-key",
+      apiKey = Secret("invalid-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -756,7 +757,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -778,7 +779,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -796,7 +797,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "handle network timeout exception with sanitized message" in {
     val failingClient = new FailingHttpClient(new java.net.http.HttpTimeoutException("Connection timeout"))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -815,7 +816,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   it should "handle unknown host exception with sanitized message" in {
     val failingClient = new FailingHttpClient(new java.net.UnknownHostException("Unknown host"))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -837,7 +838,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
     val mockClient = new MockHttpClient(HttpResponse(invalidJsonResponse.statusCode, invalidJsonResponse.body))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -860,7 +861,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val interruptingClient =
       new FailingHttpClient(org.llm4s.error.ExecutionError("Request interrupted", "http.POST"))
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -884,7 +885,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   "Override config validation" should "reject invalid numResults in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -901,7 +902,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "reject invalid maxCharacters in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -918,7 +919,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "reject invalid timeout below minimum in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -936,7 +937,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "reject timeout above maximum in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -953,7 +954,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "reject empty userLocation in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -970,7 +971,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "reject empty additionalQueries in override config" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",
@@ -986,7 +987,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   }
   it should "accept valid override config with all fields" in {
     val toolConfig = ExaSearchToolConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       apiUrl = "https://api.exa.ai",
       numResults = 10,
       searchType = "auto",

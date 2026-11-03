@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
@@ -25,7 +26,8 @@ class OllamaEmbeddingPurposeSpec extends AnyFlatSpec with Matchers {
       seen.add(ujson.read(new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
       sendJsonResponse(ex, 200, """{"embedding":[1.0, 2.0]}""")
     } { baseUrl =>
-      val provider = OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, "not-required"))
+      val provider =
+        OllamaEmbeddingProvider.fromConfig(EmbeddingProviderConfig(baseUrl, model.name, Secret("not-required")))
       provider.embed(EmbeddingRequest(Seq("first", "second"), model, purpose)).isRight shouldBe true
     }
     seen.asScala.toList
