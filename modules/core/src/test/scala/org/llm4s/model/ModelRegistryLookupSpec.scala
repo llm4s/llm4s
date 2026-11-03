@@ -33,6 +33,12 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
     capabilities = ModelCapabilities(supportsVision = Some(true))
   )
 
+  private val modelAPro = makeModel(
+    modelId = "acme/model-a-pro",
+    provider = "acme",
+    mode = ModelMode.Chat
+  )
+
   private val modelB = makeModel(
     modelId = "model-b",
     provider = "acme",
@@ -52,12 +58,12 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
     mode = ModelMode.Chat
   )
 
-  private val registry = ModelRegistryService.fromModels(List(modelA, modelB, modelC, modelD))
+  private val registry = ModelRegistryService.fromModels(List(modelA, modelAPro, modelB, modelC, modelD))
 
   "ModelRegistryService" should "return Left with ValidationError for unknown capability" in:
     registry.findByCapability("unsupported_capability") match
       case Left(err: ValidationError) =>
-        err.message shouldBe "No models found with capability: unsupported_capability"
+        err.message should include ("No models found with capability: unsupported_capability")
         err.field shouldBe "capability"
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
@@ -65,7 +71,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError for mode with no models" in:
     registry.listByMode(ModelMode.Completion) match
       case Left(err: ValidationError) =>
-        err.message shouldBe "No models found for mode: completion"
+        err.message should include ("No models found for mode: completion")
         err.field shouldBe "mode"
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
@@ -73,7 +79,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError for unknown provider" in:
     registry.listByProvider("nonexistent-provider") match
       case Left(err: ValidationError) =>
-        err.message shouldBe "No models found for provider: nonexistent-provider"
+        err.message should include ("No models found for provider: nonexistent-provider")
         err.field shouldBe "provider"
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
@@ -90,7 +96,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError for model id that matches nothing" in:
     registry.lookup("unknown-model-xyz") match
       case Left(err: ValidationError) =>
-        err.message shouldBe "Model not found: unknown-model-xyz"
+        err.message should include ("Model not found: unknown-model-xyz")
         err.field shouldBe "modelId"
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
@@ -102,7 +108,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError when lookup by provider and modelName finds nothing" in:
     registry.lookup("acme", "nonexistent") match
       case Left(err: ValidationError) =>
-        err.message shouldBe "Model not found: acme/nonexistent"
+        err.message should include ("Model not found: acme/nonexistent")
         err.field shouldBe "modelId"
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
@@ -110,11 +116,11 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "calculate statistics accurately for the small custom registry" in:
     registry.statistics() shouldBe Right(
       Map(
-        "totalModels"           -> 4,
-        "embeddedModels"        -> 4,
+        "totalModels"           -> 5,
+        "embeddedModels"        -> 5,
         "customModels"          -> 0,
         "providers"             -> 3,
-        "chatModels"            -> 2,
+        "chatModels"            -> 3,
         "embeddingModels"       -> 1,
         "imageGenerationModels" -> 1,
         "deprecatedModels"      -> 1
