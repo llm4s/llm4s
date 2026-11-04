@@ -13,6 +13,11 @@ five things most programs do: call a model, get typed output, give the model a t
 documents. For whether LLM4S is the right choice, read the [comparison](comparison) first, including
 [what it has not got yet](comparison#what-llm4s-has-not-got-yet).
 
+{: .note }
+> This page is for Scala. Moving a **Java** application? [Moving a Java app from LangChain4j or Spring AI](java-migration)
+> maps the same concepts to `llm4s-java-api`, with compiled Java for each: records as structured output, `@Tool`
+> methods, `FakeLlmClient` tests, the Spring Boot starter and provider configuration.
+
 Every LLM4S snippet below is compiled by a test in this repository (`ComparisonGuideSpec`), which also checks that the
 code on this page is, word for word, the code it compiles, so the page cannot drift from the API. All but two are also run, against a scripted client, with no network. The two that are only compiled
 (the configuration one and the RAG one) say so. The LangChain4j and Spring AI sides show concept names taken from their
@@ -25,14 +30,14 @@ own documentation, linked at the end, and no invented API.
 
 | You use | In LLM4S | Note |
 |---|---|---|
-| An AI Service, a Java interface that the library implements [L1] | `LLMClient`, or an `Agent` when tools are involved | There is no declarative interface-to-implementation layer: you call the client, or build an agent. See [the comparison](comparison) |
+| An AI Service, a Java interface that the library implements [L1] | `LLMClient`, or an `Agent` when tools are involved | There is no declarative interface-to-implementation layer, in Scala or Java: you call the client, or build an agent. See [the comparison](comparison) |
 | A chat model | `LLMClient`, from `LLMConnect.getClient(providerConfig)` | The provider is chosen by configuration, in a named section of `application.conf` ([providers](providers)) |
-| Structured output by return type [L1][L7] | `client.completeStructured[A](conversation, schema)` | The schema is written by hand, not derived from the type |
-| Tools [L1] | `ToolBuilder` and a `ToolRegistry`, run by an `Agent` | Parameter schemas are written by hand |
+| Structured output by return type [L1][L7] | `client.completeStructured[A](conversation, schema)` | The schema is written by hand below; `llm4s-schema-derivation` derives it from a case class ([derived schemas](derived-schemas)). From Java, `client.complete(prompt, SomeRecord.class)` derives it from the record ([Java](java-migration#structured-output-into-a-record)) |
+| Tools [L1] | `ToolBuilder` and a `ToolRegistry`, run by an `Agent` | Parameter schemas are written by hand with `ToolBuilder`, or derived with `Tool.of` ([typed tools](derived-schemas#typed-tools)). From Java, `@Tool` methods with `@Param` parameters ([Java](java-migration#a-tool)) |
 | Chat memory [L1] | A `Conversation` you pass on each call, and `llm4s-memory` for long-term facts | See the memory section: they are different mechanisms |
 | `ContentRetriever` and RAG [L1] | `RAG` in `llm4s-rag` | Needs an embedding provider |
-| Spring AI `ChatClient` [S6] | `LLMClient` | Spring's fluent builder versus a plain call |
-| Spring AI `entity()` [S6] | `completeStructured` | As above |
+| Spring AI `ChatClient` [S6] | `LLMClient`; from Java, `JLlmClient`, or `LLM4STemplate` in Spring Boot | Spring's fluent builder versus a plain call |
+| Spring AI `entity()` [S6] | `completeStructured`; from Java, `complete(prompt, SomeRecord.class)` | As above |
 
 The largest difference is not a class: **LLM4S returns `Result[A]` instead of throwing**. Every call in this page
 returns an `Either`-shaped value, and the snippets chain them with a `for` comprehension. See
@@ -113,9 +118,9 @@ val person: Result[Person] = for {
 
 What to know:
 
-- **The schema is not derived from `Person`.** You write it, and keep it in step with the case class yourself. A
-  mismatch shows up when a reply fails to parse, not at compile time
-  ([#1472](https://github.com/llm4s/llm4s/issues/1472) is the open issue for derivation).
+- **Here the schema is written by hand**, and kept in step with the case class yourself: a mismatch shows up when a
+  reply fails to parse, not at compile time. `llm4s-schema-derivation` (Experimental) derives it instead, with
+  `derives` on the case class ([derived schemas](derived-schemas)).
 - The schema is sent to the provider as a JSON-Schema response format, in strict mode: every property is listed as
   required, optional ones included. The tests check the properties and the required list that are sent. Providers that
   enforce a schema natively use it. Anthropic gets a best-effort instruction in the prompt that is not enforced,
@@ -216,9 +221,12 @@ reranking are in the [vector store guide](vector-store).
 
 ## What you will miss, and what you gain
 
-You will miss, today: derivation of schemas and tool definitions from types, a complete Java API, a test kit for your
-own code, and the breadth of integrations the other projects list. See the
-[full list](comparison#what-llm4s-has-not-got-yet), each item with its issue.
+You will miss, today: a declarative AI-services layer, and the breadth of integrations the other projects list. Schema
+and tool derivation is Experimental ([derived schemas](derived-schemas)); the Java API covers the client, tools,
+agents, structured output, embeddings, RAG and streaming, with gaps listed in the
+[Java migration guide](java-migration#what-has-no-direct-equivalent-yet); and `llm4s-testkit` and the Java
+`FakeLlmClient` script a model for your own tests ([testing](testing-with-the-testkit)). See the
+[full list](comparison#what-llm4s-has-not-got-yet).
 
 You gain, in code that exists today: `Result[A]` errors with typed error classes, a provider layer that is a small
 interface you can implement ([writing a provider](writing-a-provider)), guardrails and agent handoffs in the same

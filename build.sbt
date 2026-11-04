@@ -2399,10 +2399,17 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       // MeterRegistry and /actuator/metrics as an application gets them, for LlmMetricsAutoConfigurationSpec.
       Deps.springBootActuatorAutoConfigure % Test,
       // Spring Boot 4's HealthIndicator, for LlmBoot4HealthIndicator; Boot 4 applications have it (#1467).
-      Deps.springBoot4HealthApi % Provided
+      Deps.springBoot4HealthApi % Provided,
+      // @RestController and friends, for the Java migration guide's controller in src/test/web (#2282).
+      Deps.springWebAnnotations % Test
     ),
     // The specs name the health and metrics types Spring Boot 4 moved through BootLine; this is its Boot 3 one.
-    Test / unmanagedSourceDirectories += (Test / sourceDirectory).value / "scala-boot3"
+    // src/test/web holds the Java migration guide's controller and its spec, which need spring-web: only this project
+    // compiles it, since springBootStarterBoot4 recompiles src/test/scala and src/test/java on a classpath without it.
+    Test / unmanagedSourceDirectories ++= Seq(
+      (Test / sourceDirectory).value / "scala-boot3",
+      (Test / sourceDirectory).value / "web"
+    )
   )
 
 // The starter's specs on Spring Boot 4 (#1467). It tests the starter's classes as published, compiled against Boot 3,

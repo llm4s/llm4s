@@ -448,6 +448,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `ScriptedLLMClient.assertExhausted()`, `remaining` and `unusedReplies` (a scripted reply never asked for), and
   [testing guide](docs/guide/testing-with-the-testkit.md#other-test-frameworks) fixtures for MUnit, munit-cats-effect,
   weaver and ZIO Test, each a suite CI runs [#2335](https://github.com/llm4s/llm4s/issues/2335).
+- **Added** [Moving a Java app from LangChain4j or Spring AI](docs/guide/java-migration.md): concepts, compiled Java for
+  each common task, provider configuration and the gaps; the Scala migration and comparison pages corrected for the Java API [#2282](https://github.com/llm4s/llm4s/issues/2282).
 
 ### Embeddings & RAG
 
