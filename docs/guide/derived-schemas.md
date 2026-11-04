@@ -237,6 +237,37 @@ OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStr
 
 A sum type has no schema in `llm4s-core`'s model, which has no union node: `SchemaOf[Action].toJsonSchema()` is its schema, while `SchemaOf[Action].definition` throws an `UnsupportedOperationException`. So a tool's parameters cannot hold a sum type yet, and `Tool.of` returns a `Left` for one.
 
+## Named tuples
+
+For two or three fields wanted once, at one call site, a Scala 3.7 named tuple does without the case class. `SchemaOf` describes it as the case class with the same fields, and `org.llm4s.schema.namedtuples` provides the uPickle `ReadWriter` that uPickle itself lacks; import it explicitly.
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.schema.namedtuples.given
+import org.llm4s.toolapi.ToolFunction
+import upickle.default.ReadWriter
+
+enum Sentiment derives SchemaOf, ReadWriter {
+  case Positive, Neutral, Negative
+}
+
+def review(client: LLMClient, conversation: Conversation): Result[String] =
+  client
+    .completeStructuredOf[(sentiment: Sentiment, confidence: Double, quote: Option[String])](conversation)
+    .map(r => s"${r.sentiment} (${r.confidence})")
+
+val lookup: Result[ToolFunction[(city: String, days: Int), (high: Double, low: Double)]] =
+  Tool.of[(city: String, days: Int), (high: Double, low: Double)]("forecast", "Daily forecast") { query =>
+    Right((high = 20.0 + query.days, low = 12.5))
+  }
+```
+
+- **The schema** is an object with one property per element, in order, exactly as for a case class with those fields: an `Option` element may be `null` (or absent in the relaxed form), elements may be case classes, enums, sum types, collections or other named tuples, and a named tuple may be a field of a case class.
+- **Descriptions.** A named tuple's elements cannot carry annotations, so each property is described by its element type's `@description`, else by its name. When the model needs a description per field, use a case class.
+- **The `ReadWriter`** writes exactly what uPickle writes for the case class with the same fields (`null` for `None`), and reads it back; an absent `Option` element reads as `None`, and keys the tuple has no element for are ignored. Each element type needs a `ReadWriter` of its own. It is never found without the import, so it cannot compete with an instance uPickle may add later.
+- **Everywhere a case class goes:** `completeStructuredOf`, `Tool.of` (arguments, with the same argument errors, and result) and an agent's `withOutput(SchemaOf[T].definition)` with `decodeOutput[T]`.
+- A tuple without names (`(Int, String)`) is still refused: uPickle writes it as an array.
+
 ## Descriptions
 
 The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
@@ -279,8 +310,7 @@ These are refused at compile time, with a message that names the type:
 - **Recursive types** (a `Tree` with `children: List[Tree]`, or an `Expr` sum type with an `Add(left: Expr, right: Expr)` case). They need a JSON Schema `$ref`, which the derivation does not emit yet. One case is caught only at run time: see [Recursion](#recursion).
 - **A sealed hierarchy nested in another** (a sealed trait whose case is itself a sealed trait), and **a sum type with a generic case** (`case class Holds[A](a: A)`). List the cases directly under one sealed trait or enum, without type parameters.
 - **`Option` directly inside `Option`** (`Option[Option[Int]]`). uPickle writes it as a JSON array (`[]`, `[null]`, `[1]`), not as the value or `null`. An `Option` inside a `List` inside an `Option` is fine.
-- **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class with named fields.
-- **Named tuples** (`(a: Int, b: String)`). uPickle has no `ReadWriter` for them, so nothing could read the reply back. Use a case class.
+- **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class or a [named tuple](#named-tuples).
 - **A class that is not a case class**, and a field of a type nothing describes (a function, for instance).
 
 `completeStructuredOf` also needs the type to be a case class or a sum type whose cases have fields, since the model answers with a JSON object: for an enum of singletons or another type it returns a `Left` before calling the model.

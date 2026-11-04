@@ -210,6 +210,10 @@ You should see one sentence; the wording depends on the model. With a local Olla
 
 ## If something goes wrong
 
+For a configuration problem, run the [doctor](/reference/doctor#maven) first: with `llm4s-doctor_3` in test scope,
+`mvn -q test-compile exec:java -Dexec.mainClass=org.llm4s.doctor.DoctorCli -Dexec.classpathScope=test` checks your
+`application.conf`, provider module and API key, and says what to fix.
+
 **`Could not find artifact org.llm4s:llm4s-java-api:jar`** (no `_3`): add the suffix, `llm4s-java-api_3`.
 
 **`Could not create a client: ... apiKey: set OPENAI_API_KEY`**: the key is not set in the shell that runs `mvn`.

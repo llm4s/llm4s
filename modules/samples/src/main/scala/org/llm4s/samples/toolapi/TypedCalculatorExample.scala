@@ -1,6 +1,11 @@
 package org.llm4s.samples.toolapi
 
+// The build compiles with -source:3.3, which turns off named tuple field access by name; Scala 3.7's default source
+// level has it, so a project on the default needs no such import.
+import scala.language.`3.7`
+
 import org.llm4s.schema.*
+import org.llm4s.schema.namedtuples.given
 import org.llm4s.toolapi.{ ToolCallRequest, ToolFunction, ToolRegistry }
 import org.llm4s.toolapi.builtin.core.{ CalculatorResult, CalculatorTool }
 import org.llm4s.types.Result
@@ -32,7 +37,12 @@ import upickle.default.ReadWriter
  *
  * The typed way writes them once, in [[TypedCalculator.CalculatorArgs]], and the function receives them decoded.
  * The two send the same schema, except that the typed one says what the handler always did: `b` may be left out.
- * The sample needs no model; it calls both tools with the same arguments and prints what each returns.
+ *
+ * A third version, [[TypedCalculator.namedTupleTool]], takes its arguments as a named tuple,
+ * `(operation: Operation, a: Double, b: Option[Double])`, with no case class to declare: the same schema, except that
+ * each parameter is described by its name, since a named tuple's elements cannot carry a `@description`.
+ *
+ * The sample needs no model; it calls the tools with the same arguments and prints what each returns.
  *
  * {{{
  * sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"
@@ -51,21 +61,26 @@ object TypedCalculatorExample {
     )
 
     val outcome = for {
-      handBuilt <- CalculatorTool.toolSafe
-      typed     <- TypedCalculator.tool
+      handBuilt  <- CalculatorTool.toolSafe
+      typed      <- TypedCalculator.tool
+      namedTuple <- TypedCalculator.namedTupleTool
     } yield {
       println("Schema, hand-built:")
       println(handBuilt.toOpenAITool().render(indent = 2))
       println("Schema, typed:")
       println(typed.toOpenAITool().render(indent = 2))
+      println("Schema, named tuple:")
+      println(namedTuple.toOpenAITool().render(indent = 2))
 
-      val handBuiltTools = new ToolRegistry(Seq(handBuilt))
-      val typedTools     = new ToolRegistry(Seq(typed))
+      val handBuiltTools  = new ToolRegistry(Seq(handBuilt))
+      val typedTools      = new ToolRegistry(Seq(typed))
+      val namedTupleTools = new ToolRegistry(Seq(namedTuple))
       calls.foreach { arguments =>
         val request = ToolCallRequest("calculator", arguments)
         println(s"\ncalculator(${arguments.render()})")
-        println(s"  hand-built: ${show(handBuiltTools.execute(request))}")
-        println(s"  typed:      ${show(typedTools.execute(request))}")
+        println(s"  hand-built:  ${show(handBuiltTools.execute(request))}")
+        println(s"  typed:       ${show(typedTools.execute(request))}")
+        println(s"  named tuple: ${show(namedTupleTools.execute(request))}")
       }
     }
 
@@ -98,6 +113,17 @@ object TypedCalculator {
   val tool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.of[CalculatorArgs, CalculatorResult]("calculator", builtin.description)(calculate)
+    }
+
+  /** The calculator's parameters as a named tuple: no case class to declare, each parameter described by its name. */
+  type CalculatorTuple = (operation: Operation, a: Double, b: Option[Double])
+
+  /** The same calculator, its arguments a named tuple. */
+  val namedTupleTool: Result[ToolFunction[CalculatorTuple, CalculatorResult]] =
+    CalculatorTool.toolSafe.flatMap { builtin =>
+      Tool.of[CalculatorTuple, CalculatorResult]("calculator", builtin.description) { args =>
+        calculate(CalculatorArgs(args.operation, args.a, args.b))
+      }
     }
 
   private def calculate(args: CalculatorArgs): Either[String, CalculatorResult] = {

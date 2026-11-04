@@ -49,7 +49,7 @@ signature.
 
 ## D
 
-**Doctor** (`org.llm4s.configpolicy.DoctorCli`)
+**Doctor** (`org.llm4s.doctor.DoctorCli`, in `llm4s-doctor`)
 : A command that checks a whole setup (JDK, configuration, provider module, API key, optionally a local model server)
   and says what to fix. See [Doctor](/reference/doctor).
 

@@ -1,5 +1,9 @@
 package org.llm4s.schema.guide
 
+// The build compiles with -source:3.3, which turns off named tuple values and field access by name; Scala 3.7's
+// default source level, which the guide's readers have, has them.
+import scala.language.`3.7`
+
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
@@ -84,6 +88,29 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
         case Right(Action.Escalate(team))    => s"escalate to $team"
         case Right(Action.Reply(text))       => text
         case Left(error)                     => error.message
+      }
+  }
+
+  // ---- Named tuples
+
+  object NamedTuples {
+    import org.llm4s.schema.*
+    import org.llm4s.schema.namedtuples.given
+    import org.llm4s.toolapi.ToolFunction
+    import upickle.default.ReadWriter
+
+    enum Sentiment derives SchemaOf, ReadWriter {
+      case Positive, Neutral, Negative
+    }
+
+    def review(client: LLMClient, conversation: Conversation): Result[String] =
+      client
+        .completeStructuredOf[(sentiment: Sentiment, confidence: Double, quote: Option[String])](conversation)
+        .map(r => s"${r.sentiment} (${r.confidence})")
+
+    val lookup: Result[ToolFunction[(city: String, days: Int), (high: Double, low: Double)]] =
+      Tool.of[(city: String, days: Int), (high: Double, low: Double)]("forecast", "Daily forecast") { query =>
+        Right((high = 20.0 + query.days, low = 12.5))
       }
   }
 
@@ -217,7 +244,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 10
+    scalaBlocks should have size 11
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -265,6 +292,17 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       "escalate to Shipping"
     decide(new Scripted("""{"value":{"$type":"Reply","text":"Sorry!"}}"""), conversation) shouldBe "Sorry!"
     decide(new Scripted("""{"value":{"$type":"Shout"}}"""), conversation) should include("does not match")
+  }
+
+  "The named tuples of the guide" should "read the reply, and answer a tool call, with no case class" in {
+    import NamedTuples.*
+    val conversation = Conversation(Seq(UserMessage("Great product, would buy again.")))
+    review(new Scripted("""{"sentiment":"Positive","confidence":0.9,"quote":null}"""), conversation) shouldBe
+      Right("Positive (0.9)")
+    val tool = lookup.fold(e => fail(e.formatted), identity)
+    tool.toOpenAITool()("function")("parameters")("required") shouldBe ujson.Arr("city", "days")
+    tool.execute(ujson.Obj("city" -> "Paris", "days" -> 2)) shouldBe Right(ujson.Obj("high" -> 22.0, "low" -> 12.5))
+    tool.execute(ujson.Obj("city" -> "Paris")).isLeft shouldBe true
   }
 
   "The tool of the guide" should "send the derived schema as its parameters, and read a call with it" in {

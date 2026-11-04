@@ -123,6 +123,7 @@ map_file_to_project() {
     modules/gradle-demo/*)                echo "gradleDemo" ;;
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
+    modules/doctor/*)                     echo "doctor" ;;
     modules/config-policy/*)              echo "configPolicy" ;;
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
@@ -286,6 +287,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE schemaDerivation
       set_add DOWNSTREAM_COMPILE testkit
+      set_add DOWNSTREAM_COMPILE doctor
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
@@ -552,6 +554,9 @@ propagate_downstream() {
     schemaDerivation)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    doctor)
+      set_add DOWNSTREAM_COMPILE configPolicy
       ;;
   esac
 }

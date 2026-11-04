@@ -349,6 +349,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** sum types to `llm4s-schema-derivation`: enums and sealed traits whose cases have fields derive an `anyOf`
   tagged with uPickle's discriminator, which `completeStructuredOf` sends wrapped in a `value` property and unwraps
   [#2327](https://github.com/llm4s/llm4s/issues/2327); [guide](docs/guide/derived-schemas.md#sum-types).
+- **Added** named tuples to `llm4s-schema-derivation`: `SchemaOf[(a: A, b: B)]` and a `ReadWriter` in
+  `org.llm4s.schema.namedtuples` (explicit import) make a named tuple a structured output, a typed tool's arguments or
+  result, or an agent's answer, with no case class to declare [#2328](https://github.com/llm4s/llm4s/issues/2328);
+  [guide](docs/guide/derived-schemas.md#named-tuples).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).
@@ -581,6 +585,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** every artifact to JDK 21 bytecode (class-file version 65; Scala `-java-output-version 21`, `javac --release 21`,
   Kotlin and the Gradle sample `21`, from 52/17), so JDK 21, already the minimum, is enforced at load time; `scripts/check-doc-support.sh`
   checks the targets and docs agree [#1493](https://github.com/llm4s/llm4s/issues/1493); [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support).
+- **Added** `llm4s-doctor`: the doctor, published and run from your own project (`sbt "Test/runMain org.llm4s.doctor.DoctorCli"`,
+  `cs launch`, Maven, Gradle) or code (`Doctor.run`) [#2283](https://github.com/llm4s/llm4s/issues/2283); [Doctor](docs/reference/doctor.md#running-it), [migration](docs/reference/migration.md#the-doctor-is-llm4s-doctor-2283).
 
 ## [0.5.1] - 2026-10-15
 

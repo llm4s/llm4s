@@ -33,11 +33,12 @@ import scala.deriving.Mirror
  * `Seq`, `Vector` and `Set` of a supported type; case classes whose fields are supported; enums and sealed
  * hierarchies of singletons (as a string with the case names, or a case's `@upickle.implicits.key`); and sum types,
  * enums and sealed traits whose cases have fields (as a JSON Schema `anyOf` of one object per case, each with the
- * discriminator uPickle writes: `"$type"`, or the trait's `@upickle.implicits.key`, holding the case's tag). Not
- * supported, and refused at compile time with a message naming the type: `Map` (core's `ObjectSchema` has a fixed
+ * discriminator uPickle writes: `"$type"`, or the trait's `@upickle.implicits.key`, holding the case's tag); and
+ * named tuples, `(city: String, days: Int)`, as an object with one property per element (see [[SchemaOf.namedTuple]]).
+ * Not supported, and refused at compile time with a message naming the type: `Map` (core's `ObjectSchema` has a fixed
  * set of properties and cannot describe map values), recursive types (they need a JSON Schema `$ref`), a sealed
- * hierarchy nested in another or with a generic case, `Option` directly inside `Option` and
- * tuples (uPickle writes both as JSON arrays), and named tuples. Other types need a `given SchemaOf` of their own:
+ * hierarchy nested in another or with a generic case, and `Option` directly inside `Option` and tuples without names
+ * (uPickle writes both as JSON arrays). Other types need a `given SchemaOf` of their own:
  * see [[SchemaOf.string]] and [[SchemaOf.stringEnum]]. A hand-written given is used as it is, so it can also
  * describe a type the derivation would refuse.
  *
@@ -61,8 +62,8 @@ import scala.deriving.Mirror
 @Experimental
 @implicitNotFound(
   "Cannot derive a JSON schema for ${A}. Supported: String, Int, Long, Double, Float, Boolean, BigDecimal, BigInt, " +
-    "Option, List/Seq/Vector/Set of a supported type, case classes of supported fields (add `derives SchemaOf`), and " +
-    "enums or sealed traits, with or without fields. A Map cannot be described, because llm4s-core's ObjectSchema has a " +
+    "Option, List/Seq/Vector/Set of a supported type, case classes of supported fields (add `derives SchemaOf`), " +
+    "enums or sealed traits, with or without fields, and named tuples of supported types. A Map cannot be described, because llm4s-core's ObjectSchema has a " +
     "fixed set of properties and no way to describe map values. An Option directly inside an Option cannot be " +
     "described either: uPickle writes it as a JSON array ([], [null] or [value]), not as the value or null, and a tuple as an " +
     "array of mixed types: use a case class. For any other type define a `given SchemaOf[${A}]`, " +
@@ -193,6 +194,31 @@ object SchemaOf {
       ArraySchema(d, item.schema(item.defaultDescription)).asInstanceOf[SchemaDefinition[C]]
     override def jsonSchema(d: String, strict: Boolean): ujson.Value =
       JsonSchemas.array(d, item.jsonSchema(item.defaultDescription, strict))
+  }
+
+  /**
+   * The schema of a named tuple, `(sentiment: Sentiment, confidence: Double)`: an object with one property per
+   * element, in order, exactly as for a case class with those fields. Each property is described by its element
+   * type's [[description]], else by its name, since a named tuple's elements cannot carry annotations; an `Option`
+   * element may be absent or `null`, as an `Option` field may. Element types are checked as a case class's fields
+   * are: one nothing describes is refused at compile time, naming it, and so is a recursion through the tuple.
+   *
+   * The reply is read back with the `ReadWriter` in [[namedtuples]] (`import org.llm4s.schema.namedtuples.given`),
+   * since uPickle has none for named tuples.
+   */
+  inline given namedTuple[N <: Tuple, V <: Tuple]: SchemaOf[NamedTuple.NamedTuple[N, V]] = {
+    SchemaMacros.checkNamedTuple[NamedTuple.NamedTuple[N, V]]
+    // `instances` is passed by name: see `product`
+    namedTupleOf[NamedTuple.NamedTuple[N, V]](
+      SchemaMacros.shortName[NamedTuple.NamedTuple[N, V]],
+      labels[N],
+      instances[V]
+    )
+  }
+
+  private def namedTupleOf[A](name: String, names: List[String], elements: => List[SchemaOf[?]]): SchemaOf[A] = {
+    val none = names.map(_ => None)
+    product[A](name, None, names, elements, none, none)
   }
 
   /**

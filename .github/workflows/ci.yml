@@ -437,8 +437,8 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, observabilityMicrometer, agentTools,
-                      traceOpentelemetry, gradleDemo]
+            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, doctor, observabilityMicrometer,
+                      agentTools, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -547,6 +547,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: testkit
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload doctor coverage to Codecov
+        if: contains(matrix.modules, 'doctor')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/doctor/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: doctor
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1514,6 +1525,15 @@ jobs:
         env:
           REQUIRE_MAVEN: '1'
         run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
+
+      # The doctor as docs/reference/doctor.md tells a user to run it, against the library just published and from
+      # empty directories: `cs launch` with llm4s-ollama only (whose report must register `ollama` alone), and a Maven
+      # and a Gradle project reading their own application.conf (#2283).
+      - name: Launch the doctor from cs, Maven and Gradle
+        env:
+          REQUIRE_MAVEN: '1'
+          REQUIRE_GRADLE: '1'
+        run: scripts/check-doctor-launch.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()

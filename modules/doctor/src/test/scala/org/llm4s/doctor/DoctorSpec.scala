@@ -1,4 +1,4 @@
-package org.llm4s.configpolicy
+package org.llm4s.doctor
 
 import org.llm4s.security.KnownSecrets
 
@@ -67,7 +67,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     probe: Probe = new Probe(),
     options: DoctorOptions = DoctorOptions()
   ): DoctorReport =
-    Doctor.run(source(hocon), options, probe.ports)
+    Doctor.runOn(source(hocon), options, probe.ports)
 
   private def check(report: DoctorReport, name: String): DoctorCheck =
     report.checks.find(_.name == name).getOrElse(fail(s"no check called '$name' in ${report.checks.map(_.name)}"))
@@ -140,7 +140,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
     "report a provider whose module is not on the classpath, and say to add the dependency" in {
       val ollamaOnly = ProviderRegistry.of(ProviderRegistry.default.find(ProviderId("ollama")).value)
       val report =
-        Doctor.run(source(openAi(s"""apiKey = "$SecretKey"""")), DoctorOptions(), new Probe().ports)(using ollamaOnly)
+        Doctor.runOn(source(openAi(s"""apiKey = "$SecretKey"""")), DoctorOptions(), new Probe().ports)(using ollamaOnly)
 
       check(report, "Provider module").status shouldBe CheckStatus.Fail
       check(report, "Provider module").detail should include("add the dependency")
@@ -658,7 +658,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         release.await()
         Right("late")
       }
-      val report = Doctor.run(source(localOllama), live.withLiveTimeout(150.millis), ports)
+      val report = Doctor.runOn(source(localOllama), live.withLiveTimeout(150.millis), ports)
       release.countDown()
 
       check(report, "Live call").status shouldBe CheckStatus.Fail
@@ -668,7 +668,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a request that throws" in {
       val ports  = new Probe().ports.withLive((_, _) => throw new IllegalStateException("boom"))
-      val report = Doctor.run(source(localOllama), live, ports)
+      val report = Doctor.runOn(source(localOllama), live, ports)
 
       check(report, "Live call").status shouldBe CheckStatus.Fail
       check(report, "Live call").detail should include("IllegalStateException")
@@ -767,7 +767,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "find the model on a real loopback server" in {
       withStub("""[{"name":"llama3:latest"},{"name":"mistral:latest"}]""") { url =>
-        val report = Doctor.run(source(config(url)), local, systemPorts)
+        val report = Doctor.runOn(source(config(url)), local, systemPorts)
 
         check(report, "Local server").status shouldBe CheckStatus.Pass
         check(report, "Local server").detail should include(url)
@@ -777,7 +777,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report the models a real server has when the wanted one is missing" in {
       withStub("""[{"name":"mistral:latest"}]""") { url =>
-        val report = Doctor.run(source(config(url)), local, systemPorts)
+        val report = Doctor.runOn(source(config(url)), local, systemPorts)
 
         check(report, "Local server").status shouldBe CheckStatus.Fail
         check(report, "Local server").detail should include("mistral:latest")
@@ -793,7 +793,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
     "report a server that is not listening" in {
       val url    = withStub("[]")(identity)
-      val report = Doctor.run(source(config(url)), local, systemPorts)
+      val report = Doctor.runOn(source(config(url)), local, systemPorts)
 
       check(report, "Local server").status shouldBe CheckStatus.Fail
       check(report, "Local server").detail should include("nothing usable answered")
@@ -911,19 +911,19 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
 
   "Doctor on the provider module" should {
 
-    "name the module that supplied the provider, and say the doctor's classpath is not the application's" in {
+    "name the module that supplied the provider, found on the classpath the doctor runs on" in {
       val module = check(run(localOllama), "Provider module")
 
       module.status shouldBe CheckStatus.Pass
       module.detail should include("Llm4sOllamaModule")
-      module.detail should include("pass --classpath")
+      module.detail should include("on this classpath")
     }
 
     "say the module was found on the application's classpath when one was given" in {
       val module = check(run(localOllama, options = DoctorOptions().withApplicationClasspath(true)), "Provider module")
 
       module.detail should include("on the given --classpath")
-      (module.detail should not).include("pass --classpath")
+      (module.detail should not).include("on this classpath")
     }
 
     "make the live request through the run's own registry" in {
@@ -933,7 +933,7 @@ class DoctorSpec extends AnyWordSpec with Matchers with OptionValues {
         seen.set(registry); Right("m")
       }
 
-      Doctor.run(source(localOllama), DoctorOptions().withLive(true), ports)(using ollamaOnly)
+      Doctor.runOn(source(localOllama), DoctorOptions().withLive(true), ports)(using ollamaOnly)
 
       (seen.get should be).theSameInstanceAs(ollamaOnly)
     }
