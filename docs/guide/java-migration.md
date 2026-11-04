@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Moving a Java app from LangChain4j or Spring AI
+description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with compiled Java for tools, records, RAG, streaming, Spring Boot and tests."
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
