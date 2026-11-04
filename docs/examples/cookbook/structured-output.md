@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Classify text into an enum
+description: "Classify a customer message into an enum with LLM4S structured output: a Ticket case class with a fixed category set and an urgency field."
+search_title: "Classify text into an enum with an LLM in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 1

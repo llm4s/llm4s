@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Security Best Practices
+description: "Security patterns for LLM applications: API key management and rotation, input validation, prompt injection defence, PII redaction and audit logging."
+search_title: "LLM application security: prompt injection, keys and PII"
 parent: Real-World Application Patterns
 nav_order: 6
 ---

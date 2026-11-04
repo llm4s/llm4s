@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Several agents in one graph
+description: "Ask two specialist agents in parallel and let an editor agent combine their views, using an LLM4S agent graph in Scala."
+search_title: "A multi-agent graph in Scala: parallel agents and an editor"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 13

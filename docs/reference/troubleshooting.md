@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Troubleshooting / FAQ
+description: "Fix common LLM4S errors: configuration and authentication errors, Scala version issues, agent, tool and streaming problems, and vector store errors."
+search_title: "LLM4S troubleshooting and FAQ"
 parent: Reference
 nav_order: 11
 ---

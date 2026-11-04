@@ -2,6 +2,7 @@
 layout: landing
 title: Home
 nav_order: 1
+search_title: "Scala LLM framework for the JVM"
 description: "LLM4S - Large Language Models for Scala. Type-safe agents, tools, RAG and multi-provider LLM calls for Scala and the JVM, from the community-led LLM4S Foundation."
 permalink: /
 ---

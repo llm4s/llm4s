@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Security Reference
+description: "The LLM4S threat model: data flow, trust boundaries, what is redacted, and known risks such as key leakage, prompt injection and SSRF with mitigations."
+search_title: "LLM4S security reference: threat model and mitigations"
 parent: Reference
 nav_order: 16
 ---

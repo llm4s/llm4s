@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Java Threading and Cancellation
+description: "Which thread an llm4s-java-api call blocks, whether a client can be shared, how to use virtual threads, and what an interrupt or timeout does."
 parent: User Guide
 nav_order: 20
 ---

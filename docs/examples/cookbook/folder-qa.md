@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Answer questions over a folder of files
+description: "Answer questions over a folder of files in Scala: ingest each file into the LLM4S RAG pipeline, retrieve passages and answer from them."
+search_title: "Answer questions over a folder of files with RAG in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 4

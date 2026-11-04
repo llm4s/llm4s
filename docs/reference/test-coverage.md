@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Test Coverage
+description: "How LLM4S measures test coverage with sbt-scoverage: per-module floors, the policy check, what CI runs and how to run coverage locally."
 parent: Reference
 nav_order: 15
 ---

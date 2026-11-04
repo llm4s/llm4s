@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Handoffs
+description: "Hand a query from one LLM4S agent to a specialist agent: handoff configuration, handing back, handoff options and how handoffs work."
+search_title: "Agent handoffs in Scala: delegate to specialist agents"
 nav_order: 4
 parent: Agents
 grand_parent: User Guide

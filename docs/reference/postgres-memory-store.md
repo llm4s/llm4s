@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Postgres Memory Store
+description: "PostgresMemoryStore for LLM4S agents: durable memories with metadata and optional vector embeddings in PostgreSQL, with configuration and validation."
+search_title: "Postgres memory store for LLM agents in Scala"
 nav_order: 10
 parent: Reference
 ---

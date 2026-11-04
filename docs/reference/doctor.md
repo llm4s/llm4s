@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Doctor (setup check)
+description: "Check an LLM4S setup in one run: JDK version, application.conf, API keys and provider modules, with JSON output and no secrets in the report."
+search_title: "LLM4S doctor: check your Scala LLM setup"
 parent: Reference
 nav_order: 19
 ---

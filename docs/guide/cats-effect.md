@@ -1,6 +1,8 @@
 ---
 layout: page
 title: cats-effect Integration
+description: "Use LLM4S with cats-effect: llm4s-effect wraps LLMClient and Agent in IO, streams with fs2 and keeps blocking calls off the compute pool."
+search_title: "LLM4S with cats-effect and fs2: LLM calls in IO"
 parent: User Guide
 nav_order: 14
 ---

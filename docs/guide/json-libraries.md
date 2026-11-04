@@ -1,6 +1,8 @@
 ---
 layout: page
 title: JSON Libraries
+description: "Use LLM4S with circe, play-json or zio-json: pass your own types in and get them back without writing a second schema."
+search_title: "Use LLM4S with circe, play-json and zio-json"
 parent: User Guide
 nav_order: 17
 ---

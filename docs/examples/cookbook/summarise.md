@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Summarise a long document
+description: "Summarise a document longer than the context window in Scala: cut it into parts, summarise each, then summarise the summaries (map-reduce)."
+search_title: "Summarise long documents with an LLM in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 3

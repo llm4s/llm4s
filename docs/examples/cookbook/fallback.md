@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Fall back between providers
+description: "Retry a provider with ReliableClient and ask a second provider when the first still fails, in an LLM4S Scala program."
+search_title: "Fall back between LLM providers in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 8

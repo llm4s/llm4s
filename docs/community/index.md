@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Community
+description: "Join the LLM4S community: Discord, GitHub issues and contributions, the starter kit, talks and Google Summer of Code."
+search_title: "LLM4S community: Discord, GitHub and contributing"
 nav_order: 8
 ---
 

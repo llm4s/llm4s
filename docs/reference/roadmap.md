@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Roadmap
+description: "The LLM4S roadmap to 1.0 as of October 2026: current status, maturity of each capability, the production-readiness pillars and phases."
+search_title: "LLM4S roadmap: the path to 1.0"
 parent: Reference
 nav_order: 5
 ---

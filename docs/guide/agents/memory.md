@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Memory System
+description: "Give LLM4S agents short-term and long-term memory: user facts, entity knowledge, memory managers and stores that persist across conversations."
+search_title: "Agent memory in Scala: persistent context across turns"
 nav_order: 3
 parent: Agents
 grand_parent: User Guide

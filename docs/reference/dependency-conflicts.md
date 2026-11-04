@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Dependency Conflicts
+description: "Resolve LLM4S dependency conflicts in sbt, Maven and Gradle: the dependency footprint, the conflict matrix, and Logback and Azure SDK fixes."
+search_title: "Resolve LLM4S dependency conflicts: sbt, Maven, Gradle"
 parent: Reference
 nav_order: 13
 ---

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Examples
+description: "A gallery of working LLM4S examples in Scala, from a basic LLM call and streaming to agents, RAG, tools and observability, each with its run command."
+search_title: "LLM4S examples: runnable Scala samples"
 nav_order: 4
 has_children: true
 ---

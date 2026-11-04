@@ -1,3 +1,12 @@
+---
+layout: page
+title: STT Domain Model
+description: "The expanded speech-to-text domain model in LLM4S: STTOptions, WordTimestamp, Transcription and the STTError cases, with validation and examples."
+search_title: "STT domain model in LLM4S: options, transcripts, errors"
+parent: User Guide
+nav_order: 40
+---
+
 # STT Domain Model Expansion (#894) - Implementation Guide
 
 ## Overview

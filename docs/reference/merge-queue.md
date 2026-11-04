@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Protecting main (merge queue)
+description: "Why LLM4S protects main with a merge queue: two green pull requests can break main together, with setup options for maintainers."
 parent: Reference
 nav_order: 20
 ---

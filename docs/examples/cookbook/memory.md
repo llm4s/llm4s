@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Remember facts between turns
+description: "Record what a user says in an LLM4S memory manager and put the relevant facts in the system prompt of the next question."
+search_title: "Give an LLM memory between turns in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 12

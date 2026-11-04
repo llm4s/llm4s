@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Spring Boot
+description: "Use LLM4S with Spring Boot: add llm4s-spring-boot-starter, configure it in application.properties and inject an LLM4STemplate with a health indicator."
+search_title: "Use LLM4S with Spring Boot: LLM client starter"
 parent: User Guide
 nav_order: 7
 ---

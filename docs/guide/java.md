@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Java
+description: "Call an LLM from Java with llm4s-java-api: add the dependency, configure a provider, send a prompt or conversation and read failures without Scala."
+search_title: "Call LLMs from Java with LLM4S"
 parent: User Guide
 nav_order: 19
 ---

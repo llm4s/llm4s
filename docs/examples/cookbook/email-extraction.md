@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Extract structured data from an email
+description: "Extract an order change from a free-text email into a Scala case class with a list of line items, using LLM4S structured output."
+search_title: "Extract structured data from an email with an LLM in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 2

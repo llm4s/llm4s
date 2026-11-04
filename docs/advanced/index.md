@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Advanced Topics
+description: "Advanced LLM4S topics: production readiness, the road to 1.0, design documents, advanced examples and reference implementations."
 nav_order: 5
 has_children: true
 ---

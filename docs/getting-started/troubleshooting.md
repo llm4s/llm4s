@@ -1,6 +1,8 @@
 ---
 layout: page
 title: First-Run Troubleshooting
+description: "Fix the problems met when an LLM4S program fails on its first run: each error message with its cause and fix, such as a missing API key."
+search_title: "LLM4S first-run errors and fixes: missing API key and more"
 parent: Getting Started
 nav_order: 11
 ---

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Human Review
+description: "Pause an LLM4S agent for a person: approve a tool call, answer a question, review an answer or inspect a step, then resume the run."
+search_title: "Human-in-the-loop agents in Scala: approvals and review"
 nav_order: 7
 parent: Agents
 grand_parent: User Guide

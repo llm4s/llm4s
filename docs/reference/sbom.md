@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Software Bill of Materials
+description: "Where to find the CycloneDX SBOM of each published LLM4S module, what it covers, how to build it and how dependencies are scanned for vulnerabilities."
 parent: Reference
 ---
 

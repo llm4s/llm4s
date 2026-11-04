@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Gradle Integration
+description: "Use LLM4S from a Gradle build in Java, Kotlin or Kotlin/Ktor: the _3 artifact names, dependency declarations and a first call."
+search_title: "Use LLM4S from Gradle (Java and Kotlin)"
 parent: Getting Started
 nav_order: 6
 ---

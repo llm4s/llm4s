@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Contributing Guide
+description: "How to open your first pull request to LLM4S: picking an issue, the contribution ladder, PR requirements and what gets a PR closed."
 nav_order: 1
 parent: Reference
 ---

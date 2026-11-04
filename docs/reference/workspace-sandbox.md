@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Workspace Sandbox
+description: "Configure the LLM4S workspace sandbox: command allowlists, program resolution, profiles and runner environment variables for agents that run code."
+search_title: "LLM4S workspace sandbox configuration"
 parent: Reference
 nav_order: 17
 ---

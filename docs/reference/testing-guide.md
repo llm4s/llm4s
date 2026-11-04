@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Testing Guide
+description: "How contributors write, run and reason about tests in LLM4S: unit, integration and end-to-end tests, directory structure and effective test design."
 nav_order: 8
 parent: Reference
 ---

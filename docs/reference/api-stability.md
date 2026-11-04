@@ -1,6 +1,8 @@
 ---
 layout: page
 title: API Stability
+description: "How LLM4S checks binary compatibility with MiMa: stability tiers in the code, which modules are covered and how the baseline is set."
+search_title: "LLM4S API stability and binary compatibility (MiMa)"
 parent: Reference
 nav_order: 12
 ---

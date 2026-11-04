@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Support Policy
+description: "Which LLM4S releases get fixes, the supported platforms, release cadence, provider API changes and end of support."
+search_title: "LLM4S support policy and supported versions"
 parent: Reference
 nav_order: 26
 ---
