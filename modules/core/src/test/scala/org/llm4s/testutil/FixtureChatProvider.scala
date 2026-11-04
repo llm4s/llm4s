@@ -4,6 +4,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ DiscoveredModel, ProviderModelLister }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -70,13 +71,16 @@ final case class FixtureChatConfig(
   contextWindow: Int = 8192,
   reserveCompletion: Int = 1024,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
-  override val network: HttpNetworkSettings = HttpNetworkSettings.default
+  override val network: HttpNetworkSettings = HttpNetworkSettings.default,
+  override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                                       = FixtureChatProvider.id
   override def endpointUrl: Option[String]                                  = Some(baseUrl)
   override def withModel(model: String): FixtureChatConfig                  = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): FixtureChatConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): FixtureChatConfig =
+    copy(apiKeyProvider = Some(provider))
 
 object FixtureChatConfig:
 

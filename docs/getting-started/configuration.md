@@ -195,6 +195,84 @@ and bills the default account. In production, give every section its own `apiKey
 config-policy `prod` preset flags any section that does not (see
 [Production deployment](../PRODUCTION_DEPLOYMENT)).
 
+### Rotating keys: apiKeyFile and ApiKeyProvider
+
+A key that a secret manager rotates - mounted as a file by Vault Agent, the Secrets Store CSI driver
+or a Kubernetes secret volume - goes in `apiKeyFile` instead of `apiKey`:
+
+```hocon
+llm4s.providers.openai-main {
+  provider   = "openai"
+  model      = "gpt-4o-mini"
+  apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"
+}
+```
+
+The file holds the key alone (surrounding whitespace is trimmed). It is read when the section is
+loaded - a missing, unreadable or empty file fails the load with a `ConfigurationError` naming the
+path - and the client checks it again before every request (one `stat`), re-reading it whenever its
+modification time, size or identity changes. A key rewritten in place, or swapped in through a
+symbolic link as Kubernetes does, is sent from the next request on, without rebuilding the client or
+restarting the application. The INFO line names the file, never the key.
+
+A section sets `apiKeyFile` or `apiKey` (or `auth`), never two of them, and with `apiKeyFile` the
+vendor's shared key is not used. The `openai`, `requesty`, `anthropic`, `openai-compatible` and
+`openrouter` clients re-read the file per request as above. Every other provider that takes an API
+key (`azure`, `gemini`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, `watsonx`) reads it once, when
+the section is loaded, and logs that it does; a rotated key reaches it when the section is loaded
+again. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refuses `apiKeyFile` with a
+`ConfigurationError`. On a POSIX file system, a key file readable by its group or by others is
+logged once as a WARN naming the path; mount it with mode `0400`.
+
+A key your code fetches - from Vault's API, AWS Secrets Manager or GCP Secret Manager - comes from an
+`ApiKeyProvider`, which the client asks for the key on every request. `current()` is on the request
+path, so it caches:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ApiKey
+import org.llm4s.types.Result
+
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.*
+
+/** The key `fetch` returns, fetched again once it is older than `maxAge`. */
+class SecretStoreKey(fetch: () => Result[String], maxAge: FiniteDuration) extends ApiKeyProvider:
+  private val cached = AtomicReference(Option.empty[(ApiKey, Instant)])
+
+  def current(): Result[ApiKey] =
+    cached.get() match
+      case Some((key, fetchedAt)) if Instant.now().isBefore(fetchedAt.plusMillis(maxAge.toMillis)) => Right(key)
+      case _ =>
+        fetch().map { value =>
+          val key = ApiKey(value.trim)
+          cached.set(Some(key -> Instant.now()))
+          key
+        }
+
+// Your secret store's client goes here - for AWS Secrets Manager, `GetSecretValue` on the secret's id.
+val fetchOpenAIKey: () => Result[String] = () => Left(ConfigurationError("connect the secret store"))
+
+val rotating: Result[LLMClient] = for {
+  providerConfig <- Llm4sConfig.provider("openai-main")
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  config = providerConfig.withApiKeyProvider(SecretStoreKey(fetchOpenAIKey, 5.minutes))
+  // A provider whose client cannot take one leaves `apiKeyProvider` empty.
+  _      <- Either.cond(config.apiKeyProvider.isDefined, (), ConfigurationError("this provider cannot rotate keys"))
+  client <- LLMConnect.getClient(config)
+} yield client
+```
+
+`ApiKeyProvider.file(path)` is the provider `apiKeyFile` sets, and `ApiKeyProvider.static(key)` one
+that never changes. A key created as an `ApiKey` is registered for redaction, so an error that echoes
+a rotated key is scrubbed of it.
+
 ### Workload identity (SPIFFE)
 
 A section can authenticate with a workload identity token - typically a SPIFFE JWT-SVID that
@@ -295,6 +373,7 @@ section with an `apiKey`.
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
+| `apiKeyFile` | A file holding the API key, instead of `apiKey`. Re-read when it changes (no restart) by OpenAI, Requesty, Anthropic, OpenRouter and generic `openai-compatible`; read when the section is loaded by the other providers that take a key ([Rotating keys](#rotating-keys-apikeyfile-and-apikeyprovider)) |
 | `baseUrl` | Overrides the provider's default endpoint (`ollama`: `http://localhost:11434`); **required** for `openai-compatible`. Checked when the section is loaded: an absolute `http` or `https` URL with a host, or a `ConfigurationError` naming the key (a blank value counts as unset) |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
 | `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
@@ -304,7 +383,7 @@ section with an `apiKey`.
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
 | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
-The first six keys are shared by every provider. The rest belong to the providers named, which
+The first seven keys are shared by every provider (`apiKeyFile` by every one that takes an API key). The rest belong to the providers named, which
 declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for
 any other provider such a key is ignored with a warning naming it, as a misspelt key is.
 

@@ -235,6 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
   (for example `--env=production` with `prod-safe`, whose policies apply only to `prod`): nothing was checked, so a
   mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
+- **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: OpenAI, Requesty, Anthropic, OpenRouter
+  and generic OpenAI-compatible re-read a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313).
 
 ### Providers
 
@@ -455,6 +457,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** a `description` for every page under getting-started, guide, examples, reference, migrations, advanced, api and community, a
   `search_title` front-matter key (rendered into `<title>`, `og:title` and `twitter:title` by `docs/_plugins/search_title.rb`; `title` stays the
   navigation label) and `scripts/check-doc-seo.sh`, which fails CI on a missing, duplicate or over-long title or description [#2314](https://github.com/llm4s/llm4s/issues/2314).
+- **Added** [Moving a Java app from LangChain4j or Spring AI](docs/guide/java-migration.md): concepts, compiled Java for
+  each common task, provider configuration and the gaps; the Scala migration and comparison pages corrected for the Java API [#2282](https://github.com/llm4s/llm4s/issues/2282).
 
 ### Embeddings & RAG
 

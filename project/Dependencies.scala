@@ -112,6 +112,8 @@ object Versions {
   // tested at both ends; nothing else reads the property.
   val springBootBaseline = "3.3.6"
   val springBoot         = sys.props.getOrElse("llm4s.springBootVersion", springBootBaseline)
+  // The Spring Framework release Spring Boot `springBootBaseline` manages: only spring-web's annotations use it.
+  val springFrameworkBaseline = "6.1.15"
 
   // Spring Boot 4: the same artifact, compiled against Boot 3 above, also carries a Boot 4 health indicator, compiled
   // against this release's spring-boot-health. `springBootStarterBoot4` runs the starter's specs on Boot 4: on this
@@ -242,6 +244,12 @@ object Deps {
     ("org.springframework.boot" % "spring-boot-health" % Versions.springBoot4Baseline).excludeAll(
       ExclusionRule("*", "*")
     )
+  // spring-web's annotations (@RestController, @GetMapping, @RequestParam), for the Java migration guide's controller
+  // in the starter's tests (#2282). Without its dependencies, like springBoot4HealthApi: the Spring Framework jars come
+  // with the Spring Boot release under test, and the test only compiles the controller and reads its annotations.
+  // The release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
+  val springWebAnnotations =
+    ("org.springframework" % "spring-web" % Versions.springFrameworkBaseline).excludeAll(ExclusionRule("*", "*"))
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",

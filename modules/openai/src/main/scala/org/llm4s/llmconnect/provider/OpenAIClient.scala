@@ -35,7 +35,12 @@ import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentityTokenSource }
+import org.llm4s.llmconnect.auth.{
+  AccessTokenProvider,
+  ApiKeyProvider,
+  CachingAccessTokenProvider,
+  IdentityTokenSource
+}
 import org.llm4s.llmconnect.config.{
   AzureConfig,
   OpenAIConfig,
@@ -996,7 +1001,11 @@ private[provider] object OpenAIClientTransport {
           .builder()
           .baseUrl(config.baseUrl)
           .organization(config.organization.orNull)
-          .apiKey(config.apiKey.reveal)
+        config.apiKeyProvider match {
+          case None => builder.apiKey(config.apiKey.reveal)
+          // The SDK asks the credential for its token on each request (#2313).
+          case Some(keys) => builder.credential(BearerTokenCredential.create(new RotatingKey(keys)))
+        }
         sdk(withNetwork(builder, config.network, config.baseUrl).build(), config.timeouts)
     }
   }
@@ -1111,6 +1120,18 @@ private[provider] object OpenAIClientTransport {
         error => throw new IllegalArgumentException(error.message),
         _.foreach(material => tls(material.sslContext.getSocketFactory, material.trustManager))
       )
+  }
+
+  /**
+   * The key `keys` holds now, for each request (#2313). A failure to get it rides through the SDK in an
+   * [[IdentityTokenException]], so it reaches the caller as the `LLMError` it was; a provider that throws fails the
+   * request the same way, with an `AuthenticationError` naming the exception's class.
+   */
+  final private[provider] class RotatingKey(keys: ApiKeyProvider) extends java.util.function.Supplier[String] {
+    override def get(): String =
+      CachingAccessTokenProvider
+        .guarded(keys.current())
+        .fold(error => throw new IdentityTokenException(error), _.asKey)
   }
 
   /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */

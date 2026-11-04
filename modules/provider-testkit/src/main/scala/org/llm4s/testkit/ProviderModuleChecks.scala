@@ -20,14 +20,17 @@ import org.llm4s.llmconnect.spi.{
 }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.types.ProviderModelTypes.{ ApiKey, ProviderId }
 import org.llm4s.types.Result
 import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.ListBuffer
 
 /**
@@ -501,6 +504,49 @@ trait ProviderModuleChecks extends Assertions:
     descriptor.build(config) match
       case Right(provider) => provider
       case Left(error) => failAt(s"${descriptor.id.asString} failed to build an embedding provider: ${error.message}")
+
+  // ---- API key rotation ----
+
+  /**
+   * The client sends the key its `ApiKeyProvider` holds at each request, not the key it held when it was built
+   * (#2313): two `complete` calls on one client, the provider's key rotated between them, must reach the server
+   * with the first key and then the second. A key may travel in any request header (`Authorization`,
+   * `x-api-key`, ...), so the check looks for it in all of them.
+   *
+   * @param respond answers every request with a successful reply in the provider's format, e.g.
+   *                `LocalProviderTestServer.sendJsonResponse(_, 200, LocalProviderTestServer.openAICompletion("ok"))`
+   * @param path    the path the server answers on; `/` answers every path
+   * @param client  builds the client for the server's base URL, its config given the provider with
+   *                `withApiKeyProvider`, as a section's `apiKeyFile` gives it one
+   */
+  def assertHonoursApiKeyProvider(respond: HttpExchange => Unit, path: String = "/")(
+    client: (String, ApiKeyProvider) => LLMClient
+  )(using pos: Position): Assertion =
+    val first  = "llm4s-contract-key-first-0001"
+    val second = "llm4s-contract-key-second-0002"
+    val held   = new AtomicReference(first)
+    val keys = new ApiKeyProvider:
+      def current(): Result[ApiKey] = Right(ApiKey(held.get()))
+    val seen = new ConcurrentLinkedQueue[Seq[String]]()
+    LocalProviderTestServer.withServer(path) { exchange =>
+      seen.add(exchange.getRequestHeaders.values.asScala.toSeq.flatMap(_.asScala))
+      respond(exchange)
+    } { baseUrl =>
+      val built = client(baseUrl, keys)
+      val results = Seq(first, second).map { key =>
+        held.set(key)
+        scala.util.Try(built.complete(Conversation(Seq(UserMessage("Hello"))))).fold(e => Left(e.toString), identity)
+      }
+      scala.util.Try(built.close()): Unit
+      results.collectFirst { case Left(error) => error }.foreach(error => failAt(s"complete failed: $error"))
+    }
+    val requests                                   = seen.asScala.toSeq
+    def carries(headers: Seq[String], key: String) = headers.exists(_.contains(key))
+    if requests.size != 2 then failAt(s"expected 2 requests, the server saw ${requests.size}")
+    else if !carries(requests(0), first) then failAt("the first request did not carry the provider's key")
+    else if carries(requests(1), first) || !carries(requests(1), second) then
+      failAt("the second request did not carry the rotated key: the client kept the key it was built with")
+    else succeed
 
   // ---- reference.conf ----
 
