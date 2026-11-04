@@ -1,4 +1,4 @@
-package org.llm4s.configpolicy
+package org.llm4s.doctor
 
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec

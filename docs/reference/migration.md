@@ -269,6 +269,18 @@ for
 yield (files, ExecuteTool(sandbox))
 ```
 
+## The doctor is `llm4s-doctor` (#2283)
+
+The doctor moved from the unpublished `llm4s-config-policy` to the published `llm4s-doctor`, package `org.llm4s.doctor`
+(`Doctor`, `DoctorCli`, `DoctorReport`, `DoctorCheck`, `CheckStatus`, `DoctorOptions`). Run it from your own project
+([Doctor](doctor#running-it)): `sbt "Test/runMain org.llm4s.doctor.DoctorCli"` with `llm4s-doctor` as a test dependency.
+In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli"` still works.
+
+- `Doctor.run(options)` checks the application's own configuration; `Doctor.run(source, options, ports)` and
+  `DoctorPorts` are internal.
+- Without `--classpath`, the "Provider module" step reports the module as found "on this classpath": the doctor's
+  classpath is now the one it is launched on, not one with every built-in provider module.
+
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
