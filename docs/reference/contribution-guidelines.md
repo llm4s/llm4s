@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Contribution Guidelines
+description: "Guidelines for contributing to LLM4S with emphasis on code quality, testing and documentation, from finding an issue to submitting a pull request."
 parent: Reference
 nav_order: 7
 ---

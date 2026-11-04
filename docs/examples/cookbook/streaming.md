@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Stream tokens to the terminal
+description: "Print each piece of an LLM reply as it is produced with streamComplete in Scala, and get the whole completion at the end."
+search_title: "Stream LLM tokens to the terminal in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 7

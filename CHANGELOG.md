@@ -448,6 +448,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `ScriptedLLMClient.assertExhausted()`, `remaining` and `unusedReplies` (a scripted reply never asked for), and
   [testing guide](docs/guide/testing-with-the-testkit.md#other-test-frameworks) fixtures for MUnit, munit-cats-effect,
   weaver and ZIO Test, each a suite CI runs [#2335](https://github.com/llm4s/llm4s/issues/2335).
+- **Added** a `description` for every page under getting-started, guide, examples, reference, migrations, advanced, api and community, a
+  `search_title` front-matter key (rendered into `<title>`, `og:title` and `twitter:title` by `docs/_plugins/search_title.rb`; `title` stays the
+  navigation label) and `scripts/check-doc-seo.sh`, which fails CI on a missing, duplicate or over-long title or description [#2314](https://github.com/llm4s/llm4s/issues/2314).
 
 ### Embeddings & RAG
 

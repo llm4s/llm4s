@@ -1,6 +1,8 @@
 ---
 layout: page
 title: User Guide
+description: "The LLM4S user guide: providers, agents, tools, structured output, RAG, vector stores, Java, effect systems and observability for the Scala JVM."
+search_title: "LLM4S user guide: build LLM apps in Scala"
 nav_order: 3
 has_children: true
 ---

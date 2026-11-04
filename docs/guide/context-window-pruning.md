@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Context Window Pruning
+description: "Keep a long conversation inside the model's context window with LLM4S pruning strategies: oldest first, middle out, recent turns and adaptive."
+search_title: "Context window pruning for LLM conversations in Scala"
 nav_order: 11
 parent: User Guide
 ---

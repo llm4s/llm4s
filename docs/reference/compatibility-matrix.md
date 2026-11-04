@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Compatibility Matrix
+description: "Which LLM providers support which capabilities in LLM4S, and the versions of Scala, JDK and libraries it is built and tested with."
+search_title: "LLM4S provider capabilities and tested versions"
 parent: Reference
 nav_order: 24
 ---

@@ -1,0 +1,3 @@
+# Pages exempt from scripts/check-doc-seo.sh, one key per line: `src:docs/<file>.md` (source check) or
+# `site:<path>.html` (built-site check). The baseline can only shrink: the check fails on a listed page that now
+# passes, so delete its line. It is empty; never add a line to hide a new page.

@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Migration Guide
+description: "Per-change migration notes for LLM4S releases after 0.4.1, from Secret credentials to multimodal content parts and subagent changes."
 parent: Reference
 nav_order: 2
 ---

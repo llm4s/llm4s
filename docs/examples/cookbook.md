@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Cookbook
+description: "The LLM4S cookbook: complete Scala programs for classification, extraction, summarising, RAG, tool calling, streaming and agents, each runnable without a key."
+search_title: "LLM4S cookbook: Scala recipes for LLM apps"
 parent: Examples
 nav_order: 1
 has_children: true

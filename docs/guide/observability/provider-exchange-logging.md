@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Provider Exchange Logging
+description: "Capture the raw request and response of each provider call in LLM4S, to a JSON Lines file or your own sink, with redaction and truncation."
 parent: Monitoring
 grand_parent: User Guide
 nav_order: 1

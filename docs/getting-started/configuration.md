@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Configuration
+description: "Configure LLM4S providers in application.conf: named provider sections, API keys from the environment, precedence and per-section validation."
+search_title: "Configure LLM4S providers and API keys in Scala"
 parent: Getting Started
 nav_order: 3
 ---

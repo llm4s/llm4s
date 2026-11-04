@@ -124,6 +124,14 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # Every docs page has its own search title and meta description, not the site-wide one: jekyll-seo-tag falls back
+      # to it, so a page without one looks like every other page in a search result. This reads the front matter; the
+      # built site is checked again in pages.yml before a deploy (#2314).
+      - name: Check docs pages have their own title and description
+        run: |
+          scripts/test-check-doc-seo.sh
+          scripts/check-doc-seo.sh
+
       # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
       # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
       - name: Check llms.txt and llms-full.txt build from the docs

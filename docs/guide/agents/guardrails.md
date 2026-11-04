@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Guardrails
+description: "Validate an agent's inputs and outputs with LLM4S guardrails: length, profanity, JSON and regex checks, LLM-as-judge and RAG guardrails."
+search_title: "Agent guardrails in Scala: validate LLM input and output"
 nav_order: 2
 parent: Agents
 grand_parent: User Guide

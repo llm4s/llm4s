@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Agent Platform Parity
+description: "How the LLM4S agent runtime compares with LangGraph Platform and Deep Agents: durable execution, operations, serving and harness, capability by capability."
+search_title: "LLM4S vs LangGraph Platform and Deep Agents"
 parent: Reference
 nav_order: 23
 ---

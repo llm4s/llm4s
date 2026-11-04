@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Answer questions with keyword search
+description: "Answer questions from a small document set in Scala with no embedding model: an in-memory BM25 keyword index retrieves the best passage."
+search_title: "Keyword-search document Q&A (BM25) in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 11

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Mill Quick Start
+description: "Use LLM4S in a Mill 1.x project: a complete build.mill, a program that asks a model one question, its configuration and a unit test without an API key."
+search_title: "Call an LLM from Mill with LLM4S in Scala 3"
 parent: Getting Started
 nav_order: 13
 ---

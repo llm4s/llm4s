@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Error Recovery
+description: "Recover from LLM failures: retries with exponential backoff and jitter, timeouts, circuit breakers, model fallback and graceful degradation."
+search_title: "LLM error recovery: retries, fallback, circuit breaker"
 parent: Real-World Application Patterns
 nav_order: 5
 ---

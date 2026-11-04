@@ -1,6 +1,8 @@
 ---
 layout: page
 title: First Example
+description: "Write your first LLM4S program in Scala: build a client from configuration, send one prompt, and read the Result of the call."
+search_title: "Your first LLM call in Scala with LLM4S"
 parent: Getting Started
 nav_order: 2
 ---

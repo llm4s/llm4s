@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Configuration Boundary
+description: "LLM4S keeps configuration loading at the application edge: core code never reads configuration directly, and PureConfig access lives in org.llm4s.config."
 parent: Reference
 ---
 

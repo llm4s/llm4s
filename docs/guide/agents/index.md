@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Agents
+description: "Build AI agents in Scala with LLM4S: tools, multi-turn conversations, guardrails, handoffs, memory, streaming and multi-agent coordination."
+search_title: "Build AI agents in Scala with LLM4S"
 nav_order: 12
 parent: User Guide
 has_children: true

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: An agent that calls two tools
+description: "Give an LLM4S agent an exchange-rate tool of your own plus the built-in calculator, and let the model chain the two to answer."
+search_title: "LLM tool calling in Scala: an agent with two tools"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 5

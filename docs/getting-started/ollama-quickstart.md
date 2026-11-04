@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Ollama Quick Start
+description: "Run LLM4S against Ollama for free local inference in Scala: install Ollama, pull a model, configure the provider and make your first call."
+search_title: "Run local LLMs from Scala with Ollama and LLM4S"
 parent: Getting Started
 nav_order: 5
 ---

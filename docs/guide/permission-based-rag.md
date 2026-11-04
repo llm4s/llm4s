@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Permission-Based RAG
+description: "Add access control to RAG in LLM4S: organise documents in collections, grant principals access, and retrieve only what a user may read."
+search_title: "Permission-based RAG with access control in Scala"
 parent: User Guide
 nav_order: 4
 ---

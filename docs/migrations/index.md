@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Migrations
+description: "Step-by-step guides for upgrading between LLM4S versions, including the 0.4.1 to 0.5.0 modularisation and the path to 1.0."
+search_title: "Migrate between LLM4S versions: upgrade guides"
 nav_order: 11
 has_children: true
 ---

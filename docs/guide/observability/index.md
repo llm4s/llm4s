@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Monitoring
+description: "Monitor LLM4S applications in production: logging, tracing with Langfuse or OpenTelemetry, metrics, token usage and cost, and provider reliability."
+search_title: "Monitor LLM apps in Scala: tracing, metrics and cost"
 nav_order: 21
 parent: User Guide
 has_children: true
@@ -987,7 +989,7 @@ These are tracked in the [Production Readiness Roadmap](../../reference/roadmap)
 ## Related Documentation
 
 - [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
-- [In-Process Tracing Use Cases](enhanced-tracing-use-cases.md) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
+- [In-Process Tracing Use Cases](enhanced-tracing-use-cases) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
 - [Configuration Guide](../../getting-started/configuration) - Complete configuration reference
 - [Roadmap](../../reference/roadmap) - Planned observability improvements

@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Release Process
+description: "How an LLM4S release is made: tag format, release steps, the docs deploy, what is published and how to verify a release."
 parent: Reference
 nav_order: 3
 ---

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Running agents on several machines
+description: "Run an LLM4S agent service as several instances sharing threads through one PostgreSQL database, with a run queue, workers and recovery of dead runs."
+search_title: "Run LLM agents on several machines with PostgreSQL"
 nav_order: 9
 parent: Agents
 grand_parent: User Guide

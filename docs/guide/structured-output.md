@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Structured Output
+description: "Get a typed value instead of free text with completeStructured: describe the type, set options and handle replies that do not comply."
+search_title: "Structured output from LLMs in Scala with LLM4S"
 parent: User Guide
 nav_order: 6
 ---

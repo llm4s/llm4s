@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Providers
+description: "Which LLM providers LLM4S supports, including OpenAI, Anthropic, Azure, Gemini and Ollama, how to select one and configure its API key and models."
+search_title: "LLM providers for Scala: OpenAI, Anthropic, Gemini, Ollama"
 parent: User Guide
 nav_order: 2
 ---

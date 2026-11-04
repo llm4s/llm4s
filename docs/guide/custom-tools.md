@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Custom Tools
+description: "Write a tool for an LLM4S agent with ToolBuilder: declare parameters, read arguments safely, return a result or error, and test it without a model."
+search_title: "Build custom LLM tools in Scala with ToolBuilder"
 parent: User Guide
 nav_order: 34
 ---

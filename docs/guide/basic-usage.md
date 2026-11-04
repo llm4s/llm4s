@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Basic Usage
+description: "Create an LLM4S client, send a conversation, choose a model and handle the Result and LLMError values that every call returns in Scala."
+search_title: "Call LLMs from Scala with LLM4S: clients and results"
 parent: User Guide
 nav_order: 1
 ---

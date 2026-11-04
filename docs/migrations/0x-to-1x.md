@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Migrating from 0.x to 1.0
+description: "Breaking changes across the LLM4S 0.x series to apply on the way to 1.0, such as the ProviderKind change and removed throwing APIs."
+search_title: "Migrate LLM4S from 0.x to 1.0"
 parent: Migrations
 nav_order: 10
 ---

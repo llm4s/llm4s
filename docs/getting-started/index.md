@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Getting Started
+description: "Get started with LLM4S: install it, run a first program, configure a provider, and pick a quick start for sbt, Scala CLI, Maven, Gradle, Mill or JBang."
+search_title: "Get started with LLM4S: Scala LLM framework for the JVM"
 nav_order: 2
 has_children: true
 ---

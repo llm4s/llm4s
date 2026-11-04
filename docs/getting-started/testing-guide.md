@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Testing Guide
+description: "Test LLM-powered Scala code without paying for API calls: fast, deterministic tests with mock clients, plus when to run a live model."
+search_title: "Test LLM applications in Scala without API calls"
 parent: Getting Started
 nav_order: 7
 ---

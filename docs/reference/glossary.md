@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Glossary
+description: "Short definitions of the terms used in LLM4S, such as Agent and Handoff, each linked to its guide or type."
+search_title: "LLM4S glossary: terms and types"
 parent: Reference
 nav_order: 22
 ---

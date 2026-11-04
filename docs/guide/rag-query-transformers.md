@@ -1,6 +1,8 @@
 ---
 layout: page
 title: RAG Query Transformers
+description: "Rewrite a user's query before it is embedded in an LLM4S RAG pipeline to improve retrieval for vague or conversational questions."
+search_title: "RAG query transformers for better retrieval in Scala"
 parent: User Guide
 nav_order: 23
 ---

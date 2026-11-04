@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Vector Store
+description: "The VectorStore API for RAG and semantic search in Scala: in-memory, file, PostgreSQL with pgvector, Qdrant, Elasticsearch and OpenSearch stores."
+search_title: "Vector stores for Scala RAG: pgvector, Qdrant and more"
 parent: User Guide
 nav_order: 3
 ---

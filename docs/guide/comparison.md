@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Comparing LLM4S
+description: "How LLM4S compares with LangChain4j, Spring AI, Koog and Embabel for JVM LLM apps: capabilities, gaps, and when to choose or avoid it."
+search_title: "LLM4S vs LangChain4j, Spring AI, Koog and Embabel"
 parent: User Guide
 nav_order: 26
 # Issues this page links, by how it cites them. scripts/check-cited-issues.sh (weekly, and on docs pull requests)

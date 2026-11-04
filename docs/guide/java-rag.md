@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Java RAG
+description: "Ingest documents and answer questions over them from Java with llm4s-java-rag, with answers that carry the chunks they came from."
+search_title: "RAG from Java with LLM4S: ingest and ask questions"
 parent: User Guide
 nav_order: 31
 ---

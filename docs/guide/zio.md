@@ -1,6 +1,8 @@
 ---
 layout: page
 title: ZIO Integration
+description: "Use LLM4S with ZIO: llm4s-zio wraps LLMClient and Agent in ZIO effects, with ZLayer, ZIO Streams and LLMError in the error channel."
+search_title: "LLM4S with ZIO: LLM calls and agents as effects"
 parent: User Guide
 nav_order: 15
 ---

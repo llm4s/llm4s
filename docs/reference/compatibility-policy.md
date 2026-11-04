@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Compatibility and Deprecation Policy
+description: "What you can rely on when upgrading LLM4S: the promise by stability tier, versioning, how an API is deprecated and removed, and supported platforms."
+search_title: "LLM4S compatibility and deprecation policy"
 parent: Reference
 nav_order: 14
 ---

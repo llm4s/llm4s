@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Streaming Events
+description: "Watch an LLM4S agent turn as it happens: answer tokens, tool calls and model calls as StreamEvents, with replay and the live-versus-durable rule."
+search_title: "Stream agent events in Scala: tokens and tool calls"
 nav_order: 5
 parent: Agents
 grand_parent: User Guide

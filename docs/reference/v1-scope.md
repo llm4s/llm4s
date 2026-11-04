@@ -1,6 +1,8 @@
 ---
 layout: page
 title: 1.0 Scope
+description: "Which parts of the LLM4S API are safe to build on ahead of 1.0: maturity tiers, the package map and what frozen means."
+search_title: "LLM4S 1.0 scope: stable, beta and experimental APIs"
 parent: Reference
 nav_order: 6
 ---

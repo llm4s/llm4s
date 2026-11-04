@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Quarkus
+description: "Call a model from a Quarkus app with LLM4S: a CDI producer for JLlmClient, settings in application.properties and a REST endpoint off the event loop."
+search_title: "Use LLM4S with Quarkus: LLM client as a CDI bean"
 parent: User Guide
 nav_order: 37
 ---

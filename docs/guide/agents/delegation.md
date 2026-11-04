@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Delegation
+description: "Delegate a bounded task to a typed subagent in LLM4S and get back only its typed report: inheritance, bounds, permissions and approvals."
+search_title: "Subagent delegation in Scala with typed reports"
 nav_order: 8
 parent: Agents
 grand_parent: User Guide

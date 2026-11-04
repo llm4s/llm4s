@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Writing a Provider
+description: "Publish your own LLM4S provider module, a chat client or embedding provider, against llm4s-core without changing LLM4S itself."
+search_title: "Write a custom LLM provider module for LLM4S"
 parent: User Guide
 nav_order: 13
 ---

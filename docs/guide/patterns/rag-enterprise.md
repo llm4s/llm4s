@@ -1,6 +1,8 @@
 ---
 layout: page
 title: RAG for Enterprise
+description: "Production RAG strategies: chunking, ingesting large document sets, hybrid vector and keyword search and multi-stage retrieval, as illustrative patterns."
+search_title: "Enterprise RAG patterns for Scala LLM applications"
 parent: Real-World Application Patterns
 nav_order: 2
 ---

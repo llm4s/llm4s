@@ -1,6 +1,8 @@
 ---
 layout: page
 title: A guardrailed chatbot
+description: "Build a guardrailed chatbot in Scala: reject a bad request before the model sees it and an over-long answer before the user does."
+search_title: "A guardrailed LLM chatbot in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 6

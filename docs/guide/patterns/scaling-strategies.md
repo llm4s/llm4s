@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Scaling Strategies
+description: "Scale LLM applications: request and distributed caching, rate limiting, batching embeddings and worker pools, as illustrative patterns."
+search_title: "Scale LLM applications: caching, rate limits, batching"
 parent: Real-World Application Patterns
 nav_order: 4
 ---

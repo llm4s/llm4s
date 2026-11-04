@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Cache repeated calls
+description: "Wrap an LLM4S client in CachingLLMClient so a question asked again is answered from the cache without a second model call."
+search_title: "Cache repeated LLM calls in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 9

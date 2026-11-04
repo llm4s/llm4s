@@ -218,6 +218,11 @@ jobs:
         env:
           JEKYLL_ENV: production
 
+      # The <title>, og:title and description the pages are really served with: each page has its own, none is only
+      # `Home`, and none is the site-wide description (#2314).
+      - name: Check the pages' titles and descriptions
+        run: scripts/check-doc-seo.sh --site docs/_site
+
       # sitemap.xml (jekyll-sitemap) lists the guide pages only; the Scaladoc, copied in above, gets its own file (#2318).
       # The check fails the deploy if sitemap.xml lists a /scaladoc/ URL, a PDF or too many URLs, or robots.txt omits one.
       - name: Generate and check the sitemaps

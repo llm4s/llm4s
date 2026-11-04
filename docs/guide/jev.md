@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Jev decision model
+description: "Use llm4s-jev, a client for TypeSafe's Jev System One model: send a state and typed questions, and get typed answers your code can act on."
 parent: User Guide
 nav_order: 25
 ---
