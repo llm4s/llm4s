@@ -334,13 +334,15 @@ in the context, so a cost tracker can run next to it. The meters, their tags and
 
 ## Testing code that uses the template
 
-There is no supported fake client for tests yet ([#1497](https://github.com/llm4s/llm4s/issues/1497)). What works today: a test
-that does not need the model can run with `llm4s.enabled=false`, so no client is built and no key is needed; put the template
-behind an interface of your own, which that test replaces. And because the starter's beans back off for a bean of the same
-type, a test configuration can supply its own `JLlmClient`.
+Because the starter's beans back off for a bean of the same type, a test configuration can supply its own `JLlmClient`:
+`FakeLlmClient.replying("...").client()` from `llm4s-java-api` answers from a script and records the prompts it was sent,
+with no network or key ([Java: testing your code](java#testing-your-code)). A test that does not need the model can
+instead run with `llm4s.enabled=false`, so no client is built and no key is needed.
 
 ## Where next
 
+- [Moving a Java app from LangChain4j or Spring AI](java-migration): Spring AI and LangChain4j starter properties and
+  beans mapped to this starter, with a compiled controller.
 - [Java](java): the client, conversations and failures the template is built on.
 - [Providers](providers) and [configuration](../getting-started/configuration): every provider, for the HOCON route.
 - The starter's own [README](https://github.com/llm4s/llm4s/blob/main/modules/spring-boot-starter/README.md).

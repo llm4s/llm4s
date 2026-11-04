@@ -37,8 +37,9 @@ refreshed at each LLM4S release.
   reply and returns structured output as a Java record; tools are defined from Java with `@Tool` methods or a lambda
   builder; and `JAgent` runs, continues, streams the events of, resumes and recovers an agent run (added in
   [#1484](https://github.com/llm4s/llm4s/issues/1484), [#1485](https://github.com/llm4s/llm4s/issues/1485) and
-  [#1486](https://github.com/llm4s/llm4s/issues/1486)). Some Scala types still appear in its signatures, and there is no
-  asynchronous call ([what is not here yet](java#what-is-not-here-yet)).
+  [#1486](https://github.com/llm4s/llm4s/issues/1486)); `completeAsync` and `runAsync` return a `CompletableFuture`.
+  Some Scala types still appear in its signatures ([what is not here yet](java#what-is-not-here-yet)). Moving a Java
+  codebase over: [Moving a Java app from LangChain4j or Spring AI](java-migration).
 - **Spring shops.** LLM4S has a Spring Boot starter (`llm4s-spring-boot-starter`, [guide](spring-boot)). A flat
   `llm4s.provider` key covers OpenAI, Anthropic and Ollama, and every other provider on the classpath is configured
   under `llm4s.providers` ([#1467](https://github.com/llm4s/llm4s/issues/1467)). Spring AI is the Spring project's own
@@ -72,7 +73,6 @@ Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says
 Plainly, as of the date above:
 
 - **A stable schema derivation.** `llm4s-schema-derivation` is Experimental, outside the 1.0 frozen surface.
-- **An asynchronous Java call.** See the audience note above.
 - **A smaller integration catalogue.** Vector stores for SQLite, PostgreSQL, Qdrant, Elasticsearch, OpenSearch, Redis
   and Valkey, against the long lists of LangChain4j and Spring AI. Quarkus has a [guide](quarkus) and a
   runnable sample with a CDI producer, but no extension.
@@ -83,7 +83,8 @@ Plainly, as of the date above:
 
 ## When not to choose LLM4S
 
-- Your application is Java and needs an API with no Scala types in its signatures, or asynchronous calls built in.
+- Your application is Java and needs an API with no Scala types in its signatures, or a declarative AI-services
+  interface (see [what has no direct equivalent](java-migration#what-has-no-direct-equivalent-yet)).
 - You are a Spring team that wants the widest set of ready-made integrations, or you need a vector store or model
   provider that LLM4S does not have a module for. The two projects whose pages list their stores, LangChain4j and Spring AI,
   each list far more vector stores than LLM4S has.

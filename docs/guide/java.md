@@ -902,6 +902,8 @@ available from Java yet, each with the issue that tracks it:
 
 ## Where next
 
+- [Moving a Java app from LangChain4j or Spring AI](java-migration): each LangChain4j and Spring AI concept mapped to
+  this API, with compiled before-and-after code and provider configuration.
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.
 - [Java Reactor](java-reactor): a streamed reply as a Reactor `Flux<String>`, with `llm4s-reactor`.
 - [Spring Boot](spring-boot): auto-configuration, a template bean and a health indicator on top of this module.
