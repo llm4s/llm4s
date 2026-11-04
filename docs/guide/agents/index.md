@@ -632,6 +632,10 @@ val agent = Agent.builder("coder", client)
   .build()
 ```
 
+See the key-free, in-memory
+[`PermissionRulesExample`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/PermissionRulesExample.scala)
+for a runnable allow, deny and ask flow with approval and resume.
+
 **Permissions are deny-if-unmatched.** For each resource the first rule with its operation whose
 `Glob` matches the target decides, and a resource no rule matches is denied. A call runs only if
 every resource is allowed: a denial is the error result `Denied: <operation> <target>`, an `Ask`
