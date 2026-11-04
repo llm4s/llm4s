@@ -475,8 +475,9 @@ final case class AcmeConfig(
 val key: Result[String] = config.apiKeyProvider.fold[Result[String]](Right(config.apiKey))(_.current().map(_.asKey))
 ```
 
-A config that does not override `withApiKeyProvider` keeps returning `this`, and a section of its provider that
-sets `apiKeyFile` fails to load with an error saying so. Prove support with `assertHonoursApiKeyProvider`.
+A config that does not override `withApiKeyProvider` keeps returning `this`: its client gets the key the file
+held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
+an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
 
 ### `HttpErrorMapper`
 

@@ -7,7 +7,14 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.attribute.FileTime
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
+import ch.qos.logback.core.read.ListAppender
+import org.slf4j.LoggerFactory
+
+import java.nio.file.attribute.{ FileTime, PosixFilePermissions }
+import scala.jdk.CollectionConverters.*
+import scala.util.Try
 import java.nio.file.{ Files, Path }
 
 /** `ApiKeyProvider` (#2313): a key read per request, so a rotated key is used without rebuilding the client. */
@@ -19,6 +26,20 @@ class ApiKeyProviderSpec extends AnyWordSpec with Matchers with EitherValues:
     Files.writeString(file, content, StandardCharsets.UTF_8)
 
   private def key(provider: ApiKeyProvider): String = provider.current().value.asKey
+
+  private def warningsDuring(body: => Unit): List[String] =
+    val logger   = LoggerFactory.getLogger(ApiKeyProvider.getClass).asInstanceOf[LogbackLogger]
+    val appender = new ListAppender[ILoggingEvent]()
+    appender.start()
+    logger.addAppender(appender)
+    Try(body).fold(
+      e =>
+        logger.detachAppender(appender)
+        throw e
+      ,
+      _ => logger.detachAppender(appender)
+    )
+    appender.list.asScala.toList.filter(_.getLevel == Level.WARN).map(_.getFormattedMessage)
 
   "ApiKeyProvider.static" should {
     "always return its key, and hide it in toString" in {
@@ -96,6 +117,24 @@ class ApiKeyProviderSpec extends AnyWordSpec with Matchers with EitherValues:
       provider.current().left.value shouldBe a[ConfigurationError]
       Files.writeString(file, "sk-after-delete-0002")
       key(provider) shouldBe "sk-after-delete-0002"
+    }
+
+    "warn once, naming the path and never the key, when the file is readable by group or others (POSIX)" in {
+      val shared = tempFile("sk-shared-mode-0001")
+      val owned  = tempFile("sk-owner-mode-00001")
+      assume(Try(Files.getPosixFilePermissions(shared)).isSuccess, "not a POSIX file system")
+      Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rw-r--r--"))
+      Files.setPosixFilePermissions(owned, PosixFilePermissions.fromString("rw-------"))
+      val warnings = warningsDuring {
+        val provider = ApiKeyProvider.file(shared)
+        key(provider) shouldBe "sk-shared-mode-0001"
+        Files.writeString(shared, "sk-shared-mode-rotated-2")
+        key(provider) shouldBe "sk-shared-mode-rotated-2"
+        key(ApiKeyProvider.file(owned)) shouldBe "sk-owner-mode-00001"
+      }
+      warnings should have size 1
+      warnings.head should include(shared.toString)
+      (warnings.head should not).include("sk-shared")
     }
 
     "name the path, never the key, in toString" in {

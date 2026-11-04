@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
+import org.slf4j.LoggerFactory
 import pureconfig.ConfigSource
 
 /**
@@ -15,6 +16,8 @@ import pureconfig.ConfigSource
  * unregistered provider or unreadable key fails lookups of that section and nothing else.
  */
 private[config] object NamedProviderLoader:
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Loads the `ProviderConfig` for a single named provider from the given config source.
@@ -118,31 +121,43 @@ private[config] object NamedProviderLoader:
     // This used to be a twelve-branch `match` over hard-coded provider names (#1131).
     summon[ProviderRegistry]
       .resolve(section.provider, Some(s"llm4s.providers.$providerName.provider"))
-      .flatMap(_.buildConfig(providerName, section))
-      // The timeouts block is read once, for every provider; a config that carries it takes it here.
-      .map(_.withTimeouts(section.timeouts))
-      .flatMap(withKeyFile(providerName, section, _))
+      .flatMap(descriptor =>
+        descriptor
+          .buildConfig(providerName, section)
+          // The timeouts block is read once, for every provider; a config that carries it takes it here.
+          .map(_.withTimeouts(section.timeouts))
+          .flatMap(withKeyFile(providerName, section, descriptor.configSpec.requiresApiKey, _))
+      )
 
   /**
-   * `config` with its client reading the key from the section's `apiKeyFile` on each request (#2313). A provider
-   * whose config cannot take an `ApiKeyProvider` is refused rather than left on the key read at load time, which
-   * would stop working, without a word, at the first rotation.
+   * `config` with the section's `apiKeyFile` honoured (#2313). Validation has already read the file into the
+   * section's `apiKey`, so every config is built with the key the file holds. A config that can take an
+   * `ApiKeyProvider` also gets one over the file, so its client re-reads it when it changes; any other provider
+   * that takes an API key keeps the key read at load, and that is logged. A provider that takes no API key
+   * (Ollama, Bedrock, Vertex AI) is refused rather than left to ignore the file.
    */
   private def withKeyFile(
     providerName: String,
     section: NamedProviderConfig,
+    takesApiKey: Boolean,
     config: ProviderConfig
   ): Result[ProviderConfig] =
     section.apiKeyFile match
       case None => Right(config)
       case Some(file) =>
         val withFile = config.withApiKeyProvider(ApiKeyProvider.file(file))
-        Either.cond(
-          withFile.apiKeyProvider.isDefined,
-          withFile,
-          ConfigurationError(
-            s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' does not support " +
-              "apiKeyFile; set apiKey instead",
-            List("apiKeyFile")
+        if withFile.apiKeyProvider.isDefined then Right(withFile)
+        else if takesApiKey then
+          logger.info(
+            s"llm4s.providers.$providerName: provider '${section.provider.asString}' reads the key from $file once, " +
+              "when the section is loaded; a rotated key is used after the section is loaded again"
           )
-        )
+          Right(config)
+        else
+          Left(
+            ConfigurationError(
+              s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' takes no API key, " +
+                "so it cannot read one from apiKeyFile - remove it",
+              List("apiKeyFile")
+            )
+          )

@@ -6,9 +6,12 @@ import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.attribute.{ BasicFileAttributes, FileTime }
+import org.slf4j.LoggerFactory
+
+import java.nio.file.attribute.{ BasicFileAttributes, FileTime, PosixFilePermission }
 import java.nio.file.{ Files, Path }
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
+import scala.jdk.CollectionConverters.*
 import scala.util.{ Try, Using }
 
 /**
@@ -56,6 +59,10 @@ object ApiKeyProvider:
    */
   def file(path: Path): ApiKeyProvider = new KeyFile(path)
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  private val SharedRead = Set(PosixFilePermission.GROUP_READ, PosixFilePermission.OTHERS_READ)
+
   final private class Static(key: ApiKey) extends ApiKeyProvider:
     override def current(): Result[ApiKey] = Right(key)
     override def toString: String          = "ApiKeyProvider.static(***)"
@@ -66,7 +73,8 @@ object ApiKeyProvider:
   final private case class Read(stamp: Stamp, key: ApiKey)
 
   final private class KeyFile(path: Path) extends ApiKeyProvider:
-    private val last = new AtomicReference[Option[Read]](None)
+    private val last         = new AtomicReference[Option[Read]](None)
+    private val warnedAccess = new AtomicBoolean(false)
 
     private def failure(reason: String): ConfigurationError =
       ConfigurationError(s"API key file $path $reason")
@@ -98,7 +106,21 @@ object ApiKeyProvider:
             else if key.isEmpty then Left(failure("is empty"))
             // A line break in a header value would be refused by the HTTP client, or split the header.
             else if key.exists(c => c == '\n' || c == '\r') then Left(failure("holds more than one line"))
-            else Right(ApiKey(key))
+            else
+              warnIfShared()
+              Right(ApiKey(key))
           }
+
+    /**
+     * One WARN, naming the path, when the file is readable by its group or by others on a POSIX file system. A
+     * Kubernetes secret volume defaults to mode 0644; `defaultMode: 0400` keeps the key to its owner.
+     */
+    private def warnIfShared(): Unit =
+      Try(Files.getPosixFilePermissions(path).asScala).toOption
+        .filter(perms => perms.exists(SharedRead.contains))
+        .foreach(_ =>
+          if warnedAccess.compareAndSet(false, true) then
+            logger.warn(s"API key file $path is readable by its group or by others; restrict it to its owner (0400)")
+        )
 
     override def toString: String = s"ApiKeyProvider.file($path)"

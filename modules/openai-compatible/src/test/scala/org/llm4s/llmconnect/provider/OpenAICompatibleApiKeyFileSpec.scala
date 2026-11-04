@@ -63,3 +63,32 @@ class OpenAICompatibleApiKeyFileSpec extends AnyWordSpec with Matchers with Eith
       seen.asScala.toList shouldBe List("Bearer sk-openai-first-0001", "Bearer sk-openai-rotated-00002")
     }
   }
+
+  "a deepseek section with apiKeyFile, whose client does not rotate" should {
+
+    "send the key the file held when the section was loaded" in {
+      val file = keyFile("sk-deepseek-file-0001\n")
+      val seen = new ConcurrentLinkedQueue[String]()
+      withServer("/") { exchange =>
+        seen.add(Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("<none>"))
+        sendJsonResponse(exchange, 200, openAICompletion("ok"))
+      } { baseUrl =>
+        given ProviderRegistry = ProviderRegistry.default
+        val config = ProviderTestConfig
+          .loadProvider(
+            "ds",
+            s"""llm4s.providers.ds {
+               |  provider = "deepseek", model = "deepseek-chat", baseUrl = "$baseUrl"
+               |  apiKeyFile = ${quoted(file)}
+               |}""".stripMargin
+          )
+          .value
+        config.apiKeyProvider shouldBe None
+        given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
+        val client                 = DeepSeekProvider.buildClient(config, LlmClientOptions.default).value
+        client.complete(hello).isRight shouldBe true
+        client.close()
+      }
+      seen.asScala.toList shouldBe List("Bearer sk-deepseek-file-0001")
+    }
+  }

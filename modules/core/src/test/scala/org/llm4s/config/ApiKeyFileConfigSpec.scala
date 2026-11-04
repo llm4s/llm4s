@@ -20,25 +20,36 @@ import java.nio.file.{ Files, Path }
 /** A section's `apiKeyFile` (#2313): read at load, and handed to the client to re-read when it changes. */
 class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues:
 
-  /** Builds a config that cannot take an `ApiKeyProvider`: the trait's default `withApiKeyProvider`. */
-  private object NoProviderSupport extends ProviderDescriptor:
-    val id: ProviderId                 = ProviderId("noprovidersupport")
+  /** A config that cannot take an `ApiKeyProvider` (the trait's default `withApiKeyProvider`), holding its key. */
+  final private case class StaticKeyConfig(key: String, providerId: ProviderId) extends ProviderConfig:
+    val model: String                            = "m"
+    val contextWindow: Int                       = 8192
+    val reserveCompletion: Int                   = 1024
+    val endpointUrl: Option[String]              = None
+    def withModel(model: String): ProviderConfig = this
+
+  /** A provider whose key is read when its config is built, not per request. */
+  private object NoRotation extends ProviderDescriptor:
+    val id: ProviderId                 = ProviderId("norotation")
     val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(FixtureChatProvider.DefaultBaseUrl)
     def buildConfig(providerName: String, section: NamedProviderConfig)(using
       ContextWindowResolver
     ): Result[ProviderConfig] =
-      Right(new ProviderConfig:
-        val providerId: ProviderId                   = id
-        val model: String                            = section.model.asString
-        val contextWindow: Int                       = 8192
-        val reserveCompletion: Int                   = 1024
-        val endpointUrl: Option[String]              = None
-        def withModel(model: String): ProviderConfig = this
-      )
+      ProviderDescriptor.requireApiKey(providerName, section).map(key => StaticKeyConfig(key.reveal, id))
     def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
       FixtureChatProvider.buildClient(config, options)
 
-  private given ProviderRegistry = ProviderRegistry.of(FixtureChatProvider, NoProviderSupport)
+  /** A provider that takes no API key, as Ollama and Bedrock do. */
+  private object Keyless extends ProviderDescriptor:
+    val id: ProviderId                 = ProviderId("keylessprovider")
+    val configSpec: ProviderConfigSpec = ProviderConfigSpec(defaultBaseUrl = Some(FixtureChatProvider.DefaultBaseUrl))
+    def buildConfig(providerName: String, section: NamedProviderConfig)(using
+      ContextWindowResolver
+    ): Result[ProviderConfig] = Right(StaticKeyConfig("", id))
+    def buildClient(config: ProviderConfig, options: LlmClientOptions)(using ModelRegistryService): Result[LLMClient] =
+      FixtureChatProvider.buildClient(config, options)
+
+  private given ProviderRegistry = ProviderRegistry.of(FixtureChatProvider, NoRotation, Keyless)
 
   private def keyFile(content: String): Path =
     val file = Files.createTempFile("api-key", ".txt")
@@ -99,10 +110,18 @@ class ApiKeyFileConfigSpec extends AnyWordSpec with Matchers with EitherValues w
       error.message should include("sets apiKeyFile and apiKey")
     }
 
-    "be refused for a provider whose config cannot take a key provider" in {
+    "give a provider that cannot rotate the key the file holds when the section is loaded" in {
+      val file   = keyFile("sk-file-key-000001")
+      val config = load(hocon(s"apiKeyFile = ${quoted(file)}", provider = "norotation")).value
+      config shouldBe StaticKeyConfig("sk-file-key-000001", ProviderId("norotation"))
+      config.apiKeyProvider shouldBe None
+    }
+
+    "be refused for a provider that takes no API key" in {
       val file  = keyFile("sk-file-key-000001")
-      val error = load(hocon(s"apiKeyFile = ${quoted(file)}", provider = "noprovidersupport")).left.value
-      error.message should include("does not support apiKeyFile")
+      val error = load(hocon(s"apiKeyFile = ${quoted(file)}", provider = "keylessprovider")).left.value
+      error shouldBe a[ConfigurationError]
+      error.message should include("'keylessprovider' takes no API key")
     }
 
     "treat a blank apiKeyFile as unset" in {
