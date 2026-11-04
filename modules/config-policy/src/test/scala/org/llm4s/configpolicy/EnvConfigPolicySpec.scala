@@ -29,6 +29,38 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       val p = PolicyBuilder.allowedProviders(Set("azure"), Set("dev"))
       p.evaluate(base, "prod") shouldBe PolicySkip("allowed-providers")
     }
+
+    it("should match a mixed-case provider against a mixed-case allowlist (#2504)") {
+      val p = PolicyBuilder.allowedProviders(Set("OpenAI"), Set("prod"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-providers")
+      p.evaluate(base.copy(provider = Some("OpenAI")), "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should trim and case-normalize the allowlist entries (#2504)") {
+      val p = PolicyBuilder.allowedProviders(Set(" openai "), Set("prod"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should fail with its own message when the provider is unset (#2504)") {
+      val p = PolicyBuilder.allowedProviders(Set("openai"), Set("prod"))
+      val result = p.evaluate(base.copy(provider = None), "prod")
+      result.isInstanceOf[PolicyFail] shouldBe true
+      result.asInstanceOf[PolicyFail].reason shouldBe "provider is not set (env 'prod')"
+    }
+  }
+
+  describe("PolicyBuilder.allowedModels") {
+    it("should fail with its own message when the model is unset (#2504)") {
+      val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
+      val result = p.evaluate(base.copy(model = None), "prod")
+      result.isInstanceOf[PolicyFail] shouldBe true
+      result.asInstanceOf[PolicyFail].reason shouldBe "model is not set (env 'prod')"
+    }
+
+    it("should keep model matching case-sensitive (#2504)") {
+      val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
+      p.evaluate(base.copy(model = Some("GPT-4O-MINI")), "prod").isInstanceOf[PolicyFail] shouldBe true
+    }
   }
 
   describe("PolicyBuilder.allowedModels") {
