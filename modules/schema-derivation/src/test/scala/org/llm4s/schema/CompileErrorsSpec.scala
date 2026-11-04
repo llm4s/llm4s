@@ -134,11 +134,52 @@ class CompileErrorsSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "refuse a named tuple, which would otherwise derive an object nothing reads back" in {
+  it should "describe a named tuple with its own given (#2328), and refuse to derive one" in {
+    scala.compiletime.testing.typeCheckErrors("SchemaOf[(a: Int, b: String)]") shouldBe Nil
+    scala.compiletime.testing.typeCheckErrors("SchemaOf[(a: Fixtures.Inner, b: List[(c: Option[Int])])]") shouldBe Nil
+    scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[NamedTupleFixtures.HoldsTuples]") shouldBe Nil
     val errors = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf.derived[(a: Int, b: String)]"))
     errors should include("Cannot derive SchemaOf[")
-    errors should include("a named tuple")
-    errors should include("Use a case class with named fields")
+    errors should include("a named tuple is not derived")
+    errors should include("SchemaOf[(a: Int, b: String)]")
+  }
+
+  it should "still refuse a tuple without names, with the same message" in {
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(Int, String)]")) should include(
+      "Cannot derive a JSON schema for (Int, String)"
+    )
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(a: Int, b: (Int, String))]")) should include(
+      "Cannot derive a JSON schema for (Int, String)"
+    )
+  }
+
+  it should "refuse a named tuple with an element nothing describes, naming the element type" in {
+    val function = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(a: Int, f: Int => Int)]"))
+    function should include("Cannot derive a JSON schema for Int => Int")
+    val map = messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(counts: Map[String, Int])]"))
+    map should include("Cannot derive a JSON schema for Map[String, Int]")
+    map should include("A Map cannot be described")
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(n: Option[Option[Int]])]")) should include(
+      "An Option directly inside an Option cannot be described"
+    )
+  }
+
+  it should "refuse a recursion through a named tuple, and a named tuple holding a recursive type" in {
+    messages(
+      scala.compiletime.testing.typeCheckErrors(
+        "case class Folder(name: String, items: List[(label: String, sub: Folder)]) derives SchemaOf"
+      )
+    ) should include("Folder refers to itself")
+    messages(scala.compiletime.testing.typeCheckErrors("SchemaOf[(root: Fixtures.Tree)]")) should include(
+      "Tree refers to itself"
+    )
+  }
+
+  it should "have no ReadWriter for a named tuple without the explicit import" in {
+    scala.compiletime.testing.typeCheckErrors("upickle.default.read[(a: Int)](\"{}\")") should not be empty
+    scala.compiletime.testing.typeCheckErrors(
+      "{ import org.llm4s.schema.namedtuples.given; upickle.default.read[(a: Int)](\"{}\") }"
+    ) shouldBe Nil
   }
 
   it should "take a hand-written given as it is, even for a sealed hierarchy with fields or a recursive type" in {

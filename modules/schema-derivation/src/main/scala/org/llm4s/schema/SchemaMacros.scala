@@ -43,13 +43,57 @@ private[schema] object SchemaMacros {
   inline def typeDescription[A]: Option[String] = ${ typeDescriptionImpl[A] }
 
   /**
-   * Fails compilation, naming the type, if `A` is a tuple or a named tuple, refers to itself or is (or holds) a
+   * Fails compilation, naming the type, if `A` is a tuple or a named tuple (see [[checkNamedTuple]]), refers to itself or is (or holds) a
    * sealed hierarchy nested in another or with a generic case. A type with a hand-written `given SchemaOf` of its own, other than the one being
    * derived, is not looked into: its schema is whatever that given says. When that given itself derives a type
    * that reaches back to `A`, the recursion is not visible here; building the schema then fails at run time
    * instead (see `SchemaOf.product`).
    */
-  inline def check[A]: Unit = ${ checkImpl[A] }
+  inline def check[A]: Unit = ${ checkImpl[A]('{ false }) }
+
+  /**
+   * As [[check]] for the named tuple `A`, which is described by `SchemaOf.namedTuple` rather than refused: its
+   * element types are checked as a case class's fields are.
+   */
+  inline def checkNamedTuple[A]: Unit = ${ checkImpl[A]('{ true }) }
+
+  /** The named tuple `A` as it is written in code, `(city: String, days: Int)`, without package prefixes. */
+  inline def shortName[A]: String = ${ shortNameImpl[A] }
+
+  private def shortNameImpl[A: Type](using q: Quotes): Expr[String] = {
+    import q.reflect.*
+
+    // The element types of a tuple type, written either as `TupleN[...]` or as `h *: t`
+    def elements(t: TypeRepr): Option[List[TypeRepr]] = t.dealias match {
+      case AppliedType(tycon, List(h, tail)) if tycon.typeSymbol == TypeRepr.of[*:].typeSymbol =>
+        elements(tail).map(h :: _)
+      case t if t =:= TypeRepr.of[EmptyTuple]                                              => Some(Nil)
+      case AppliedType(tycon, args) if tycon.typeSymbol.fullName.startsWith("scala.Tuple") => Some(args)
+      case _                                                                               => None
+    }
+
+    def show(t: TypeRepr): String = t match {
+      case AppliedType(_, List(names, values)) if t <:< TypeRepr.of[NamedTuple.AnyNamedTuple] =>
+        (elements(names), elements(values)) match {
+          case (Some(ns), Some(vs)) if ns.size == vs.size =>
+            ns.zip(vs)
+              .map { case (n, v) =>
+                val name = n match {
+                  case ConstantType(StringConstant(text)) => text
+                  case other                              => other.show(using Printer.TypeReprShortCode)
+                }
+                s"$name: ${show(v)}"
+              }
+              .mkString("(", ", ", ")")
+          case _ => t.show(using Printer.TypeReprShortCode)
+        }
+      case AppliedType(tycon, args) if args.nonEmpty && !(t <:< TypeRepr.of[Tuple]) =>
+        s"${tycon.show(using Printer.TypeReprShortCode)}[${args.map(show).mkString(", ")}]"
+      case _ => t.show(using Printer.TypeReprShortCode)
+    }
+
+    Expr(show(TypeRepr.of[A]))
+  }
 
   private def stringArgument(using q: Quotes)(annotation: q.reflect.Term): Option[String] = {
     import q.reflect.*
@@ -99,8 +143,10 @@ private[schema] object SchemaMacros {
     Expr(TypeRepr.of[A].typeSymbol.getAnnotation(annotation).flatMap(a => stringArgument(a)))
   }
 
-  private def checkImpl[A: Type](using q: Quotes): Expr[Unit] = {
+  private def checkImpl[A: Type](namedTupleRoot: Expr[Boolean])(using q: Quotes): Expr[Unit] = {
     import q.reflect.*
+
+    val namedTupleAllowed = namedTupleRoot.valueOrAbort
 
     def fail(message: String): Nothing = report.errorAndAbort(message)
 
@@ -117,19 +163,23 @@ private[schema] object SchemaMacros {
           "needs a JSON Schema $ref, which llm4s-core's schema model cannot express."
       )
 
-    if (root.dealias <:< TypeRepr.of[Tuple]) {
+    val isNamedTuple =
+      root <:< TypeRepr.of[NamedTuple.AnyNamedTuple] || root.dealias <:< TypeRepr.of[NamedTuple.AnyNamedTuple]
+
+    if (!isNamedTuple && root.dealias <:< TypeRepr.of[Tuple]) {
       fail(
         s"Cannot derive SchemaOf[${root.show}]: a tuple is written by uPickle as a JSON array of mixed types, " +
           "which llm4s-core's schema model cannot express. Use a case class with named fields."
       )
     }
 
-    // A named tuple, `(a: Int, b: String)`, has a product Mirror whose labels are its names, so without this it
-    // would derive an object schema; uPickle has no ReadWriter for it, so nothing could read the reply back.
-    if (root <:< TypeRepr.of[NamedTuple.AnyNamedTuple] || root.dealias <:< TypeRepr.of[NamedTuple.AnyNamedTuple]) {
+    // A named tuple, `(a: Int, b: String)`, has a product Mirror whose labels are its names, but no case class
+    // symbol to read annotations from: it is described by the `SchemaOf.namedTuple` given, never by `derived`.
+    if (isNamedTuple && !namedTupleAllowed) {
       fail(
-        s"Cannot derive SchemaOf[${root.show}]: a named tuple has no uPickle ReadWriter to read the reply back " +
-          "into. Use a case class with named fields."
+        s"Cannot derive SchemaOf[${root.show}]: a named tuple is not derived. Its schema is SchemaOf's own given: " +
+          "summon SchemaOf[(a: Int, b: String)] directly, and import org.llm4s.schema.namedtuples.given for its " +
+          "ReadWriter."
       )
     }
 
