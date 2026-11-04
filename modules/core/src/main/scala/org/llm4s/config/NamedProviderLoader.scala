@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
@@ -120,3 +121,28 @@ private[config] object NamedProviderLoader:
       .flatMap(_.buildConfig(providerName, section))
       // The timeouts block is read once, for every provider; a config that carries it takes it here.
       .map(_.withTimeouts(section.timeouts))
+      .flatMap(withKeyFile(providerName, section, _))
+
+  /**
+   * `config` with its client reading the key from the section's `apiKeyFile` on each request (#2313). A provider
+   * whose config cannot take an `ApiKeyProvider` is refused rather than left on the key read at load time, which
+   * would stop working, without a word, at the first rotation.
+   */
+  private def withKeyFile(
+    providerName: String,
+    section: NamedProviderConfig,
+    config: ProviderConfig
+  ): Result[ProviderConfig] =
+    section.apiKeyFile match
+      case None => Right(config)
+      case Some(file) =>
+        val withFile = config.withApiKeyProvider(ApiKeyProvider.file(file))
+        Either.cond(
+          withFile.apiKeyProvider.isDefined,
+          withFile,
+          ConfigurationError(
+            s"llm4s.providers.$providerName.apiKeyFile: provider '${section.provider.asString}' does not support " +
+              "apiKeyFile; set apiKey instead",
+            List("apiKeyFile")
+          )
+        )

@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.TokenExchange
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -34,6 +34,9 @@ import org.llm4s.types.Result
  * @param webSearch whether the model may search the web: the section's `webSearch` key. When set, every request
  *                 carries Anthropic's server-side `web_search` tool, and the sources the answer cites arrive on
  *                 `Completion.citations`. Off by default; each search is billed by Anthropic.
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2313): a section's `apiKeyFile` sets one. Never set
+ *                 together with `workloadIdentity`.
  */
 @Stable
 final case class AnthropicConfig private (
@@ -45,13 +48,16 @@ final case class AnthropicConfig private (
   workloadIdentity: Option[AnthropicWorkloadIdentity],
   override val timeouts: ProviderTimeouts,
   webSearch: Boolean,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                     = ProviderId("anthropic")
-  override def endpointUrl: Option[String]                                = Some(baseUrl)
-  override def withModel(model: String): AnthropicConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig = copy(network = network)
+  override val providerId: ProviderId                                        = ProviderId("anthropic")
+  override def endpointUrl: Option[String]                                   = Some(baseUrl)
+  override def withModel(model: String): AnthropicConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): AnthropicConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): AnthropicConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AnthropicConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
@@ -64,7 +70,8 @@ final case class AnthropicConfig private (
   def withWebSearch(enabled: Boolean): AnthropicConfig = copy(webSearch = enabled)
   override def toString: String =
     s"AnthropicConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity, webSearch=$webSearch)"
+      s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity, webSearch=$webSearch" +
+      s"${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 object AnthropicConfig {
 
@@ -100,7 +107,8 @@ object AnthropicConfig {
       workloadIdentity,
       ProviderTimeouts.default,
       webSearch = false,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**
@@ -145,10 +153,21 @@ object AnthropicConfig {
   private[llm4s] def validate(config: AnthropicConfig): Result[AnthropicConfig] =
     config.workloadIdentity match
       // Without workload identity the key is the only credential: a blank one would authenticate as nobody.
+      // With an API key provider, the provider's key is sent instead.
+      case None if config.apiKeyProvider.isDefined => Right(config)
       case None => ProviderConfig.nonEmpty("Anthropic", "apiKey", config.apiKey.reveal).map(_ => config)
       case Some(identity) =>
         for
           _ <- AnthropicWorkloadIdentity.validate(identity)
+          _ <- Either.cond(
+            config.apiKeyProvider.isEmpty,
+            (),
+            ConfigurationError(
+              "Anthropic config sets both an API key provider (apiKeyFile) and workloadIdentity; a config " +
+                "authenticates one way - use one",
+              List("apiKeyFile", "workloadIdentity")
+            )
+          )
           _ <- Either.cond(
             config.apiKey.reveal.trim.isEmpty,
             (),

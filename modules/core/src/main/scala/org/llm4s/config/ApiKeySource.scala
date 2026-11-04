@@ -15,9 +15,9 @@ import org.llm4s.annotation.Stable
 enum ApiKeySource:
 
   /**
-   * The section sets its own `apiKey`.
+   * The section sets its own `apiKey`, or an `apiKeyFile` holding it.
    *
-   * @param path where, e.g. `llm4s.providers.openai-main.apiKey`
+   * @param path where, e.g. `llm4s.providers.openai-main.apiKey` or `llm4s.providers.openai-main.apiKeyFile`
    */
   case Section(path: String)
 

@@ -454,6 +454,30 @@ provider with no timeouts to offer needs to do nothing. An embedding provider re
 Methods added to the trait after 1.0 will have default implementations, so a test double that
 implements it keeps compiling.
 
+### Honouring `apiKeyFile` (key rotation)
+
+A section may name its key with `apiKeyFile` instead of `apiKey` (#2313). Validation reads the file once into
+`NamedProviderConfig.apiKey`, so your descriptor builds its config as usual; the loader then calls
+`ProviderConfig.withApiKeyProvider(ApiKeyProvider.file(path))` on it. To support rotation, carry the provider
+and ask it for the key on every request, not once when the client is built:
+
+```scala
+final case class AcmeConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  override val apiKeyProvider: Option[ApiKeyProvider] = None
+) extends ProviderConfig:
+  // ... providerId, contextWindow and the rest ...
+  override def withApiKeyProvider(provider: ApiKeyProvider): AcmeConfig = copy(apiKeyProvider = Some(provider))
+
+// in the client, per request
+val key: Result[String] = config.apiKeyProvider.fold[Result[String]](Right(config.apiKey))(_.current().map(_.asKey))
+```
+
+A config that does not override `withApiKeyProvider` keeps returning `this`, and a section of its provider that
+sets `apiKeyFile` fails to load with an error saying so. Prove support with `assertHonoursApiKeyProvider`.
+
 ### `HttpErrorMapper`
 
 ```scala
@@ -687,7 +711,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |

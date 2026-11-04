@@ -42,6 +42,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ProviderConfig }
 import org.llm4s.llmconnect.model.*
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
@@ -154,7 +155,15 @@ class AnthropicClient(
   private val client = {
     val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
     config.workloadIdentity match {
-      case None => builder.apiKey(config.apiKey.reveal)
+      case None =>
+        config.apiKeyProvider match {
+          case None => builder.apiKey(config.apiKey.reveal)
+          // The SDK sends a fixed key; the interceptor replaces it with the provider's on each request (#2313).
+          case Some(keys) =>
+            builder
+              .apiKey(AnthropicClient.RotatingKey.Placeholder)
+              .addInterceptor(new AnthropicClient.RotatingKey(keys))
+        }
       case Some(wi) =>
         val auth = AuthenticationConfig
           .builder()
@@ -897,6 +906,57 @@ object AnthropicClient {
    * body echoing a workload-identity access token the SDK obtained is scrubbed. The SDK's interceptors sit beneath
    * its authorizing layer, so they see the `Authorization` header it adds.
    */
+  /**
+   * Replaces the `X-Api-Key` the SDK sets with the key `keys` holds now, on every request and retry, so a rotated key
+   * is sent without rebuilding the client (#2313). A failure to get the key fails the request with that error
+   * ([[RotatingKey.failure]]); a provider that throws fails it with an `AuthenticationError` naming the exception's
+   * class.
+   */
+  final private[provider] class RotatingKey(keys: ApiKeyProvider) extends com.anthropic.core.http.Interceptor {
+    private def keyed(request: com.anthropic.core.http.HttpRequest): com.anthropic.core.http.HttpRequest =
+      CachingAccessTokenProvider
+        .guarded(keys.current())
+        .fold(
+          error => throw new RotatingKey.KeyFailure(error),
+          key => request.toBuilder().replaceHeaders("X-Api-Key", key.asKey).build()
+        )
+
+    override def intercept(next: com.anthropic.core.http.HttpClient): com.anthropic.core.http.HttpClient =
+      new com.anthropic.core.http.HttpClient {
+        override def execute(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): com.anthropic.core.http.HttpResponse = next.execute(keyed(request), options)
+        override def executeAsync(
+          request: com.anthropic.core.http.HttpRequest,
+          options: RequestOptions
+        ): java.util.concurrent.CompletableFuture[com.anthropic.core.http.HttpResponse] =
+          Try(keyed(request)).fold(
+            java.util.concurrent.CompletableFuture.failedFuture[com.anthropic.core.http.HttpResponse](_),
+            next.executeAsync(_, options)
+          )
+        override def close(): Unit = next.close()
+      }
+  }
+
+  private[provider] object RotatingKey {
+
+    /** The key the SDK is built with, never sent: [[RotatingKey]] replaces it on every request. */
+    val Placeholder: String = "llm4s-api-key-provider"
+
+    /** Carries a failure to get the key through the SDK, which only understands exceptions. */
+    final class KeyFailure(val error: LLMError) extends RuntimeException(error.message, null, false, false)
+
+    /** The key failure somewhere in `e`'s cause chain, if any; a cause cycle is walked once. */
+    def failure(e: Throwable): Option[LLMError] = {
+      val seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap[Throwable, java.lang.Boolean]())
+      Iterator
+        .iterate(e)(_.getCause)
+        .takeWhile(c => c != null && seen.add(c))
+        .collectFirst { case f: KeyFailure => f.error }
+    }
+  }
+
   final private[provider] class RegisteringBearer extends com.anthropic.core.http.Interceptor {
     private val generations = new TokenGenerations
 
@@ -1061,8 +1121,13 @@ object AnthropicClient {
    * passed through the general redactor and truncated.
    */
   private[provider] def mapError(e: Throwable): LLMError =
-    // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
-    TroubleshootingLinks.annotate(mapSdkError(e))
+    // A failure to get the key from an API key provider is returned as the error it was.
+    RotatingKey
+      .failure(e)
+      .getOrElse(
+        // A 401/403, 429 or 404 says the next step and links its troubleshooting entry (#2285).
+        TroubleshootingLinks.annotate(mapSdkError(e))
+      )
 
   private def mapSdkError(e: Throwable): LLMError = {
     def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""))
