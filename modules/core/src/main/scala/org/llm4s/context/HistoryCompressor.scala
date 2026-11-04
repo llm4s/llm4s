@@ -93,7 +93,7 @@ object HistoryCompressor {
     logger.debug(s"Starting history compression: cap=$capTokens, keepLastK=$keepLastK")
 
     // Skip compression if messages already contain [HISTORY_SUMMARY] for idempotence
-    val existingSummaries = messages.collect { case s: SystemMessage if s.content.startsWith("[HISTORY_SUMMARY]") => s }
+    val existingSummaries = messages.filter(HistorySummaryMarker.isDigest)
     if (existingSummaries.nonEmpty) {
       logger.debug(s"Found ${existingSummaries.length} existing history summaries, skipping compression")
       Right(messages)
@@ -127,7 +127,7 @@ object HistoryCompressor {
     val olderDigests          = digested.map(createBlockDigest)
 
     val digestMessages: Seq[Message] =
-      olderDigests.map(d => SystemMessage(s"[HISTORY_SUMMARY]\n${d.content}"))
+      olderDigests.map(d => SystemMessage(HistorySummaryMarker.wrap(d.content)))
 
     val recentMessages: Seq[Message] =
       (keptOlder ++ recent).flatMap(_.messages)
@@ -138,7 +138,7 @@ object HistoryCompressor {
       if (digestTotalTokens <= capTokens) digestMessages
       else {
         val consolidated = consolidateDigests(olderDigests, capTokens)
-        Seq(SystemMessage(s"[HISTORY_SUMMARY]\n${consolidated.content}"))
+        Seq(SystemMessage(HistorySummaryMarker.wrap(consolidated.content)))
       }
 
     Right(finalDigestMsgs ++ recentMessages)
