@@ -5,7 +5,7 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [1496, 2277, 2278, 2279]
+cites_open_issues: [1496, 2277, 2278, 2279, 2476]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -390,6 +390,7 @@ Plainly, as of this page's sources:
   `createAgentWithTools` take a client and tools; the rest needs the Scala `Agent.builder` and `Llm4s.wrapAgent`
   ([streaming an agent](agents/streaming#java-and-kotlin)). There is no Java `MessageWindowChatMemory`
   equivalent, and no chat-memory store keyed by a conversation id, as Spring AI's `ChatMemoryRepository`s are [S3].
+  A Java agent builder is tracked in [#2476](https://github.com/llm4s/llm4s/issues/2476).
 - **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse
   ([#2278](https://github.com/llm4s/llm4s/issues/2278)).
 - **More Spring Boot auto-configuration.** Embeddings, an agent from `@Tool` beans and streaming endpoints
