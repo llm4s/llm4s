@@ -29,12 +29,18 @@ private[llm4s] object TroubleshootingLinks:
     case RateLimited           extends Entry("rate-limited")
     case ModelNotFound         extends Entry("model-not-found")
 
-  /** The doctor's command, as `docs/reference/doctor.md` gives it for an application's own configuration. */
-  val DoctorCommand: String =
-    """sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf""""
+  /**
+   * The doctor's command, as `docs/reference/doctor.md` gives it for an sbt project: run from the application's own
+   * build, it checks the application's `application.conf` and the provider modules it depends on (#2283).
+   */
+  val DoctorCommand: String = """sbt "Test/runMain org.llm4s.doctor.DoctorCli""""
+
+  /** The doctor's page on the published documentation, with the Maven, Gradle and no-project commands. */
+  val DoctorPageUrl: String = "https://llm4s.org/reference/doctor"
 
   /** The line a configuration error ends with. */
-  val DoctorLine: String = s"Run the doctor to check your whole setup: $DoctorCommand"
+  val DoctorLine: String =
+    s"Run the doctor to check your whole setup: $DoctorCommand with llm4s-doctor as a test dependency ($DoctorPageUrl)"
 
   /** The entry's address on the published page. */
   def url(entry: Entry): String = s"$PageUrl#${entry.id}"

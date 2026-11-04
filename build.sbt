@@ -364,6 +364,7 @@ lazy val llm4s = (project in file("."))
     springBootStarter,
     springBootStarterBoot4,
     samples,
+    doctor,
     configPolicy,
     workspaceShared,
     workspaceRunner,
@@ -1693,7 +1694,9 @@ lazy val samples = (project in file("modules//samples"))
     agentTestkit % Test,
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
-    vectorstoreRedis         % Test
+    vectorstoreRedis         % Test,
+    // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
+    doctor % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1753,7 +1756,9 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
+  // `doctor`: `org.llm4s.configpolicy.DoctorCli` forwards to the published doctor, so the in-repository command runs
+  // it with every built-in provider module on the classpath.
+  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -1771,6 +1776,26 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     libraryDependencies += Deps.config,
     appLogging,
     Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
+  )
+
+// `llm4s-doctor` (#2283): the setup checker (#1481), published so an application runs it on its own classpath, with
+// its own `application.conf` and only the provider modules it depends on: `sbt "Test/runMain
+// org.llm4s.doctor.DoctorCli"` with the module as a test dependency, `cs launch` with no project, `exec:java` or a
+// `JavaExec` task from Maven or Gradle (docs/reference/doctor.md). It depends on core only and discovers provider
+// modules through `ProviderRegistry`; the provider modules are test-only, for the specs that check real providers'
+// keys and model listers. `DoctorCli` is the manifest's main class, so `cs launch` finds it.
+lazy val doctor = (project in file("modules/doctor"))
+  .dependsOn(core % "compile->compile;test->test", ollama % Test, openai % Test)
+  .settings(
+    name := "llm4s-doctor",
+    commonSettings,
+    // Measured 92.85% statement and 80.80% branch coverage (`sbt coverage doctor/test doctor/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90),
+    Compile / mainClass := Some("org.llm4s.doctor.DoctorCli"),
+    // DoctorCli.main calls sys.exit with the report's exit code.
+    run / fork  := true,
+    Test / fork := true
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
@@ -2212,6 +2237,7 @@ lazy val docs = (project in file("modules/docs"))
     providerTestkit,
     schemaDerivation,
     testkit,
+    doctor,
     workspaceShared,
     workspaceClient,
     observability,
@@ -2268,6 +2294,7 @@ lazy val docs = (project in file("modules/docs"))
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (testkit / Compile / sources).value ++
+        (doctor / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++

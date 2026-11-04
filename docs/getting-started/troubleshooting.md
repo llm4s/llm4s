@@ -18,7 +18,10 @@ when an entry is renumbered or its heading reworded.
 Two tools help before you read on:
 
 - **The doctor** checks your JDK, configuration, default provider, provider module, API key and (with `--local`) a
-  local model server in one run, and says what to change. See [Doctor](/reference/doctor).
+  local model server in one run, and says what to change. Run it from your own project, so it checks your
+  `application.conf` and your provider modules: add `"org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test` and run
+  `sbt "Test/runMain org.llm4s.doctor.DoctorCli"`. [Doctor](/reference/doctor) has the Maven, Gradle and no-project
+  (`cs launch`) commands.
 - **The rest of the reference** has [Troubleshooting / FAQ](/reference/troubleshooting) for later problems (agents,
   streaming, RAG, tracing) and [Configuration: Troubleshooting](configuration#troubleshooting).
 
@@ -48,7 +51,7 @@ Two tools help before you read on:
 Provider 'openai-main' (provider = openai) is missing required fields:
   - apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf
 See https://llm4s.org/getting-started/troubleshooting#missing-api-key
-Run the doctor to check your whole setup: sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf"
+Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
 An embeddings block without a key fails the same way, with `Missing openai embeddings apiKey: set OPENAI_API_KEY, ...`.
@@ -68,7 +71,7 @@ uses that instead. A variable exported in one terminal is not seen by an IDE run
 ```text
 No default provider configured under llm4s.providers.provider
 See https://llm4s.org/getting-started/troubleshooting#no-default-provider
-Run the doctor to check your whole setup: sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf"
+Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
 **Cause.** `Llm4sConfig.defaultProvider()` loads the section that `llm4s.providers.provider` names, and the key is
@@ -84,7 +87,7 @@ or load a section by name with `Llm4sConfig.provider("<name>")`.
 ```text
 Configured provider 'openai-main' was not found
 See https://llm4s.org/getting-started/troubleshooting#provider-not-found
-Run the doctor to check your whole setup: sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf"
+Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
 **Cause.** `llm4s.providers.provider` (or the name you passed to `Llm4sConfig.provider(...)`) names a section that
@@ -99,7 +102,7 @@ does not exist, for example through a typo, or a `-Dllm4s.providers.provider=...
 ```text
 Provider 'openai' is not registered. Registered providers: none. If you expected 'openai', add the dependency that supplies it, or register it explicitly with ProviderRegistry.of(...). Discovery scanned 0 modules; 0 failed.
 See https://llm4s.org/getting-started/troubleshooting#provider-not-registered
-Run the doctor to check your whole setup: sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf"
+Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
 When the id came from a config section, the message also says which key it came from. The first line ends with a
@@ -123,7 +126,7 @@ or it cannot read the block at all (a `ConfigurationError`):
 ```text
 Failed to load raw providers config via PureConfig: <what is wrong, and where>
 See https://llm4s.org/getting-started/troubleshooting#application-conf-not-loaded
-Run the doctor to check your whole setup: sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf"
+Run the doctor to check your whole setup: sbt "Test/runMain org.llm4s.doctor.DoctorCli" with llm4s-doctor as a test dependency (https://llm4s.org/reference/doctor)
 ```
 
 A section that cannot be read on its own fails only a load of that section, with

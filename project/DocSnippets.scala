@@ -43,6 +43,7 @@ object DocSnippets {
     "guide/providers.md",
     "guide/vector-store.md",
     "index.md",
+    "reference/doctor.md",
     "reliability-guide.md"
   )
 

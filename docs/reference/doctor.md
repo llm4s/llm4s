@@ -12,8 +12,8 @@ The first run of an LLM4S application has several parts that can each fail on th
 local model server that is not running. The doctor checks all of them in order and, for each one that fails, says
 what to change.
 
-This is `--config modules/samples/src/main/resources/application.conf --local` on a machine where Ollama is not
-running:
+This is the report for an application whose `application.conf` names a local Ollama, on a machine where Ollama is not
+running, run with `--local`:
 
 ```text
 llm4s doctor
@@ -21,7 +21,7 @@ llm4s doctor
   PASS  JDK               Java 21 (LLM4S needs 21 or newer)
   PASS  Configuration     readable; llm4s.providers has 1 section(s): ollama-local
   PASS  Default provider  'ollama-local'
-  PASS  Provider module   'ollama' is registered by org.llm4s.llmconnect.provider.Llm4sOllamaModule (llm4s-ollama_3-0.4.1+377d5d09797-SNAPSHOT.jar); this is the doctor's own classpath, which has every built-in provider module, so pass --classpath to check your application's
+  PASS  Provider module   'ollama' is registered by org.llm4s.llmconnect.provider.Llm4sOllamaModule (llm4s-ollama_3-{{ site.data.project.latest_release }}.jar) on this classpath
   PASS  API key           'ollama' needs no API key
   PASS  Provider config   section 'ollama-local' is valid (model llama3:latest)
   FAIL  Local server      nothing usable answered at http://localhost:11434: GET http://localhost:11434/api/tags: connection failed: ConnectException
@@ -34,41 +34,130 @@ Result: 6 passed, 0 warnings, 1 failed, 2 skipped
 
 ## Running it
 
-The doctor is part of the repository's `llm4s-config-policy` module, which is not published, so today you run it from
-a checkout of the repository:
+The doctor is `llm4s-doctor`, published from the first release after 0.5.1. It depends on `llm4s-core` only. Run it
+from your own project, so it runs on your project's classpath: it reads the `application.conf` your application loads
+and finds only the provider modules your build depends on. A provider your build lacks is reported as missing, not
+found on someone else's classpath.
 
-```bash
-# Check the configuration the module itself would load
-sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli"
+### sbt
 
-# Check your own application's configuration file, and ask a local Ollama whether it has the model
-sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"
+Add it in test scope, so it never reaches your application's runtime classpath:
+
+```scala
+// build.sbt: same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test
 ```
 
-`--config` layers your file over the `reference.conf` of every module on the doctor's classpath, so a key that a
-built-in provider module binds to a vendor variable (for example `OPENAI_API_KEY`) is found. A binding made by a
-module that is not part of this repository is seen only with `--classpath`, below.
+```bash
+# Check the application.conf in src/main/resources
+sbt "Test/runMain org.llm4s.doctor.DoctorCli"
 
-The doctor's own classpath has every built-in provider module, so without `--classpath` the "Provider module" step
-can only tell you that a provider id exists, not that your build depends on its module. To check your build, pass your
-application's runtime classpath. Only the provider modules on it are then registered, and the configuration is
-layered as your application would load it: `-D` system properties, over your `--config` file (or, without one, the
-`application.conf` on that classpath), over the `reference.conf` files on that classpath - so a third-party provider
-module's credential binding is found too. The doctor's own `reference.conf` files come last, only to fill in what
-the classpath leaves out:
+# Also ask a local Ollama whether it is running and has the model
+sbt "Test/runMain org.llm4s.doctor.DoctorCli --local"
+```
+
+The test classpath has your main resources, so the `application.conf` checked is your application's; an
+`application.conf` in `src/test/resources` takes precedence, as in your tests. `DoctorCli` exits the JVM it runs in with
+its exit code, so run it as a batch command as above, or set `Test / run / fork := true` to run it from the sbt shell.
+
+### No project yet: Coursier
+
+With [Coursier](https://get-coursier.io), name the doctor and the provider module you mean to use, and the file to check:
+
+```bash
+cs launch org.llm4s:llm4s-doctor_3:{{ site.data.project.latest_release }} \
+          org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }} \
+          -M org.llm4s.doctor.DoctorCli -- --config application.conf
+```
+
+Only the provider modules you list are on that classpath, so this also tells you which module your build needs.
+
+### Maven
+
+Add `llm4s-doctor_3` in test scope, then run it on the test classpath with the exec plugin:
+
+```xml
+<dependency>
+  <groupId>org.llm4s</groupId>
+  <artifactId>llm4s-doctor_3</artifactId>
+  <version>{{ site.data.project.latest_release }}</version>
+  <scope>test</scope>
+</dependency>
+```
+
+```bash
+mvn -q test-compile exec:java -Dexec.mainClass=org.llm4s.doctor.DoctorCli -Dexec.classpathScope=test
+# with options:
+mvn -q test-compile exec:java -Dexec.mainClass=org.llm4s.doctor.DoctorCli -Dexec.classpathScope=test -Dexec.args="--local"
+```
+
+### Gradle
+
+Add it to the test runtime classpath and register a `JavaExec` task (Kotlin DSL):
+
+```kotlin
+dependencies {
+    testRuntimeOnly("org.llm4s:llm4s-doctor_3:{{ site.data.project.latest_release }}")
+}
+
+tasks.register<JavaExec>("llm4sDoctor") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("org.llm4s.doctor.DoctorCli")
+}
+```
+
+```bash
+gradle llm4sDoctor
+gradle llm4sDoctor --args="--local"
+```
+
+A failed step makes the task fail, which is what a CI step wants.
+
+### From code
+
+`Doctor.run` makes the same checks against the configuration and provider modules of the running application and
+returns the report, so an application can log it at startup, or a test can fail on it. It is `@Experimental`; the
+command line's options, text and JSON output are the stable contract.
+
+```scala
+import org.llm4s.doctor.{ Doctor, DoctorOptions }
+
+val report = Doctor.run(DoctorOptions())
+println(report.renderText)
+if report.exitCode == 2 then println("the setup has a problem: see the report above")
+```
+
+`DoctorOptions().withLocal(true)` and `.withLive(true)` are `--local` and `--live`.
+
+### From a checkout of this repository
+
+`sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli"` runs the same doctor with every built-in provider module
+on the classpath.
+
+### Options
+
+`--config` layers your file over the `reference.conf` of every module on the classpath, so a key that a provider
+module binds to a vendor variable (for example `OPENAI_API_KEY`) is found.
+
+`--classpath` checks another application's runtime classpath from wherever the doctor runs. Only the provider modules
+on it are then registered, and the configuration is layered as that application would load it: `-D` system
+properties, over your `--config` file (or, without one, the `application.conf` on that classpath), over the
+`reference.conf` files on that classpath - so a third-party provider module's credential binding is found too. The
+doctor's own `reference.conf` files come last, only to fill in what the classpath leaves out. Running the doctor from
+your project, as above, makes it unnecessary:
 
 ```bash
 # In your application's project: print its runtime classpath (the last line of the output)
 sbt --error "export Runtime/fullClasspath"
 
-# In the llm4s checkout
-sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --classpath <that classpath>"
+# Wherever the doctor runs
+cs launch org.llm4s:llm4s-doctor_3:{{ site.data.project.latest_release }} -M org.llm4s.doctor.DoctorCli -- --classpath <that classpath>
 ```
 
 | Option | What it does |
 |---|---|
 | `--config <file>` | Check this file instead of the application's own `application.conf`. |
-| `--classpath <path>` | Check the provider modules, `reference.conf` files and (without `--config`) `application.conf` on this classpath (entries separated by `:`, or `;` on Windows) instead of the doctor's own. |
+| `--classpath <path>` | Check the provider modules, `reference.conf` files and (without `--config`) `application.conf` on this classpath (entries separated by `:`, or `;` on Windows) instead of the one the doctor runs on. |
 | `--local` | Ask a model server on this machine whether it is running and has the configured model. |
 | `--live` | Make one small request to the configured provider (see below). |
 | `--timeout <seconds>` | How long to wait for that request. The default is 30. |
@@ -84,7 +173,7 @@ failed.
 | JDK | the running JDK is 21 or newer | names the version it found and says to set `JAVA_HOME` |
 | Configuration | the configuration can be read and has at least one section under `llm4s.providers` | shows the parse problem, or an example section to add |
 | Default provider | `llm4s.providers.provider` names a section that exists | lists the sections you have |
-| Provider module | the section's `provider` is registered, which means its module is on the classpath (yours, with `--classpath`); names the module and the jar it came from | names the registered providers and says to add the dependency that supplies it |
+| Provider module | the section's `provider` is registered, which means its module is on the classpath the doctor runs on (or the `--classpath` given); names the module and the jar it came from | names the registered providers and says to add the dependency that supplies it |
 | API key | the provider needs none, or a key is set | gives the exact setting, for example `set OPENAI_API_KEY, or set apiKey under llm4s.providers.main` |
 | Provider config | the section validates and the provider can build its config | shows the validation error for the section |
 | Local server | (only with `--local`) a server on this machine answers and has the configured model | says to start it, or the command to pull the model |

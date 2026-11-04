@@ -1,11 +1,13 @@
-package org.llm4s.configpolicy
+package org.llm4s.doctor
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.error.TroubleshootingLinks
 import org.llm4s.util.Redaction
 
 import scala.concurrent.duration.*
 
 /** How one step of the setup check ended. `Skipped` means it was not run, and is neither good nor bad. */
+@Experimental
 enum CheckStatus:
   case Pass, Warn, Fail, Skipped
 
@@ -29,13 +31,14 @@ enum CheckStatus:
  * @param detail what was found
  * @param fix    what to change when the step did not pass
  */
+@Experimental
 final case class DoctorCheck private (name: String, status: CheckStatus, detail: String, fix: Option[String]) {
 
   /** This check with a fix hint. */
   def withFix(fix: String): DoctorCheck = copy(fix = Some(DoctorCheck.clean(fix)))
 
   /** This check with every one of `secrets` replaced by `***`, longest first so a secret that contains another is hidden whole. */
-  private[configpolicy] def scrubbed(secrets: Set[String]): DoctorCheck = {
+  private[doctor] def scrubbed(secrets: Set[String]): DoctorCheck = {
     val ordered                    = secrets.toList.sortBy(secret => -secret.length)
     def hide(text: String): String = ordered.foldLeft(text)((acc, secret) => acc.replace(secret, "***"))
     copy(detail = hide(detail), fix = fix.map(hide))
@@ -45,7 +48,7 @@ final case class DoctorCheck private (name: String, status: CheckStatus, detail:
 object DoctorCheck {
 
   // An error's "Run the doctor" line is dropped: this is the doctor's own output (#2285).
-  private[configpolicy] def clean(text: String): String =
+  private[doctor] def clean(text: String): String =
     Redaction.redact(DoctorUrls.scrubText(TroubleshootingLinks.withoutDoctorLine(text)))
 
   def apply(name: String, status: CheckStatus, detail: String): DoctorCheck =
@@ -61,7 +64,7 @@ object DoctorCheck {
  * How the doctor prints a URL: `scheme://host:port/path`, never its user info, query or fragment, which is
  * where a base URL carries a password, a signature or a token.
  */
-private[configpolicy] object DoctorUrls {
+private[doctor] object DoctorUrls {
 
   private val InText = """[A-Za-z][A-Za-z0-9+.\-]*://[^\s"'<>]+""".r
 
@@ -123,6 +126,7 @@ private[configpolicy] object DoctorUrls {
  *
  * @param checks the steps in the order they were checked
  */
+@Experimental
 final case class DoctorReport private (checks: List[DoctorCheck]) {
 
   private def count(status: CheckStatus): Int = checks.count(_.status == status)
@@ -182,6 +186,7 @@ object DoctorReport {
  * @param applicationClasspath the registry was discovered on the application's classpath (`--classpath`),
  *                             not the doctor's own, which has every built-in provider module
  */
+@Experimental
 final case class DoctorOptions private (
   live: Boolean,
   local: Boolean,

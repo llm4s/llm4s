@@ -1,5 +1,6 @@
-package org.llm4s.configpolicy
+package org.llm4s.doctor
 
+import org.llm4s.annotation.{ Experimental, Stable }
 import org.llm4s.config.{ Llm4sConfig, SharedCredentials }
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderName, RawNamedProviderSection }
 import org.llm4s.error.*
@@ -28,7 +29,7 @@ import scala.util.{ Failure, Success, Try, Using }
  * @param live        makes one small request with the given provider config, through the run's registry,
  *                    and returns the model that answered
  */
-final case class DoctorPorts private (
+final private[doctor] case class DoctorPorts private (
   javaFeature: () => Int,
   listModels: (ProviderDescriptor, NamedProviderConfig) => Result[List[String]],
   live: (ProviderConfig, ProviderRegistry) => Result[String]
@@ -39,7 +40,7 @@ final case class DoctorPorts private (
   def withLive(live: (ProviderConfig, ProviderRegistry) => Result[String]): DoctorPorts = copy(live = live)
 }
 
-object DoctorPorts {
+private[doctor] object DoctorPorts {
 
   def apply(
     javaFeature: () => Int,
@@ -88,7 +89,12 @@ object DoctorPorts {
  * value is never put in the report: only the config path it came from is shown, and every key, header value
  * and base-URL credential the configuration holds is hidden by value in every message as well. A URL is
  * printed without its user info, query or fragment.
+ *
+ * From code, [[run]] checks the configuration the application itself loads (`application.conf` on its classpath,
+ * `-D` overrides and every module's `reference.conf`) against the provider modules on its classpath; log the
+ * [[DoctorReport]] at startup, or fail a test on its [[DoctorReport.exitCode]]. From a shell, [[DoctorCli]].
  */
+@Experimental
 object Doctor {
 
   /** The JDK this version of LLM4S needs: core uses virtual threads. */
@@ -106,18 +112,30 @@ object Doctor {
   private type Sections = Map[ProviderName, Result[RawNamedProviderSection]]
 
   /**
+   * Runs every check against the application's own configuration: `-D` system properties over the
+   * `application.conf` on the classpath over every module's `reference.conf`, as `Llm4sConfig` loads it.
+   *
+   * @param options  what the run may do; by default it contacts nothing
+   * @param registry the providers to check the configuration against; by default the provider modules
+   *                 discovered on the classpath
+   */
+  def run(options: DoctorOptions = DoctorOptions())(using registry: ProviderRegistry): DoctorReport =
+    // The doctor is the app edge: it checks exactly what the application's Llm4sConfig calls would load.
+    runOn(ConfigSource.default, options, DoctorPorts.system) // scalafix:ok DisableSyntax.NoPureConfigDefault
+
+  /**
    * Runs every check against `source`.
    *
-   * @param source   where the configuration comes from (see `CheckPolicies.sourceFor`)
+   * @param source   where the configuration comes from
    * @param options  what the run may do
    * @param ports    the outside world, replaceable in tests
    * @param registry the providers to check the configuration against: the application's, when the CLI is
    *                 given `--classpath`
    */
-  def run(
+  private[doctor] def runOn(
     source: ConfigSource,
-    options: DoctorOptions = DoctorOptions(),
-    ports: DoctorPorts = DoctorPorts.system
+    options: DoctorOptions,
+    ports: DoctorPorts
   )(using registry: ProviderRegistry): DoctorReport = {
     val unreadable = source.value().left.toOption
     val block      = Llm4sConfig.providerBlock(source)
@@ -295,11 +313,7 @@ object Doctor {
       }
       s" by ${module.moduleClass}" + where.fold("")(w => s" ($w)")
     }
-    val scope =
-      if (options.applicationClasspath) " on the given --classpath"
-      else
-        "; this is the doctor's own classpath, which has every built-in provider module, " +
-          "so pass --classpath to check your application's"
+    val scope = if (options.applicationClasspath) " on the given --classpath" else " on this classpath"
     DoctorCheck.pass(Module, s"'${id.asString}' is registered${supplier.getOrElse("")}$scope")
   }
 
@@ -534,7 +548,7 @@ object Doctor {
  * configuration's secrets are not known yet when it cannot be parsed, so a message is never printed: only
  * where the problem is (file and line), the kind of problem and a fixed description of it.
  */
-private[configpolicy] object DoctorConfigErrors {
+private[doctor] object DoctorConfigErrors {
 
   // Shorter values are left alone, as in the doctor's other by-value hiding.
   private val MinSecretLength = 8
@@ -624,27 +638,32 @@ private[configpolicy] object DoctorConfigErrors {
 }
 
 /**
- * `llm4s doctor` as a command line: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [options]"`.
+ * `llm4s doctor` as a command line. Run it on the application's own classpath, so it checks the provider modules
+ * the application depends on and the `application.conf` it loads: from sbt,
+ * `sbt "Test/runMain org.llm4s.doctor.DoctorCli"` with `llm4s-doctor` as a test dependency; without a project,
+ * `cs launch org.llm4s:llm4s-doctor_3:<version> org.llm4s:llm4s-<provider>_3:<version> -- --config application.conf`.
+ * See `docs/reference/doctor.md`.
  *
- * Options: `--config <file>` to check a file layered over every module's `reference.conf` (as
- * `CheckPolicies` does) instead of the application's own configuration, `--classpath <path>` to check the
+ * Options: `--config <file>` to check a file layered over every module's `reference.conf` instead of the
+ * application's own configuration, `--classpath <path>` to check the
  * provider modules, `reference.conf` files and (without `--config`) `application.conf` on an application's
  * classpath instead of the doctor's own, `--local` to ask a model
  * server on this machine which models it has, `--live` to make one small request, `--timeout <seconds>` for
  * that request, and `--json`. Without `--local` or `--live` nothing is contacted.
  * Exit code: `0` everything passed, `1` warnings only, `2` something failed.
  */
+@Stable
 object DoctorCli {
 
   /** The command line, parsed. */
-  final private[configpolicy] case class Invocation(
+  final private[doctor] case class Invocation(
     options: DoctorOptions,
     json: Boolean,
     config: Option[String],
     classpath: Option[String]
   )
 
-  private[configpolicy] def parse(args: Array[String]): Invocation = {
+  private[doctor] def parse(args: Array[String]): Invocation = {
     val timeout   = argValue(args, "--timeout").flatMap(_.toIntOption).filter(_ > 0).map(_.seconds)
     val classpath = argValue(args, "--classpath").map(_.trim).filter(_.nonEmpty)
     val options = timeout.foldLeft(
@@ -664,7 +683,7 @@ object DoctorCli {
    * first, so a built-in module is the doctor's copy of it, and from `classpath` otherwise, so a third-party
    * module is found too. The caller closes it.
    */
-  private[configpolicy] def classLoaderFor(classpath: String): Either[String, java.net.URLClassLoader] = {
+  private[doctor] def classLoaderFor(classpath: String): Either[String, java.net.URLClassLoader] = {
     val entries = classpath.split(java.io.File.pathSeparator).toList.map(_.trim).filter(_.nonEmpty)
     val urls    = entries.map(entry => Try(java.nio.file.Paths.get(entry).toUri.toURL).toEither.left.map(_ => entry))
     urls.collect { case Left(bad) => bad } match {
@@ -689,7 +708,7 @@ object DoctorCli {
    * vendor's variable to `llm4s.credentials.<id>.apiKey`. The doctor's own `reference.conf` files come last,
    * only to supply what the given classpath leaves out.
    */
-  private[configpolicy] def sourceOn(loader: ClassLoader, config: Option[String]): ConfigSource = {
+  private[doctor] def sourceOn(loader: ClassLoader, config: Option[String]): ConfigSource = {
     val application = config.fold(ConfigSource.resources("application.conf", loader).optional)(ConfigSource.file(_))
     ConfigSource.defaultOverrides
       .withFallback(application)
@@ -698,16 +717,16 @@ object DoctorCli {
   }
 
   /** Runs the doctor for `args` and returns what to print and the exit code. */
-  private[configpolicy] def execute(args: Array[String], ports: DoctorPorts = DoctorPorts.system)(using
+  private[doctor] def execute(args: Array[String], ports: DoctorPorts = DoctorPorts.system)(using
     default: ProviderRegistry
   ): (String, Int) = {
     val invocation = parse(args)
     def render(source: ConfigSource, registry: ProviderRegistry): (String, Int) = {
-      val report = Doctor.run(source, invocation.options, ports)(using registry)
+      val report = Doctor.runOn(source, invocation.options, ports)(using registry)
       (if (invocation.json) report.renderJson else report.renderText, report.exitCode)
     }
     invocation.classpath match {
-      case None => render(CheckPolicies.sourceFor(invocation.config), default)
+      case None => render(sourceFor(invocation.config), default)
       case Some(classpath) =>
         classLoaderFor(classpath) match {
           case Left(problem) => (s"llm4s doctor: $problem", 2)
@@ -716,6 +735,17 @@ object DoctorCli {
         }
     }
   }
+
+  /**
+   * The application's own configuration, or with `--config` that file layered between the `-D` system
+   * properties and every module's `reference.conf`.
+   */
+  private[doctor] def sourceFor(configFile: Option[String]): ConfigSource =
+    configFile.fold[ConfigSource](ConfigSource.default) { path => // scalafix:ok DisableSyntax.NoPureConfigDefault
+      ConfigSource.defaultOverrides
+        .withFallback(ConfigSource.file(path))
+        .withFallback(ConfigSource.defaultReference)
+    }
 
   def main(args: Array[String]): Unit = {
     val (output, exitCode) = execute(args)

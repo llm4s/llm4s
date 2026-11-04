@@ -215,6 +215,10 @@ These are standalone reference files, not part of the sbt build. Copy them direc
 
 ## Troubleshooting
 
+For a configuration problem, run the [doctor](/reference/doctor#gradle) first: with `llm4s-doctor_3` on the test runtime
+classpath and its `llm4sDoctor` `JavaExec` task, `gradle llm4sDoctor` checks your `application.conf`, provider module and
+API key, and says what to fix.
+
 ### `Could not resolve org.llm4s:...`
 Gradle could not find the artifact. Use the prefixed name and the explicit Scala suffix: `org.llm4s:llm4s-core_3`. There is no Scala 2.13 artifact.
 

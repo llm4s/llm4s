@@ -81,10 +81,10 @@ object PlatformTests {
       "org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec",
       "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec"
     ),
-    "configPolicy" -> Seq(
-      "org.llm4s.configpolicy.DoctorSpec",
-      "org.llm4s.configpolicy.DoctorClassLoaderSpec",
-      "org.llm4s.configpolicy.CheckPoliciesSourceSpec"
+    "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
+    "doctor" -> Seq(
+      "org.llm4s.doctor.DoctorSpec",
+      "org.llm4s.doctor.DoctorClassLoaderSpec"
     ),
     // `it` holds integration suites by tier. Only `@Local` ones (no Docker, model server or API key) belong here, as
     // in `sbt test`; of those, the vision clients' file-encoding paths create, write, read and delete temp files.

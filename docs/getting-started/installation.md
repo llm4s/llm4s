@@ -764,6 +764,17 @@ A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned rep
 injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
 [Testing with the Testkit](../guide/testing-with-the-testkit).
 
+### Checking your setup (the doctor)
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test
+```
+
+`DoctorCli` checks your JDK, `application.conf`, default provider, provider module, API key and, with `--local` or
+`--live`, the model server, and says what to fix: `sbt "Test/runMain org.llm4s.doctor.DoctorCli"`. It depends on
+`llm4s-core` only. See [Doctor](../reference/doctor) for Maven, Gradle and Coursier.
+
 ### For provider authors (testing a provider module)
 
 ```scala

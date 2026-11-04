@@ -40,6 +40,8 @@ object PomDescriptions {
       "Cohere embedding provider for LLM4S.",
     "llm4s-core" ->
       "Core of LLM4S, a Scala 3 toolkit for LLM applications: Result-based errors, the LLM client and provider SPI, the tool-calling API, context management and the tracing contract.",
+    "llm4s-doctor" ->
+      "Setup checker for LLM4S applications: JDK, configuration, provider module, API key and an optional live call.",
     "llm4s-effect" ->
       "cats-effect integration for LLM4S: the LLM client and agent calls as IO.",
     "llm4s-gemini" ->
