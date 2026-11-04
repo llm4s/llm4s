@@ -240,6 +240,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
+  JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new
   `llm4s-azure-identity` (`DefaultAzureCredential`, any `TokenCredential`), `AzureConfig.withTokenProvider`, embeddings, Java and Spring [#2274](https://github.com/llm4s/llm4s/issues/2274).
 - **Added** one proxy and custom-CA setting honoured by every provider client - the JDK client, `openai-java`,
