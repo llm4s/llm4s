@@ -49,6 +49,8 @@ object PlatformTests {
       "org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec",
       "org.llm4s.config.ProviderAuthConfigSpec",
       "org.llm4s.llmconnect.auth.IdentityTokenSourceSpec",
+      "org.llm4s.llmconnect.auth.ApiKeyProviderSpec",
+      "org.llm4s.config.ApiKeyFileConfigSpec",
       "org.llm4s.model.ModelRegistryServiceSpec",
       "org.llm4s.http.Llm4sHttpClientSpec"
     ),
@@ -70,9 +72,16 @@ object PlatformTests {
       "org.llm4s.mcp.StdioStderrDrainSpec",
       "org.llm4s.mcp.MCPClientImplSpec"
     ),
-    "anthropic" -> Seq("org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec"),
-    "openai"    -> Seq("org.llm4s.llmconnect.provider.OpenAIWorkloadIdentitySpec"),
+    "anthropic" -> Seq(
+      "org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec",
+      "org.llm4s.llmconnect.provider.AnthropicApiKeyFileSpec"
+    ),
+    "openai" -> Seq(
+      "org.llm4s.llmconnect.provider.OpenAIWorkloadIdentitySpec",
+      "org.llm4s.llmconnect.provider.OpenAIApiKeyFileSpec"
+    ),
     "openaiCompatible" -> Seq(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleApiKeyFileSpec",
       "org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec",
       "org.llm4s.config.OpenAICompatibleListModelsWorkloadIdentitySpec",
       "org.llm4s.llmconnect.provider.ProviderExchangeLoggingGuideSpec"

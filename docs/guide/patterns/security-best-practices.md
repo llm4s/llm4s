@@ -40,93 +40,20 @@ object SecureKeyManagement {
 }
 ```
 
-### Key Vault Integration
+### Key vaults and key rotation
 
-```text
-object KeyVault {
-  
-  import com.azure.security.keyvault.secrets._
-  
-  class SecureKeyManager(vaultUri: String) {
-    private val client = new SecretClientBuilder()
-      .vaultUrl(vaultUri)
-      .buildClient()
-    
-    def getKey(keyName: String): Result[String] = {
-      try {
-        val secret = client.getSecret(keyName)
-        Result.success(secret.getValue)
-      } catch {
-        case e: Exception =>
-          Result.failure(s"Failed to retrieve key from vault: ${e.getMessage}")
-      }
-    }
-  }
-  
-  // Usage
-  def getOpenAIKey(): Result[String] = {
-    val vaultManager = new SecureKeyManager("https://myvault.vault.azure.net/")
-    vaultManager.getKey("openai-api-key")
-  }
-}
-```
+Keep provider keys in a secret manager (HashiCorp Vault, AWS Secrets Manager, GCP Secret Manager,
+Azure Key Vault) and rotate them without restarting the application:
 
-### Key Rotation
+- **Mounted as a file** (Vault Agent, the Secrets Store CSI driver, External Secrets Operator): set
+  `apiKeyFile` in the provider section instead of `apiKey`. The client re-reads the file when it
+  changes, so the next request after a rotation sends the new key.
+- **Fetched by your code**: implement `ApiKeyProvider` and give it to the config with
+  `withApiKeyProvider`; the client asks it for the key on every request.
 
-```text
-object KeyRotation {
-  
-  case class KeyMetadata(
-    key: String,
-    provider: String,
-    createdAt: Long,
-    rotatedAt: Long,
-    expiresAt: Long
-  ) {
-    def isExpired: Boolean = System.currentTimeMillis() > expiresAt
-    def daysSinceRotation: Long = 
-      (System.currentTimeMillis() - rotatedAt) / (1000 * 60 * 60 * 24)
-  }
-  
-  class KeyRotationManager {
-    private var activeKey: KeyMetadata = _
-    private var rotationScheduler: Option[java.util.Timer] = None
-    
-    def rotateKey(newKey: String, provider: String): Unit = {
-      val now = System.currentTimeMillis()
-      val thirtyDaysFromNow = now + (30 * 24 * 60 * 60 * 1000)
-      
-      activeKey = KeyMetadata(
-        key = newKey,
-        provider = provider,
-        createdAt = now,
-        rotatedAt = now,
-        expiresAt = thirtyDaysFromNow
-      )
-      
-      println(s"Key rotated for $provider. Valid until ${new java.util.Date(thirtyDaysFromNow)}")
-    }
-    
-    def scheduleRotation(intervalDays: Int = 30): Unit = {
-      val timer = new java.util.Timer()
-      val delayMs = intervalDays * 24 * 60 * 60 * 1000L
-      
-      timer.scheduleAtFixedRate(
-        new java.util.TimerTask {
-          def run(): Unit = {
-            println("Time to rotate API keys!")
-            // In production: fetch new key from vault and rotate
-          }
-        },
-        delayMs,
-        delayMs
-      )
-      
-      rotationScheduler = Some(timer)
-    }
-  }
-}
-```
+Both are described, with examples that compile, in
+[Rotating keys](../../getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider) and
+[Secrets and key rotation](../../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation) (#2313).
 
 ---
 

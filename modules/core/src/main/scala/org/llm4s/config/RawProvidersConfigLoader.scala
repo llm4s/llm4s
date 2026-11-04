@@ -73,6 +73,11 @@ private[config] object RawProvidersConfigLoader:
           .map(Some(_))
       }
 
+  /** The section's `apiKeyFile`, a path; a `null` or an unset `${?VAR}` is absent. */
+  private def readApiKeyFile(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[String]] =
+    val cursor = objCursor.atKeyOrUndefined("apiKeyFile")
+    if cursor.isUndefined || cursor.isNull then Right(None) else PureConfigReader[String].from(cursor).map(Some(_))
+
   /** The section's `http` block as read; [[HttpNetworkReader]] checks its keys when the section is loaded. */
   private def readHttp(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[ConfigObject]] =
     val httpCursor = objCursor.atKeyOrUndefined("http")
@@ -120,9 +125,10 @@ private[config] object RawProvidersConfigLoader:
                     )
             yield value.fold(acc)(acc.updated(key, _))
         }
-        auth <- readAuth(objCursor)
-        http <- readHttp(objCursor)
-      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http)
+        auth       <- readAuth(objCursor)
+        http       <- readHttp(objCursor)
+        apiKeyFile <- readApiKeyFile(objCursor)
+      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http, apiKeyFile = apiKeyFile)
     }
 
   /** The block as read, each section's read failure kept to that section. */

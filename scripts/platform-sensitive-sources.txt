@@ -20,6 +20,7 @@ modules/core/src/main/scala/org/llm4s/config/NamedProviderConfigNormalizer.scala
 modules/core/src/main/scala/org/llm4s/config/ProviderExchangeLoggingConfigLoader.scala             core:org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec
 modules/core/src/main/scala/org/llm4s/http/Llm4sHttpClient.scala                                   core:org.llm4s.http.Llm4sHttpClientSpec
 modules/core/src/main/scala/org/llm4s/llmconnect/ProviderExchangeSink.scala                        core:org.llm4s.llmconnect.ProviderExchangeSinkSpec
+modules/core/src/main/scala/org/llm4s/llmconnect/auth/ApiKeyProvider.scala                         core:org.llm4s.llmconnect.auth.ApiKeyProviderSpec
 modules/core/src/main/scala/org/llm4s/llmconnect/auth/IdentityTokenSource.scala                    core:org.llm4s.llmconnect.auth.IdentityTokenSourceSpec
 modules/core/src/main/scala/org/llm4s/model/ModelRegistryService.scala                             core:org.llm4s.model.ModelRegistryServiceSpec
 modules/doctor/src/main/scala/org/llm4s/doctor/Doctor.scala                                        doctor:org.llm4s.doctor.DoctorSpec

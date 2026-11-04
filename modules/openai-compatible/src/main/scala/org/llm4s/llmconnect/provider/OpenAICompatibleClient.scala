@@ -5,7 +5,13 @@ import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, CachingAccessTokenProvider, TokenExchange, TokenExchangeConfig }
+import org.llm4s.llmconnect.auth.{
+  AccessTokenProvider,
+  ApiKeyProvider,
+  CachingAccessTokenProvider,
+  TokenExchange,
+  TokenExchangeConfig
+}
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -337,6 +343,10 @@ class OpenAICompatibleClient(
   private def bearer(): Result[Option[String]] = settings.credential match
     case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
     case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key.reveal))
+    // Asked on every request, so a rotated key is sent from the next one on; like a Dynamic provider, the
+    // caller's code: one that throws fails the request instead of escaping it.
+    case OpenAICompatibleClient.Credential.Rotating(keys) =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(key => Some(key.asKey))
     // A Dynamic provider is the caller's code: one that throws fails the request instead of escaping it.
     case _ =>
       tokenProvider.fold[Result[Option[String]]](Right(None))(p =>
@@ -649,8 +659,9 @@ object OpenAICompatibleClient {
 
   private[provider] def overridesDynamicBearer(credential: Credential, headers: Seq[(String, String)]): Boolean =
     credential match
-      case Credential.Dynamic(_) | Credential.Exchange(_) => headers.exists(_._1.equalsIgnoreCase("Authorization"))
-      case _                                              => false
+      case Credential.Dynamic(_) | Credential.Exchange(_) | Credential.Rotating(_) =>
+        headers.exists(_._1.equalsIgnoreCase("Authorization"))
+      case _ => false
 
   /**
    * Why `settings` may not carry its credential, if it may not: a [[Credential.Dynamic]] or
@@ -749,11 +760,19 @@ object OpenAICompatibleClient {
      */
     case Exchange(config: TokenExchangeConfig)
 
+    /**
+     * `Authorization: Bearer <key>`, the key asked of `keys` for each request, so a key rotated by a secret
+     * manager is sent without rebuilding the client (#2313). A `current()` that throws fails the request
+     * with an `AuthenticationError` naming the exception's class.
+     */
+    case Rotating(keys: ApiKeyProvider)
+
     override def toString: String = this match
       case Anonymous        => "Anonymous"
       case Static(_)        => "Static(***)"
       case Dynamic(_)       => "Dynamic"
       case Exchange(config) => s"Exchange($config)"
+      case Rotating(keys)   => s"Rotating($keys)"
   }
 
   /**
@@ -854,8 +873,12 @@ object OpenAICompatibleClient {
       baseUrl = config.baseUrl,
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)
-        // A blank key is no key, as `fromValues` treats it: never an empty bearer.
-        case None => config.apiKey.filter(_.reveal.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
+        case None =>
+          config.apiKeyProvider match {
+            case Some(keys) => Credential.Rotating(keys)
+            // A blank key is no key, as `fromValues` treats it: never an empty bearer.
+            case None => config.apiKey.filter(_.reveal.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
+          }
       },
       contextWindow = config.contextWindow,
       reserveCompletion = config.reserveCompletion,

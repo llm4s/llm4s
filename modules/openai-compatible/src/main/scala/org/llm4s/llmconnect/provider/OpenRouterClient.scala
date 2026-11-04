@@ -100,7 +100,9 @@ object OpenRouterClient {
    */
   private def credential(config: OpenAIConfig): OpenAICompatibleClient.Credential =
     if (config.workloadIdentity.isDefined) throw new IllegalArgumentException(WorkloadIdentityRefusal)
-    OpenAICompatibleClient.Credential.Static(config.apiKey)
+    config.apiKeyProvider.fold(OpenAICompatibleClient.Credential.Static(config.apiKey))(
+      OpenAICompatibleClient.Credential.Rotating(_)
+    )
 
   /** `config` unless it carries `workloadIdentity`, which OpenRouter cannot use; then the rules of `OpenAIConfig.validate`. */
   private def validate(config: OpenAIConfig): Result[OpenAIConfig] =

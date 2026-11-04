@@ -209,7 +209,96 @@ spec:
               value: "langfuse"
 ```
 
-For enterprise environments, consider HashiCorp Vault or AWS Secrets Manager with init containers or sidecar injection.
+An environment variable is read once, when the process starts, so a key passed this way changes only with
+a restart. For a key that rotates, mount it as a file and use `apiKeyFile`.
+
+### Secrets and key rotation
+
+A provider section's `apiKeyFile` names a file holding the key. The client checks the file before every
+request and re-reads it when it changes, so a key that the secret manager rotates is sent from the next
+request on - no restart, no client rebuild. The `openai`, `requesty`, `anthropic`, `openai-compatible` and
+`openrouter` clients rotate this way; the other providers that take a key read the file when the section is
+loaded. Mount the file with mode `0400`: one readable by its group or by others is logged as a WARN. The
+full rules are in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
+
+```hocon
+llm4s.providers.openai-main {
+  provider   = "openai"
+  model      = "gpt-4o-mini"
+  apiKeyFile = "/vault/secrets/openai-api-key"   # instead of apiKey
+}
+```
+
+**Vault Agent Injector.** The agent renders the secret into `/vault/secrets/<name>` and rewrites it when
+the secret changes:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "llm4s-app"
+        vault.hashicorp.com/agent-inject-secret-openai-api-key: "secret/data/llm4s/openai"
+        vault.hashicorp.com/agent-inject-template-openai-api-key: |
+          {% raw %}{{- with secret "secret/data/llm4s/openai" -}}{{ .Data.data.apiKey }}{{- end -}}{% endraw %}
+```
+
+**Secrets Store CSI driver** (AWS Secrets Manager, GCP Secret Manager, Azure Key Vault or Vault as the
+provider). Enable rotation in the driver (`enableSecretRotation`) and mount the volume; each object
+becomes a file:
+
+```yaml
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          volumeMounts:
+            - name: llm-keys
+              mountPath: /var/run/secrets/llm4s
+              readOnly: true
+      volumes:
+        - name: llm-keys
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: llm4s-keys    # maps the store's secret to the file openai-api-key
+```
+
+**External Secrets Operator.** The operator syncs the store's secret into a Kubernetes Secret every
+`refreshInterval`; mount that Secret as a volume (not as environment variables, and not with `subPath`,
+which the kubelet never updates) and point `apiKeyFile` at the file:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: llm4s-keys
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: llm4s-keys
+  data:
+    - secretKey: openai-api-key
+      remoteRef:
+        key: prod/llm4s/openai
+---
+# in the Deployment's pod spec
+volumes:
+  - name: llm-keys
+    secret:
+      secretName: llm4s-keys      # mounted at /var/run/secrets/llm4s, so apiKeyFile = ".../openai-api-key"
+```
+
+**Fetched by your code.** Without a file, implement `ApiKeyProvider` over your secret store's client
+(Vault's API, AWS Secrets Manager's `GetSecretValue`, ...) and set it with `withApiKeyProvider`; the client
+asks it for the key on every request. llm4s itself depends on no secret-manager SDK. A compiled example is
+in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 ---
 
@@ -592,7 +681,7 @@ Key considerations:
 - Use Azure OpenAI with Private Link or AWS Bedrock for data residency
 - Deploy self-hosted Langfuse within your VPC
 - Implement centralized audit logging for compliance
-- Use HashiCorp Vault for secrets rotation
+- Use HashiCorp Vault for secrets rotation, mounted as a file the section's `apiKeyFile` names
 
 ---
 
