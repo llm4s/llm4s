@@ -465,6 +465,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Embeddings & RAG
 
+- **Fixed** `GraphQAPipeline` always enforces `maxContextEdges`, including when ranking is disabled or unnecessary
+  [#2495](https://github.com/llm4s/llm4s/issues/2495).
 - **Added** caller-owned connection pools for every Postgres store and index: `PgVectorStore`, `PgKeywordIndex`,
   `HybridSearcher.pgvectorShared(dataSource, vectorTableName, keywordTableName[, strategy])` and
   `PgSearchIndex.fromDataSource(dataSource, vectorTableName)` take any `javax.sql.DataSource` and never close it; no public

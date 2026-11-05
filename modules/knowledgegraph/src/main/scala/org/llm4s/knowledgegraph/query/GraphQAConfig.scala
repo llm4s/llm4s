@@ -16,7 +16,7 @@ package org.llm4s.knowledgegraph.query
  *
  * @param maxHops Maximum number of hops for graph traversal during context gathering
  * @param maxContextNodes Maximum number of nodes to include in LLM context
- * @param maxContextEdges Maximum number of edges to include in LLM context
+ * @param maxContextEdges Maximum number of edges to include in LLM context, whether or not ranking is used
  * @param useRanking Whether to use graph ranking algorithms to prioritize entities
  * @param rankingAlgorithm Which ranking algorithm to use (when useRanking is true)
  * @param includeCitations Whether to track and return source citations
