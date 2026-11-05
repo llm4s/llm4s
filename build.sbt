@@ -1706,7 +1706,12 @@ lazy val samples = (project in file("modules//samples"))
     vectorstoreElasticsearch % Test,
     vectorstoreRedis         % Test,
     // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
-    doctor % Test
+    doctor % Test,
+    // Test scope: docs/guide/reference-architecture.md's gateway policy is compiled and checked against the
+    // enterprise overlay's application.conf (#2315), whose gateway section is driven against provider-testkit's
+    // local server.
+    configPolicy    % Test,
+    providerTestkit % Test
   )
   .settings(
     name := "llm4s-samples",
