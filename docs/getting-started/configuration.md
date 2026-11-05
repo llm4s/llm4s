@@ -614,8 +614,9 @@ val client = for {
 - **The section's `llm4s.http` proxy and TLS settings do not apply to it**: configure them on your own stack.
 - **SDK-free providers use it**: `ollama`, `gemini`, `vertexai`, `watsonx`, `openai-compatible` and its dialects
   (`deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`). Providers built on a vendor SDK (`openai`, `azure`,
-  `requesty`, `anthropic`, `bedrock`) keep the SDK's transport and ignore it; their descriptor's
-  `features.customHttpClient` is `false`. Embedding providers do not take one yet.
+  `requesty`, `anthropic`, `bedrock`) keep the SDK's transport and ignore it. A descriptor's
+  `features.customHttpClient` says which: it is `false` unless the provider opts in, so a third-party provider that
+  predates the option does not claim it. Embedding providers do not take one yet.
 
 ---
 

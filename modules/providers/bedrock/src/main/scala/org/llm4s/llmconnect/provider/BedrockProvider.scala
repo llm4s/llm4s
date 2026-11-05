@@ -4,7 +4,7 @@ import org.llm4s.config.BedrockConfigKeys.*
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.security.Secret
@@ -89,9 +89,6 @@ object BedrockProvider extends ProviderDescriptor:
             s"Configured provider '$providerName' must set $ACCESS_KEY_ID_KEY and $SECRET_ACCESS_KEY_KEY together"
           )
         )
-
-  /** Built on the AWS SDK, whose own HTTP transport ignores `LlmClientOptions.httpClient` (#2341). */
-  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(false)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

@@ -37,9 +37,11 @@ way, or to the `httpClient` constructor parameter of `OllamaClient`, `GeminiClie
 `WatsonXClient` or an `OpenAICompatibleClient`, is no longer closed when the LLM client is closed: the caller owns
 it. Close it yourself when your application stops. A client the provider builds itself is still closed with it.
 
-`LlmClientOptions` gains `httpClient: Option[Llm4sHttpClient]` and `ProviderFeatures` gains `customHttpClient`
-(`false` for `openai`, `azure`, `requesty`, `anthropic` and `bedrock`, whose SDKs keep their own transport). Their
-`apply` overloads without the new field remain; a pattern match on either type's extractor binds one more field.
+`LlmClientOptions` gains `httpClient: Option[Llm4sHttpClient]` and `ProviderFeatures` gains `customHttpClient`,
+`false` by default (and for `openai`, `azure`, `requesty`, `anthropic` and `bedrock`, whose SDKs keep their own
+transport). A provider of your own that sends its requests through `options.httpClient` opts in with
+`ProviderFeatures.default.withCustomHttpClient(true)`. Their `apply` overloads without the new field remain; a
+pattern match on either type's extractor binds one more field.
 
 ## Credentials are Secret (#1932)
 

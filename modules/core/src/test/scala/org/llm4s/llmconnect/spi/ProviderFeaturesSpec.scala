@@ -158,21 +158,24 @@ class ProviderFeaturesSpec extends AnyWordSpec with Matchers:
 
   "customHttpClient (#2341)" should {
 
-    "default to true, so a provider that omits it claims to honour a supplied HTTP client" in {
-      ProviderFeatures().customHttpClient shouldBe true
-      ProviderFeatures.default.customHttpClient shouldBe true
-      ProviderFeatures(streaming = false, toolCalling = false).customHttpClient shouldBe true
+    "default to false, so a provider that omits it does not claim to honour a supplied HTTP client" in {
+      ProviderFeatures().customHttpClient shouldBe false
+      ProviderFeatures.default.customHttpClient shouldBe false
+      ProviderFeatures(streaming = false, toolCalling = false).customHttpClient shouldBe false
+      // a descriptor that does not override `features` - here the core test fixture - claims none
+      org.llm4s.testutil.FixtureChatProvider.features.customHttpClient shouldBe false
     }
 
     "be set by apply and by its setter, leaving the other flags and the original alone" in {
       val start = ProviderFeatures(streaming = false, toolCalling = true)
-      val sdk   = start.withCustomHttpClient(false)
+      val optIn = start.withCustomHttpClient(true)
 
-      sdk.customHttpClient shouldBe false
-      flags(sdk) shouldBe flags(start)
-      start.customHttpClient shouldBe true
-      sdk shouldBe ProviderFeatures(streaming = false, toolCalling = true, customHttpClient = false)
-      sdk should not be start
+      optIn.customHttpClient shouldBe true
+      flags(optIn) shouldBe flags(start)
+      start.customHttpClient shouldBe false
+      optIn shouldBe ProviderFeatures(streaming = false, toolCalling = true, customHttpClient = true)
+      optIn should not be start
+      optIn.withCustomHttpClient(false) shouldBe start
     }
   }
 

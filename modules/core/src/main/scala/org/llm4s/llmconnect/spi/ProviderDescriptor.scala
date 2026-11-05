@@ -99,8 +99,8 @@ trait ProviderDescriptor:
    * produces the standard mismatch error.
    *
    * A client that sends its own HTTP requests sends them through `options.httpClient` when it is set, and
-   * does not close that client; a provider that cannot (one built on a vendor SDK) declares
-   * `features.customHttpClient = false`.
+   * does not close that client, and declares so with `features.customHttpClient = true` (it defaults to
+   * `false`, which a provider built on a vendor SDK keeps).
    */
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

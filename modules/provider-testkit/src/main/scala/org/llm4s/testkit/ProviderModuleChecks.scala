@@ -263,9 +263,13 @@ trait ProviderModuleChecks extends Assertions:
       call
       if http.requests.size == before then
         failAt(s"${descriptor.id.asString}: $what sent no request through the supplied HTTP client")
-    sent("complete")(client.complete(conversation))
-    sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))
-    client.close()
+    // the LLM client is closed even when a check fails, so a failing provider leaks nothing
+    val checked = scala.util
+      .Try(sent("complete")(client.complete(conversation)))
+      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))))
+    val closing = scala.util.Try(client.close())
+    checked.get
+    closing.get
     if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
     succeed
 
@@ -688,7 +692,7 @@ object ProviderModuleChecks extends ProviderModuleChecks:
    * The HTTP client [[assertUsesSuppliedHttpClient]] supplies: it records each request's method and URL and
    * answers every one `400` with an OpenAI-style error body.
    */
-  final private class RecordingHttpClient extends Llm4sHttpClient:
+  final private[testkit] class RecordingHttpClient extends Llm4sHttpClient:
     private val sentRequests     = new ConcurrentLinkedQueue[String]
     @volatile private var isOpen = true
     private val ErrorBody = """{"error":{"message":"refused by provider-testkit","type":"invalid_request_error"}}"""

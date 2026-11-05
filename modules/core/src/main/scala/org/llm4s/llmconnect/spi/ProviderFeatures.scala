@@ -9,7 +9,7 @@ import org.llm4s.annotation.Stable
  * runtime discovery: it describes the client this build ships, so a caller can
  * ask "will streaming work here?" without making a call and reading the error.
  *
- * The flags default to `true` because a provider that omits them is claiming
+ * `streaming` and `toolCalling` default to `true` because a provider that omits them is claiming
  * the full interface; a provider that cannot honour part of it must say so, and
  * saying so is then visible to users rather than buried in a `Left` at call
  * time. Cohere and Mistral declared `streaming = false` until they moved onto
@@ -19,8 +19,9 @@ import org.llm4s.annotation.Stable
  * @param streaming        whether `LLMClient.streamComplete` is implemented.
  * @param toolCalling      whether the provider accepts tool/function definitions.
  * @param customHttpClient whether the client sends its requests through the HTTP client supplied with
- *                         `LlmClientOptions.withHttpClient`; `false` for a provider built on a vendor SDK,
- *                         which brings its own transport and ignores it
+ *                         `LlmClientOptions.withHttpClient`. It defaults to `false`, unlike the other flags,
+ *                         because a provider that predates the option ignores it: a provider opts in with
+ *                         `withCustomHttpClient(true)` once it honours the supplied client
  *                         ([[https://github.com/llm4s/llm4s/issues/2341 #2341]]).
  */
 @Stable
@@ -39,13 +40,13 @@ object ProviderFeatures:
   def apply(
     streaming: Boolean = true,
     toolCalling: Boolean = true,
-    customHttpClient: Boolean = true
+    customHttpClient: Boolean = false
   ): ProviderFeatures =
     new ProviderFeatures(streaming, toolCalling, customHttpClient)
 
-  /** Creates a [[ProviderFeatures]] that honours a supplied HTTP client. */
+  /** Creates a [[ProviderFeatures]] that does not claim to honour a supplied HTTP client. */
   def apply(streaming: Boolean, toolCalling: Boolean): ProviderFeatures =
-    new ProviderFeatures(streaming, toolCalling, true)
+    new ProviderFeatures(streaming, toolCalling, false)
 
-  /** Full interface support: streaming, tool calling and a supplied HTTP client. */
+  /** Streaming and tool calling; a supplied HTTP client is not claimed (opt in with `withCustomHttpClient(true)`). */
   val default: ProviderFeatures = ProviderFeatures()

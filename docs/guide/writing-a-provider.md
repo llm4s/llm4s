@@ -401,8 +401,9 @@ in the request body you record; send them in headers.
 `get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
 as a constructor parameter so tests can inject a stub. When `LlmClientOptions.httpClient` is set, send your requests
 through that client and do not close it - the caller owns it; otherwise build your own and close it in
-`releaseResources`. A client that cannot (one built on a vendor SDK) overrides `features` with
-`ProviderFeatures.default.withCustomHttpClient(false)`.
+`releaseResources`. A provider that does so opts in by overriding `features` with
+`ProviderFeatures.default.withCustomHttpClient(true)` and runs `assertUsesSuppliedHttpClient` in its module spec;
+`customHttpClient` defaults to `false`, which a client built on a vendor SDK keeps.
 
 ```scala
 def post(
@@ -867,7 +868,7 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
       `apiKeyEnv` names the same variable
 - [ ] defaults (base URL, model) on the spec, not in `reference.conf`
 - [ ] provider-specific keys declared as `ProviderConfigKey` extras
-- [ ] `ProviderFeatures` honest about streaming and tool calling
+- [ ] `ProviderFeatures` honest about streaming, tool calling and `customHttpClient` (opt in only when `LlmClientOptions.httpClient` is honoured)
 - [ ] client built on `BaseLifecycleLLMClient`, errors via `HttpErrorMapper`, cost via
       `CostEstimator`, exchanges via `ProviderExchangeRecorder`
 - [ ] no exceptions escape, no environment reads

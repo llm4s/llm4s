@@ -253,7 +253,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Providers
 
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
-  `Llm4sHttpClient`, which you keep owning; `ProviderFeatures.customHttpClient` says which honour it [#2341](https://github.com/llm4s/llm4s/issues/2341).
+  `Llm4sHttpClient`, which you keep owning; `ProviderFeatures.customHttpClient` (opt-in, `false` by default) says which honour it [#2341](https://github.com/llm4s/llm4s/issues/2341).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
   JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new

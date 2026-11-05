@@ -19,7 +19,7 @@ import org.llm4s.metrics.MetricsCollector
  *                        own; `None` (the default) builds one from the section's proxy and TLS settings. The caller
  *                        owns a supplied client: closing the LLM client does not close it, and the section's
  *                        `network` settings do not apply to it. A provider whose `ProviderFeatures.customHttpClient`
- *                        is `false` (the SDK-based ones) ignores it.
+ *                        is `false` (the default; the SDK-based ones keep it) ignores it.
  */
 @Stable
 final case class LlmClientOptions private (

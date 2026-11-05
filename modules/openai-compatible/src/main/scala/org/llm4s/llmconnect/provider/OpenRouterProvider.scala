@@ -6,7 +6,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenRouterModelLister, ProviderModelLister }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -21,6 +21,10 @@ import org.llm4s.types.Result
  */
 @Stable
 object OpenRouterProvider extends ProviderDescriptor:
+
+  /** Sends its requests through `LlmClientOptions.httpClient` when one is supplied (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(true)
+
   val id: ProviderId = ProviderId("openrouter")
 
   /**
