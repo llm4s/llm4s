@@ -352,6 +352,7 @@ lazy val llm4s = (project in file("."))
     providerTestkit,
     schemaDerivation,
     schemaIron,
+    prompt,
     testkit,
     agentTestkit,
     agentCheckpointSqlite,
@@ -1408,12 +1409,28 @@ lazy val schemaIron = (project in file("modules/schema-iron"))
     name := "llm4s-schema-iron",
     commonSettings,
     // Measured 96.00% statement and 89.04% branch coverage (`sbt coverage schemaIron/test schemaIron/coverageReport`).
-    // Floor is the measured value rounded down to the nearest 5. Never lower it. The constraint walk is a macro, which runs inside the compiler where scoverage cannot see it;
-    // `IronCompileErrorsSpec` and the golden specs exercise it when they compile.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The constraint walk is a macro,
+    // which runs inside the compiler where scoverage cannot see it; `IronCompileErrorsSpec` exercises it.
     coverageFloor(95),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies += Deps.iron
+  )
+
+// `llm4s-prompt` (#2325): the `prompt"..."` and `system"..."` interpolators, which render each value through a
+// `Promptable` found at compile time (derived with `Mirror` for case classes and enums) and fence `Untrusted` values.
+// It layers on core's public API (it builds `Message`s and a `Conversation`) and adds no dependency.
+lazy val prompt = (project in file("modules/prompt"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-prompt",
+    commonSettings,
+    // Measured 98.06% statement and 95.08% branch coverage (`sbt coverage prompt/test prompt/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The interpolator's macro runs inside
+    // the compiler, where scoverage cannot see it; `PromptCompileErrorsSpec` and the golden specs exercise it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
   )
 
 // `llm4s-testkit` (#1475) is for the people who USE llm4s: a scriptable fake `LLMClient` they can put
@@ -1682,6 +1699,8 @@ lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
     schemaDerivation,
+    // `org.llm4s.samples.prompt.TypedPromptExample` (#2325), and docs/guide/prompts.md's snippets
+    prompt,
     rag,
     knowledgegraph,
     memory,
@@ -1718,7 +1737,8 @@ lazy val samples = (project in file("modules//samples"))
     javaRag,
     // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
     // acceptance suites script their model with it. Compile scope since #2295: the runnable
-    // `org.llm4s.samples.json.JsoniterStructuredOutputExample` scripts its model with it, so it needs no API key.
+    // `org.llm4s.samples.json.JsoniterStructuredOutputExample` and (#2325)
+    // `org.llm4s.samples.prompt.TypedPromptExample` script their model with it, so they need no API key.
     testkit,
     agentTestkit % Test,
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
@@ -2270,6 +2290,7 @@ lazy val docs = (project in file("modules/docs"))
     providerTestkit,
     schemaDerivation,
     schemaIron,
+    prompt,
     testkit,
     doctor,
     workspaceShared,
@@ -2328,6 +2349,7 @@ lazy val docs = (project in file("modules/docs"))
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (schemaIron / Compile / sources).value ++
+        (prompt / Compile / sources).value ++
         (testkit / Compile / sources).value ++
         (doctor / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++

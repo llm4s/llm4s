@@ -114,6 +114,7 @@ map_file_to_project() {
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
     modules/schema-iron/*)                echo "schemaIron" ;;
+    modules/prompt/*)                     echo "prompt" ;;
     modules/testkit/*)                    echo "testkit" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
@@ -288,6 +289,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE schemaDerivation
       set_add DOWNSTREAM_COMPILE schemaIron
+      set_add DOWNSTREAM_COMPILE prompt
       set_add DOWNSTREAM_COMPILE testkit
       set_add DOWNSTREAM_COMPILE doctor
       set_add DOWNSTREAM_COMPILE it
@@ -557,6 +559,9 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE schemaIron
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    prompt)
+      set_add DOWNSTREAM_COMPILE samples
       ;;
     doctor)
       set_add DOWNSTREAM_COMPILE configPolicy
