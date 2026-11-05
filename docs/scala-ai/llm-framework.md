@@ -51,7 +51,8 @@ deliberately differs:
 - Errors are values (`Result[A]`) with typed error classes, not exceptions.
 - A provider is a small published interface, `ProviderDescriptor`, so adding a provider is adding a dependency
   ([writing a provider](../guide/writing-a-provider)).
-- Guardrails and agent handoffs are part of the same library as the client.
+- A guardrail block is an outcome of the run (`AgentStatus.Blocked`), not an exception, and handoffs are routes inside one
+  agent graph.
 
 It also lacks things others have: LangChain4j and Spring AI each list far more vector stores, and LLM4S has no Scala
 2.13 artifact. The [comparison with LangChain4j, Spring AI, Koog and Embabel](../guide/comparison) is a sourced
