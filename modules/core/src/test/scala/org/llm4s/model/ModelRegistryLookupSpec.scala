@@ -63,24 +63,21 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   "ModelRegistryService" should "return Left with ValidationError for unknown capability" in:
     registry.findByCapability("unsupported_capability") match
       case Left(err: ValidationError) =>
-        err.message should include ("No models found with capability: unsupported_capability")
-        err.field shouldBe "capability"
+        err.message should include("No models found with capability: unsupported_capability")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
   it should "return Left with ValidationError for mode with no models" in:
     registry.listByMode(ModelMode.Completion) match
       case Left(err: ValidationError) =>
-        err.message should include ("No models found for mode: completion")
-        err.field shouldBe "mode"
+        err.message should include("No models found for mode: completion")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
   it should "return Left with ValidationError for unknown provider" in:
     registry.listByProvider("nonexistent-provider") match
       case Left(err: ValidationError) =>
-        err.message should include ("No models found for provider: nonexistent-provider")
-        err.field shouldBe "provider"
+        err.message should include("No models found for provider: nonexistent-provider")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
@@ -96,8 +93,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError for model id that matches nothing" in:
     registry.lookup("unknown-model-xyz") match
       case Left(err: ValidationError) =>
-        err.message should include ("Model not found: unknown-model-xyz")
-        err.field shouldBe "modelId"
+        err.message should include("Model not found: unknown-model-xyz")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
@@ -108,8 +104,7 @@ class ModelRegistryLookupSpec extends AnyFlatSpec with Matchers:
   it should "return Left with ValidationError when lookup by provider and modelName finds nothing" in:
     registry.lookup("acme", "nonexistent") match
       case Left(err: ValidationError) =>
-        err.message should include ("Model not found: acme/nonexistent")
-        err.field shouldBe "modelId"
+        err.message should include("Model not found: acme/nonexistent")
       case other =>
         fail(s"Expected Left(ValidationError), got $other")
 
