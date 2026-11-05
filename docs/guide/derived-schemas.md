@@ -182,6 +182,46 @@ The problems are collected, every field at once, in declaration order: one is re
 
 The built-in calculator, re-expressed this way next to the hand-built original, is the `TypedCalculatorExample` sample (`sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"`).
 
+## Scoped tools
+
+`Tool.scoped` builds the same tool from a function that returns its result directly and runs in a `ToolScope`: the call it serves, given to the function and nowhere else. Inside it, `reject(message)` ends the call with `message` as the error the model sees, `ensure(condition, message)` ends it unless the condition holds, and `.?` unwraps a `Result` or an `Either[String, T]`, ending the call with the `LLMError`'s formatted message or the `Left`'s text. `ToolScope.idempotencyKey` is the key to pass to a system with a side effect, so that running the same call again does not repeat the effect:
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.ToolFunction
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+@description("A charge to a customer's saved card")
+case class Charge(
+  @description("The customer to charge") customerId: String,
+  @description("Amount in cents, above zero") amountCents: Long,
+  @description("ISO 4217 code: EUR or USD") currency: String
+) derives SchemaOf, ReadWriter
+
+case class Receipt(chargeId: String) derives ReadWriter
+
+case class Customer(id: String, blocked: Boolean)
+
+trait Customers { def find(id: String): Result[Customer] }
+trait Payments { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
+
+def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+  Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
+    ensure(c.amountCents > 0, "amountCents must be positive")
+    ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
+    val customer = customers.find(c.customerId).?
+    if (customer.blocked) reject("this customer cannot be charged")
+    Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
+  }
+```
+
+The arguments are decoded, and refused, exactly as by `Tool.of`, and the result is the same `ToolFunction`. An agent runs every call with its `ToolCallInfo`, which the function reads as `ToolScope.call`; `ToolScope.idempotencyKey` is then that call's key, the same in every run of the call (a retry, a `recover`, an approval). Without a `ToolCallInfo`, as with plain `ToolRegistry` calling, the key is derived from the tool's name and the arguments, with their object keys sorted: equal arguments give equal keys, so two separate calls with equal arguments share one.
+
+`reject`, `ensure`, `.?` and `ToolScope` need the scope, so using them outside a `Tool.scoped` function does not compile; the message says they are only available inside one. They end the call with `scala.util.boundary`'s `break`, which works from a lambda inside the function (in a `map` or a `foreach`) but is an exception underneath: a `Try` or a `catch NonFatal` around them catches it, so leave them outside one, and do not use the scope on another thread or after the function returns. An exception the function throws is not caught by the tool: a `ToolRegistry` turns it into the tool's error, as for `Tool.of`.
+
+The `TypedCalculatorExample` sample has a scoped calculator next to the others.
+
 ## An agent's answer
 
 An agent's response format is a schema too: pass `SchemaOf[A].definition` to `AgentBuilder.withOutput`, and read the answer with `decodeOutput[A]` (see [the agent guide](agents/#a-typed-answer)). `withOutput` is in `llm4s-agent`, which this module does not depend on.
