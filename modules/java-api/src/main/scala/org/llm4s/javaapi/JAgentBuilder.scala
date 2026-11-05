@@ -36,7 +36,7 @@ final class JAgentBuilder private[javaapi] (token: FacadeToken, spec: AgentBuild
    * Guardrails run in order on each turn's query before the model sees it; one that fails ends the turn `BLOCKED`, and
    * the turn stores nothing.
    */
-  def inputGuardrails(guardrails: java.util.List[JGuardrail]): JAgentBuilder =
+  def inputGuardrails(guardrails: java.util.List[? <: JGuardrail]): JAgentBuilder =
     next(spec.copy(input = AgentBuilds.elements(guardrails, "inputGuardrails", "a guardrail")))
 
   /**
