@@ -89,6 +89,7 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
           "llm4s.credentials.fixturechat.apiKey = \"sk-literal-0001\"\n" + chatSection
       val error = loadChat(hocon).left.value
       error.message should include("llm4s.credentials.fixturechat sets both apiKey and apiKeyFile")
+      error.message should include("unset that variable")
       (error.message should not).include("sk-literal-0001")
     }
 
@@ -178,5 +179,14 @@ class SharedApiKeyFileSpec extends AnyWordSpec with Matchers with EitherValues w
       val config = EmbeddingProviderConfig("https://e.invalid", "m", Secret("k")).withApiKeyProvider(failing)
       config.currentApiKey().left.value.message should include("is empty")
       config.withApiKeyProvider(None).currentApiKey().value.reveal shouldBe "k"
+    }
+
+    "turn a provider that throws into a Left naming the exception's class, not an exception" in {
+      val throwing = new ApiKeyProvider:
+        def current(): Result[ApiKey] = throw new IllegalStateException("vault unreachable")
+      val config = EmbeddingProviderConfig("https://e.invalid", "m", Secret("k")).withApiKeyProvider(throwing)
+      val error  = config.currentApiKey().left.value
+      error shouldBe a[org.llm4s.error.AuthenticationError]
+      error.message should include("IllegalStateException")
     }
   }

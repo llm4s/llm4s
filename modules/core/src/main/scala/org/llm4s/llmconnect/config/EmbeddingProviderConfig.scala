@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
@@ -59,10 +59,13 @@ final case class EmbeddingProviderConfig private (
 
   /**
    * The key to send with the next request: [[apiKeyProvider]]'s current key when one is set, otherwise `apiKey`.
-   * A key file that has become unreadable or empty is a `Left` naming its path.
+   * A key file that has become unreadable or empty is a `Left` naming its path, and a provider that throws is an
+   * `AuthenticationError` naming the exception's class, as it is for a chat client.
    */
   def currentApiKey(): Result[Secret] =
-    apiKeyProvider.fold[Result[Secret]](Right(apiKey))(_.current().map(key => Secret(key.asKey)))
+    apiKeyProvider.fold[Result[Secret]](Right(apiKey))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(key => Secret(key.asKey))
+    )
 
   override def toString: String =
     s"EmbeddingProviderConfig(baseUrl=$baseUrl, model=$model, apiKey=$apiKey" +

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;
+  [migration](docs/reference/migration.md#rerankproviderconfig-is-growth-safe-2478).
 - `ApiKey` and every config credential field (`apiKey`, Langfuse keys, search-tool keys) are `org.llm4s.security.Secret`, not `String`; [migration](docs/reference/migration.md#credentials-are-secret-1932).
 - `FileConfig()` blocks more by default: each platform's system and credential locations (`FileConfig.DefaultBlockedPaths`),
   matched regardless of case; [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).

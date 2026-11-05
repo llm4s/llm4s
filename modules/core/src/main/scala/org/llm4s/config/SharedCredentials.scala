@@ -251,13 +251,15 @@ private[llm4s] object SharedCredentials:
                 .flatMap { (apiKey, apiKeyFile) =>
                   keyFilePath(apiKeyFile, ConfigUtil.joinPath(List("llm4s", "credentials", key, "apiKeyFile").asJava))
                     .flatMap {
-                      // `apiKey` is usually bound to the vendor's variable by its module's reference.conf, so the
-                      // message says where a key the user never wrote may come from.
+                      // `apiKey` is usually bound to the vendor's variable by its module's reference.conf, so a key
+                      // the user never wrote is most likely an exported variable: the message says to unset it.
                       case Some(_) if apiKey.isDefined =>
                         Left(
                           ConfigurationError(
-                            s"$entryPath sets both apiKey and apiKeyFile (apiKey may be bound to the vendor's " +
-                              "environment variable by its module's reference.conf); remove one",
+                            s"$entryPath sets both apiKey and apiKeyFile. Its apiKey is usually the vendor's API key " +
+                              s"environment variable, which the provider module's reference.conf binds to $entryPath.apiKey " +
+                              "(OPENAI_API_KEY for openai, COHERE_API_KEY for cohere, ...): to read the key from the " +
+                              "file, unset that variable; to use the variable, remove apiKeyFile",
                             List("apiKeyFile")
                           )
                         )
