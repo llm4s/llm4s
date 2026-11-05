@@ -759,8 +759,9 @@ lazy val llm4sOx = (project in file("modules/llm4s-ox"))
   .settings(
     name := "llm4s-ox",
     commonSettings,
+    // Measured 96.39% statement coverage (CI's agent coverage leg).
     // Floor is the measured value rounded down to the nearest 5. Never lower it.
-    coverageFloor(90),
+    coverageFloor(95),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
