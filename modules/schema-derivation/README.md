@@ -31,6 +31,7 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 | `import org.llm4s.schema.namedtuples.given` | a uPickle `ReadWriter` for named tuples, so `(sentiment: Sentiment, confidence: Double)` works wherever a case class does |
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
 | `Tool.of[A, R](name, description)(a => Either[String, R])` | a `ToolFunction` from a function over a case class: the schema derived from `A`, the arguments decoded into it, argument errors as `SafeParameterExtractor`'s `ToolParameterError`s |
+| `Tool.scoped[A, R](name, description)(a => R)` | the same tool from a function that returns `R` and ends the call early with `fail`, `ensure` or `.?`, reading `ToolScope.idempotencyKey`; these compile only inside it |
 
 ## Supported and not
 

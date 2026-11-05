@@ -244,7 +244,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 11
+    scalaBlocks should have size 12
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -358,6 +358,42 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     upickle.default.read[Meeting](upickle.default.write(meeting)) shouldBe meeting
   }
 
+  "The scoped tool of the guide" should "pass the call's idempotency key on and end the call on each check" in {
+    import ScopedTools.*
+    import org.llm4s.error.NotFoundError
+    import org.llm4s.toolapi.{ ToolCallError, ToolCallInfo }
+
+    val charged = scala.collection.mutable.ListBuffer.empty[(String, Long, String)]
+    val customers = new Customers {
+      def find(id: String): Result[Customer] = id match {
+        case "c-1" => Right(Customer("c-1", blocked = false))
+        case "c-2" => Right(Customer("c-2", blocked = true))
+        case other => Left(NotFoundError(s"no customer $other", "customer"))
+      }
+    }
+    val payments = new Payments {
+      def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] = {
+        charged += ((customer.id, amountCents, idempotencyKey))
+        Right(s"ch-${charged.size}")
+      }
+    }
+    val tool = chargeTool(customers, payments).fold(e => fail(e.toString), identity)
+    def call(id: String, cents: Long, currency: String = "EUR") =
+      tool.execute(
+        ujson.Obj("customerId" -> id, "amountCents" -> ujson.Num(cents.toDouble), "currency" -> currency),
+        ToolCallInfo("t-1", "k-1")
+      )
+    def error(message: String) = Left(ToolCallError.HandlerError("charge_card", message))
+
+    call("c-1", 500) shouldBe Right(ujson.Obj("chargeId" -> "ch-1"))
+    charged.toList shouldBe List(("c-1", 500L, "k-1"))
+    call("c-1", 0) shouldBe error("amountCents must be positive")
+    call("c-1", 500, "GBP") shouldBe error("unsupported currency GBP")
+    call("c-2", 500) shouldBe error("this customer cannot be charged")
+    call("c-9", 500) shouldBe error(NotFoundError("no customer c-9", "customer").formatted)
+    charged should have size 1
+  }
+
   "A recursion through a hand-written given" should "fail on first use with the message the guide quotes, not hang" in {
     import scala.concurrent.ExecutionContext.Implicits.global
     import scala.concurrent.duration.*
@@ -369,4 +405,40 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       "recursive type P: llm4s-schema-derivation cannot describe recursive types; core's schema model has no $ref."
     )
   }
+}
+
+// ---- Scoped tools
+//
+// Outside the spec, as the guide advises: inside it, the spec's inherited ScalaTest `fail` would clash with the
+// `fail` that `import org.llm4s.schema.*` brings in.
+
+object ScopedTools {
+  import org.llm4s.schema.*
+  import org.llm4s.toolapi.ToolFunction
+  import org.llm4s.types.Result
+  import upickle.default.ReadWriter
+
+  @description("A charge to a customer's saved card")
+  case class Charge(
+    @description("The customer to charge") customerId: String,
+    @description("Amount in cents, above zero") amountCents: Long,
+    @description("ISO 4217 code: EUR or USD") currency: String
+  ) derives SchemaOf,
+        ReadWriter
+
+  case class Receipt(chargeId: String) derives ReadWriter
+
+  case class Customer(id: String, blocked: Boolean)
+
+  trait Customers { def find(id: String): Result[Customer]                                                    }
+  trait Payments  { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
+
+  def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+    Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
+      ensure(c.amountCents > 0, "amountCents must be positive")
+      ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
+      val customer = customers.find(c.customerId).?
+      if (customer.blocked) fail("this customer cannot be charged")
+      Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
+    }
 }
