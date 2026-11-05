@@ -36,7 +36,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Comparing LLM4S](comparison)** - A sourced comparison with LangChain4j, Spring AI, Koog and Embabel, and a [migration guide](migrating-from-langchain4j)
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
-- **[JSON Libraries](json-libraries)** - Use circe, play-json or zio-json with LLM4S: converting at the boundary, structured output and tools
+- **[JSON Libraries](json-libraries)** - Use circe, play-json, zio-json or jsoniter-scala with LLM4S: converting at the boundary, structured output and tools
 
 ### Agent Framework
 

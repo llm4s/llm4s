@@ -119,6 +119,6 @@ private[schema] object StructuredOutput {
 
   private def readWith[A](read: => A): Result[A] =
     Try(read).toEither.left.map(e =>
-      ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
+      ValidationError("structured_output", s"Response does not match expected schema: ${LLMClient.readFailure(e)}")
     )
 }

@@ -1688,9 +1688,10 @@ lazy val samples = (project in file("modules//samples"))
     llm4sPekko,
     // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
     javaRag,
-    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
-    // examples' acceptance suites script their model with it.
-    testkit      % Test,
+    // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
+    // acceptance suites script their model with it. Compile scope since #2295: the runnable
+    // `org.llm4s.samples.json.JsoniterStructuredOutputExample` scripts its model with it, so it needs no API key.
+    testkit,
     agentTestkit % Test,
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
@@ -1706,13 +1707,17 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
-    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
-    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    // Test scope unless noted: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the
+    // real libraries. Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
     libraryDependencies ++= Seq(
       Deps.circeCore  % Test,
       Deps.ujsonCirce % Test,
       Deps.playJson   % Test,
       Deps.zioJson    % Test,
+      // docs/guide/json-libraries.md's jsoniter-scala section (#2295). Compile scope: the runnable
+      // `org.llm4s.samples.json.JsoniterStructuredOutputExample` uses the same bridge.
+      Deps.jsoniterScalaCore,
+      Deps.jsoniterScalaMacros,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each

@@ -208,7 +208,7 @@ A reply that cannot become an `A` is a `ValidationError` whose `field` is `"stru
 |---|---|
 | text with no JSON in it | `Response is not valid JSON` |
 | the JSON value `null` | `Response does not match expected schema: got JSON null` |
-| JSON of the wrong shape (an array for an object, a missing field, a wrong type) | `Response does not match expected schema` |
+| JSON of the wrong shape (an array for an object, a missing field, a wrong type) | `Response does not match expected schema`, then the JSON path (`$['amount']`) and the reader's reason |
 
 The reply is deserialised, not validated against the schema. A missing field or a wrong type fails because
 the uPickle reader for `A` fails on it, but a constraint the reader does not check is not checked at all: an
@@ -278,8 +278,8 @@ use that provider.
 - **Every property is required** (section 4), whatever you declared.
 - **Integers above 2^53.** A uPickle `Long` field reads a number such as 9007199254740993 exactly, because
   `completeStructured` reads `A` from the reply's text. A reader that starts from `ujson.Value` (the circe,
-  play-json and zio-json bridges) and every tool argument get the rounded double instead, so send large identifiers as
-  strings there; see [Numbers](json-libraries#numbers).
+  play-json, zio-json and jsoniter-scala bridges) and every tool argument get the rounded double instead, so send
+  large identifiers as strings there; see [Numbers](json-libraries#numbers).
 - **One call, no streaming, no repair.** There is no automatic retry inside `completeStructured`.
 - **The content goes to the provider.** The conversation and the schema are sent to whichever provider the client
   talks to, like any other completion.

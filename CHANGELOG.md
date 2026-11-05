@@ -291,6 +291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#2348](https://github.com/llm4s/llm4s/issues/2348).
 - **Fixed** a streamed Anthropic completion's usage, which reported `promptTokens = 0` and no prompt-cache counts:
   it now passes `message_start`'s and `message_delta`'s counts to `StreamingAccumulator.updateUsage`, so its estimated cost is complete [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Fixed** the `ValidationError` of a `completeStructured` (and `completeStructuredOf`) reply that does not fit `A`: its message named only the
+  JSON path (`$['age']`); it now adds the reader's reason, including a bridged decoder's own message [#2295](https://github.com/llm4s/llm4s/issues/2295).
 
 ### Java & Kotlin APIs
 
@@ -462,6 +464,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation label) and `scripts/check-doc-seo.sh`, which fails CI on a missing, duplicate or over-long title or description [#2314](https://github.com/llm4s/llm4s/issues/2314).
 - **Added** [Moving a Java app from LangChain4j or Spring AI](docs/guide/java-migration.md): concepts, compiled Java for
   each common task, provider configuration and the gaps; the Scala migration and comparison pages corrected for the Java API [#2282](https://github.com/llm4s/llm4s/issues/2282).
+- **Added** a jsoniter-scala section to the [JSON libraries guide](docs/guide/json-libraries.md#jsoniter-scala): a `JsonValueCodec` as the `Reader` of
+  `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 
 ### Embeddings & RAG
 
