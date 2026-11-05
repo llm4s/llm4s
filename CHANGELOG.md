@@ -344,6 +344,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tools
 
+- **Fixed** HTTP tool blocklist matching so a configured domain with a leading `www.` blocks the same host and its
+  subdomains consistently with allowlist matching [#2496](https://github.com/llm4s/llm4s/issues/2496).
 - **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
   Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
   derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
