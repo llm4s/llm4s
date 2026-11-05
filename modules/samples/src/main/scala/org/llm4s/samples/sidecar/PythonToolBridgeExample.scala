@@ -18,7 +18,7 @@ import scala.util.Using
  *
  * `modules/samples/src/main/python/sentiment_tool.py` wraps a plain Python function in an MCP server with the official
  * MCP Python SDK. This example starts it as a subprocess over stdio (`MCPServerConfig.stdio`), lists its tools
- * through an [[MCPToolRegistry]] and hands them to an [[Agent]]. The tool's schema comes from the Python type hints.
+ * through an `MCPToolRegistry` and hands them to an `Agent`. The tool's schema comes from the Python type hints.
  *
  * The model is a `ScriptedLLMClient` from `llm4s-testkit`: it asks for `analyze_sentiment`, then answers with what
  * the Python tool returned, so the example needs no API key. The guide is `docs/guide/replacing-a-python-sidecar.md`.
