@@ -200,7 +200,8 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      _                       = adjustmentLog.record(model, transformed.adjustments)
+      adjustments             = withUnsentSampling(transformed.options, transformed.adjustments)
+      _                       = adjustmentLog.record(model, adjustments)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -210,7 +211,7 @@ class OpenAIClient private[provider] (
       )
       body = serializeParams(params)
       response <- call("completion")(transport.createChatCompletion(params))
-      completion = convertFromOpenAIFormat(response).withAdjustments(transformed.adjustments)
+      completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -240,7 +241,8 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        adjustmentLog.record(model, transformed.adjustments)
+        val adjustments = withUnsentSampling(transformed.options, transformed.adjustments)
+        adjustmentLog.record(model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -248,12 +250,11 @@ class OpenAIClient private[provider] (
           transformed.options,
           OpenAIModelRules.requiresMaxCompletionTokens(model),
           streaming = !transformed.requiresFakeStreaming
-        ).map(params => (transformed, params))
+        ).map(params => (transformed, params, adjustments))
       }
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
-      .flatMap { (transformed, params) =>
+      .flatMap { (transformed, params, adjustments) =>
         val requestBody = serializeParams(params)
-        val adjustments = transformed.adjustments
         if (transformed.requiresFakeStreaming)
           executeFakeStreaming(startedAt, requestBody, params, adjustments, onChunk)
         else executeNativeStreaming(startedAt, requestBody, params, adjustments, onChunk)
@@ -485,6 +486,36 @@ class OpenAIClient private[provider] (
       }
     }
 
+  /** Whether the request for `options` goes to a reasoning model: one the registry flags, or one sent an effort. */
+  private def isReasoningRequest(options: CompletionOptions): Boolean =
+    reasoningSupport == OpenAIReasoning.Support.Reasoning || reasoningEffortFor(options).isDefined
+
+  /** Whether the request for `options` leaves out `temperature`, `top_p` and the penalties (see [[buildParams]]). */
+  private def omitsSampling(options: CompletionOptions): Boolean =
+    isReasoningRequest(options) && OpenAIReasoning.restrictsSampling(model)
+
+  /**
+   * `adjustments` with the sampling options a reasoning-model request leaves out reported as `Dropped`
+   * (RFC 0008): `temperature` always, since it always has a value, and `top_p` and the penalties when set
+   * away from their defaults. Each replaces any report the transformer made for the same option, such as
+   * the o-series temperature it adjusts to 1.0, because in the end nothing is sent for it.
+   */
+  private def withUnsentSampling(
+    options: CompletionOptions,
+    adjustments: List[RequestAdjustment]
+  ): List[RequestAdjustment] =
+    if (!omitsSampling(options)) adjustments
+    else {
+      val reason = s"$model is a reasoning model, which takes no sampling parameters"
+      val unsent = List(
+        Some(RequestOption.Temperature),
+        Option.when(options.topP != 1.0)(RequestOption.TopP),
+        Option.when(options.presencePenalty != 0.0)(RequestOption.PresencePenalty),
+        Option.when(options.frequencyPenalty != 0.0)(RequestOption.FrequencyPenalty)
+      ).flatten
+      adjustments.filterNot(a => unsent.contains(a.option)) ++ unsent.map(RequestAdjustment.Dropped(_, reason))
+    }
+
   /**
    * Builds the chat-completions request from conversation and completion options.
    *
@@ -517,14 +548,15 @@ class OpenAIClient private[provider] (
   ): Result[ChatCompletionCreateParams] =
     Try {
       val effort         = reasoningEffortFor(options)
-      val reasoningModel = reasoningSupport == OpenAIReasoning.Support.Reasoning || effort.isDefined
+      val reasoningModel = isReasoningRequest(options)
 
       val builder = ChatCompletionCreateParams
         .builder()
         .model(model)
         .messages(messages.asJava)
 
-      if (reasoningModel && OpenAIReasoning.restrictsSampling(model))
+      // reported on the Completion by withUnsentSampling
+      if (omitsSampling(options))
         logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
       else
         builder

@@ -55,14 +55,19 @@ trait RequestTransformer {
   /**
    * The options with everything `modelId` cannot take dropped or adjusted, as
    * `transformOptions(modelId, options, dropUnsupported = true)` returns them, and a
-   * [[org.llm4s.llmconnect.model.RequestAdjustment]] for each change. The default reports none, so a
-   * transformer that does not override it still works. [[TransformationResult.transform]] calls it.
+   * [[org.llm4s.llmconnect.model.RequestAdjustment]] for each change. [[TransformationResult.transform]]
+   * calls it. A `Left` from `transformOptions` is returned as it is, so a transformer can still refuse a
+   * request outright.
+   *
+   * This hook is `private[llm4s]`: only llm4s's own transformers report adjustments. A transformer
+   * written outside llm4s cannot override it, so the default applies, which reports none. Whether to
+   * make the hook public is left to a later change under RFC 0008.
    */
   private[llm4s] def adjustOptions(
     modelId: String,
     options: CompletionOptions
-  ): (CompletionOptions, List[RequestAdjustment]) =
-    (transformOptions(modelId, options, dropUnsupported = true).getOrElse(options), List.empty)
+  ): Result[(CompletionOptions, List[RequestAdjustment])] =
+    transformOptions(modelId, options, dropUnsupported = true).map(_ -> List.empty)
 
   /**
    * Transform messages for model-specific requirements.
@@ -147,7 +152,7 @@ final private[model] class DefaultRequestTransformer(
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions] =
-    if (dropUnsupported) Right(adjustOptions(modelId, options)._1)
+    if (dropUnsupported) adjustOptions(modelId, options).map(_._1)
     else
       violations(modelId, options, getCapabilities(modelId)).flatMap(_.error) match {
         case Nil    => Right(options)
@@ -158,9 +163,9 @@ final private[model] class DefaultRequestTransformer(
   override private[llm4s] def adjustOptions(
     modelId: String,
     options: CompletionOptions
-  ): (CompletionOptions, List[RequestAdjustment]) = {
+  ): Result[(CompletionOptions, List[RequestAdjustment])] = {
     val found = violations(modelId, options, getCapabilities(modelId))
-    (found.foldLeft(options)((adjusted, violation) => violation.drop(adjusted)), found.map(_.adjustment))
+    Right((found.foldLeft(options)((adjusted, violation) => violation.drop(adjusted)), found.map(_.adjustment)))
   }
 
   /**
@@ -353,7 +358,7 @@ object TransformationResult {
     dropUnsupported: Boolean = true
   ): Result[TransformationResult] = {
     val transformedOptions =
-      if (dropUnsupported) Right(transformer.adjustOptions(modelId, options))
+      if (dropUnsupported) transformer.adjustOptions(modelId, options)
       else transformer.transformOptions(modelId, options).map(_ -> List.empty[RequestAdjustment])
     transformedOptions.map { (transformed, adjustments) =>
       TransformationResult(

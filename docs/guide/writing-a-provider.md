@@ -549,6 +549,11 @@ An `OpenAICompatibleDialect` does the second through `addReasoning`, which retur
 send: the standard one reports a set `reasoning` as `Dropped`, and an override that sends it returns
 `List.empty`. `OpenAICompatibleClient` puts the list on the `Completion`.
 
+A `RequestTransformer` of your own reports nothing yet. The hook that turns the transformer's drops into
+adjustments, `adjustOptions`, is `private[llm4s]`, so only llm4s's own transformers fill
+`t.adjustments`; with yours the list is empty, and a `Left` from your `transformOptions` still fails the
+request. Report what your request mapping drops as above.
+
 The transform never logs. llm4s's own clients log each adjustment at WARN once per model and option.
 
 ### `EmbeddingProvider`

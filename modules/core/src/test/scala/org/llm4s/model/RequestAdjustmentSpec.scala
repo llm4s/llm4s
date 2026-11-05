@@ -3,14 +3,18 @@ package org.llm4s.model
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
+  Citation,
   Completion,
   CompletionOptions,
   Message,
+  ReasoningEffort,
   RequestAdjustment,
   RequestOption,
   ResponseFormat,
+  TokenUsage,
   UserMessage
 }
 import org.llm4s.llmconnect.model.RequestAdjustment.{ Adjusted, Dropped, NotNeeded }
@@ -135,6 +139,26 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     result.adjustments shouldBe empty
   }
 
+  test("a transformer that refuses the request still fails it, with or without dropUnsupported") {
+    val refusal = ValidationError("options", "rejected by policy")
+    val rejecting = new RequestTransformer {
+      def transformOptions(
+        modelId: String,
+        options: CompletionOptions,
+        dropUnsupported: Boolean
+      ): Result[CompletionOptions] = Left(refusal)
+      def transformMessages(modelId: String, messages: Seq[Message]): Seq[Message] = messages
+      def requiresFakeStreaming(modelId: String): Boolean                          = false
+      def disallowedParams(modelId: String): Set[String]                           = Set.empty
+    }
+
+    TransformationResult.transform("any", CompletionOptions(), messages, rejecting).left.value shouldBe refusal
+    TransformationResult
+      .transform("any", CompletionOptions(), messages, rejecting, dropUnsupported = false)
+      .left
+      .value shouldBe refusal
+  }
+
   // ---- the types ----
 
   test("TransformationResult and Completion default to no adjustments and set them with withAdjustments") {
@@ -147,6 +171,47 @@ class RequestAdjustmentSpec extends AnyFunSuite with Matchers with EitherValues 
     completion.adjustments shouldBe empty
     completion.withAdjustments(adjustments).adjustments shouldBe adjustments
     completion.withAdjustments(adjustments).withAdjustments(Nil) shouldBe completion
+  }
+
+  test("each Completion setter sets its own field and keeps the adjustments") {
+    val adjustments = List(Dropped(RequestOption.TopP, "not supported"))
+    val usage       = TokenUsage(1, 2, 3)
+    val message     = AssistantMessage("there")
+    val citations   = List(Citation("https://example.invalid"))
+    val set = Completion("id", Instant.EPOCH, "hi", "m", AssistantMessage("hi"))
+      .withAdjustments(adjustments)
+      .withId("id2")
+      .withCreated(Instant.EPOCH.plusSeconds(1))
+      .withContent("there")
+      .withModel("m2")
+      .withMessage(message)
+      .withToolCalls(Nil)
+      .withUsage(usage)
+      .withEstimatedCost(0.5)
+      .withCitations(citations)
+
+    (set.id, set.created, set.content, set.model, set.message) shouldBe
+      ("id2", Instant.EPOCH.plusSeconds(1), "there", "m2", message)
+    (set.usage, set.estimatedCost, set.citations, set.adjustments) shouldBe
+      (Some(usage), Some(0.5), citations, adjustments)
+    val cleared = set.withUsage(None: Option[TokenUsage]).withEstimatedCost(None: Option[Double])
+    (cleared.usage, cleared.estimatedCost) shouldBe (None, None)
+  }
+
+  test("the apply each had before adjustments, kept for Java and Kotlin, sets none") {
+    TransformationResult(CompletionOptions(), messages, true) shouldBe
+      TransformationResult(CompletionOptions(), messages, requiresFakeStreaming = true)
+
+    val created = Instant.EPOCH
+    val message = AssistantMessage("hi")
+    Completion("id", created, "hi", "m", message, Nil, None, None, Nil) shouldBe
+      Completion("id", created, "hi", "m", message)
+  }
+
+  test("a client that sends no reasoning setting reports a requested one as dropped, and nothing otherwise") {
+    UnmappedOptions.reasoning("m", CompletionOptions().withReasoning(ReasoningEffort.Low)) shouldBe
+      List(Dropped(RequestOption.Reasoning, "reasoning effort is not sent to m by this client"))
+    UnmappedOptions.reasoning("m", CompletionOptions()) shouldBe empty
   }
 
   test("each adjustment names its option and round-trips through JSON") {
