@@ -4,21 +4,21 @@
 # change `as_of`. The talks count is computed from _data/events.yml at build time, so it needs no edit here.
 # Never round up or add a number that cannot be checked from a public source.
 
-as_of: "Oct 2026"
-source_note: "GitHub, as of Oct 2026. Activity is also tracked on LFX Insights."
+as_of: "Nov 2026"
+source_note: "GitHub, as of Nov 2026. Activity is also tracked on LFX Insights."
 lfx_insights: https://insights.linuxfoundation.org/project/llm4s
 
 github:
-  - value: "271"
+  - value: "276"
     label: GitHub stars
     url: https://github.com/llm4s/llm4s/stargazers
-  - value: "119"
+  - value: "135"
     label: Forks
     url: https://github.com/llm4s/llm4s/forks
-  - value: "72"
+  - value: "77"
     label: Contributors
     url: https://github.com/llm4s/llm4s/graphs/contributors
-  - value: "1,231"
+  - value: "1,337"
     label: Merged pull requests
     url: https://github.com/llm4s/llm4s/pulls?q=is%3Apr+is%3Amerged
   - value: "27"
