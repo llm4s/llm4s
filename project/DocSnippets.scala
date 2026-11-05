@@ -41,6 +41,7 @@ object DocSnippets {
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/providers.md",
+    "guide/replacing-a-python-sidecar.md",
     "guide/vector-store.md",
     "index.md",
     "reference/doctor.md",
