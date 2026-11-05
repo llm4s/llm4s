@@ -149,6 +149,7 @@ object TicketPipelineSpec {
 
   enum Event {
     case Produced(topic: String, sourcePartition: Int, sourceOffset: Long, value: String)
+    case Acknowledged(sourcePartition: Int, sourceOffset: Long)
     case Committed(offsets: Map[Int, Long])
   }
 
@@ -161,7 +162,8 @@ object TicketPipelineSpec {
     def commitsFollowTheirProduce: Boolean =
       events.zipWithIndex.forall {
         case (Event.Committed(offsets), at) =>
-          val before = events.take(at).collect { case p: Event.Produced => (p.sourcePartition, p.sourceOffset) }.toSet
+          val before =
+            events.take(at).collect { case a: Event.Acknowledged => (a.sourcePartition, a.sourceOffset) }.toSet
           offsets.forall { case (partition, next) => (0L until next).forall(o => before.contains((partition, o))) }
         case _ => true
       }
@@ -206,20 +208,23 @@ object TicketPipelineSpec {
 
   /** Acknowledges each record at once, logging it when acknowledged (the inner effect), as the broker would. */
   private def send(log: Ref[IO, Vector[Event]]): TicketPipeline.Send =
-    records =>
-      IO.pure {
-        val produced = records.toVector.map { r =>
-          Event.Produced(
-            r.topic,
-            header(r, TicketPipeline.SourcePartitionHeader).toInt,
-            header(r, TicketPipeline.SourceOffsetHeader).toLong,
-            r.value
-          )
-        }
+    records => {
+      // The outer effect puts the records in the producer's buffer, in order, as KafkaProducer.produce does; the inner
+      // one is the broker's acknowledgement, which the pipeline awaits concurrently.
+      val produced: Vector[Event.Produced] = records.toVector.map { r =>
+        Event.Produced(
+          r.topic,
+          header(r, TicketPipeline.SourcePartitionHeader).toInt,
+          header(r, TicketPipeline.SourceOffsetHeader).toLong,
+          r.value
+        )
+      }
+      log.update(_ ++ produced).as {
         log
-          .update(_ ++ produced)
+          .update(_ ++ produced.map(p => Event.Acknowledged(p.sourcePartition, p.sourceOffset)))
           .as(records.map(r => r -> new RecordMetadata(new TopicPartition(r.topic, 0), 0L, 0, 0L, 0, 0)))
       }
+    }
 
   private def header(r: ProducerRecord[String, String], key: String): String =
     r.headers(key).map(_.as[String]).getOrElse(sys.error(s"no $key header"))
