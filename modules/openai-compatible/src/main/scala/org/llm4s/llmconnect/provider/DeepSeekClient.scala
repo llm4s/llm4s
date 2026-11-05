@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -37,7 +37,7 @@ class DeepSeekClient(
         displayName = "DeepSeek",
         model = config.model,
         baseUrl = config.baseUrl,
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -55,18 +55,18 @@ object DeepSeekClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[DeepSeekClient] =
-    ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult)
 
   def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
-    ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new DeepSeekClient(config, metrics)).toResult)
 
   def apply(config: DeepSeekConfig)(using ModelRegistryService): Result[DeepSeekClient] =
-    ProviderConfig
-      .nonEmpty("DeepSeek", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult)
 }
 

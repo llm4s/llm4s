@@ -61,6 +61,12 @@ Maven and Gradle need it spelled out.
     <artifactId>llm4s-spring-boot-starter_3</artifactId>
     <version>{{ site.data.project.latest_release }}</version>
 </dependency>
+<!-- and the provider module you call: llm4s-ollama_3, llm4s-anthropic_3, llm4s-gemini_3, ... -->
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-openai_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
 ```
 
 **Gradle (Kotlin DSL)**
@@ -68,11 +74,13 @@ Maven and Gradle need it spelled out.
 ```kotlin
 dependencies {
     implementation("org.llm4s:llm4s-spring-boot-starter_3:{{ site.data.project.latest_release }}")
+    implementation("org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }}")   // the provider you call
 }
 ```
 
-It brings the Java API, so the [dependency notes of the Java guide](java#add-the-dependency) apply: the provider modules,
-Scala's standard library, and no logging backend. For the health indicator, add `spring-boot-starter-actuator` yourself:
+It brings the Java API, so the [dependency notes of the Java guide](java#add-the-dependency) apply: no provider module
+(declare the ones your configuration names, at the same version), Scala's standard library, and no logging backend. A
+provider whose module is missing fails the client with a `CONFIGURATION` error naming the artifact to add. For the health indicator, add `spring-boot-starter-actuator` yourself:
 the starter declares it as `provided`, so it is not on your classpath unless you add it.
 
 ## Configure it

@@ -216,9 +216,8 @@ a restart. For a key that rotates, mount it as a file and use `apiKeyFile`.
 
 A provider section's `apiKeyFile` names a file holding the key. The client checks the file before every
 request and re-reads it when it changes, so a key that the secret manager rotates is sent from the next
-request on - no restart, no client rebuild. The `openai`, `requesty`, `anthropic`, `openai-compatible` and
-`openrouter` clients rotate this way; the other providers that take a key read the file when the section is
-loaded. Mount the file with mode `0400`: one readable by its group or by others is logged as a WARN. The
+request on - no restart, no client rebuild. Every built-in chat provider that takes a key rotates this way
+(`watsonx` exchanges the new key for a new IAM token). Mount the file with mode `0400`: one readable by its group or by others is logged as a WARN. The
 full rules are in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 ```hocon

@@ -64,31 +64,46 @@ class OpenAICompatibleApiKeyFileSpec extends AnyWordSpec with Matchers with Eith
     }
   }
 
-  "a deepseek section with apiKeyFile, whose client does not rotate" should {
+  "a deepseek, zai, mistral, cohere or xai section with apiKeyFile" should {
 
-    "send the key the file held when the section was loaded" in {
-      val file = keyFile("sk-deepseek-file-0001\n")
-      val seen = new ConcurrentLinkedQueue[String]()
-      withServer("/") { exchange =>
-        seen.add(Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("<none>"))
-        sendJsonResponse(exchange, 200, openAICompletion("ok"))
-      } { baseUrl =>
-        given ProviderRegistry = ProviderRegistry.default
-        val config = ProviderTestConfig
-          .loadProvider(
-            "ds",
-            s"""llm4s.providers.ds {
-               |  provider = "deepseek", model = "deepseek-chat", baseUrl = "$baseUrl"
-               |  apiKeyFile = ${quoted(file)}
-               |}""".stripMargin
-          )
-          .value
-        config.apiKeyProvider shouldBe None
-        given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
-        val client                 = DeepSeekProvider.buildClient(config, LlmClientOptions.default).value
-        client.complete(hello).isRight shouldBe true
-        client.close()
+    "send the key the file holds at each request, without rebuilding the client (#2477)" in {
+      val dialects = Seq(
+        DeepSeekProvider -> "deepseek-chat",
+        ZaiProvider      -> "glm-4.6",
+        MistralProvider  -> "mistral-small-latest",
+        CohereProvider   -> "command-a-03-2025",
+        XaiProvider      -> "grok-4"
+      )
+      dialects.foreach { (descriptor, model) =>
+        val id   = descriptor.id.asString
+        val file = keyFile(s"sk-$id-first-0001\n")
+        val seen = new ConcurrentLinkedQueue[String]()
+        withServer("/") { exchange =>
+          seen.add(Option(exchange.getRequestHeaders.getFirst("Authorization")).getOrElse("<none>"))
+          sendJsonResponse(exchange, 200, openAICompletion("ok"))
+        } { baseUrl =>
+          given ProviderRegistry = ProviderRegistry.default
+          val config = ProviderTestConfig
+            .loadProvider(
+              "rotating",
+              s"""llm4s.providers.rotating {
+                 |  provider = "$id", model = "$model", baseUrl = "$baseUrl"
+                 |  apiKeyFile = ${quoted(file)}
+                 |}""".stripMargin
+            )
+            .value
+          config.apiKeyProvider shouldBe defined
+          given ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
+          val client                 = descriptor.buildClient(config, LlmClientOptions.default).value
+
+          withClue(s"$id: ")(client.complete(hello).isRight shouldBe true)
+          Files.writeString(file, s"sk-$id-rotated-00002")
+          withClue(s"$id: ")(client.complete(hello).isRight shouldBe true)
+          client.close()
+        }
+        withClue(s"$id: ") {
+          seen.asScala.toList shouldBe List(s"Bearer sk-$id-first-0001", s"Bearer sk-$id-rotated-00002")
+        }
       }
-      seen.asScala.toList shouldBe List("Bearer sk-deepseek-file-0001")
     }
   }
