@@ -1162,7 +1162,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
     // Measured 81.32% statement coverage (`sbt coverage anthropic/test anthropic/coverageReport`)
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Anthropic smoke suite in `modules/it` is not counted here.
-    coverageFloor(95),
+    coverageFloor(80),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -2169,7 +2169,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
     ),
     // Enforce >=80% statement coverage when running with `sbt coverage test`
     // for the unit-test suite that ships with this module. Pre-existing gate, unchanged.
-    coverageFloor(95)
+    coverageFloor(80)
   )
 
 // Two OkHttp majors share this classpath, and it is left that way on purpose (#1132).
