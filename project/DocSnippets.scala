@@ -40,6 +40,7 @@ object DocSnippets {
     "guide/data-protection.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
+    "guide/prompts.md",
     "guide/providers.md",
     "guide/reference-architecture.md",
     "guide/vector-store.md",
