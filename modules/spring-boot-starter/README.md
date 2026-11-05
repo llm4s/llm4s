@@ -56,10 +56,11 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 
 - **Names.** Within a section, `kebab-case` and `snake_case` names are read as the `camelCase` names of the HOCON block
   (`api-key` is `apiKey`, `base-url` is `baseUrl`, `api-version` is `apiVersion`). The section name is kept as written.
-- **Providers on the classpath.** `llm4s-spring-boot-starter` brings `openai`, `azure`, `requesty`, `anthropic`, `ollama`,
-  `gemini` (alias `google`), `vertexai` (alias `vertex`) and the OpenAI-compatible family: `openai-compatible`,
-  `deepseek`, `zai`, `openrouter`, `mistral` and `cohere`. A provider module you add to the classpath is found the
-  same way, with no change to the starter. Each provider's own keys (`endpoint` for Azure, `project` and `location` for
+- **Providers on the classpath.** `llm4s-spring-boot-starter` brings no provider module (#1496): declare the ones your
+  sections name, at the same version. `llm4s-openai` has `openai`, `azure` and `requesty`; `llm4s-anthropic` has
+  `anthropic`; `llm4s-ollama` has `ollama`; `llm4s-gemini` has `gemini` (alias `google`) and `vertexai` (alias
+  `vertex`); `llm4s-openai-compatible` has `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral` and
+  `cohere`. Any other provider module you add to the classpath is found the same way, with no change to the starter. Each provider's own keys (`endpoint` for Azure, `project` and `location` for
   Vertex AI, ...) are listed in its module's README.
 - **Keys.** A section with no `api-key` uses the vendor's shared key,
   `llm4s.credentials.<provider>.api-key`, and llm4s's own conventional environment variable for the vendor

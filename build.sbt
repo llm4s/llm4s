@@ -2320,16 +2320,20 @@ lazy val docs = (project in file("modules/docs"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// The provider modules are optional dependencies (#1496): the facade compiles its typed client builders against them,
+// but its POM marks them `<optional>`, so a Java user receives only core and the agent and declares the provider
+// modules they call (`llm4s-ollama`, `llm4s-openai`, ...). A builder whose module is absent fails with a
+// ConfigurationError naming the artifact to add (`ProviderModules`), not a NoClassDefFoundError.
 lazy val javaApi = (project in file("modules/java-api"))
   .dependsOn(
     core % "compile->compile;test->test",
     agent,
-    openai,
-    anthropic,
-    ollama,
-    gemini,
-    openaiCompatible,
-    providerTestkit % Test
+    openai           % "optional",
+    anthropic        % "optional",
+    ollama           % "optional",
+    gemini           % "optional",
+    openaiCompatible % "optional",
+    providerTestkit  % Test
   )
   .settings(
     name := "llm4s-java-api",
@@ -2401,11 +2405,18 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
   // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820), and
   // `azureIdentity` for an Azure section with `authentication = entra-id` read from properties (#2274).
+  // `openai`, `anthropic` and `ollama` are optional, as in java-api (#1496): the flat `llm4s.provider` keys build
+  // their configs, but the application declares the provider module it uses. `gemini` is a test dependency: the
+  // specs configure a Gemini section.
   .dependsOn(
     javaApi,
+    openai                  % "optional",
+    anthropic               % "optional",
+    ollama                  % "optional",
     observabilityMicrometer % "provided",
     core                    % "test->test",
     providerTestkit         % Test,
+    gemini                  % Test,
     bedrock                 % Test,
     azureIdentity           % Test
   )
@@ -2443,10 +2454,15 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
 // on a Boot 4 classpath: the specs are the starter's own, recompiled here with boot4/src/test's BootLine. The Boot
 // release is `Versions.springBoot4`; CI's "Spring Boot 4.x" job runs this on the 4.0 line and on the latest 4.x.
 lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/boot4"))
+  // The starter's optional provider modules (#1496) are not inherited: its specs build their configs.
   .dependsOn(
     springBootStarter,
     observabilityMicrometer,
     core            % "test->test",
+    openai          % Test,
+    anthropic       % Test,
+    ollama          % Test,
+    gemini          % Test,
     providerTestkit % Test,
     bedrock         % Test,
     azureIdentity   % Test
