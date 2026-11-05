@@ -20,7 +20,7 @@ import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
- * [[LLMClient]] for Perplexity's Agent API: `POST <baseUrl>/v1/agent`, Perplexity's canonical path for its
+ * `LLMClient` for Perplexity's Agent API: `POST <baseUrl>/v1/agent`, Perplexity's canonical path for its
  * OpenAI Responses-format endpoint (`/v1/responses` is its alias).
  *
  * The request and response shapes are those of Perplexity's API reference ("Create Agent Response",
@@ -39,22 +39,22 @@ import scala.util.{ Try, Using }
  * `anthropic/` model without `max_output_tokens`, so such a request that sets no limit is sent the config's
  * `reserveCompletion`. `CompletionOptions.reasoning` is sent as `reasoning.effort` (`ReasoningEffort.None` as
  * `minimal`, the least the API takes; `budgetTokens` has no counterpart). The penalties have no counterpart in the
- * Agent API and are not sent. A [[ResponseFormat.JsonSchema]] is sent as `response_format`
+ * Agent API and are not sent. A `ResponseFormat.JsonSchema` is sent as `response_format`
  * (`{"type":"json_schema","json_schema":{"name","schema","strict"}}`); the Agent API takes no plain JSON mode, so
- * [[ResponseFormat.Json]] is refused before anything is sent.
+ * `ResponseFormat.Json` is refused before anything is sent.
  *
  * == Tools and web search ==
  *
  * With `webSearch` on (the default) every request offers Perplexity's `web_search` tool, which Perplexity runs
  * itself and bills per search; the model decides whether to search. `CompletionOptions.tools` are sent as `function`
- * tools. A `function_call` item in the reply becomes a [[ToolCall]] whose id is the item's `call_id`. A model may
+ * tools. A `function_call` item in the reply becomes a `ToolCall` whose id is the item's `call_id`. A model may
  * attach a `thought_signature` to a call, which Perplexity says to send back with it: it is kept as a sealed
- * [[ThinkingBlock.Opaque]] block of provider `perplexity` and replayed on the call it came with, only to the same
+ * `ThinkingBlock.Opaque` block of provider `perplexity` and replayed on the call it came with, only to the same
  * provider and model (see `ThinkingReplay.bindOrigin`).
  *
  * == Reply ==
  *
- * The answer is the text of the `message` items' `output_text` parts. [[Completion.citations]] holds the `url_citation`
+ * The answer is the text of the `message` items' `output_text` parts. `Completion.citations` holds the `url_citation`
  * annotations on that text, then each result of the `search_results` items (URL, title, and the snippet as
  * `citedText`) whose URL is not already there: the answer's `[web:N]` markers point at those results. A response
  * whose `status` is `failed`, or anything but `completed` or `incomplete`, is an error; `incomplete` (a limit
@@ -227,7 +227,7 @@ class PerplexityClient(
     }
   }
 
-  /** A [[Completion]] of a parsed reply, its sealed signatures bound to this client's provider and model. */
+  /** A `Completion` of a parsed reply, its sealed signatures bound to this client's provider and model. */
   private def completion(reply: Reply): Completion = {
     val message = ThinkingReplay.bindOrigin(
       replayOrigin,
@@ -381,7 +381,7 @@ object PerplexityClient {
     if (reserve > 0) reserve else PerplexityConfig.DEFAULT_RESERVE_COMPLETION
 
   /**
-   * A [[ReasoningEffort]] as the Agent API's `reasoning.effort`, which takes `minimal`, `low`, `medium`, `high`,
+   * A `ReasoningEffort` as the Agent API's `reasoning.effort`, which takes `minimal`, `low`, `medium`, `high`,
    * `xhigh` and `max`. `None` has no "off": it is sent as `minimal`, the least.
    */
   private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort match {
