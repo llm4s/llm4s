@@ -213,6 +213,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
 - **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
   returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
+- **Added** `StreamingBridgeContract`, one conformance suite that `llm4s-effect`, `llm4s-zio` and `llm4s-pekko` each run:
+  errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core [#2334](https://github.com/llm4s/llm4s/issues/2334).
 
 ### Agent runtime
 

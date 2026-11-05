@@ -694,7 +694,10 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
       Deps.catsEffect,
       Deps.fs2,
       Deps.scalatest % Test
-    )
+    ),
+    // The effect bridges' shared conformance contract (#2334), `StreamingBridgeContract`: llm4s-zio and llm4s-pekko
+    // compile the same directory into their tests, so every bridge runs one suite.
+    Test / unmanagedSourceDirectories += (Test / sourceDirectory).value / "contract"
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
@@ -712,9 +715,12 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zio,
       Deps.zioStreams,
       Deps.zioTest    % Test,
-      Deps.zioTestSbt % Test
+      Deps.zioTestSbt % Test,
+      Deps.scalatest  % Test
     ),
-    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
   )
 
 // `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
@@ -722,7 +728,8 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
 // the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
 // `org.apache.pekko` and Akka there).
 lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
-  .dependsOn(core, agent)
+  // `testkit % Test`: the bridges' shared conformance contract (#2334) drives every case from a `ScriptedLLMClient`.
+  .dependsOn(core, agent, testkit % Test)
   .settings(
     name := "llm4s-pekko",
     commonSettings,
@@ -736,7 +743,9 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
       Deps.scalatest          % Test,
       Deps.pekkoStreamTestkit % Test,
       Deps.pekkoTestkit       % Test
-    )
+    ),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
   )
 
 lazy val core = (project in file("modules/core"))
