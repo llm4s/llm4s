@@ -43,7 +43,7 @@ Then [move responsibilities one at a time](#a-staged-migration), with the sideca
 | A model you serve yourself (vLLM, TGI, llama.cpp) | The `openai-compatible` provider in `llm4s-openai-compatible`: [Bridge 1](#bridge-1-a-python-served-model) |
 | Tool calling and the agent loop | `ToolBuilder` in `llm4s-core` and `Agent` in `llm4s-agent`; see [Build Your Own Tool](custom-tools) and [Agents](agents/) |
 | A Python function the model calls as a tool | An MCP server in Python, called through `llm4s-mcp`: [Bridge 2](#bridge-2-a-python-function-as-an-agent-tool) |
-| Retries, timeouts and rate limits | `ReliableClient` in `llm4s-core`; see the [reliability guide](/reliability-guide) |
+| Retries, timeouts and rate limits | `ReliableClient` in `llm4s-core`; see the [reliability guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) |
 | Typed (JSON) replies parsed by Pydantic | `completeStructured` with a `Schema`, or a schema derived from a case class; see [Structured Output](structured-output) |
 | Embeddings, chunking, vector search, reranking | `llm4s-rag`; see [Embeddings](embeddings) and [Vector Store](vector-store) |
 | Input and output checks | Guardrails in `llm4s-agent`; see [Guardrails](agents/guardrails) |
