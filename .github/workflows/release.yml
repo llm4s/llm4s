@@ -266,6 +266,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # A warning, never a failure: the post can follow on main (docs/reference/release.md#write-the-news-post, #2319).
+      - name: Check the release has a News post
+        run: scripts/new-release-post.sh --check "${GITHUB_REF_NAME#v}"
+
       - name: Deploy the docs from main, built from this tag
         env:
           GH_TOKEN: ${{ github.token }}

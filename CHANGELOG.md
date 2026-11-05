@@ -490,6 +490,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 - **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
+- **Added** a News section on llm4s.org (`/news/`, posts for 0.5.0 and 0.5.1) with an Atom feed, per-tag feeds and
+  `scripts/new-release-post.sh`, which drafts a release's post from its CHANGELOG section [#2319](https://github.com/llm4s/llm4s/issues/2319); [release step](docs/reference/release.md#write-the-news-post).
 
 ### Embeddings & RAG
 
