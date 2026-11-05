@@ -381,6 +381,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
+- **Added** streamed structured output to `llm4s-schema-derivation`: `client.streamStructuredOf[A](conversation)(onPartial)`
+  hands `onPartial` typed partial values (`PartialOf[A]`, a named tuple of `Option`s) as the reply streams, parsed with the
+  new `PartialJson` [#2329](https://github.com/llm4s/llm4s/issues/2329); [guide](docs/guide/structured-output.md#10-streaming-structured-output).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).

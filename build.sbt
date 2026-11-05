@@ -1381,9 +1381,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
 // agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
 // `llm4s-agent-tools` is test-only too (#1473): `TypedToolSpec` compares a typed tool's schema and argument errors
-// with the hand-built calculator's.
+// with the hand-built calculator's. `llm4s-testkit` is test-only too (#2329): `StreamStructuredSpec` streams a reply
+// in chunks of every size with its `ScriptedLLMClient`.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test)
+  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test, testkit % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,
