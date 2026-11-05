@@ -751,10 +751,14 @@ and `llm4s-knowledgegraph` and brings the Neo4j driver.
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+libraryDependencies += "org.llm4s" %% "llm4s-schema-iron"       % llm4sVersion  // bounds from Iron refinement types
 ```
 
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+`llm4s-schema-iron` (experimental) adds the bounds of [Iron](https://github.com/Iltotore/iron) refinement types, such
+as `Int :| Interval.Closed[1, 5]`, to the derived schema and refuses a reply that breaks them; it brings Iron. See
+[Iron refinements](../guide/derived-schemas#iron-refinements).
 
 ### Testing your own code (the testkit)
 

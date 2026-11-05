@@ -381,6 +381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
+- **Added** `llm4s-schema-iron` (Experimental): Iron refinement types (`Int :| Interval.Closed[1, 5]`) add their bounds to
+  a derived schema and are refused on decode when broken [#2294](https://github.com/llm4s/llm4s/issues/2294); [guide](docs/guide/derived-schemas.md#iron-refinements).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).

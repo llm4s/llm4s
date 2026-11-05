@@ -61,6 +61,12 @@ object CompatibilityMatrix {
       Stack("ZIO", "llm4s-zio", Seq(Versions.zio), ""),
       Stack("Apache Pekko", "llm4s-pekko", Seq(Versions.pekko), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
+      Stack(
+        "Iron",
+        "llm4s-schema-iron",
+        Seq(Versions.iron),
+        s"Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the ${Common.scala3} compiler cannot read."
+      ),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",

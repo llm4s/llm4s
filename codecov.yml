@@ -138,6 +138,10 @@ flags:
     paths:
       - modules/schema-derivation/src/main/scala
     carryforward: true
+  schema-iron:
+    paths:
+      - modules/schema-iron/src/main/scala
+    carryforward: true
   testkit:
     paths:
       - modules/testkit/src/main/scala

@@ -252,7 +252,15 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       .find(dir => Files.exists(dir.resolve("docs/guide/derived-schemas.md")))
       .getOrElse(fail("docs/guide/derived-schemas.md was not found in this directory or above it"))
 
-  private val guide = Files.readString(root.resolve("docs/guide/derived-schemas.md"))
+  // The guide without its "Iron refinements" section, whose code needs Iron: `IronGuideSpec` in llm4s-schema-iron
+  // compiles and checks that section the same way.
+  private val guide = {
+    val full  = Files.readString(root.resolve("docs/guide/derived-schemas.md"))
+    val start = full.indexOf("\n## Iron refinements\n")
+    val end   = full.indexOf("\n## ", start + 1)
+    if (start < 0 || end < 0) fail("docs/guide/derived-schemas.md has no \"Iron refinements\" section before another")
+    full.substring(0, start) + full.substring(end)
+  }
   private val thisSource =
     Files.readString(
       root.resolve("modules/schema-derivation/src/test/scala/org/llm4s/schema/guide/DerivedSchemasGuideSpec.scala")

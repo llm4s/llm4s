@@ -12,11 +12,14 @@ object Versions {
   val scalatestplusScalacheck = "3.2.19.0"
   val junitJupiter            = "5.12.2"
   val reactor                 = "3.8.8"
-  val fansi                   = "0.5.1"
-  val ox                      = "1.0.9"
-  val postgres                = "42.7.11"
-  val sqlite                  = "3.53.2.0"
-  val config                  = "1.4.9"
+  // Apache-2.0. Only llm4s-schema-iron (#2294). Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the
+  // 3.7 compiler cannot read; 3.3.x is built with Scala 3.3 LTS.
+  val iron     = "3.3.2"
+  val fansi    = "0.5.1"
+  val ox       = "1.0.9"
+  val postgres = "42.7.11"
+  val sqlite   = "3.53.2.0"
+  val config   = "1.4.9"
   // NOTE: HikariCP 7.x is available but is a 2-major jump (5->6->7) with a higher
   // JDK baseline; held for separate review.
   val hikariCP   = "5.1.0"
@@ -140,14 +143,16 @@ object Deps {
   val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter
   val fansi           = "com.lihaoyi"      %% "fansi"             % Versions.fansi
   // llm4s-reactor (#1492): the Flux adapter over the Java facade's Flow.Publisher, and StepVerifier for its specs
-  val reactorCore = "io.projectreactor"      % "reactor-core"    % Versions.reactor
-  val reactorTest = "io.projectreactor"      % "reactor-test"    % Versions.reactor
-  val ox          = "com.softwaremill.ox"   %% "core"            % Versions.ox
-  val postgres    = "org.postgresql"         % "postgresql"      % Versions.postgres
-  val sqlite      = "org.xerial"             % "sqlite-jdbc"     % Versions.sqlite
-  val config      = "com.typesafe"           % "config"          % Versions.config
-  val hikariCP    = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
-  val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
+  val reactorCore = "io.projectreactor" % "reactor-core" % Versions.reactor
+  val reactorTest = "io.projectreactor" % "reactor-test" % Versions.reactor
+  // llm4s-schema-iron (#2294): JSON Schema constraints derived from Iron refinement types
+  val iron       = "io.github.iltotore"    %% "iron"            % Versions.iron
+  val ox         = "com.softwaremill.ox"   %% "core"            % Versions.ox
+  val postgres   = "org.postgresql"         % "postgresql"      % Versions.postgres
+  val sqlite     = "org.xerial"             % "sqlite-jdbc"     % Versions.sqlite
+  val config     = "com.typesafe"           % "config"          % Versions.config
+  val hikariCP   = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
+  val pureConfig = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
   val openaiJava    = "com.openai"         % "openai-java"    % Versions.openaiJava
   val azureIdentity = "com.azure"          % "azure-identity" % Versions.azureIdentity
