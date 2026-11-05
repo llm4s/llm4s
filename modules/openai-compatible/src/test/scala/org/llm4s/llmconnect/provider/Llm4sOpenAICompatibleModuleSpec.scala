@@ -135,11 +135,11 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     }
   }
 
-  "a client built by the openai-compatible and openrouter descriptors" should {
+  "a client built by each openai-compatible descriptor" should {
 
-    "send the key its ApiKeyProvider holds at each request (#2313)" in {
+    "send the key its ApiKeyProvider holds at each request (#2313, #2477)" in {
       given ModelRegistryService = registryService
-      Seq(OpenAICompatibleProvider, OpenRouterProvider).foreach { descriptor =>
+      expectations.map(_._1).foreach { descriptor =>
         withClue(s"${descriptor.id.asString}: ") {
           assertHonoursApiKeyProvider(sendJsonResponse(_, 200, openAICompletion("done"))) { (baseUrl, keys) =>
             descriptor

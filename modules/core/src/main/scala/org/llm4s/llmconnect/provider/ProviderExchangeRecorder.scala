@@ -23,14 +23,16 @@ object ProviderExchangeRecorder {
     responseBody: Option[String],
     result: Result[?],
     requestId: Option[String] = None,
-    correlationId: Option[String] = None
+    correlationId: Option[String] = None,
+    clock: () => Instant = () => Instant.now(),
+    idGenerator: () => String = () => java.util.UUID.randomUUID().toString
   ): Unit =
     exchangeLogging match
       case ProviderExchangeLogging.Disabled => ()
       case ProviderExchangeLogging.Enabled(sink) =>
-        val completedAt = Instant.now()
+        val completedAt = clock()
         val exchange = ProviderExchange(
-          exchangeId = java.util.UUID.randomUUID().toString,
+          exchangeId = idGenerator(),
           provider = provider,
           model = model,
           requestId = requestId,

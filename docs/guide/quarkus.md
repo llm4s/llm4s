@@ -53,13 +53,20 @@ loopback port (see [Testing](#testing)).
 ## Dependencies
 
 llm4s is Scala 3 only, and Maven has no notion of Scala cross-versions, so the artifact is written with its Scala
-binary suffix, `llm4s-java-api_3`. It brings `llm4s-core`, the agent runtime, the provider modules and the Scala 3
-library:
+binary suffix, `llm4s-java-api_3`. It brings `llm4s-core`, the agent runtime and the Scala 3 library, and no provider
+module: the sample declares the three its producer builds clients for (`llm4s-openai` brings `llm4s-openai-compatible`).
+Keep only the ones you use, so no other vendor's SDK reaches the application
+([#1496](https://github.com/llm4s/llm4s/issues/1496)):
 
 ```xml
 <dependency>
   <groupId>org.llm4s</groupId>
   <artifactId>llm4s-java-api_3</artifactId>
+  <version>${llm4s.version}</version>
+</dependency>
+<dependency>
+  <groupId>org.llm4s</groupId>
+  <artifactId>llm4s-ollama_3</artifactId>
   <version>${llm4s.version}</version>
 </dependency>
 ```

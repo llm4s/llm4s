@@ -64,6 +64,12 @@ it for you (`%%`); Maven and Gradle do not, so write it yourself.
     <artifactId>llm4s-java-api_3</artifactId>
     <version>{{ site.data.project.latest_release }}</version>
 </dependency>
+<!-- and the provider module you call: llm4s-openai_3, llm4s-anthropic_3, llm4s-gemini_3, ... -->
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-ollama_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
 ```
 
 **Gradle (Kotlin DSL)**
@@ -71,6 +77,7 @@ it for you (`%%`); Maven and Gradle do not, so write it yourself.
 ```kotlin
 dependencies {
     implementation("org.llm4s:llm4s-java-api_3:{{ site.data.project.latest_release }}")
+    implementation("org.llm4s:llm4s-ollama_3:{{ site.data.project.latest_release }}")   // the provider you call
 }
 ```
 
@@ -78,13 +85,18 @@ dependencies {
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-java-api" % "{{ site.data.project.latest_release }}"
+libraryDependencies += "org.llm4s" %% "llm4s-ollama"   % "{{ site.data.project.latest_release }}"   // the provider you call
 ```
 
 What arrives with it:
 
-- `llm4s-core`, `llm4s-agent` and the OpenAI, Anthropic, Ollama, Gemini and OpenAI-compatible provider modules, so you do
-  not add a provider artifact. Making providers opt-in is tracked in
-  [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- `llm4s-core` and `llm4s-agent`, and no provider module: declare the ones you call, `llm4s-openai` (OpenAI and Azure
+  OpenAI), `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama` or `llm4s-openai-compatible` (DeepSeek, Mistral, OpenRouter
+  and any server with a chat-completions API), at the same version. A Java user who calls only Ollama gets no vendor
+  SDK, OkHttp or Kotlin standard library (the [dependency footprint](../reference/dependency-conflicts#dependency-footprint)).
+  A typed builder whose module is missing, `Llm4s.anthropic()` without `llm4s-anthropic` say, fails with a
+  `CONFIGURATION` result naming the artifact to add; a configured section whose provider is not on the classpath fails
+  the same way. Up to 0.5.x the facade brought all five ([#1496](https://github.com/llm4s/llm4s/issues/1496)).
 - Scala's standard library (`scala3-library_3` and `scala-library`). If your build pins or excludes it, see the
   [Gradle guide](../getting-started/gradle) for the recipes that keep the two Scala libraries aligned.
 - No logging backend. LLM4S logs through SLF4J; add one (for example Logback), or SLF4J prints a warning and drops the
@@ -814,7 +826,7 @@ llm4s {
 ```
 
 The key comes from the vendor's variable, `OPENAI_API_KEY` here, as a chat section's does. The embedding providers
-`llm4s-java-api` brings are `openai` and `ollama`; Voyage, Jina and Cohere come with their own modules
+are in `llm4s-openai` (`openai`) and `llm4s-ollama` (`ollama`); Voyage, Jina and Cohere come with their own modules
 (`llm4s-voyage`, `llm4s-jina`, `llm4s-cohere`). Creating the client sends no request, and does not throw:
 
 ```java
