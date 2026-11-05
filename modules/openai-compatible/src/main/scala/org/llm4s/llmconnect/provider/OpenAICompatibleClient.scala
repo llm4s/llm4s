@@ -275,8 +275,10 @@ class OpenAICompatibleClient(
   /**
    * The failure an event reports in an `error` field, which a server sends once the 200 status is
    * already out. The field is an object with a `message` or a plain string; an empty one, which some
-   * proxies put on every event, is no failure. A `code` that is an HTTP failure status keeps its meaning,
-   * so a rejected key is not retried; any other is a 502, retried like a bad gateway.
+   * proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
+   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by
+   * the token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a
+   * bad gateway.
    */
   private def streamedError(json: ujson.Value): Option[LLMError] =
     json.objOpt
@@ -285,11 +287,11 @@ class OpenAICompatibleClient(
       .flatMap { error =>
         val message =
           error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
-        val status = error.objOpt
-          .flatMap(_.get("code"))
+        val status = error.objOpt.toSeq
+          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
           .flatMap(_.numOpt)
           .map(_.toInt)
-          .filter(code => code >= 400 && code <= 599)
+          .find(code => code >= 400 && code <= 599)
           .getOrElse(502)
         val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
         HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption

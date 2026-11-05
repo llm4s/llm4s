@@ -150,6 +150,19 @@ class OpenAICompatibleStreamEndingSpec extends AnyFlatSpec with Matchers with Ei
       result.left.value.message should include("error")
     }
 
+  // The shape real Groq sends with a 200 status when max_completion_tokens cuts a tool call: a text
+  // `code`, the status in `status_code`, and no finish_reason or [DONE]. Retrying can't help.
+  it should "not retry an error event whose status_code is a client error, as Groq sends for a cut tool call" in
+    streaming(
+      sse(
+        """data: {"error":{"message":"Failed to parse tool call arguments as JSON","type":"invalid_request_error",""" +
+          """"code":"tool_use_failed","status_code":400}}"""
+      )
+    ) { (result, _) =>
+      org.llm4s.reliability.RetryPolicy.isTransient(result.left.value) shouldBe false
+      result.left.value.message should include("Failed to parse tool call arguments")
+    }
+
   it should "keep the meaning of an error event's status code: a rejected key is not retried" in
     streaming(sse("""data: {"error":{"code":401,"message":"invalid key"}}""")) { (result, _) =>
       result.left.value shouldBe a[AuthenticationError]
