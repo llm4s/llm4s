@@ -1,7 +1,7 @@
 # Project numbers shown in the stats band of the home page (_includes/stats-band.html) and on the Foundation page.
-# Update by hand: take the GitHub numbers from https://github.com/llm4s/llm4s (stars, forks, contributors,
-# releases) and the merged pull requests from https://github.com/llm4s/llm4s/pulls?q=is%3Apr+is%3Amerged, then
-# change `as_of`. The talks count is computed from _data/events.yml at build time, so it needs no edit here.
+# The GitHub numbers and `as_of` are refreshed from the GitHub API on every deploy and daily by
+# scripts/update-site-stats.sh (run by .github/workflows/pages.yml), so the values here are only the fallback used
+# when the API cannot be reached; there is no need to edit them by hand. The talks count is computed from _data/events.yml at build time, so it needs no edit here.
 # Never round up or add a number that cannot be checked from a public source.
 
 as_of: "Nov 2026"
