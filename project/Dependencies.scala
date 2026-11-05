@@ -86,6 +86,9 @@ object Versions {
   val circe    = "0.14.17"
   val playJson = "3.0.6"
   val zioJson  = "1.0.0" // 1.1.0 is built with Scala 3.9: its stdlib TASTy is unreadable to the 3.7.1 compiler
+  // jsoniter-scala (MIT), built with Scala 3.3 LTS. Compile scope in the unpublished samples only, for
+  // `org.llm4s.samples.json.JsoniterStructuredOutputExample` (#2295).
+  val jsoniterScala = "2.42.2"
 
   // AWS SDK
   val awsSdk        = "2.46.14"
@@ -186,6 +189,10 @@ object Deps {
   val ujsonCirce = "com.lihaoyi"       %% "ujson-circe" % Versions.ujson
   val playJson   = "org.playframework" %% "play-json"   % Versions.playJson
   val zioJson    = "dev.zio"           %% "zio-json"    % Versions.zioJson
+  val jsoniterScalaCore =
+    "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % Versions.jsoniterScala
+  val jsoniterScalaMacros =
+    "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % Versions.jsoniterScala
 
   // Test frameworks (unpublished samples' Test scope only; see Versions)
   val munit             = "org.scalameta"       %% "munit"             % Versions.munit

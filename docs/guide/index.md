@@ -37,7 +37,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Coming from sttp-ai or openai-scala-client](migrating-from-scala-llm-clients)** - Your Scala client code next to the same thing in LLM4S, compiled: completions, typed output, tools, streaming, providers, and when to stay on your client
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
-- **[JSON Libraries](json-libraries)** - Use circe, play-json or zio-json with LLM4S: converting at the boundary, structured output and tools
+- **[JSON Libraries](json-libraries)** - Use circe, play-json, zio-json or jsoniter-scala with LLM4S: converting at the boundary, structured output and tools
 
 ### Agent Framework
 

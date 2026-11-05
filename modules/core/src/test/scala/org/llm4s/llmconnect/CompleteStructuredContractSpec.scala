@@ -198,4 +198,38 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
     results.foreach { case (r, name) => r shouldBe Right(Person(name, name.length)) }
     c.recorded should have size 200L
   }
+
+  it should "name the JSON path and the reader's reason when the reply does not fit A" in {
+    val c = new RecordingClient((_, _) => Right(completion("""{"name":"Ada","age":"old"}""")))
+    c.completeStructured[Person](conv, personSchema) match {
+      case Left(e: ValidationError) =>
+        e.field shouldBe "structured_output"
+        e.message should endWith("Response does not match expected schema: $['age']: old")
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  it should "name what is missing or of the wrong kind at the root" in {
+    val missing = new RecordingClient((_, _) => Right(completion("""{"name":"Ada"}""")))
+    missing.completeStructured[Person](conv, personSchema).left.map(_.message) should matchPattern {
+      case Left(m: String) if m.endsWith("$: missing keys in dictionary: age") =>
+    }
+  }
+
+  it should "keep the message of an exception thrown by a Reader built on another JSON library" in {
+    val bridged: upickle.default.Reader[Person] =
+      upickle.default.reader[ujson.Value].map(_ => throw new IllegalStateException("illegal number, offset: 0x6"))
+    okClient.completeStructured[Person](conv, personSchema)(using bridged) match {
+      case Left(e: ValidationError) =>
+        e.message should endWith("Response does not match expected schema: $: illegal number, offset: 0x6")
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  "LLMClient.readFailure" should "fall back to the path, or to the exception's class, when there is no message" in {
+    val noReason = new upickle.core.TraceVisitor.TraceException("$.a", new RuntimeException())
+    LLMClient.readFailure(noReason) shouldBe "$.a"
+    LLMClient.readFailure(new RuntimeException("plain")) shouldBe "plain"
+    LLMClient.readFailure(new RuntimeException()) shouldBe "java.lang.RuntimeException"
+  }
 }
