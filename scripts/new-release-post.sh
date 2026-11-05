@@ -6,7 +6,7 @@
 #                                                    when no post for <version> exists; always exits 0
 #
 # The draft is built from `## [<version>] - <date>` in CHANGELOG.md, and the post is dated with that date:
-#   - front matter: title, description, image (the share image), tags: [release] and version;
+#   - front matter: title, description (the share card is the site default), tags: [release] and version;
 #   - the section's `### Highlights` paragraph as the summary, or else its entries under "What is new";
 #   - its `### Breaking changes` entries under "Upgrading", with the migration guide;
 #   - the dependency line, from `maven_group` in docs/_data/project.yml and <version>;
@@ -116,7 +116,6 @@ lines = [
     'title: "LLM4S %s"' % version,
     'description: "What is new in LLM4S %s, what breaks and how to upgrade, with the dependency line for the release."'
     % version,
-    "image: /image_assets/llm4s_logo.png",
     "tags: [release]",
     "version: %s" % version,
     "---",

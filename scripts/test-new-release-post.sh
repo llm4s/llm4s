@@ -23,7 +23,7 @@ POST="$WORK/posts/2026-10-15-llm4s-0.5.1.md"
 sed -n '2,/^---$/p' "$POST" | sed '$d' > "$WORK/fm"
 has "front matter: title" "$WORK/fm" 'title: "LLM4S 0.5.1"'
 has "front matter: description" "$WORK/fm" 'description: "What is new in LLM4S 0.5.1'
-has "front matter: share image" "$WORK/fm" 'image: /image_assets/llm4s_logo.png'
+! grep -q '^image:' "$WORK/fm"; expect "front matter: no image, so the post gets the default share card and its alt" 0 $?
 has "front matter: release tag" "$WORK/fm" 'tags: [release]'
 has "front matter: version" "$WORK/fm" 'version: 0.5.1'
 [ "$(head -1 "$POST")" = "---" ]; expect "front matter opens the file" 0 $?
