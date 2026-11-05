@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310, 2315, 2477, 2478]
+cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310, 2315, 2477]
 ---
 
 # Enterprise Evaluation
@@ -83,7 +83,7 @@ linked to its open issue.
 | Is there a reference architecture? | Not yet: see [Known gaps](#known-gaps). |
 | Observability? | Tracing to Langfuse or OpenTelemetry, metrics to Prometheus or Micrometer: [Monitoring](../guide/observability/). |
 | Health checks? | [Production Deployment](../PRODUCTION_DEPLOYMENT#health-checks), and the `/health` and `/llm-check` endpoints of the deploy template. [Doctor](doctor) checks a developer's setup. |
-| Secret rotation? | Keys come from configuration, which can bind environment variables: [Configuration & Secrets](../PRODUCTION_DEPLOYMENT#configuration--secrets). A key mounted as a file by Vault Agent, the Secrets Store CSI driver or External Secrets Operator (`apiKeyFile`), or fetched by your own `ApiKeyProvider`, is re-read without a restart for the OpenAI, Requesty, Anthropic, OpenRouter and generic OpenAI-compatible providers: [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). The other providers, embeddings and the shared `llm4s.credentials` keys still need a restart: see [Known gaps](#known-gaps). |
+| Secret rotation? | Keys come from configuration, which can bind environment variables: [Configuration & Secrets](../PRODUCTION_DEPLOYMENT#configuration--secrets). A key mounted as a file by Vault Agent, the Secrets Store CSI driver or External Secrets Operator (`apiKeyFile`), or fetched by your own `ApiKeyProvider`, is re-read without a restart for the OpenAI, Requesty, Anthropic, OpenRouter and generic OpenAI-compatible providers, the embedding providers and the Cohere reranker, also when it is the vendor's shared `llm4s.credentials` key: [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). The other chat providers still need a restart: see [Known gaps](#known-gaps). |
 
 ## Platform
 
@@ -119,7 +119,7 @@ closes, so this list is updated when the gap is.
 | Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
-| Rotating an API key without a restart covers only the OpenAI, Requesty, Anthropic, OpenRouter and generic OpenAI-compatible chat providers; the other providers, embeddings and `llm4s.credentials` still need one | [#2477](https://github.com/llm4s/llm4s/issues/2477), [#2478](https://github.com/llm4s/llm4s/issues/2478) |
+| Rotating an API key without a restart covers only the OpenAI, Requesty, Anthropic, OpenRouter and generic OpenAI-compatible chat providers (and embeddings and the reranker); the other chat providers still need one | [#2477](https://github.com/llm4s/llm4s/issues/2477) |
 | No enterprise reference architecture (gateway, secret injection, egress, failover, spend controls) | [#2315](https://github.com/llm4s/llm4s/issues/2315) |
 
 ---

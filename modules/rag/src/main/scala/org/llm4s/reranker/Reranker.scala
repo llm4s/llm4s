@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
@@ -64,12 +65,25 @@ final case class RerankError(
  * @param baseUrl API endpoint
  * @param apiKey API key for authentication
  * @param model Model name (e.g., "rerank-english-v3.0")
+ * @param apiKeyProvider supplies the key per request in place of `apiKey`, so a rotated key is used without
+ *                       rebuilding the reranker (#2478): `llm4s.rerank.cohere.apiKeyFile`, or Cohere's shared
+ *                       `llm4s.credentials.cohere.apiKeyFile`, sets
+ *                       [[org.llm4s.llmconnect.auth.ApiKeyProvider.file]]. `apiKey` then holds the key read at load.
  */
 final case class RerankProviderConfig(
   baseUrl: String,
   apiKey: Secret,
-  model: String
-)
+  model: String,
+  apiKeyProvider: Option[ApiKeyProvider] = None
+) {
+
+  /**
+   * The key to send with the next request: [[apiKeyProvider]]'s current key when one is set, otherwise `apiKey`.
+   * A key file that has become unreadable or empty is a `Left` naming its path.
+   */
+  def currentApiKey(): Result[Secret] =
+    apiKeyProvider.fold[Result[Secret]](Right(apiKey))(_.current().map(key => Secret(key.asKey)))
+}
 
 /**
  * Cross-encoder reranker interface.

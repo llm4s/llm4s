@@ -50,6 +50,37 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
     body("top_n").num shouldBe 1
   }
 
+  it should "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+    val held = new AtomicReference("co-key-first")
+    val keys = new org.llm4s.llmconnect.auth.ApiKeyProvider {
+      def current(): org.llm4s.types.Result[org.llm4s.types.ProviderModelTypes.ApiKey] =
+        Right(org.llm4s.types.ProviderModelTypes.ApiKey(held.get()))
+    }
+    val seen = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+    withServer("/v1/rerank") { (ex: HttpExchange) =>
+      seen.add(ex.getRequestHeaders.getFirst("Authorization"))
+      sendJsonResponse(ex, 200, """{"results":[{"index":0,"relevance_score":0.4,"document":{"text":"about java"}}]}""")
+    } { baseUrl =>
+      val reranker =
+        CohereReranker(RerankProviderConfig(baseUrl, org.llm4s.security.Secret("co-key-first"), "m", Some(keys)))
+      reranker.rerank(request).isRight shouldBe true
+      held.set("co-key-second")
+      reranker.rerank(request).isRight shouldBe true
+    }
+    seen.toArray.toSeq shouldBe Seq("Bearer co-key-first", "Bearer co-key-second")
+  }
+
+  it should "return the key provider's failure without sending a request" in {
+    val failing = new org.llm4s.llmconnect.auth.ApiKeyProvider {
+      def current(): org.llm4s.types.Result[org.llm4s.types.ProviderModelTypes.ApiKey] =
+        Left(org.llm4s.error.ConfigurationError("API key file /x is empty"))
+    }
+    val reranker = CohereReranker(
+      RerankProviderConfig(s"http://127.0.0.1:${closedPort()}", org.llm4s.security.Secret("k"), "m", Some(failing))
+    )
+    reranker.rerank(request).left.map(_.message).swap.getOrElse("") should include("API key file /x is empty")
+  }
+
   it should "take the document text from the request when not returning documents" in {
     withServer("/v1/rerank")(ex => sendJsonResponse(ex, 200, """{"results":[{"index":0,"relevance_score":0.4}]}""")) {
       baseUrl =>

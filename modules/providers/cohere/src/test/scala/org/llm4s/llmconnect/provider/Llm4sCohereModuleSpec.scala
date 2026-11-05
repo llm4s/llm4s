@@ -37,6 +37,20 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
       }
     }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(
+          _,
+          200,
+          """{"id":"abc","embeddings":{"float":[[0.1,0.2]]},"texts":[],"response_type":"embeddings_by_type"}"""
+        )
+      ) { (baseUrl, keys) =>
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config.withApiKeyProvider(keys))
+      }
+    }
   }
 
   "the llm4s-cohere reference.conf" should {

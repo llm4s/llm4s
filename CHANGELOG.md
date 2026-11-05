@@ -237,6 +237,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
 - **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: OpenAI, Requesty, Anthropic, OpenRouter
   and generic OpenAI-compatible re-read a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313).
+  Also in embeddings blocks, `llm4s.rerank.cohere` and `llm4s.credentials.<id>`, re-read per request by the embedding providers and the
+  Cohere reranker (`apiKeyProvider` on their configs, testkit `assertEmbeddingHonoursApiKeyProvider`) [#2478](https://github.com/llm4s/llm4s/issues/2478).
 
 ### Providers
 
