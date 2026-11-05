@@ -211,6 +211,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Streaming integrations
 
+- **Fixed** `LLMClientIO.streamComplete` letting the provider run far past its 64-chunk buffer after the consumer stopped: each pull of the queue is now limited to the buffer size.
 - **Fixed** a `llm4s-pekko` stream leaking its producer thread when provider code swallows the interrupt: once the
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
 - **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
