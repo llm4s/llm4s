@@ -1,0 +1,45 @@
+name: Dev container playground
+
+# Builds the dev container (.devcontainer, #2286) the way GitHub Codespaces does, with its Ollama sidecar, and runs
+# the five commands of docs/getting-started/playground.md inside it against the in-container model
+# (.devcontainer/playground-check.sh): each must exit 0, and the first call must print a non-empty answer. Building
+# the image, pulling the models and compiling the samples takes a while, so it runs nightly and when the container,
+# the check or the page changes, not on every pull request.
+
+on:
+  schedule:
+    - cron: "37 3 * * *"  # 03:37 UTC every day
+  pull_request:
+    paths:
+      - .devcontainer/**
+      - docs/getting-started/playground.md
+      - .github/workflows/devcontainer.yml
+  push:
+    branches: [main]
+    paths:
+      - .devcontainer/**
+      - docs/getting-started/playground.md
+      - .github/workflows/devcontainer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  playground:
+    name: Build the dev container and run the playground commands
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the dev container, start it with Ollama, and run the playground commands
+        uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          push: never
+          runCmd: .devcontainer/playground-check.sh
