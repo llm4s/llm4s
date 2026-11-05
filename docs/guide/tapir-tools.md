@@ -102,6 +102,7 @@ with no body. Everything that goes wrong is a tool error the model reads, never 
 | What happens | The model reads |
 |---|---|
 | an argument the codec or a validator rejects | `the arguments are invalid: 'limit' is invalid: expected <=100, got 500`, every argument at once; nothing is sent |
+| a path argument that is empty, `.` or `..`, or holds `/` or `\`, written or percent-encoded (`%2e%2e`) | `'id' must be a single path segment, not '..'`; nothing is sent, so a model cannot reach another endpoint of the same host with your headers |
 | an error response | `the service rejected the call with HTTP 404: {"message":"no order 9"}` |
 | a server error | `the service failed with HTTP 503: ...` |
 | the request cannot be sent | `the request to GET https://... could not be sent: ...` |
@@ -137,6 +138,11 @@ not list, such as a header the model was not allowed, is ignored. Only header au
 API key in a query parameter or a cookie fails the build.
 
 ## Approval
+
+{: .warning }
+> **Approval is not enforced by the tool.** `requiresApproval` only marks the tool; a `ToolRegistry` carries no
+> approval flag, so an agent runs a `cancel_order` call at once unless you wire
+> `EndpointTools.requiringApproval` into an `ApprovalMiddleware` on that agent, as below.
 
 `EndpointTools.tool(name, endpoint)` requires approval for any endpoint whose method is not `GET`, `HEAD` or
 `OPTIONS`; pass `requiresApproval` to decide yourself. A `ToolRegistry` carries no approval flag, so

@@ -133,6 +133,34 @@ class EndpointCallSpec extends AnyFlatSpec with Matchers with EitherValues {
     recording.requests shouldBe empty
   }
 
+  "a path argument that would leave its segment" should "be a tool error naming it, and nothing is sent" in {
+    val recording = new Recording()
+    val tools = registry(
+      recording.backend,
+      EndpointTools.tool("get_order", getOrder).withHeaders(Map("Authorization" -> "Bearer secret"))
+    )
+    val escapes =
+      Seq("..", ".", "../admin", "a/b", "a\\b", "%2e%2e", "%2E%2E", "%2e", ".%2e", "%2fadmin", "%5c", "%252e%252e")
+    escapes.foreach { value =>
+      withClue(value) {
+        message(call(tools, "get_order", ujson.write(ujson.Obj("id" -> value)))) should include(
+          "'id' must be a single path segment"
+        )
+      }
+    }
+    message(call(tools, "get_order", """{"id":""}""")) should include("'id' must not be empty")
+    recording.requests shouldBe empty
+  }
+
+  it should "still allow dots and percent signs inside a segment" in {
+    val recording = new Recording()
+    val tools     = registry(recording.backend, EndpointTools.tool("get_order", getOrder))
+    Seq("a.b", "...", "v1..2", "50%", "%zz").foreach { value =>
+      withClue(value)(call(tools, "get_order", ujson.write(ujson.Obj("id" -> value))).isRight shouldBe true)
+    }
+    recording.requests should have size 5
+  }
+
   it should "report every invalid argument at once, and a JSON body's field by its path" in {
     val e         = endpoint.post.in("orders" / path[Int]("id")).in(jsonIn[NewOrder])
     val recording = new Recording()

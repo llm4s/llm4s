@@ -201,8 +201,33 @@ private[tapir] object Inputs {
   ): Either[String, Option[String]] =
     value match {
       case None    => Left(s"'$name' is required")
-      case Some(v) => scalar(name, v).flatMap(raw => through(name, codec, raw)).map(Some(_))
+      case Some(v) => scalar(name, v).flatMap(raw => through(name, codec, raw)).flatMap(segment(name, _)).map(Some(_))
     }
+
+  /**
+   * A path capture must stay one segment of the endpoint's path: a value that is empty, `.` or `..`, or holds a `/`
+   * or `\`, as written or percent-decoded (`%2e%2e`, `%2F`, `%252e`), could reach another endpoint of the same host
+   * with the application's headers, so it is refused before anything is sent.
+   */
+  private def segment(name: String, value: String): Either[String, String] = {
+    val decoded = percentDecoded(value)
+    val escapes = Seq(value, decoded).exists(v => v == "." || v == ".." || v.contains('/') || v.contains('\\'))
+    if (value.isEmpty) Left(s"'$name' must not be empty: it is a segment of the path")
+    else if (escapes) Left(s"'$name' must be a single path segment, not '${Text.truncate(value)}'")
+    else Right(value)
+  }
+
+  private val Escape = "%([0-9a-fA-F]{2})".r
+
+  /** `value` with its percent escapes decoded until none is left, so a doubly encoded `%252e` is caught too. */
+  @scala.annotation.tailrec
+  private def percentDecoded(value: String): String = {
+    val decoded = Escape.replaceAllIn(
+      value,
+      m => scala.util.matching.Regex.quoteReplacement(Integer.parseInt(m.group(1), 16).toChar.toString)
+    )
+    if (decoded == value) value else percentDecoded(decoded)
+  }
 
   private def listValue[T](
     name: String,
