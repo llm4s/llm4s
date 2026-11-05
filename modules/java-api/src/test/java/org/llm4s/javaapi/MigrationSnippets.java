@@ -85,6 +85,17 @@ final class MigrationSnippets {
         return second;
     }
 
+    /** "A conversation with memory": a system prompt and a window over the thread, as MessageWindowChatMemory (#2476). */
+    static JAgent windowed(JLlmClient client) {
+        JAgent agent = Llm4s.agentBuilder("assistant", client)
+            .systemPrompt("You are a helpful assistant.")
+            .contextWindow(JContextWindow.lastMessages(20))   // each call is sent the last 20 messages
+            .build()
+            .get();
+
+        return agent;
+    }
+
     /** "Streaming": a listener, and a JDK Flow.Publisher. */
     static JCompletion streaming(JLlmClient client, Flow.Subscriber<String> subscriber) {
         JCompletion reply;

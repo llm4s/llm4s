@@ -341,8 +341,8 @@ turn had already ended; an interrupt of the thread calling `cancel()` does not c
 and is kept. A listener that throws from `onEvent` - or sets its own thread's interrupt flag -
 cancels the turn, and `onError` receives what it threw, or a `CancelledError`. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
 that calls the model's `complete`, so its stream carries no text deltas; pass `streaming = true`
-for them. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for middleware, a
-system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
+for them, or `streaming(true)` to `Llm4s.agentBuilder`, which also sets a system prompt, guardrails and a context
+window. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for other middleware or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
 `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`. The Java sample in
 `modules/samples/gradle-java` streams a turn's text.
 

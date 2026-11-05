@@ -312,9 +312,11 @@ import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JContextWindow;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
+import org.llm4s.javaapi.JGuardrails;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JTool;
@@ -700,6 +702,47 @@ LlmResult<JTool> refund = JTool.builder("refund", "Refunds a charge once")
 
 `idempotencyKey()` and `toolCallId()` (the id the model gave the call) are `Optional<String>`s: present for every call
 an agent runs, the key the same in every run of one call, and empty when the tool runs outside an agent.
+
+## An agent with a system prompt, guardrails and a context window
+
+`Llm4s.agentBuilder(id, client)` sets the rest of an agent from Java
+([#2476](https://github.com/llm4s/llm4s/issues/2476)): its system prompt, its tools, guardrails on each query and on each
+final answer, how much of the conversation each model call is sent, and streaming. `createAgent` and
+`createAgentWithTools` are the builder with none of these set.
+
+```java
+LlmResult<JAgent> built = Llm4s.agentBuilder("support", client)
+    .systemPrompt("You are a support assistant. Answer in JSON.")
+    .tools(List.of(add))
+    .inputGuardrails(List.of(JGuardrails.length(1, 10_000), JGuardrails.profanity()))
+    .outputGuardrails(List.of(JGuardrails.json()))
+    .contextWindow(JContextWindow.lastMessages(20))
+    .streaming(true)
+    .build();
+
+JAgent agent = built.get();
+JAgentResult result = agent.run("What is 2 + 3?").get();
+result.status().guardrail().ifPresent(g ->
+    System.out.println("Blocked by " + g + ": " + result.status().reason().orElse("")));
+```
+
+- **Guardrails.** `JGuardrails` has the built-in ones: `length(min, max)`, `profanity()` (a deliberately minimal word
+  list, an example rather than a production filter), `regex(pattern)` and `regex(pattern, errorMessage)`, which check a
+  query or an answer, and `json()`, which checks only an answer - `inputGuardrails` does not compile with it. Each list
+  runs in order. A guardrail that fails ends the turn `BLOCKED`, with the guardrail's name in `status().guardrail()` and
+  its reason in `status().reason()`; a blocked query stores nothing of the turn, a blocked answer is not kept, and the
+  conversation stays usable. Guardrails written in Java are not available yet.
+- **Context window.** `JContextWindow.lastMessages(n)` sends each model call at most the `n` most recent messages,
+  dropping the oldest first. The system prompt is always sent and not counted; the current turn is always sent whole; a
+  tool call is never sent without its result. Only what is sent is pruned: `messages()` of a result still has the whole
+  conversation.
+- **Streaming.** `streaming(true)` makes the agent's model calls stream, so a [streamed turn](agents/streaming#java-and-kotlin)
+  carries the answer's text deltas.
+
+The builder is immutable - each method returns a new one, and a setting replaces the one set before - and nothing in it
+throws: a `null` argument, an invalid guardrail or window (`length(5, 1)`, `lastMessages(0)`), a blank id or two tools
+with one name is a failed result of `build()`. For what it does not set - approvals, handoffs, subagents, another
+runtime - build the agent with the Scala `Agent.builder` and wrap it with `Llm4s.wrapAgent`.
 
 ## The Kotlin DSL
 
