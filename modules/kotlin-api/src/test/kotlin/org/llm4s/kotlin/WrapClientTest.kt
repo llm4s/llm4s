@@ -119,6 +119,25 @@ class WrapClientTest {
         assertTrue(lastBody.get().contains("What is 2 + 2?"), "the query reaches the request: ${lastBody.get()}")
     }
 
+    // The Kotlin call of docs/scala-ai/java-kotlin.md, word for word (ScalaAiPagesSpec in modules/samples checks it):
+    // change the page and this function together.
+    suspend fun ask(ollamaUrl: String): String =
+        Llm4s.ollama {
+            model = "llama3.2"
+            baseUrl = ollamaUrl
+        }.use { client -> client.complete("What is 2 + 2?") }
+
+    @Test
+    fun `the Java and Kotlin page's call completes through the Kotlin DSL client`() = runBlocking<Unit> {
+        reply.set(200 to ollamaReply("four"))
+
+        assertEquals("four", ask(baseUrl))
+
+        assertEquals(1, requests.get())
+        assertEquals("/api/chat", lastPath.get())
+        assertTrue(lastBody.get().contains("What is 2 + 2?"), "the query reaches the request: ${lastBody.get()}")
+    }
+
     @Test
     fun `a wrapped builder client streams through a cold Flow`() = runBlocking<Unit> {
         reply.set(200 to ollamaReply("chunk"))

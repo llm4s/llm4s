@@ -158,6 +158,7 @@ val ticket: Result[Ticket] = for {
     <header class="lp-section__head">
       <p class="lp-eyebrow">Use cases</p>
       <h2 id="usecases-heading">What teams build with it</h2>
+      <p>Short answers, each with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card lp-card--flat"><h3>Assistants inside JVM services</h3><p>Support, operations and internal assistants that run in your Spring Boot, Pekko or plain JVM service, with guardrails on what goes in and comes out.</p></li>

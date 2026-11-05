@@ -139,3 +139,7 @@ guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
 guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
+scala-ai/agents.md | 825dc005dd | skip | sbt build definition, not Scala source
+scala-ai/llm-framework.md | f41ac720c4 | skip | sbt build definition, not Scala source
+scala-ai/providers.md | 6bfa1a8590 | skip | sbt build definition, not Scala source
+scala-ai/rag.md | e66ecd7f53 | skip | sbt build definition, not Scala source
