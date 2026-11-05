@@ -173,3 +173,30 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
   }
 
 }
+
+class HttpConfigWwwBlocklistSpec extends AnyFlatSpec with Matchers {
+  // #2496: a blocklist entry written with www. used to block only the subdomains of that host and
+  // not the host itself, because only the allowlist stripped the leading "www.".
+  "HttpConfig" should "block www.example.com and its apex when the entry carries www." in {
+    val config = HttpConfig(blockedDomains = Seq("www.example.com"))
+    config.isDomainAllowed("www.example.com") shouldBe false
+    config.isDomainAllowed("example.com") shouldBe false
+    config.isDomainAllowed("WWW.Example.COM") shouldBe false
+    config.isDomainAllowed("api.example.com") shouldBe false
+  }
+
+  it should "keep blocking a www.-prefixed host when the entry has no www." in {
+    val config = HttpConfig(blockedDomains = Seq("example.com"))
+    config.isDomainAllowed("www.example.com") shouldBe false
+  }
+
+  it should "still allow an unrelated host" in {
+    val config = HttpConfig(blockedDomains = Seq("www.example.com"))
+    config.isDomainAllowed("notexample.com") shouldBe true
+  }
+
+  it should "prefer the blocklist when a www. entry collides with an allowlist host" in {
+    val config = HttpConfig(allowedDomains = Some(Seq("example.com")), blockedDomains = Seq("www.example.com"))
+    config.isDomainAllowed("example.com") shouldBe false
+  }
+}

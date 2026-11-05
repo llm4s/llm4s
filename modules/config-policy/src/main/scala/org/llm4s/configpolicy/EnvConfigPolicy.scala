@@ -56,13 +56,22 @@ object PolicyBuilder {
     new EnvConfigPolicy {
       override val name: String = "allowed-providers"
 
+      // Both sides compared as trim.toLowerCase(Locale.ROOT), normalized once outside evaluate
+      // (#2504): a configured entry keeps its case, and the JVM default locale must not
+      // influence the match (snapshotFromEnv already lower-cases with Locale.ROOT).
+      private val normalizedAllowed = allowed.map(_.trim.toLowerCase(java.util.Locale.ROOT))
+
       override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
         if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          val provider = config.provider.getOrElse("")
-          if (provider.nonEmpty && allowed.contains(provider.toLowerCase)) PolicyPass(name)
-          else PolicyFail(name, s"provider '$provider' is not allowed in env '$env'")
-        }
+        else
+          config.provider match {
+            case Some(provider) if provider.trim.nonEmpty =>
+              val normalized = provider.trim.toLowerCase(java.util.Locale.ROOT)
+              if (normalizedAllowed.contains(normalized)) PolicyPass(name)
+              else PolicyFail(name, s"provider '$provider' is not allowed in env '$env'")
+            case _ =>
+              PolicyFail(name, s"provider is not set (env '$env')")
+          }
     }
 
   def allowedModels(allowed: Set[String], envs: Set[String] = Set.empty): EnvConfigPolicy =
@@ -71,11 +80,14 @@ object PolicyBuilder {
 
       override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
         if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          val model = config.model.getOrElse("")
-          if (model.nonEmpty && allowed.contains(model)) PolicyPass(name)
-          else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
-        }
+        else
+          config.model match {
+            case Some(model) if model.trim.nonEmpty =>
+              if (allowed.contains(model)) PolicyPass(name)
+              else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
+            case _ =>
+              PolicyFail(name, s"model is not set (env '$env')")
+          }
     }
 
   def maxTokensLimit(max: Int, envs: Set[String] = Set.empty): EnvConfigPolicy =
