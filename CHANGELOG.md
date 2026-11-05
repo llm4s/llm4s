@@ -534,6 +534,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also doubly escaped in JSON inside a JSON string): `token = "..."`, `password: ...`, `token='...'`. The rest of such
   a line is now replaced, and the JSON still parses [#1765](https://github.com/llm4s/llm4s/issues/1765),
   [#1799](https://github.com/llm4s/llm4s/issues/1799).
+- **Added** `llm4s-prompt` (Experimental): `prompt"..."`/`system"..."` interpolators that render each value through a
+  `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
 
 ### Build & tooling
 

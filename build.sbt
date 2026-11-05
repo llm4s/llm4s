@@ -351,6 +351,7 @@ lazy val llm4s = (project in file("."))
     watsonx,
     providerTestkit,
     schemaDerivation,
+    prompt,
     testkit,
     agentTestkit,
     agentCheckpointSqlite,
@@ -1388,6 +1389,22 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// `llm4s-prompt` (#2325): the `prompt"..."` and `system"..."` interpolators, which render each value through a
+// `Promptable` found at compile time (derived with `Mirror` for case classes and enums) and fence `Untrusted` values.
+// It layers on core's public API (it builds `Message`s and a `Conversation`) and adds no dependency.
+lazy val prompt = (project in file("modules/prompt"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-prompt",
+    commonSettings,
+    // Measured 98.06% statement and 95.08% branch coverage (`sbt coverage prompt/test prompt/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The interpolator's macro runs inside
+    // the compiler, where scoverage cannot see it; `PromptCompileErrorsSpec` and the golden specs exercise it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
 // `llm4s-testkit` (#1475) is for the people who USE llm4s: a scriptable fake `LLMClient` they can put
 // in their own tests (`% Test`) instead of copying the mocks out of this repository, whose test sources
 // are not published. It is a different audience from `llm4s-provider-testkit` above, which is for the
@@ -1654,6 +1671,8 @@ lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
     schemaDerivation,
+    // `org.llm4s.samples.prompt.TypedPromptExample` (#2325), and docs/guide/prompts.md's snippets
+    prompt,
     rag,
     knowledgegraph,
     memory,
@@ -1688,9 +1707,10 @@ lazy val samples = (project in file("modules//samples"))
     llm4sPekko,
     // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
     javaRag,
-    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
-    // examples' acceptance suites script their model with it.
-    testkit      % Test,
+    // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
+    // acceptance suites script their model with it. Compile scope since #2325: `TypedPromptExample` runs offline on
+    // a `ScriptedLLMClient`. Samples are unpublished, so this reaches no user's classpath.
+    testkit,
     agentTestkit % Test,
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
@@ -2236,6 +2256,7 @@ lazy val docs = (project in file("modules/docs"))
     watsonx,
     providerTestkit,
     schemaDerivation,
+    prompt,
     testkit,
     doctor,
     workspaceShared,
@@ -2293,6 +2314,7 @@ lazy val docs = (project in file("modules/docs"))
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
+        (prompt / Compile / sources).value ++
         (testkit / Compile / sources).value ++
         (doctor / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++

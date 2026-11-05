@@ -755,6 +755,17 @@ libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
 
+### Typed prompts
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-prompt" % llm4sVersion
+```
+
+The `prompt"..."` and `system"..."` interpolators: each value is rendered by a `Promptable` checked at compile time,
+and `Untrusted` input is fenced. It is experimental, and depends on `llm4s-core` only. See
+[Typed Prompts](../guide/prompts).
+
 ### Testing your own code (the testkit)
 
 ```scala
