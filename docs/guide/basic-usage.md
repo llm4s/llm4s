@@ -294,6 +294,10 @@ val conversation = Conversation(Seq(
 val response = client.complete(conversation)
 ```
 
+To build the messages from typed values, with untrusted text (a document, an email, a tool's result) fenced off from
+your instructions, use the `prompt"..."` and `system"..."` interpolators of `llm4s-prompt`: see
+[Typed Prompts](prompts).
+
 ---
 
 ## Configuration Methods
