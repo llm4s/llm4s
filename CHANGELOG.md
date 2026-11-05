@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
 - `OpenAICompatibleDialect.addReasoning` returns the `List[RequestAdjustment]` it could not send, not `Unit`; the
-  standard dialect reports a set `reasoning` as `Dropped` (RFC 0008, PR 1);
+  standard dialect reports a set `reasoning` as `Dropped` (RFC 0008, PR 1); recompile a dialect that overrides it;
   [migration](docs/reference/migration.md#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115).
 - Tier hygiene before the baseline: `org.llm4s.trace.AnsiColors` is `private[llm4s]`; `org.llm4s.core.safety.UsingOps`
   moved to `llm4s-agent-tools` and `org.llm4s.llmconnect.utils.ModelSelector` to `llm4s-rag`, their only consumers,
@@ -248,7 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TransformationResult`; logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
   Bedrock, Ollama and the standard OpenAI-compatible dialect (Mistral, Cohere, DeepSeek, generic) report a requested
   `reasoning` they do not send as `Dropped`, and OpenAI reports the `temperature`, `top_p` and penalties a reasoning
-  model's request leaves out, where each was dropped silently. Both types are
+  model's request leaves out, and xAI the penalties it leaves out of one, where each was dropped silently. An empty
+  list means nothing was reported, not that every option was sent: other omissions follow under RFC 0008. Both types are
   promoted from the `@Experimental` tier RFC 0008 first gave them, because the `@Stable` `Completion` exposes them
   (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to

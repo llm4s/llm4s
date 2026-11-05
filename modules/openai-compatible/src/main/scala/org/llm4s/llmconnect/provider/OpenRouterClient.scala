@@ -220,7 +220,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
           if (isAnthropicModel) body("thinking") = anthropicThinking(budget)
         }
     }
-    // a level this dialect leaves unsent is not reported yet: a follow-up under RFC 0008
+    // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
     List.empty
   }
 

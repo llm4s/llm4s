@@ -22,9 +22,11 @@ import java.time.Instant
  * @param citations The sources the model cited in its answer, when the provider reports them
  *                  (see [[Citation]]); empty for a model that does not search or does not cite,
  *                  and for a completion assembled from streamed chunks, which carry none.
- * @param adjustments The requested options the provider or model could not honour as asked, each
- *                    dropped, adjusted or not needed (see [[RequestAdjustment]]); empty when every
- *                    option was sent as requested. Streamed and non-streamed calls report the same.
+ * @param adjustments The requested options the client reports it could not honour as asked, each
+ *                    dropped, adjusted or not needed (see [[RequestAdjustment]]). Streamed and
+ *                    non-streamed calls report the same. Coverage is growing under RFC 0008, so an
+ *                    empty list means nothing was reported, not that every option was sent: see
+ *                    [[RequestAdjustment]] for what is reported today.
  */
 @Stable
 final case class Completion private (

@@ -199,6 +199,10 @@ class BedrockClient(
       val startedAt   = Instant.now()
       val requestJson = serializeRequestForLogging(conv, opts)
       buildConverseRequest(conv, opts).flatMap { request =>
+        adjustmentLog.record(
+          config.model,
+          adjustments
+        ) // once the request is built, so a failed build spends no warning
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
         outcome
           .flatMap { response =>
@@ -227,7 +231,13 @@ class BedrockClient(
       val requestJson = serializeRequestForLogging(conv, opts)
       val raw         = new StringBuilder()
       buildConverseStreamRequest(conv, opts)
-        .flatMap(request => runStream(request, onChunk, raw))
+        .flatMap { request =>
+          adjustmentLog.record(
+            config.model,
+            adjustments
+          ) // once the request is built, so a failed build spends no warning
+          runStream(request, onChunk, raw)
+        }
         .map(c =>
           c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts)).withAdjustments(adjustments)
         )
@@ -258,7 +268,6 @@ class BedrockClient(
       )
       .map { t =>
         val adjustments = t.adjustments ++ UnmappedOptions.reasoning(config.model, t.options)
-        adjustmentLog.record(config.model, adjustments)
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
 

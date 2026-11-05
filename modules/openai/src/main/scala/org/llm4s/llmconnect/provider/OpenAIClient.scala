@@ -201,7 +201,6 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       adjustments             = withUnsentSampling(transformed.options, transformed.adjustments)
-      _                       = adjustmentLog.record(model, adjustments)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -209,6 +208,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
+      _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
       body = serializeParams(params)
       response <- call("completion")(transport.createChatCompletion(params))
       completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
@@ -241,8 +241,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val adjustments = withUnsentSampling(transformed.options, transformed.adjustments)
-        adjustmentLog.record(model, adjustments)
+        val adjustments             = withUnsentSampling(transformed.options, transformed.adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -250,7 +249,10 @@ class OpenAIClient private[provider] (
           transformed.options,
           OpenAIModelRules.requiresMaxCompletionTokens(model),
           streaming = !transformed.requiresFakeStreaming
-        ).map(params => (transformed, params, adjustments))
+        ).map { params =>
+          adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
+          (transformed, params, adjustments)
+        }
       }
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { (transformed, params, adjustments) =>

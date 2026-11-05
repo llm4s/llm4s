@@ -21,8 +21,16 @@ enum RequestOption derives ReadWriter {
  * What happened to one requested option that was not sent as asked (RFC 0008, #2115).
  *
  * A client sends what the provider and model can take and reports the rest on
- * [[Completion.adjustments]], instead of dropping it silently. A caller that must not run without
- * an option checks the list and treats a [[RequestAdjustment.Dropped]] as a failure.
+ * [[Completion.adjustments]], instead of dropping it silently. A caller that must not run without a
+ * particular option looks for that option in the list and treats its [[RequestAdjustment.Dropped]] as a
+ * failure; `temperature` always has a value, so it is reported whenever it is not sent as given.
+ *
+ * Reported today: every option the [[org.llm4s.model.RequestTransformer]] drops or adjusts (Anthropic,
+ * OpenAI, Gemini, Vertex AI, Bedrock); a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama or the
+ * standard OpenAI-compatible dialect does not send; the sampling options OpenAI leaves out of a reasoning
+ * model's request; and the penalties xAI leaves out of one. Other options a client leaves out, such as
+ * Anthropic's `top_p` and penalties, are not reported yet and follow under RFC 0008, so an empty list
+ * does not prove every option was sent.
  *
  * `reason`, `requested` and `sent` are for people and logs; match on [[option]] and the case.
  */

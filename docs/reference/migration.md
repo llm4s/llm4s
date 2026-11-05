@@ -293,7 +293,8 @@ Changes too small for a section of their own. Each is listed under Breaking chan
 that a requested reasoning effort was not sent instead of losing it silently. The standard implementation sends
 nothing and reports a set `CompletionOptions.reasoning` as `Dropped`. A dialect that overrides it returns
 `List.empty` when it sent what was asked, and a `RequestAdjustment` for each part it did not send
-([Writing a provider](../guide/writing-a-provider)).
+([Writing a provider](../guide/writing-a-provider)). Recompile such a dialect: one compiled against an earlier llm4s
+keeps the old method, which the client no longer calls, so its reasoning fields would silently not be sent.
 
 ### One proxy and TLS setting for every provider client (#2273)
 

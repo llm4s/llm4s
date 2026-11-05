@@ -152,7 +152,12 @@ final private[model] class DefaultRequestTransformer(
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions] =
-    if (dropUnsupported) adjustOptions(modelId, options).map(_._1)
+    if (dropUnsupported)
+      adjustOptions(modelId, options).map { (adjusted, adjustments) =>
+        // a direct caller has no Completion to read them from; the clients report them and log through AdjustmentLog
+        adjustments.foreach(adjustment => logger.debug(s"Model $modelId: ${AdjustmentLog.describe(adjustment)}"))
+        adjusted
+      }
     else
       violations(modelId, options, getCapabilities(modelId)).flatMap(_.error) match {
         case Nil    => Right(options)
@@ -359,7 +364,8 @@ object TransformationResult {
   ): Result[TransformationResult] = {
     val transformedOptions =
       if (dropUnsupported) transformer.adjustOptions(modelId, options)
-      else transformer.transformOptions(modelId, options).map(_ -> List.empty[RequestAdjustment])
+      else
+        transformer.transformOptions(modelId, options, dropUnsupported = false).map(_ -> List.empty[RequestAdjustment])
     transformedOptions.map { (transformed, adjustments) =>
       TransformationResult(
         options = transformed,

@@ -156,7 +156,7 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
       }
     }
     if (replaysReasoning(body)) mergeThinking(body, "clear_thinking", ujson.False)
-    // a level this dialect leaves unsent is not reported yet: a follow-up under RFC 0008
+    // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
     List.empty
   }
 

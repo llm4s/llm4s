@@ -434,12 +434,15 @@ PR 1 settled these:
 
 12. **`RequestOption` and `RequestAdjustment` are `@Stable`**, not `@Experimental` as first written. `Completion`
     and `TransformationResult` are `@Stable` and expose them, and `stabilityTierCheck` (#1818) rejects a `@Stable`
-    signature that names an `@Experimental` type. The design is settled by this RFC.
+    signature that names an `@Experimental` type unless the member itself is marked `@Experimental`. Marking
+    `adjustments` and `withAdjustments` that way was the alternative; the maintainers chose promotion in review,
+    since the design is settled by this RFC.
 13. **PR 1 also reports the provider-side drops that #2115's three-PR plan put in its first step**: a `reasoning`
     ignored by Gemini, Vertex AI, Bedrock, Ollama and the standard OpenAI-compatible dialect. The OpenAI client reports the
     sampling options (`temperature`, `top_p`, the penalties) a reasoning model's request leaves out, replacing the
     transformer's report for the same option, since nothing is sent for it. `addReasoning` returns
-    what it could not send, as "Where they come from" describes. The dialects that map reasoning themselves (Z.ai,
+    what it could not send, as "Where they come from" describes, which for xAI includes the penalties it strips from
+    a reasoning model's request. The dialects that map reasoning themselves (Z.ai,
     xAI, OpenRouter) report nothing new yet; a level one of them leaves unsent is a follow-up under this RFC.
 
 ## Open questions
