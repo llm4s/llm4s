@@ -328,7 +328,9 @@ Stay where you are, or keep the client next to LLM4S, when:
   speech. Both clients also wrap OpenAI endpoints such as files, fine-tuning, batches and moderations, and
   openai-scala-client the Responses API and Anthropic's Managed Agents ([sttp-ai][s-basics],
   [openai-scala-client][c-readme]). LLM4S has none of these.
-- **You build for Scala 2.12 or 2.13.** Both clients publish for 2.12, 2.13 and 3; LLM4S is Scala 3 only, on JDK 21.
+- **You build for Scala 2.12 or 2.13.** Both clients publish for 2.12, 2.13 and 3; LLM4S is published for Scala 3 <!-- doc-support: ignore -->
+  only, on JDK 21. A 2.13 project can call it through the TASTy reader, with limits <!-- doc-support: ignore -->
+  ([Using LLM4S from Scala 2.13](../getting-started/scala-2-13)); a 2.12 project cannot. <!-- doc-support: ignore -->
 - **You want a thin, request-level API.** Both clients mirror the provider's request and response types, so every
   parameter the API has is in reach. LLM4S puts one `LLMClient` over all providers, and a parameter it does not model
   is not available through it.
