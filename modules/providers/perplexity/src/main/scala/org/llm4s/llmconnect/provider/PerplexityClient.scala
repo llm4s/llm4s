@@ -31,8 +31,9 @@ import scala.util.{ Try, Using }
  *
  * The model goes in `model`, in the Agent API's `provider/model` form. System messages are joined, in order, into
  * `instructions`; every other message becomes an `input` item: a user or assistant turn a `message` item, a tool call
- * a `function_call` item (its `arguments` a JSON string) and a [[ToolMessage]] a `function_call_output` item carrying
- * the call's `call_id`. Only text parts are sent; any other part is refused before anything is sent.
+ * a `function_call` item (its `arguments` a JSON string) and a
+ * [[org.llm4s.llmconnect.model.ToolMessage ToolMessage]] a `function_call_output` item carrying the call's
+ * `call_id`. Only text parts are sent; any other part is refused before anything is sent.
  *
  * `temperature` is always sent, `top_p` when not 1.0 and `max_output_tokens` when set. The Agent API rejects an
  * `anthropic/` model without `max_output_tokens`, so such a request that sets no limit is sent the config's

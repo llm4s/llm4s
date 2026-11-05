@@ -1817,7 +1817,19 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
   // `doctor`: `org.llm4s.configpolicy.DoctorCli` forwards to the published doctor, so the in-repository command runs
   // it with every built-in provider module on the classpath.
-  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx, perplexity)
+  .dependsOn(
+    core,
+    doctor,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    azureIdentity,
+    openaiCompatible,
+    bedrock,
+    watsonx,
+    perplexity
+  )
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
