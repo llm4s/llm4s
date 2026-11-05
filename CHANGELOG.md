@@ -370,6 +370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md): current lines and their status (`docs/_data/support.yml`), platform
   support and end of support; cadence and post-1.0 lines are marked to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
 - **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
