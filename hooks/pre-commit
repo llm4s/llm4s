@@ -113,6 +113,7 @@ map_file_to_project() {
     modules/providers/azure-identity/*)   echo "azureIdentity" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
+    modules/prompt/*)                     echo "prompt" ;;
     modules/testkit/*)                    echo "testkit" ;;
     modules/capabilities/*)               echo "capabilities" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
@@ -287,6 +288,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE schemaDerivation
+      set_add DOWNSTREAM_COMPILE prompt
       set_add DOWNSTREAM_COMPILE testkit
       set_add DOWNSTREAM_COMPILE capabilities
       set_add DOWNSTREAM_COMPILE doctor
@@ -556,6 +558,9 @@ propagate_downstream() {
     schemaDerivation)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    prompt)
+      set_add DOWNSTREAM_COMPILE samples
       ;;
     doctor)
       set_add DOWNSTREAM_COMPILE configPolicy
