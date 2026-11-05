@@ -11,21 +11,21 @@ import org.llm4s.types.Result
 /**
  * A client whose model has the capabilities `C`, a set such as `Vision & Tools`.
  *
- * One is made at the application's edge, by [[org.llm4s.capability.require]], which checks the model's metadata, or
+ * One is made at the application's edge, by [[org.llm4s.capability.requireCapabilities]], which checks the model's metadata, or
  * by [[Capable.assume]], which does not. From then on the compiler tracks the set: an operation that needs vision
  * takes a `Capable[Vision]`, and since `Capable` is covariant a `Capable[Vision & Tools]` is one, while a
  * `Capable[Tools]` is a compile error.
  *
  * @tparam C the capability set
  * @param client the client, unchanged
- * @param capabilities the names of the capabilities this value was checked (or assumed) for, which may be more
+ * @param capabilities the capabilities this value was checked (or assumed) for, which may be more
  *   than its static type shows
  * @param metadata the model metadata the capabilities were checked against; `None` when they were assumed
  */
 @Experimental
 final class Capable[+C] private (
   val client: LLMClient,
-  val capabilities: List[String],
+  val capabilities: List[Capability],
   val metadata: Option[ModelMetadata]
 ) {
 
@@ -82,13 +82,13 @@ extension (client: LLMClient) {
 
   /**
    * Checks once, here, that `provider`'s `model` has the capabilities `C`, by the registry's metadata, and returns
-   * the client typed with them: `client.require[Vision & Tools]("openai", "gpt-4o")`.
+   * the client typed with them: `client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")`.
    *
    * Fails with the registry's error when it does not know the model (see [[Capable.assume]] for that case), and
    * with a [[org.llm4s.error.ValidationError]] on the field `capabilities` that names every capability the model
    * lacks.
    */
-  def require[C](provider: String, model: String)(using
+  def requireCapabilities[C](provider: String, model: String)(using
     registry: ModelRegistryService,
     check: CapabilityCheck[C]
   ): Result[Capable[C]] =

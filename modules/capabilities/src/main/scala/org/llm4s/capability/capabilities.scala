@@ -32,3 +32,21 @@ sealed trait PromptCaching
 /** The model takes system messages (`ModelMetadata.supports("system_messages")`). */
 @Experimental
 sealed trait SystemMessages
+
+/**
+ * A capability as a value: the name of one marker, such as [[Capability.Vision]] for [[Vision]], and the key of
+ * `ModelMetadata.supports` that says a model has it. [[Capable.capabilities]] and [[CapabilityCheck.missing]] list
+ * these, in the order of [[Capability.values]].
+ *
+ * @param supportsKey the key of `ModelMetadata.supports` for this capability
+ */
+@Experimental
+enum Capability(val supportsKey: String) {
+  case Vision           extends Capability("vision")
+  case Tools            extends Capability("function_calling")
+  case ParallelTools    extends Capability("parallel_function_calling")
+  case StructuredOutput extends Capability("response_schema")
+  case Reasoning        extends Capability("reasoning")
+  case PromptCaching    extends Capability("prompt_caching")
+  case SystemMessages   extends Capability("system_messages")
+}

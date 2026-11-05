@@ -1436,7 +1436,7 @@ lazy val testkit = (project in file("modules/testkit"))
     )
   )
 
-// `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.require[Vision & Tools](provider,
+// `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.requireCapabilities[Vision & Tools](provider,
 // model)` checks the model's `ModelMetadata` once, at the application's edge, and returns a `Capable[Vision & Tools]`;
 // operations that need a capability take a `Capable[...]` of it, so passing a client not checked for it is a compile
 // error. Depends on core only; `llm4s-testkit` scripts the client in its specs.

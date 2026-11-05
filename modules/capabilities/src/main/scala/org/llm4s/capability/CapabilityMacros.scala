@@ -10,7 +10,8 @@ private[capability] object CapabilityMacros {
   def derive[C: Type](using Quotes): Expr[CapabilityCheck[C]] = {
     import quotes.reflect.*
 
-    val markers = CapabilityCheck.Order.mkString(", ")
+    val order   = Capability.values.toList.map(_.toString)
+    val markers = order.mkString(", ")
 
     def parts(tpe: TypeRepr): List[String] = tpe.dealias match {
       case AndType(left, right) => parts(left) ++ parts(right)
@@ -20,9 +21,9 @@ private[capability] object CapabilityMacros {
         if (other =:= TypeRepr.of[Nothing])
           report.errorAndAbort(
             "No capability set was given. Name the capabilities, for example " +
-              "client.require[Vision & Tools](provider, model) or Capable.assume[Vision](client)."
+              "client.requireCapabilities[Vision & Tools](provider, model) or Capable.assume[Vision](client)."
           )
-        else if (symbol.fullName == s"$Package.$name" && CapabilityCheck.SupportsKeys.contains(name)) List(name)
+        else if (symbol.fullName == s"$Package.$name" && order.contains(name)) List(name)
         else
           report.errorAndAbort(
             s"${other.show} is not a capability. A capability set is one or more of $markers, joined with &, " +
@@ -30,7 +31,7 @@ private[capability] object CapabilityMacros {
           )
     }
 
-    val names = Expr(parts(TypeRepr.of[C]).distinct.sortBy(CapabilityCheck.Order.indexOf))
+    val names = Expr(parts(TypeRepr.of[C]).distinct.sortBy(order.indexOf))
     '{ CapabilityCheck.unsafeOf[C]($names) }
   }
 }

@@ -774,7 +774,7 @@ and `Untrusted` input is fenced. It is experimental, and depends on `llm4s-core`
 libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
 ```
 
-`client.require[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
+`client.requireCapabilities[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
 client not checked for one fails to compile. It is experimental, and depends on `llm4s-core` only. See
 [Capability-Typed Clients](../guide/capabilities).
 

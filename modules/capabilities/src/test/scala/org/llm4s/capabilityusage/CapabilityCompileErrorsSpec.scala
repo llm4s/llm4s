@@ -22,7 +22,7 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
     c.describe(image, "One-line alt text").map(_.content)
 
   def checkedOnce(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] =
-    client.require[Vision & Tools]("openai", "gpt-4o")
+    client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")
 
   "A Capable[Tools]" should "not be accepted where a Capable[Vision] is needed" in {
     val errors = scala.compiletime.testing.typeCheckErrors(
@@ -61,24 +61,29 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
   it should "be refused when it is not given at all" in {
     val errors = messages(
       scala.compiletime.testing.typeCheckErrors(
-        """def f(client: LLMClient)(using ModelRegistryService) = client.require("openai", "gpt-4o")"""
+        """def f(client: LLMClient)(using ModelRegistryService) = client.requireCapabilities("openai", "gpt-4o")"""
       )
     )
     errors should include("No capability set was given")
   }
 
-  "require" should "check a model of the bundled model data from outside the package" in {
+  "requireCapabilities" should "check a model of the bundled model data from outside the package" in {
     val registry = ModelRegistryService.default().fold(e => fail(e.message), identity)
     val client   = org.llm4s.testkit.ScriptedLLMClient.always(org.llm4s.testkit.Reply.text("ok"))
-    checkedOnce(client)(using registry).map(_.capabilities) shouldBe Right(List("Vision", "Tools"))
+    checkedOnce(client)(using registry).map(_.capabilities) shouldBe Right(List(Capability.Vision, Capability.Tools))
   }
 
   it should "type its result with the set it checked" in {
     scala.compiletime.testing.typeCheckErrors(
-      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.require[Vision & Tools]("openai", "gpt-4o")"""
+      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision & Tools]("openai", "gpt-4o")"""
     ) shouldBe Nil
     scala.compiletime.testing.typeCheckErrors(
-      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.require[Vision]("openai", "gpt-4o")"""
+      """def f(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & Tools]] = client.requireCapabilities[Vision]("openai", "gpt-4o")"""
     ) should not be empty
+  }
+
+  "The wildcard import" should "leave Predef.require usable" in {
+    require(true, "x")
+    scala.compiletime.testing.typeCheckErrors("""require(1 > 0, "positive")""") shouldBe Nil
   }
 }

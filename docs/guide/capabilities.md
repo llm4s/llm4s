@@ -30,9 +30,9 @@ It depends on `llm4s-core` only.
 ## Checked once at the edge, typed afterwards
 
 A capability set is an intersection of markers: `Vision`, `Tools`, `ParallelTools`, `StructuredOutput`,
-`Reasoning`, `PromptCaching` and `SystemMessages`. `client.require[C](provider, model)` looks the model up in the
-`ModelRegistryService` in scope and returns a `Capable[C]`, or a `ValidationError` that names every capability the
-model lacks. Code that needs a capability takes a `Capable` of it:
+`Reasoning`, `PromptCaching` and `SystemMessages`. `client.requireCapabilities[C](provider, model)` looks the
+model up in the `ModelRegistryService` in scope and returns a `Capable[C]`, or a `ValidationError` that names every
+capability the model lacks. Code that needs a capability takes a `Capable` of it:
 
 ```scala
 import org.llm4s.capability.*
@@ -42,15 +42,15 @@ def caption(c: Capable[Vision], image: ContentPart.Image): Result[String] =
 
 def altText(client: LLMClient, image: ContentPart.Image)(using ModelRegistryService): Result[String] =
   for {
-    capable <- client.require[Vision & Tools]("openai", "gpt-4o") // checked once, here
-    alt     <- caption(capable, image)                             // compiles: Vision & Tools is a Vision
+    capable <- client.requireCapabilities[Vision & Tools]("openai", "gpt-4o") // checked once, here
+    alt     <- caption(capable, image)                                         // compiles: Vision & Tools is a Vision
   } yield alt
 ```
 
 `Capable` is covariant, so a `Capable[Vision & Tools]` is a `Capable[Vision]` and a `Capable[Tools]`. A client
 checked only for tools is not one with vision, and passing it is a compile error
 (`Found: Capable[Tools], Required: Capable[Vision]`). A set that holds anything other than the markers, or no
-set at all (`client.require("openai", "gpt-4o")`), does not compile either.
+set at all (`client.requireCapabilities("openai", "gpt-4o")`), does not compile either.
 
 The operations a capability allows are methods of `Capable`, thin layers over `LLMClient.complete`:
 
@@ -59,12 +59,13 @@ The operations a capability allows are methods of `Capable`, thin layers over `L
 | `Vision` | `describe(image, question, options)` | one user message: the image, then the question |
 | `Tools` | `completeWithTools(conversation, tools, options)` | the conversation, with `tools` added to the options' tools |
 
-`capable.client` is the client itself, for everything else.
+`capable.client` is the client itself, for everything else, and `capable.capabilities` lists what it was checked
+(or assumed) for as `Capability` values (`Capability.Vision`, ...).
 
 ## The run-time check is the authoritative one
 
-`require` reads the registry at run time: the bundled model data of `llm4s-core` (`modeldata/`) with llm4s's
-overrides, or the registry your application configures (`Llm4sConfig.modelRegistryService()`). A model the registry
+`requireCapabilities` reads the registry at run time: the bundled model data of `llm4s-core` (`modeldata/`) with
+llm4s's overrides, or the registry your application configures (`Llm4sConfig.modelRegistryService()`). A model the registry
 does not mark as supporting a capability is refused, even when the provider might accept the request; a model it
 does not know is refused with the registry's error.
 
