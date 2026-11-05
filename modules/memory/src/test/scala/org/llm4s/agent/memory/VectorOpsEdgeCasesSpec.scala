@@ -58,4 +58,26 @@ class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
     r(0).toDouble shouldBe 0.6 +- tol
     r(1).toDouble shouldBe 0.8 +- tol
   }
+    "VectorOps.topKBySimilarity" should "return every candidate, best first, when k is larger than the candidates" in {
+    val query = Array(1f, 0f)
+    val candidates = Seq(
+      (Array(0f, 1f), "far"),
+      (Array(1f, 0f), "best"),
+      (Array(1f, 1f), "middle")
+    )
+
+    val result = VectorOps.topKBySimilarity(query, candidates, 10)
+
+    result.map(_._1) shouldBe Seq("best", "middle", "far")
+    result.map(_._2).zip(Seq(1.0, 0.7071067811865475, 0.0)).foreach { case (actual, expected) =>
+      actual shouldBe expected +- tol
+    }
+  }
+
+  it should "return an empty Seq when k is 0" in {
+    val query = Array(1f, 0f)
+    val candidates = Seq((Array(1f, 0f), "a"), (Array(0f, 1f), "b"))
+
+    VectorOps.topKBySimilarity(query, candidates, 0) shouldBe empty
+  }
 }
