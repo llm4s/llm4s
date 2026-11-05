@@ -90,6 +90,12 @@ object Versions {
   // `org.llm4s.samples.json.JsoniterStructuredOutputExample` (#2295).
   val jsoniterScala = "2.42.2"
 
+  // fs2-kafka (Apache-2.0), for docs/guide/kafka.md (#2297): compile scope in the unpublished samples and test scope
+  // in modules/it only. 3.7.0 is the last release built on the cats-effect and fs2 versions above (3.8.0 needs
+  // cats-effect 3.6). kafka-clients (Apache-2.0) is pinned to 3.9.1 over the 3.9.0 it brings, for CVE-2025-27817.
+  val fs2Kafka     = "3.7.0"
+  val kafkaClients = "3.9.1"
+
   // AWS SDK
   val awsSdk        = "2.46.14"
   val opentelemetry = "1.63.0"
@@ -193,6 +199,10 @@ object Deps {
     "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % Versions.jsoniterScala
   val jsoniterScalaMacros =
     "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % Versions.jsoniterScala
+
+  // Kafka, unpublished samples and modules/it only (see Versions)
+  val fs2Kafka     = "com.github.fd4s" %% "fs2-kafka"     % Versions.fs2Kafka
+  val kafkaClients = "org.apache.kafka" % "kafka-clients" % Versions.kafkaClients
 
   // Test frameworks (unpublished samples' Test scope only; see Versions)
   val munit             = "org.scalameta"       %% "munit"             % Versions.munit

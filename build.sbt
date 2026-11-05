@@ -1727,6 +1727,10 @@ lazy val samples = (project in file("modules//samples"))
       // `org.llm4s.samples.json.JsoniterStructuredOutputExample` uses the same bridge.
       Deps.jsoniterScalaCore,
       Deps.jsoniterScalaMacros,
+      // docs/guide/kafka.md (#2297). Compile scope: the runnable pipeline `org.llm4s.samples.kafka` is built on it,
+      // and modules/it runs that pipeline against a broker.
+      Deps.fs2Kafka,
+      Deps.kafkaClients,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
@@ -2171,7 +2175,9 @@ lazy val it = (project in file("modules/it"))
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
     deployService % Test,
     // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
-    schemaDerivation % Test
+    schemaDerivation % Test,
+    // KafkaTicketPipelineSpec (#2297): the Kafka enrichment pipeline of docs/guide/kafka.md, against a real broker
+    samples % Test
   )
   .settings(
     name := "llm4s-it",
