@@ -140,3 +140,5 @@ guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on t
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source
 reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
+getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not Scala source
+guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
