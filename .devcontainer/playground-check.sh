@@ -21,7 +21,7 @@ run() {
   if [ "$status" -ne 0 ]; then
     echo "FAIL: $name exited $status"
     fail=1
-  elif ! grep -Eq "$marker" "$log"; then
+  elif ! grep -Eq -e "$marker" "$log"; then
     echo "FAIL: $name exited 0 but its output has no '$marker'"
     fail=1
   fi
