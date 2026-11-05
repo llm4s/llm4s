@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.llmconnect.auth.AccessTokenProvider
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, ApiKeyProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -38,6 +38,9 @@ import org.llm4s.types.Result
  *                 `llm4s-azure-identity`; in code, build one with that module's `AzureEntraId`, or
  *                 implement [[org.llm4s.llmconnect.auth.AccessTokenProvider]] directly. Use [[AzureConfig.keyless]]
  *                 or [[withTokenProvider]].
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is used
+ *                 without rebuilding the client (#2477): a section's `apiKeyFile` sets one. Never set together
+ *                 with `tokenProvider`.
  */
 @Stable
 final case class AzureConfig private (
@@ -49,13 +52,24 @@ final case class AzureConfig private (
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
-  tokenProvider: Option[AccessTokenProvider]
+  tokenProvider: Option[AccessTokenProvider],
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("azure")
   override def endpointUrl: Option[String]                            = Some(endpoint)
   override def withModel(model: String): AzureConfig                  = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
+
+  /**
+   * Sends the key `provider` holds at each request in the `api-key` header, instead of `apiKey`, so a rotated key
+   * is used without rebuilding the client (#2477). A config authenticates one way: this clears `tokenProvider`.
+   */
+  override def withApiKeyProvider(provider: ApiKeyProvider): AzureConfig = withApiKeyProvider(Some(provider))
+
+  /** `Some` as [[withApiKeyProvider(provider:* withApiKeyProvider]]; `None` goes back to `apiKey`. */
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AzureConfig =
+    copy(apiKeyProvider = provider, tokenProvider = if provider.isDefined then None else tokenProvider)
 
   def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
   def withApiKey(apiKey: Secret): AzureConfig                    = copy(apiKey = apiKey)
@@ -68,10 +82,15 @@ final case class AzureConfig private (
 
   /** `Some` as [[withTokenProvider(tokenProvider:* withTokenProvider]]; `None` goes back to the API key. */
   def withTokenProvider(tokenProvider: Option[AccessTokenProvider]): AzureConfig =
-    copy(tokenProvider = tokenProvider, apiKey = if tokenProvider.isDefined then Secret("") else apiKey)
+    copy(
+      tokenProvider = tokenProvider,
+      apiKey = if tokenProvider.isDefined then Secret("") else apiKey,
+      apiKeyProvider = if tokenProvider.isDefined then None else apiKeyProvider
+    )
 
   override def toString: String =
-    val credential = tokenProvider.fold(s"apiKey=$apiKey")(_ => "auth=entra-id")
+    val credential =
+      tokenProvider.fold(s"apiKey=$apiKey${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")}")(_ => "auth=entra-id")
     s"AzureConfig(endpoint=$endpoint, $credential, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
 
@@ -110,7 +129,8 @@ object AzureConfig {
       reserveCompletion,
       timeouts,
       HttpNetworkSettings.default,
-      tokenProvider
+      tokenProvider,
+      apiKeyProvider = None
     )
 
   /** The shape before `tokenProvider` (#2274): API-key authentication. */
