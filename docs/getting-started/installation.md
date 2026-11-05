@@ -756,6 +756,17 @@ libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
 
+### Capability-typed clients
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
+```
+
+`client.require[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
+client not checked for one fails to compile. It is experimental, and depends on `llm4s-core` only. See
+[Capability-Typed Clients](../guide/capabilities).
+
 ### Testing your own code (the testkit)
 
 ```scala

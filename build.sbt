@@ -352,6 +352,7 @@ lazy val llm4s = (project in file("."))
     providerTestkit,
     schemaDerivation,
     testkit,
+    capabilities,
     agentTestkit,
     agentCheckpointSqlite,
     agentCheckpointPostgres,
@@ -1418,6 +1419,27 @@ lazy val testkit = (project in file("modules/testkit"))
     )
   )
 
+// `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.require[Vision & Tools](provider,
+// model)` checks the model's `ModelMetadata` once, at the application's edge, and returns a `Capable[Vision & Tools]`;
+// operations that need a capability take a `Capable[...]` of it, so passing a client not checked for it is a compile
+// error. Depends on core only; `llm4s-testkit` scripts the client in its specs.
+lazy val capabilities = (project in file("modules/capabilities"))
+  .dependsOn(core, testkit % Test)
+  .settings(
+    name := "llm4s-capabilities",
+    commonSettings,
+    // Measured 100.00% statement and 100.00% branch coverage (`sbt coverage capabilities/test
+    // capabilities/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never lower it. The
+    // `CapabilityCheck` macro runs inside the compiler, where scoverage cannot see it; `CapabilityCompileErrorsSpec`
+    // exercises it when it compiles.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
 // no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
@@ -2251,6 +2273,7 @@ lazy val docs = (project in file("modules/docs"))
     providerTestkit,
     schemaDerivation,
     testkit,
+    capabilities,
     doctor,
     workspaceShared,
     workspaceClient,
@@ -2308,6 +2331,7 @@ lazy val docs = (project in file("modules/docs"))
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (testkit / Compile / sources).value ++
+        (capabilities / Compile / sources).value ++
         (doctor / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++

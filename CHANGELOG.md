@@ -303,6 +303,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it now passes `message_start`'s and `message_delta`'s counts to `StreamingAccumulator.updateUsage`, so its estimated cost is complete [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** the `ValidationError` of a `completeStructured` (and `completeStructuredOf`) reply that does not fit `A`: its message named only the
   JSON path (`$['age']`); it now adds the reader's reason, including a bridged decoder's own message [#2295](https://github.com/llm4s/llm4s/issues/2295).
+- **Added** `llm4s-capabilities` (Experimental): `client.require[Vision & Tools](provider, model)` checks the model's metadata once and
+  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
 
 ### Java & Kotlin APIs
 
