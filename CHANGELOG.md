@@ -134,6 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads them itself; [migration](docs/reference/migration.md#the-embeddings-samples-settings-left-llm4sconfig-2265).
 - `ServiceError`'s extractor binds five fields (`retryAfter` added) and `ServiceError.ServiceErrorOps` is gone
   (`isRecoverableStatus` is a method of `ServiceError`): four-field patterns and the import break; [migration](docs/reference/migration.md#serviceerror-extractor-and-isrecoverablestatus-2266).
+- `llm4s-java-api` and `llm4s-spring-boot-starter` no longer bring the provider modules: declare `llm4s-openai`,
+  `llm4s-ollama`, ... yourself; [migration](docs/reference/migration.md#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ### Observability
 
@@ -341,6 +343,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moved to `org.springframework.boot.health.contributor`, the `llmHealthIndicator` bean is an `LlmBoot4HealthIndicator`
   reporting what `LlmHealthIndicator` does on 3.x. CI runs the starter's specs on Spring Boot 4.0.8 and 4.1.1 as well as
   3.3.6 and 3.5.16 [#1467](https://github.com/llm4s/llm4s/issues/1467); see the [Spring Boot guide](docs/guide/spring-boot.md#what-the-starter-gives-you).
+- **Changed** `llm4s-java-api` and `llm4s-spring-boot-starter` to make the provider modules optional dependencies: a Java
+  user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
+  fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
 
 ### Tools
 

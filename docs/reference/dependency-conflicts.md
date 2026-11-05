@@ -48,10 +48,13 @@ together, as a project that declares those dependencies gets them:
 | llm4s-core + llm4s-openai | 42 | 95.2 | OkHttp, kotlin-stdlib, Jackson, OpenAI SDK |
 | llm4s-core + llm4s-agent + llm4s-ollama | 22 | 30.1 | - |
 
-- **`llm4s-java-api` brings every provider.** It depends on `llm4s-openai`, `llm4s-anthropic`, `llm4s-ollama`,
+- **`llm4s-java-api` 0.5.x brings every provider.** It depends on `llm4s-openai`, `llm4s-anthropic`, `llm4s-ollama`,
   `llm4s-gemini` and `llm4s-openai-compatible`, so a Java user who calls only Ollama still gets both vendor SDKs:
-  two and a half times the jars, and over four times the size, of core, the agent and one SDK-free provider. Whether to make the providers opt-in is
-  [#1496](https://github.com/llm4s/llm4s/issues/1496).
+  two and a half times the jars, and over four times the size, of core, the agent and one SDK-free provider. After
+  0.5.x the provider modules are optional dependencies of `llm4s-java-api` and `llm4s-spring-boot-starter`
+  ([#1496](https://github.com/llm4s/llm4s/issues/1496)): the facade brings core and the agent, and you declare the
+  provider modules you call, so `llm4s-java-api` with `llm4s-ollama` is the last row of the table. See the
+  [migration note](migration#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 - **Only two providers bring an SDK.** Ollama, Gemini and the OpenAI-compatible providers add one small jar to core;
   OpenAI and Anthropic add their SDK and, with it, OkHttp, Jackson and the Kotlin standard library (see
   [OkHttp and Kotlin standard library](#okhttp-and-kotlin-standard-library)).

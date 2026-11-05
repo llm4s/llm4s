@@ -5,7 +5,7 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [1496, 2277, 2278, 2279, 2476]
+cites_open_issues: [2277, 2278, 2279, 2476]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -397,8 +397,6 @@ Plainly, as of this page's sources:
   ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).
-- **Choosing providers.** `llm4s-java-api` brings five provider modules and their SDKs whether you use them or not
-  ([#1496](https://github.com/llm4s/llm4s/issues/1496)).
 - **Automatic retries.** Spring AI retries transient failures for you [S5]; an llm4s Java client reports them
   (`isRecoverable()`) and leaves the retry to you.
 - **Breadth.** LangChain4j and Spring AI list many more model providers, vector stores and document loaders than
