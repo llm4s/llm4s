@@ -481,6 +481,10 @@ A config that does not override `withApiKeyProvider` keeps returning `this`: its
 held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
 an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
 
+An embedding provider gets the same from its block's `apiKeyFile` (or the vendor's shared one) through
+`EmbeddingProviderConfig.apiKeyProvider`: read the key per request with `cfg.currentApiKey()`, which falls back
+to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
+
 ### `HttpErrorMapper`
 
 ```scala
@@ -714,7 +718,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |

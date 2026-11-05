@@ -225,6 +225,29 @@ it does. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refu
 `ConfigurationError`. On a POSIX file system, a key file readable by its group or by others is
 logged once as a WARN naming the path; mount it with mode `0400`.
 
+`apiKeyFile` is accepted wherever `apiKey` is: in an embeddings block (`llm4s.embeddings.<id>`), in
+the reranker's block (`llm4s.rerank.cohere`) and in the vendor's shared credentials
+(`llm4s.credentials.<id>`), which every client of the vendor falls back to. The precedence is the
+same as for `apiKey`: the client's own key or key file, then the shared key or key file, then an
+error naming both. So one mounted file can serve a vendor's chat sections, its embeddings and the
+reranker:
+
+```hocon
+llm4s {
+  credentials.openai.apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # every OpenAI client
+  embeddings.voyage.apiKeyFile  = "/var/run/secrets/llm4s/voyage-api-key"   # Voyage embeddings only
+  rerank.cohere.apiKeyFile      = "/var/run/secrets/llm4s/cohere-api-key"   # the Cohere reranker only
+}
+```
+
+The embedding providers (`openai`, `voyage`, `jina`, `cohere`, `ollama`) and the Cohere reranker
+re-read the file per request, as the chat clients above do; a chat section that falls back to a
+shared `apiKeyFile` is treated as if it set that file itself. A block or credentials entry that sets
+both `apiKey` and `apiKeyFile` is refused - a provider module's `reference.conf` binds
+`llm4s.credentials.<id>.apiKey` to the vendor's variable, so with a shared `apiKeyFile`, leave that
+variable unset. The safety rules are the same: the path is logged, never the key; a file over 64 KiB
+is refused; a group- or world-readable file is logged as a WARN.
+
 A key your code fetches - from Vault's API, AWS Secrets Manager or GCP Secret Manager - comes from an
 `ApiKeyProvider`, which the client asks for the key on every request. `current()` is on the request
 path, so it caches:

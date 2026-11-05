@@ -185,19 +185,27 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
           s"[JinaEmbeddingProvider] POST $url model=$model task=${sentTask.map(_.wireName).getOrElse("-")} inputs=${input.size}"
         )
 
-        val headers = Map(
-          "Authorization" -> s"Bearer ${cfg.apiKey.reveal}",
+        // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+        def headers(key: String) = Map(
+          "Authorization" -> s"Bearer $key",
           "Content-Type"  -> "application/json"
         )
 
         // A cancellation is not a failed request: it passes through (design section 4.4).
         val respEither: Result[Llm4sHttpResponse] =
-          httpClient.post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(120.seconds)).left.map {
-            // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
-            case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
-            case err =>
-              EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
-          }
+          cfg
+            .currentApiKey()
+            .flatMap(key =>
+              httpClient
+                .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                .left
+                .map {
+                  // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+                  case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
+                  case err =>
+                    EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
+                }
+            )
 
         respEither.flatMap { response =>
           response.statusCode match {

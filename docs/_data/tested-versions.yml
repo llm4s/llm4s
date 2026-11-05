@@ -77,6 +77,10 @@ stacks:
     artifact: "docs/guide/json-libraries.md (tested recipe)"
     versions: ["1.0.0"]
     note: "Pinned: later releases are built with a newer Scala 3 whose TASTy the 3.7.1 compiler cannot read."
+  - name: "jsoniter-scala"
+    artifact: "docs/guide/json-libraries.md (tested recipe)"
+    versions: ["2.42.2"]
+    note: ""
   - name: "OpenAI Java SDK"
     artifact: "llm4s-openai"
     versions: ["4.69.3"]

@@ -2,6 +2,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.reranker.{ CohereReranker, RerankProviderConfig, RerankerFactory }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -13,7 +14,9 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  * `llm4s-rag`'s `reference.conf` binds `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL` and
  * `COHERE_RERANK_MODEL` there. The Cohere key is `llm4s.rerank.cohere.apiKey` when that is set,
  * and otherwise Cohere's shared `llm4s.credentials.cohere.apiKey`, bound to `COHERE_API_KEY` -
- * the key the Cohere chat provider uses too, so one variable serves both.
+ * the key the Cohere chat provider uses too, so one variable serves both. Either place may set
+ * `apiKeyFile` instead, a file holding the key: it is read at load and again whenever it changes,
+ * so a key a secret manager rotates is used without rebuilding the reranker (#2478).
  *
  * {{{
  * for
@@ -36,10 +39,15 @@ object RerankerConfigLoader {
    */
   val COHERE_API_KEY: String = "COHERE_API_KEY"
 
-  final private case class CohereSettings(apiKey: Option[String], baseUrl: Option[String], model: Option[String])
+  final private case class CohereSettings(
+    apiKey: Option[String],
+    baseUrl: Option[String],
+    model: Option[String],
+    apiKeyFile: Option[String]
+  )
 
   implicit private val cohereReader: PureConfigReader[CohereSettings] =
-    PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(CohereSettings.apply)
+    PureConfigReader.forProduct4("apiKey", "baseUrl", "model", "apiKeyFile")(CohereSettings.apply)
 
   /**
    * Reads `llm4s.rerank` from `source`.
@@ -85,7 +93,7 @@ object RerankerConfigLoader {
   private def loadCohere(source: ConfigSource): Result[RerankProviderConfig] = {
     val at = source.at(CohereSection)
     val settings =
-      if (at.value().isLeft) Right(CohereSettings(None, None, None))
+      if (at.value().isLeft) Right(CohereSettings(None, None, None, None))
       else
         at.load[CohereSettings]
           .left
@@ -93,7 +101,8 @@ object RerankerConfigLoader {
 
     for {
       cohere   <- settings
-      resolved <- SharedCredentials.read(source).resolve(cohere.apiKey, s"$CohereSection.apiKey", CohereId)
+      keyFile  <- SharedCredentials.keyFilePath(cohere.apiKeyFile, s"$CohereSection.apiKeyFile")
+      resolved <- SharedCredentials.read(source).resolve(cohere.apiKey, s"$CohereSection.apiKey", CohereId, keyFile)
       key <- resolved.toRight(
         ConfigurationError(
           "Missing Cohere reranker apiKey: " +
@@ -105,7 +114,8 @@ object RerankerConfigLoader {
       RerankProviderConfig(
         baseUrl = nonEmpty(cohere.baseUrl).getOrElse(CohereReranker.DEFAULT_BASE_URL),
         apiKey = key.value,
-        model = nonEmpty(cohere.model).getOrElse(CohereReranker.DEFAULT_MODEL)
+        model = nonEmpty(cohere.model).getOrElse(CohereReranker.DEFAULT_MODEL),
+        apiKeyProvider = key.file.map(ApiKeyProvider.file)
       )
     }
   }

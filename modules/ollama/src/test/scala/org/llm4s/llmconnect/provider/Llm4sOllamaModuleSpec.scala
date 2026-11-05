@@ -144,4 +144,13 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
       }
     }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(_, 200, """{"embedding":[0.1,0.2]}""")
+      ) { (baseUrl, keys) =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(keys))
+      }
+    }
   }

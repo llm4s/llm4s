@@ -288,4 +288,18 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
       }
     }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(
+          _,
+          200,
+          """{"data":[{"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":1,"total_tokens":1}}"""
+        )
+      ) { (baseUrl, keys) =>
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(keys))
+      }
+    }
   }
