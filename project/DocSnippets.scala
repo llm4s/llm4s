@@ -41,6 +41,7 @@ object DocSnippets {
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/kafka.md",
+    "guide/prompts.md",
     "guide/providers.md",
     "guide/vector-store.md",
     "index.md",
