@@ -219,6 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
 - **Added** `StreamingBridgeContract`, one conformance suite that `llm4s-effect`, `llm4s-zio` and `llm4s-pekko` each run:
   errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core [#2334](https://github.com/llm4s/llm4s/issues/2334).
+- **Added** `llm4s-ox` (Experimental): a streamed completion as an Ox `Flow`, `parComplete`, `raceProviders` and `RetrySchedule`
+  for direct-style code on virtual threads, and the [direct-style guide](docs/guide/direct-style.md) [#2332](https://github.com/llm4s/llm4s/issues/2332).
 
 ### Agent runtime
 

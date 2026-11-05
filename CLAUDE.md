@@ -115,6 +115,7 @@ llm4s/
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
+│   ├── llm4s-ox/              # Ox direct style: a streamed reply as a Flow, parComplete, raceProviders, RetrySchedule (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
