@@ -12,17 +12,18 @@ import sttp.tapir.server.stub.TapirStubInterpreter
 
 /**
  * Two endpoints of an order service, served in-process by tapir's stub interpreter, offered to an agent as tools
- * with [[EndpointTools]] (docs/guide/tapir-tools.md).
+ * with `EndpointTools` (docs/guide/tapir-tools.md).
  *
  * The model is scripted (`ScriptedLLMClient`), so the example needs no API key and no network: it looks an order up,
  * then cancels it, which suspends the run for approval because `POST` changes something; the example approves it.
+ *
+ * A `main` method, not `extends App`: the tools run on the agent's threads, and an `App` object's fields are set in its
+ * static initialiser, which those threads would wait on while `main` waits for them.
  *
  * {{{
  * sbt "samples/runMain org.llm4s.samples.tapir.TapirEndpointToolsExample"
  * }}}
  */
-// A `main` method, not `extends App`: the tools run on the agent's threads, and an `App` object's fields are set in its
-// static initialiser, which those threads would wait on while `main` waits for them.
 object TapirEndpointToolsExample {
 
   def main(args: Array[String]): Unit = {
