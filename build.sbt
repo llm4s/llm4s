@@ -1393,6 +1393,9 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
     // specs exercise it when they compile.
     coverageFloor(95),
+    // `DerivedToolsSpec` (#2326) reads the Scaladoc of a core method from its TASTy, which the compiler only does
+    // when asked; the guide tells users of `Tools.derive` to add the same flag.
+    Test / scalacOptions += "-Xread-docs",
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
   )
