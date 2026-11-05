@@ -537,7 +537,7 @@ RequestTransformer.adjusted(service) { (modelId, caps) =>
 the option and message transforms in one call and returns the transformed `options`, `messages`,
 `requiresFakeStreaming` and `adjustments`.
 
-**Reporting adjustments** ([RFC 0008](../rfcs/0008-generation-controls.md)). A caller learns which
+**Reporting adjustments** ([RFC 0008](../rfcs/0008-generation-controls)). A caller learns which
 requested options were not sent as asked from `Completion.adjustments`, a list of
 `RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`, each naming a `RequestOption`). Your client:
 

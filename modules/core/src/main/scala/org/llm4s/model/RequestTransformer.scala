@@ -335,6 +335,13 @@ object TransformationResult {
     new TransformationResult(options, messages, requiresFakeStreaming, adjustments)
 
   /**
+   * The `apply` before `adjustments` was added, with none. Kept for Java and Kotlin, which pass every
+   * argument because they do not see Scala's defaults.
+   */
+  def apply(options: CompletionOptions, messages: Seq[Message], requiresFakeStreaming: Boolean): TransformationResult =
+    new TransformationResult(options, messages, requiresFakeStreaming, List.empty)
+
+  /**
    * Transforms both options and messages in one call. With `dropUnsupported`, what was dropped or
    * changed is in [[TransformationResult.adjustments]]; without it, an unsupported option fails.
    */

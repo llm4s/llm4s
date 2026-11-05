@@ -108,6 +108,23 @@ object Completion {
     adjustments: List[RequestAdjustment] = List.empty
   ): Completion =
     new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, adjustments)
+
+  /**
+   * The `apply` before `adjustments` was added, with none. Kept for Java and Kotlin, which pass every
+   * argument because they do not see Scala's defaults.
+   */
+  def apply(
+    id: String,
+    created: Instant,
+    content: String,
+    model: String,
+    message: AssistantMessage,
+    toolCalls: List[ToolCall],
+    usage: Option[TokenUsage],
+    estimatedCost: Option[Double],
+    citations: List[Citation]
+  ): Completion =
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, List.empty)
 }
 
 /**
