@@ -309,7 +309,7 @@ in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-ap
 ### Rate Limits
 
 LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`.
-`ReliableClient` ([Reliable LLM Calling](reliability-guide)) retries a `429` with backoff, honouring the
+`ReliableClient` ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)) retries a `429` with backoff, honouring the
 provider's `Retry-After`, and can rate-limit locally; by hand, the loop looks like this:
 
 ```scala
@@ -351,7 +351,7 @@ llm4s.providers.openai-main.timeouts {
 ### Provider Fallbacks
 
 `ReliableClient` (`org.llm4s.reliability`) wraps any `LLMClient` with retries, a circuit breaker, a per-call
-deadline and an optional local rate limit ([Reliable LLM Calling](reliability-guide)). To fail over to a second
+deadline and an optional local rate limit ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)). To fail over to a second
 provider or region, wrap each client once and ask the second only when the first still fails after its own
 retries: the cookbook's
 [fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala)

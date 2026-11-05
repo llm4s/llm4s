@@ -103,7 +103,7 @@ What the gateway receives, on every chat request:
 - `model` as written. The gateway maps it to a provider, a region and a deployment, so switching any of those is a
   change to the gateway, not to the app.
 
-`registryProvider` tells LLM4S which [model registry](../MODEL_METADATA.md) entry gives the context window, since a
+`registryProvider` tells LLM4S which [model registry](https://github.com/llm4s/llm4s/blob/main/docs/MODEL_METADATA.md) entry gives the context window, since a
 gateway's host says nothing about the model behind it
 ([details](providers#where-the-context-window-comes-from)). Without it, the window is 8192 tokens.
 
@@ -191,7 +191,7 @@ Three layers, from the outside in:
 1. **The gateway** can retry and fall back between deployments and regions of the same model, in its own config.
 2. **`ReliableClient`** in the app retries what is transient (429, 408, 5xx and timeouts, honouring `Retry-After`),
    opens a circuit breaker when the gateway keeps failing, bounds each call with a deadline and can rate-limit
-   locally ([Reliable LLM Calling](../reliability-guide)).
+   locally ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)).
 3. **A second section**, for a second gateway or provider, asked only when the first still fails.
 
 The section's `timeouts` bound how long one HTTP attempt may wait for the response to begin
