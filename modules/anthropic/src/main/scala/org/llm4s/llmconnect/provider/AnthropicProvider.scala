@@ -7,7 +7,7 @@ import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderMod
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -91,6 +91,9 @@ object AnthropicProvider extends ProviderDescriptor:
         yield Some(
           AnthropicWorkloadIdentity(file, rule, org, auth.extra(ServiceAccountIdKey), auth.extra(WorkspaceIdKey))
         )
+
+  /** Built on the Anthropic Java SDK, whose own HTTP transport ignores `LlmClientOptions.httpClient` (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(false)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

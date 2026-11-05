@@ -156,6 +156,26 @@ class ProviderFeaturesSpec extends AnyWordSpec with Matchers:
     }
   }
 
+  "customHttpClient (#2341)" should {
+
+    "default to true, so a provider that omits it claims to honour a supplied HTTP client" in {
+      ProviderFeatures().customHttpClient shouldBe true
+      ProviderFeatures.default.customHttpClient shouldBe true
+      ProviderFeatures(streaming = false, toolCalling = false).customHttpClient shouldBe true
+    }
+
+    "be set by apply and by its setter, leaving the other flags and the original alone" in {
+      val start = ProviderFeatures(streaming = false, toolCalling = true)
+      val sdk   = start.withCustomHttpClient(false)
+
+      sdk.customHttpClient shouldBe false
+      flags(sdk) shouldBe flags(start)
+      start.customHttpClient shouldBe true
+      sdk shouldBe ProviderFeatures(streaming = false, toolCalling = true, customHttpClient = false)
+      sdk should not be start
+    }
+  }
+
   // Note on falsifiability: these macros expand when THIS file compiles. A main-only change under
   // zinc's incremental compilation may not recompile this spec, so the macros are not re-expanded
   // and the tests appear to pass against a public constructor; a clean build (as in CI) is the

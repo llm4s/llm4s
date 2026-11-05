@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ GeminiConfigKeys, GeminiModelLister, ProviderModelLister }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -47,4 +48,11 @@ object GeminiProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[GeminiConfig](id, config)
-      .flatMap(GeminiClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        GeminiClient(
+          _,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      )

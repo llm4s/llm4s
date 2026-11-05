@@ -6,7 +6,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -85,6 +85,9 @@ object OpenAIProvider extends ProviderDescriptor:
           idp <- ProviderDescriptor.requireAuthExtra(providerName, auth, IdentityProviderIdKey)
           sa  <- ProviderDescriptor.requireAuthExtra(providerName, auth, ServiceAccountIdKey)
         yield Some(OpenAIWorkloadIdentity(auth.identityToken, idp, sa, auth.extra(ClientIdKey).map(Secret(_))))
+
+  /** Built on the openai-java SDK, whose own HTTP transport ignores `LlmClientOptions.httpClient` (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(false)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

@@ -399,7 +399,10 @@ in the request body you record; send them in headers.
 
 `org.llm4s.http.Llm4sHttpClient` is the JDK-backed HTTP client (`Llm4sHttpClient.create()`), with
 `get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
-as a constructor parameter so tests can inject a stub.
+as a constructor parameter so tests can inject a stub. When `LlmClientOptions.httpClient` is set, send your requests
+through that client and do not close it - the caller owns it; otherwise build your own and close it in
+`releaseResources`. A client that cannot (one built on a vendor SDK) overrides `features` with
+`ProviderFeatures.default.withCustomHttpClient(false)`.
 
 ```scala
 def post(
@@ -718,7 +721,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`, `assertUsesSuppliedHttpClient` (a client built with `LlmClientOptions.withHttpClient` sends `complete` and `streamComplete` through it, and does not close it). Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |

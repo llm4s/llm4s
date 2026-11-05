@@ -97,6 +97,10 @@ trait ProviderDescriptor:
    * `config` is whatever the caller passed, so implementations must check the
    * type rather than cast — `ProviderDescriptor.expectConfig` does that and
    * produces the standard mismatch error.
+   *
+   * A client that sends its own HTTP requests sends them through `options.httpClient` when it is set, and
+   * does not close that client; a provider that cannot (one built on a vendor SDK) declares
+   * `features.customHttpClient = false`.
    */
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

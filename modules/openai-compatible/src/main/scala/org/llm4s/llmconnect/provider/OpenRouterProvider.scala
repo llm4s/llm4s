@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenRouterModelLister, ProviderModelLister }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -58,4 +59,11 @@ object OpenRouterProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[OpenAIConfig](id, config)
-      .flatMap(OpenRouterClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        OpenRouterClient(
+          _,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      )

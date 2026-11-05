@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
@@ -345,4 +346,11 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[OpenAICompatibleConfig](id, config)
-      .flatMap(OpenAICompatibleClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        OpenAICompatibleClient(
+          _,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      )

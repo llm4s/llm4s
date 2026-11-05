@@ -588,6 +588,35 @@ What is not covered:
   `llm4s.http`; the AWS SDK reads `HTTPS_PROXY` for those itself.
 - **Clients you build yourself** with `Llm4sHttpClient.create()` keep the JVM's defaults; pass the settings as above.
 
+### Your own HTTP client
+
+A service that already has a tuned HTTP stack - connection pool, proxy, request logging, tracing - can hand it to the
+provider clients instead: implement `org.llm4s.http.Llm4sHttpClient` over it and pass it with
+`LlmClientOptions.withHttpClient` ([#2341](https://github.com/llm4s/llm4s/issues/2341)).
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
+import org.llm4s.model.ModelRegistryService
+
+val http: Llm4sHttpClient = Llm4sHttpClient.create() // or your own implementation of the trait
+
+val client = for {
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client <- LLMConnect.getClient(providerConfig, LlmClientOptions.default.withHttpClient(http))
+} yield client
+```
+
+- **You own it.** Closing the LLM client does not close a supplied HTTP client; close it when your application stops.
+- **The section's `llm4s.http` proxy and TLS settings do not apply to it**: configure them on your own stack.
+- **SDK-free providers use it**: `ollama`, `gemini`, `vertexai`, `watsonx`, `openai-compatible` and its dialects
+  (`deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`). Providers built on a vendor SDK (`openai`, `azure`,
+  `requesty`, `anthropic`, `bedrock`) keep the SDK's transport and ignore it; their descriptor's
+  `features.customHttpClient` is `false`. Embedding providers do not take one yet.
+
 ---
 
 ## Switching providers

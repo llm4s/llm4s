@@ -5,7 +5,7 @@ import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -142,6 +142,9 @@ object AzureProvider extends ProviderDescriptor:
               s"\"$ApiKeyAuthentication\" or \"$EntraIdAuthentication\""
           )
         )
+
+  /** Built on the openai-java SDK, whose own HTTP transport ignores `LlmClientOptions.httpClient` (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(false)
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService
