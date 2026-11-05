@@ -130,6 +130,10 @@ flags:
     paths:
       - modules/providers/watsonx/src/main/scala
     carryforward: true
+  perplexity:
+    paths:
+      - modules/providers/perplexity/src/main/scala
+    carryforward: true
   provider-testkit:
     paths:
       - modules/provider-testkit/src/main/scala

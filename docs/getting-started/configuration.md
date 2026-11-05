@@ -162,6 +162,7 @@ the value.
 | `openrouter` | `OPENROUTER_API_KEY` | `llm4s-openai-compatible` |
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
 | `xai` | `XAI_API_KEY` | `llm4s-openai-compatible` |
+| `perplexity` | `PERPLEXITY_API_KEY` | `llm4s-perplexity` |
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
@@ -218,7 +219,7 @@ restarting the application. The INFO line names the file, never the key.
 A section sets `apiKeyFile` or `apiKey` (or `auth`), never two of them, and with `apiKeyFile` the
 vendor's shared key is not used. Every built-in provider that takes an API key re-reads the file per
 request as above: `openai`, `requesty`, `azure` (its `api-key` header), `anthropic`, `gemini`,
-`openai-compatible`, `openrouter`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, and `watsonx`, which
+`openai-compatible`, `openrouter`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, `perplexity`, and `watsonx`, which
 exchanges a rotated key for a new IAM token at the next request. A provider from another module whose
 config cannot take an `ApiKeyProvider` reads the file once, when the section is loaded, and logs that
 it does. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refuses `apiKeyFile` with a
@@ -445,6 +446,7 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 |---|---|---|---|
 | `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
 | `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
+| `perplexity` | 5 minutes | 10 minutes | the wait for the response to begin |
 | `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
 | `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
@@ -1151,6 +1153,7 @@ also set in `application.conf` or with `-D`.
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
+| `PERPLEXITY_API_KEY` | `llm4s.credentials.perplexity.apiKey` | `llm4s-perplexity` |
 | `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
 | `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |

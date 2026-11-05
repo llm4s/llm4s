@@ -349,6 +349,7 @@ lazy val llm4s = (project in file("."))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
     testkit,
@@ -1160,7 +1161,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
     // Measured 81.32% statement coverage (`sbt coverage anthropic/test anthropic/coverageReport`)
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Anthropic smoke suite in `modules/it` is not counted here.
-    coverageFloor(80),
+    coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1332,6 +1333,29 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
     // Floor is the measured value rounded down to the nearest 5. Never lower it. The live check is
     // the `@Cloud` probe suite `WatsonXAssumptionProbeSpec` in `modules/it`, which needs an IBM Cloud
     // account and has not been run yet (#1314).
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-perplexity` (#1026): Perplexity's Agent API (`/v1/agent`), which replaced Sonar Chat Completions. It
+// speaks the OpenAI Responses format, not `/chat/completions`, so it is a provider module of its own rather than a
+// dialect in `openai-compatible`. No dependency beyond core.
+
+lazy val perplexity = (project in file("modules/providers/perplexity"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-perplexity",
+    commonSettings,
+    // Measured 99.37% statement coverage (`sbt coverage perplexity/test perplexity/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The `@Cloud` `PerplexitySmokeSpec` in
+    // `modules/it` is not counted here.
     coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
@@ -1682,6 +1706,7 @@ lazy val samples = (project in file("modules//samples"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1772,7 +1797,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
   // `doctor`: `org.llm4s.configpolicy.DoctorCli` forwards to the published doctor, so the in-repository command runs
   // it with every built-in provider module on the classpath.
-  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
+  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx, perplexity)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -2112,7 +2137,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
     ),
     // Enforce >=80% statement coverage when running with `sbt coverage test`
     // for the unit-test suite that ships with this module. Pre-existing gate, unchanged.
-    coverageFloor(80)
+    coverageFloor(95)
   )
 
 // Two OkHttp majors share this classpath, and it is left that way on purpose (#1132).
@@ -2154,6 +2179,7 @@ lazy val it = (project in file("modules/it"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -2248,6 +2274,7 @@ lazy val docs = (project in file("modules/docs"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
     testkit,
@@ -2305,6 +2332,7 @@ lazy val docs = (project in file("modules/docs"))
         (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
+        (perplexity / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (testkit / Compile / sources).value ++
