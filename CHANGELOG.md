@@ -507,6 +507,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store built from a `Config` closes its own pool, also when the schema cannot be created
   [#2300](https://github.com/llm4s/llm4s/issues/2300); see
   [Postgres Memory Store](docs/reference/postgres-memory-store.md#sharing-your-applications-connection-pool).
+- **Changed** `PostgresMemoryStore.storeAll` sends its rows as JDBC batches (up to 1,000 per round trip) instead of one
+  statement per memory [#637](https://github.com/llm4s/llm4s/issues/637); see
+  [bulk ingestion](docs/reference/postgres-memory-store.md#bulk-ingestion).
 - **Changed** `MemoryManagerConfig` to a private constructor with `with*` setters (`.copy` is private) [#1847](https://github.com/llm4s/llm4s/issues/1847).
 - **Fixed** `autoExtractEntities` swallowing a cancellation: `recordMessage` returns the `CancelledError` (also a failure ending
   while the thread is interrupted, or a thrown `InterruptedException`) and the interrupt flag stays set [#1847](https://github.com/llm4s/llm4s/issues/1847).
