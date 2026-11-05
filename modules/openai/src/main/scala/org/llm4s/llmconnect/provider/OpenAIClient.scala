@@ -53,7 +53,7 @@ import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -143,6 +143,9 @@ class OpenAIClient private[provider] (
   protected def providerName: String      = provider.asString
   protected def modelName: String         = model
 
+  // what the transformer dropped goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   /**
    * Creates an OpenAI client for direct OpenAI API access (or Requesty, or any other
    * OpenAI-compatible base URL).
@@ -197,6 +200,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      _                       = adjustmentLog.record(model, transformed.adjustments)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -206,7 +210,7 @@ class OpenAIClient private[provider] (
       )
       body = serializeParams(params)
       response <- call("completion")(transport.createChatCompletion(params))
-      completion = convertFromOpenAIFormat(response)
+      completion = convertFromOpenAIFormat(response).withAdjustments(transformed.adjustments)
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -236,6 +240,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
+        adjustmentLog.record(model, transformed.adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -248,8 +253,10 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { (transformed, params) =>
         val requestBody = serializeParams(params)
-        if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
-        else executeNativeStreaming(startedAt, requestBody, params, onChunk)
+        val adjustments = transformed.adjustments
+        if (transformed.requiresFakeStreaming)
+          executeFakeStreaming(startedAt, requestBody, params, adjustments, onChunk)
+        else executeNativeStreaming(startedAt, requestBody, params, adjustments, onChunk)
       }
   }
 
@@ -280,11 +287,12 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
+    adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     call("fake streaming")(transport.createChatCompletion(params))
       .map { response =>
-        val completion = convertFromOpenAIFormat(response)
+        val completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
         emitCompletionAsChunks(completion, onChunk)
         recordExchange(startedAt, Some(requestBody), Some(serialize(response)), Right(completion))
         completion
@@ -299,6 +307,7 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
+    adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
@@ -322,7 +331,10 @@ class OpenAIClient private[provider] (
         // breakdown and its total (`StreamingAccumulator.updateUsage`).
         accumulator.toCompletion.map { c =>
           val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-          c.withModel(model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+          c.withModel(model)
+            .withToolCalls(c.message.toolCalls.toList)
+            .withEstimatedCost(cost)
+            .withAdjustments(adjustments)
         }
       )
     }(

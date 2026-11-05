@@ -286,6 +286,15 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
 
+### `OpenAICompatibleDialect.addReasoning` returns what it did not send (#2115)
+
+`addReasoning(body, model, options)` returns `List[RequestAdjustment]` instead of `Unit`
+([RFC 0008](../rfcs/0008-generation-controls)). The client puts the list on `Completion.adjustments`, so a caller learns
+that a requested reasoning effort was not sent instead of losing it silently. The standard implementation sends
+nothing and reports a set `CompletionOptions.reasoning` as `Dropped`. A dialect that overrides it returns
+`List.empty` when it sent what was asked, and a `RequestAdjustment` for each part it did not send
+([Writing a provider](../guide/writing-a-provider)).
+
 ### One proxy and TLS setting for every provider client (#2273)
 
 Every provider client now honours `llm4s.http` ([Corporate networks](../getting-started/configuration#corporate-networks-a-proxy-and-a-custom-ca)):

@@ -8,7 +8,7 @@ nav_order: 8
 
 # RFC 0008: Generation controls and reported adjustments
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
 - **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
@@ -82,19 +82,19 @@ for Anthropic, and multi-provider callers keep losing settings without notice.
 
 ### Part 1: Reported adjustments
 
-A public, `@Experimental` value describing what happened to one requested option. The option is typed, so a
+A public, `@Stable` value describing what happened to one requested option. The option is typed, so a
 caller's `match` on it is checked by the compiler and survives a field rename:
 
 ```scala
 package org.llm4s.llmconnect.model
 
-@Experimental
+@Stable
 enum RequestOption derives ReadWriter {
   case Temperature, TopP, MaxTokens, PresencePenalty, FrequencyPenalty, Tools, ResponseFormat,
        Reasoning, Thinking, PromptCache
 }
 
-@Experimental
+@Stable
 enum RequestAdjustment derives ReadWriter {
   /** The option was not sent: the provider or model cannot honour it. */
   case Dropped(option: RequestOption, reason: String)
@@ -109,9 +109,10 @@ enum RequestAdjustment derives ReadWriter {
 }
 ```
 
-`RequestOption` names each `CompletionOptions` field that can be adjusted. A field added later adds a case, under
-the same `@Experimental` tier. `reason`, `requested` and `sent` stay strings: they are for people and logs, not for
-matching.
+`RequestOption` names each `CompletionOptions` field that can be adjusted. A field added later adds a case. Both
+types are `@Stable` because `Completion` and `TransformationResult`, which are `@Stable`, expose them, and a `@Stable`
+signature may not name an `@Experimental` type (#1818; decision 12). `reason`, `requested` and `sent` stay strings:
+they are for people and logs, not for matching.
 
 **Where they come from.** There are two sources, both pure, and the result is one list:
 
@@ -316,9 +317,10 @@ below).
 ## Compatibility impact
 
 - **Modules and tiers:** `llm4s-core` (Frozen at 1.0): `CompletionOptions`, `ReasoningEffort`, `Completion`,
-  `TransformationResult` and `ModelCapabilities` change. `RequestOption`, `RequestAdjustment`, `Thinking` and
-  `PromptCache` are new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
-  Provider modules change only internally. `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
+  `TransformationResult` and `ModelCapabilities` change. `RequestOption` and `RequestAdjustment` are new and
+  `@Stable` (decision 12); `Thinking` and `PromptCache` are new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
+  Provider modules change only internally, except `llm4s-openai-compatible`: `OpenAICompatibleDialect.addReasoning`
+  returns the `List[RequestAdjustment]` it could not send instead of `Unit` (decision 13). `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
   `NONE` and gains `MINIMAL`, `XHIGH` and `MAX`, `JCompletionOptions` loses `budgetTokens` and gains `thinking`, and
   the Kotlin `CompletionOptionsDsl` swaps its `budgetTokens` property for `thinking`.
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
@@ -376,7 +378,9 @@ completion.adjustments                                 // what was dropped, adju
 Each PR has its own review:
 
 1. **PR 1 (Part 1).** `RequestOption` and `RequestAdjustment` on `TransformationResult` and `Completion`, the
-   transformer's existing drops reported, and per-client, capped warn-once logging. No new options.
+   transformer's existing drops reported, a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama and the standard
+   OpenAI-compatible dialect do not send reported as `Dropped` (decision 13), and per-client, capped warn-once
+   logging. No new options.
 2. **PR 2 (Part 1).** `AgentEvents.ModelCallCompleted.adjustments`, filled from each call's `Completion`.
 3. **PR 3 (Part 2).** `ModelCapabilities` reads the metadata keys above, plus `supportsBudgetThinking` from the
    overrides file.
@@ -424,6 +428,17 @@ The review of this PR settled these:
 10. **Warn-once state is per client, thread-safe and capped at 256 entries.**
 11. **A `reasoning`-only request to a model that rejects a thinking budget maps to `output_config.effort`**, driven
     by `supportsBudgetThinking` in the overrides file.
+
+PR 1 settled these:
+
+12. **`RequestOption` and `RequestAdjustment` are `@Stable`**, not `@Experimental` as first written. `Completion`
+    and `TransformationResult` are `@Stable` and expose them, and `stabilityTierCheck` (#1818) rejects a `@Stable`
+    signature that names an `@Experimental` type. The design is settled by this RFC. Nothing is frozen until the
+    pre-1.0 MiMa baseline (#1281), so they can still change if a later PR shows they must.
+13. **PR 1 also reports the provider-side drops that #2115's three-PR plan put in its first step**: a `reasoning`
+    ignored by Gemini, Vertex AI, Bedrock, Ollama and the standard OpenAI-compatible dialect. `addReasoning` returns
+    what it could not send, as "Where they come from" describes. The dialects that map reasoning themselves (Z.ai,
+    xAI, OpenRouter) report nothing new yet; a level one of them leaves unsent is a follow-up under this RFC.
 
 ## Open questions
 

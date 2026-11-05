@@ -2,7 +2,15 @@ package org.llm4s.model
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ CompletionOptions, Message, ResponseFormat, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  Message,
+  RequestAdjustment,
+  RequestOption,
+  ResponseFormat,
+  SystemMessage,
+  UserMessage
+}
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -34,7 +42,8 @@ trait RequestTransformer {
    *
    * @param modelId The model identifier (e.g., "o1", "gpt-4o", "claude-3-7-sonnet")
    * @param options The completion options to transform
-   * @param dropUnsupported If true, silently drop/adjust unsupported params; if false, return error
+   * @param dropUnsupported If true, drop or adjust unsupported params; if false, return error.
+   *                        [[TransformationResult.transform]] also reports what it dropped.
    * @return Transformed options or validation error
    */
   def transformOptions(
@@ -42,6 +51,18 @@ trait RequestTransformer {
     options: CompletionOptions,
     dropUnsupported: Boolean = false
   ): Result[CompletionOptions]
+
+  /**
+   * The options with everything `modelId` cannot take dropped or adjusted, as
+   * `transformOptions(modelId, options, dropUnsupported = true)` returns them, and a
+   * [[org.llm4s.llmconnect.model.RequestAdjustment]] for each change. The default reports none, so a
+   * transformer that does not override it still works. [[TransformationResult.transform]] calls it.
+   */
+  private[llm4s] def adjustOptions(
+    modelId: String,
+    options: CompletionOptions
+  ): (CompletionOptions, List[RequestAdjustment]) =
+    (transformOptions(modelId, options, dropUnsupported = true).getOrElse(options), List.empty)
 
   /**
    * Transform messages for model-specific requirements.
@@ -125,31 +146,34 @@ final private[model] class DefaultRequestTransformer(
     modelId: String,
     options: CompletionOptions,
     dropUnsupported: Boolean
-  ): Result[CompletionOptions] = {
-    val found = violations(modelId, options, getCapabilities(modelId))
-    if (dropUnsupported)
-      Right(found.foldLeft(options) { (adjusted, violation) =>
-        logger.debug(s"Model $modelId: ${violation.dropping}")
-        violation.drop(adjusted)
-      })
+  ): Result[CompletionOptions] =
+    if (dropUnsupported) Right(adjustOptions(modelId, options)._1)
     else
-      found.flatMap(_.error) match {
+      violations(modelId, options, getCapabilities(modelId)).flatMap(_.error) match {
         case Nil    => Right(options)
         case errors => Left(ValidationError(errors.mkString("; "), "options"))
       }
+
+  // Pure: the client that sends the request logs what was adjusted (AdjustmentLog), once.
+  override private[llm4s] def adjustOptions(
+    modelId: String,
+    options: CompletionOptions
+  ): (CompletionOptions, List[RequestAdjustment]) = {
+    val found = violations(modelId, options, getCapabilities(modelId))
+    (found.foldLeft(options)((adjusted, violation) => violation.drop(adjusted)), found.map(_.adjustment))
   }
 
   /**
    * An option the model does not support.
    *
-   * @param drop     removes or adjusts it, when unsupported options may be dropped
-   * @param dropping describes `drop`, for the debug log
-   * @param error    why the options are invalid when they may not be dropped; `None` when the
-   *                 option is sent anyway
+   * @param drop       removes or adjusts it, when unsupported options may be dropped
+   * @param adjustment what `drop` does, reported to the caller
+   * @param error      why the options are invalid when they may not be dropped; `None` when the
+   *                   option is sent anyway
    */
   final private case class Violation(
     drop: CompletionOptions => CompletionOptions,
-    dropping: String,
+    adjustment: RequestAdjustment,
     error: Option[String]
   )
 
@@ -165,19 +189,28 @@ final private[model] class DefaultRequestTransformer(
       case (min, max) if options.temperature < min || options.temperature > max =>
         Violation(
           _.withTemperature(min),
-          s"adjusting temperature from ${options.temperature} to $min (allowed range: $min-$max)",
+          RequestAdjustment.Adjusted(
+            RequestOption.Temperature,
+            options.temperature.toString,
+            min.toString,
+            s"allowed range for $modelId is $min-$max"
+          ),
           Some(s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)")
         )
     }
 
     val topP = Option.when(disallowed.contains("top_p") && options.topP != 1.0)(
-      Violation(_.withTopP(1.0), "dropping top_p (not supported)", Some(s"top_p parameter not supported for $modelId"))
+      Violation(
+        _.withTopP(1.0),
+        RequestAdjustment.Dropped(RequestOption.TopP, s"top_p not supported for $modelId"),
+        Some(s"top_p parameter not supported for $modelId")
+      )
     )
 
     val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty != 0.0)(
       Violation(
         _.withPresencePenalty(0.0),
-        "dropping presence_penalty (not supported)",
+        RequestAdjustment.Dropped(RequestOption.PresencePenalty, s"presence_penalty not supported for $modelId"),
         Some(s"presence_penalty parameter not supported for $modelId")
       )
     )
@@ -185,7 +218,7 @@ final private[model] class DefaultRequestTransformer(
     val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0)(
       Violation(
         _.withFrequencyPenalty(0.0),
-        "dropping frequency_penalty (not supported)",
+        RequestAdjustment.Dropped(RequestOption.FrequencyPenalty, s"frequency_penalty not supported for $modelId"),
         Some(s"frequency_penalty parameter not supported for $modelId")
       )
     )
@@ -193,7 +226,7 @@ final private[model] class DefaultRequestTransformer(
     val tools = Option.when(options.tools.nonEmpty && !capabilities.supportsFunctionCalling.getOrElse(true))(
       Violation(
         _.withTools(Seq.empty),
-        "dropping tools (function calling not supported)",
+        RequestAdjustment.Dropped(RequestOption.Tools, s"function calling not supported for $modelId"),
         Some(s"Function calling not supported for $modelId")
       )
     )
@@ -203,11 +236,16 @@ final private[model] class DefaultRequestTransformer(
     // told the constraint cannot be applied.
     val responseFormat = options.responseFormat.filter(_ => capabilities.supportsResponseSchema.contains(false)).map {
       case ResponseFormat.Json =>
-        Violation(_.withResponseFormat(None), "dropping responseFormat (structured output not supported)", None)
+        Violation(
+          _.withResponseFormat(None),
+          RequestAdjustment.Dropped(RequestOption.ResponseFormat, s"structured output not supported for $modelId"),
+          None
+        )
       case _: ResponseFormat.JsonSchema =>
         Violation(
           _.withResponseFormat(None),
-          "dropping JsonSchema responseFormat (not supported)",
+          RequestAdjustment
+            .Dropped(RequestOption.ResponseFormat, s"structured output (JSON schema) not supported for $modelId"),
           Some(s"Structured output (JSON schema) not supported for model $modelId")
         )
     }
@@ -256,12 +294,16 @@ final private[model] class DefaultRequestTransformer(
 
 /**
  * Transformed options and messages for one request, and whether the client must fake streaming.
+ *
+ * @param adjustments what the transformation dropped or changed from the requested options, in the
+ *                    order found; the client puts them on its [[org.llm4s.llmconnect.model.Completion]]
  */
 @Stable
 final case class TransformationResult private (
   options: CompletionOptions,
   messages: Seq[Message],
-  requiresFakeStreaming: Boolean
+  requiresFakeStreaming: Boolean,
+  adjustments: List[RequestAdjustment]
 ) {
 
   /** Sets the transformed completion options. */
@@ -273,20 +315,28 @@ final case class TransformationResult private (
   /** Sets whether the client must fake streaming. */
   def withRequiresFakeStreaming(requiresFakeStreaming: Boolean): TransformationResult =
     copy(requiresFakeStreaming = requiresFakeStreaming)
+
+  /** Sets what the transformation dropped or changed. */
+  def withAdjustments(adjustments: List[RequestAdjustment]): TransformationResult = copy(adjustments = adjustments)
 }
 
 object TransformationResult {
 
-  /** Creates a [[TransformationResult]]; streaming is real unless `requiresFakeStreaming` says otherwise. */
+  /**
+   * Creates a [[TransformationResult]]; streaming is real unless `requiresFakeStreaming` says
+   * otherwise, and nothing was adjusted unless `adjustments` says so.
+   */
   def apply(
     options: CompletionOptions,
     messages: Seq[Message],
-    requiresFakeStreaming: Boolean = false
+    requiresFakeStreaming: Boolean = false,
+    adjustments: List[RequestAdjustment] = List.empty
   ): TransformationResult =
-    new TransformationResult(options, messages, requiresFakeStreaming)
+    new TransformationResult(options, messages, requiresFakeStreaming, adjustments)
 
   /**
-   * Convenience method to transform both options and messages in one call.
+   * Transforms both options and messages in one call. With `dropUnsupported`, what was dropped or
+   * changed is in [[TransformationResult.adjustments]]; without it, an unsupported option fails.
    */
   def transform(
     modelId: String,
@@ -294,12 +344,17 @@ object TransformationResult {
     messages: Seq[Message],
     transformer: RequestTransformer,
     dropUnsupported: Boolean = true
-  ): Result[TransformationResult] =
-    transformer.transformOptions(modelId, options, dropUnsupported).map { transformedOptions =>
+  ): Result[TransformationResult] = {
+    val transformedOptions =
+      if (dropUnsupported) Right(transformer.adjustOptions(modelId, options))
+      else transformer.transformOptions(modelId, options).map(_ -> List.empty[RequestAdjustment])
+    transformedOptions.map { (transformed, adjustments) =>
       TransformationResult(
-        options = transformedOptions,
+        options = transformed,
         messages = transformer.transformMessages(modelId, messages),
-        requiresFakeStreaming = transformer.requiresFakeStreaming(modelId)
+        requiresFakeStreaming = transformer.requiresFakeStreaming(modelId),
+        adjustments = adjustments
       )
     }
+  }
 }

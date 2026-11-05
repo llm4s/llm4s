@@ -22,6 +22,9 @@ import java.time.Instant
  * @param citations The sources the model cited in its answer, when the provider reports them
  *                  (see [[Citation]]); empty for a model that does not search or does not cite,
  *                  and for a completion assembled from streamed chunks, which carry none.
+ * @param adjustments The requested options the provider or model could not honour as asked, each
+ *                    dropped, adjusted or not needed (see [[RequestAdjustment]]); empty when every
+ *                    option was sent as requested. Streamed and non-streamed calls report the same.
  */
 @Stable
 final case class Completion private (
@@ -33,19 +36,21 @@ final case class Completion private (
   toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
   estimatedCost: Option[Double],
-  citations: List[Citation]
+  citations: List[Citation],
+  adjustments: List[RequestAdjustment]
 ) {
-  def withId(id: String): Completion                               = copy(id = id)
-  def withCreated(created: Instant): Completion                    = copy(created = created)
-  def withContent(content: String): Completion                     = copy(content = content)
-  def withModel(model: String): Completion                         = copy(model = model)
-  def withMessage(message: AssistantMessage): Completion           = copy(message = message)
-  def withToolCalls(toolCalls: List[ToolCall]): Completion         = copy(toolCalls = toolCalls)
-  def withUsage(usage: TokenUsage): Completion                     = copy(usage = Some(usage))
-  def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
-  def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
-  def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
-  def withCitations(citations: List[Citation]): Completion         = copy(citations = citations)
+  def withId(id: String): Completion                                    = copy(id = id)
+  def withCreated(created: Instant): Completion                         = copy(created = created)
+  def withContent(content: String): Completion                          = copy(content = content)
+  def withModel(model: String): Completion                              = copy(model = model)
+  def withMessage(message: AssistantMessage): Completion                = copy(message = message)
+  def withToolCalls(toolCalls: List[ToolCall]): Completion              = copy(toolCalls = toolCalls)
+  def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
+  def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
+  def withEstimatedCost(estimatedCost: Double): Completion              = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[Double]): Completion      = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
+  def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
 
   /**
    * Extract content as text (for compatibility)
@@ -99,9 +104,10 @@ object Completion {
     toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[Double] = None,
-    citations: List[Citation] = List.empty
+    citations: List[Citation] = List.empty,
+    adjustments: List[RequestAdjustment] = List.empty
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations)
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, adjustments)
 }
 
 /**

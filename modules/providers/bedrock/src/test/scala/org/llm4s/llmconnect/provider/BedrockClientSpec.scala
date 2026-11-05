@@ -53,6 +53,24 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    "report a requested reasoning effort as dropped, from complete and from a stream (RFC 0008)" in {
+      // the Converse request carries no model-specific reasoning field yet, so it is reported, not dropped silently
+      val dropped =
+        List(
+          RequestAdjustment.Dropped(RequestOption.Reasoning, s"reasoning effort is not sent to $Model by this client")
+        )
+      val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
+      withServer("/") { exchange =>
+        if (isStreamRequest(exchange)) sendEventStream(exchange, textStream("Hi", " there"))
+        else sendJsonResponse(exchange, 200, converseResponse("Hi"))
+      } { url =>
+        val client = new BedrockClient(config(url))
+        client.complete(conversation, reasoning).toOption.value.adjustments shouldBe dropped
+        collect(client, options = reasoning)._1.toOption.value.adjustments shouldBe dropped
+        client.complete(conversation, CompletionOptions()).toOption.value.adjustments shouldBe empty
+      }
+    }
+
     "send the model id in the path, system text apart from messages, and the inference settings" in {
       var seen: Option[(String, ujson.Value)] = None
       withServer("/") { exchange =>

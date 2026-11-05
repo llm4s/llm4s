@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ ProviderConfig, XaiConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -117,7 +117,7 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
    *
    * With `reasoning` unset nothing is sent for it.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = {
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
     options.reasoning.foreach { effort =>
       XaiDialect.family(model) match {
         case XaiDialect.Family.Effort =>
@@ -142,6 +142,8 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
         warnPenaltiesDropped(model, dropped)
       }
     }
+    // a level this dialect leaves unsent is not reported yet: a follow-up under RFC 0008
+    List.empty
   }
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)

@@ -4,7 +4,14 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ContentPart, ReasoningEffort, ThinkingBlock, ToolCall }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  ContentPart,
+  ReasoningEffort,
+  RequestAdjustment,
+  ThinkingBlock,
+  ToolCall
+}
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
 import org.llm4s.metrics.MetricsCollector
@@ -189,7 +196,7 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
    * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).
    * An explicit thinking budget with no effort set also enables Anthropic thinking.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = {
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
     val modelLower       = model.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
@@ -213,6 +220,8 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
           if (isAnthropicModel) body("thinking") = anthropicThinking(budget)
         }
     }
+    // a level this dialect leaves unsent is not reported yet: a follow-up under RFC 0008
+    List.empty
   }
 
   override def thinking(obj: ujson.Value): Option[String] =

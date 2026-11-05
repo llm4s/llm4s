@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
+- `OpenAICompatibleDialect.addReasoning` returns the `List[RequestAdjustment]` it could not send, not `Unit`; the
+  standard dialect reports a set `reasoning` as `Dropped` (RFC 0008, PR 1);
+  [migration](docs/reference/migration.md#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115).
 - Tier hygiene before the baseline: `org.llm4s.trace.AnsiColors` is `private[llm4s]`; `org.llm4s.core.safety.UsingOps`
   moved to `llm4s-agent-tools` and `org.llm4s.llmconnect.utils.ModelSelector` to `llm4s-rag`, their only consumers,
   with packages unchanged; the `org.llm4s.assistant` types are `@Experimental`, matching their Beta tier;
@@ -240,6 +243,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Added** `Completion.adjustments`: each requested option a provider or model could not honour, as an
+  `@Stable` `RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`) naming a `@Stable` `RequestOption`, also on
+  `TransformationResult`; logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
+  Bedrock, Ollama and the standard OpenAI-compatible dialect (Mistral, Cohere, DeepSeek, generic) report a requested
+  `reasoning` they do not send as `Dropped`, where they ignored it silently. Both types are
+  promoted from the `@Experimental` tier RFC 0008 first gave them, because the `@Stable` `Completion` exposes them
+  (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
   JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new

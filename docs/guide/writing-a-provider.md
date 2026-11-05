@@ -534,8 +534,22 @@ RequestTransformer.adjusted(service) { (modelId, caps) =>
 ```
 
 `TransformationResult.transform(modelId, options, messages, transformer, dropUnsupported)` runs
-the option and message transforms in one call and returns the transformed `options`, `messages`
-and `requiresFakeStreaming`.
+the option and message transforms in one call and returns the transformed `options`, `messages`,
+`requiresFakeStreaming` and `adjustments`.
+
+**Reporting adjustments** ([RFC 0008](../rfcs/0008-generation-controls.md)). A caller learns which
+requested options were not sent as asked from `Completion.adjustments`, a list of
+`RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`, each naming a `RequestOption`). Your client:
+
+- calls `transform` with `dropUnsupported = true` (the default), and puts `t.adjustments` on every
+  `Completion` it returns, streamed or not: `completion.withAdjustments(t.adjustments)`;
+- adds a `Dropped` for an option its own request mapping cannot send, rather than ignoring it.
+
+An `OpenAICompatibleDialect` does the second through `addReasoning`, which returns what it could not
+send: the standard one reports a set `reasoning` as `Dropped`, and an override that sends it returns
+`List.empty`. `OpenAICompatibleClient` puts the list on the `Completion`.
+
+The transform never logs. llm4s's own clients log each adjustment at WARN once per model and option.
 
 ### `EmbeddingProvider`
 
@@ -616,7 +630,9 @@ final class AcmeClient(
     completeWithMetrics {
       TransformationResult
         .transform(config.model, options, conversation.messages, transformer)
-        .flatMap(t => send(AcmeWire.encode(config.model, t.messages, t.options)))
+        .flatMap(t =>
+          send(AcmeWire.encode(config.model, t.messages, t.options)).map(_.withAdjustments(t.adjustments))
+        )
     }
 
   def streamComplete(
