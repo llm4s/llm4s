@@ -4,7 +4,7 @@ title: Replacing a Python Sidecar
 description: "Move a Python sidecar's LLM logic into Scala with LLM4S: vLLM, TGI and llama.cpp models as OpenAI-compatible sections, Python functions as MCP tools."
 search_title: "Replace a Python LLM sidecar with LLM4S in Scala"
 parent: User Guide
-nav_order: 42
+nav_order: 43
 ---
 
 # Replacing a Python Sidecar

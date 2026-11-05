@@ -17,7 +17,7 @@ import scala.util.Using
  * A Python-only function as an llm4s agent tool, with no sidecar service and no hand-written HTTP contract.
  *
  * `modules/samples/src/main/python/sentiment_tool.py` wraps a plain Python function in an MCP server with the official
- * MCP Python SDK. This example starts it as a subprocess over stdio ([[MCPServerConfig.stdio]]), lists its tools
+ * MCP Python SDK. This example starts it as a subprocess over stdio (`MCPServerConfig.stdio`), lists its tools
  * through an [[MCPToolRegistry]] and hands them to an [[Agent]]. The tool's schema comes from the Python type hints.
  *
  * The model is a `ScriptedLLMClient` from `llm4s-testkit`: it asks for `analyze_sentiment`, then answers with what
