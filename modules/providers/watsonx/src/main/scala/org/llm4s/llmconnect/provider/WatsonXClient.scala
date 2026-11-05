@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
+import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.MediaSource
@@ -163,7 +164,8 @@ class WatsonXClient(
   /** How long a streamed call may take: the section's `timeouts.stream`, else [[WatsonXClient.DefaultStreamTimeout]]. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
-  final private case class IamToken(value: String, expiresAt: Long)
+  /** An IAM token, and the API key it was exchanged for: a token from a key since rotated away is not reused. */
+  final private case class IamToken(value: String, expiresAt: Long, apiKey: String)
 
   private val tokenCache = new AtomicReference[Option[IamToken]](None)
 
@@ -176,8 +178,21 @@ class WatsonXClient(
   // blocked here does not pin its carrier and an interrupted waiter wakes with the interrupt.
   private val tokenLock = new ReentrantLock()
 
-  private def freshCached(): Option[String] =
-    tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
+  private def freshCached(apiKey: String): Option[String] =
+    tokenCache
+      .get()
+      .filter(token => token.apiKey == apiKey && nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS)
+      .map(_.value)
+
+  /**
+   * The API key to exchange: asked of the config's `ApiKeyProvider` on every request when it has one (a section's
+   * `apiKeyFile`), so a rotated key is exchanged for a new IAM token without rebuilding the client (#2477);
+   * otherwise `apiKey`. A provider that throws fails the request with an `AuthenticationError`.
+   */
+  private def currentApiKey(): Result[String] =
+    config.apiKeyProvider.fold[Result[String]](Right(config.apiKey.reveal))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(_.asKey)
+    )
 
   /**
    * The cached IAM token, or a fresh one when none is cached or it expires within the buffer.
@@ -186,22 +201,24 @@ class WatsonXClient(
    * gets `Left(CancelledError)` with its interrupt flag set again, never a thrown `InterruptedException`.
    */
   private[provider] def bearerToken(): Result[String] =
-    freshCached() match {
-      case Some(token) => Right(token)
-      case None =>
-        CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
-          case Left(interrupted) =>
-            Thread.currentThread().interrupt()
-            Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
-          case Right(()) =>
-            Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
-              freshCached() match {
-                case Some(token) => Right(token)
-                case None        => fetchToken()
+    currentApiKey().flatMap(apiKey =>
+      freshCached(apiKey) match {
+        case Some(token) => Right(token)
+        case None =>
+          CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
+            case Left(interrupted) =>
+              Thread.currentThread().interrupt()
+              Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
+            case Right(()) =>
+              Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+                freshCached(apiKey) match {
+                  case Some(token) => Right(token)
+                  case None        => fetchToken(apiKey)
+                }
               }
-            }
-        }
-    }
+          }
+      }
+    )
 
   /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
   private def invalidate(token: String): Unit =
@@ -211,12 +228,12 @@ class WatsonXClient(
   private def noteStatus(status: Int, token: String): Unit =
     if (status == 401) invalidate(token)
 
-  private def fetchToken(): Result[String] = {
+  private def fetchToken(apiKey: String): Result[String] = {
     val body =
-      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey.reveal, "UTF-8")}"
+      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(apiKey, "UTF-8")}"
     val headers = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
     http.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
-      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body)
+      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body, apiKey)
       else
         Left(
           AuthenticationError(
@@ -227,7 +244,7 @@ class WatsonXClient(
     }
   }
 
-  private def parseToken(body: String): Result[String] =
+  private def parseToken(body: String, apiKey: String): Result[String] =
     Try(ujson.read(body)).toResult.flatMap { json =>
       val fields = json.objOpt
       fields.flatMap(_.get("access_token")).flatMap(_.strOpt).filter(_.nonEmpty) match {
@@ -235,7 +252,7 @@ class WatsonXClient(
           val ttl =
             fields.flatMap(_.get("expires_in")).flatMap(_.numOpt).map(_.toLong).getOrElse(DEFAULT_TOKEN_TTL_SECONDS)
           iamTokens.rotate(token)
-          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl)))
+          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl, apiKey)))
           Right(token)
         case None =>
           Left(AuthenticationError(providerName, "IAM response contained no access_token"))

@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ ProviderConfig, XaiConfig }
+import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -40,7 +40,7 @@ class XaiClient(
         displayName = "xAI",
         model = config.model,
         baseUrl = config.baseUrl,
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -65,8 +65,8 @@ object XaiClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[XaiClient] =
-    ProviderConfig
-      .nonEmpty("xAI", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("xAI", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new XaiClient(config, metrics, exchangeLogging)).toResult)
 }
 

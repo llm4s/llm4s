@@ -1232,7 +1232,8 @@ private[provider] object OpenAIClientTransport {
   }
 
   /**
-   * Azure OpenAI: an `api-key` header - or, with `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
+   * Azure OpenAI: an `api-key` header - its key asked of `apiKeyProvider` per request when that is set - or, with
+   * `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
    * `<endpoint>/openai/deployments/<model>/chat/completions?api-version=<apiVersion>`,
    * where `model` is the deployment name - the URL the Azure SDK built.
    *
@@ -1255,15 +1256,58 @@ private[provider] object OpenAIClientTransport {
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.
     def transport(): OpenAIClientTransport =
       sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
-    config.tokenProvider match {
-      case None =>
+    (config.tokenProvider, config.apiKeyProvider) match {
+      case (None, None) =>
         builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))
         transport()
-      case Some(tokens) =>
+      case (None, Some(keys)) =>
+        val key = new RotatingAzureKey(keys)
+        builder.credential(key.credential)
+        key.refreshing(transport())
+      case (Some(tokens), _) =>
         val bearer = new EntraIdBearer(tokens)
         builder.credential(BearerTokenCredential.create(bearer))
         bearer.invalidatingOnRejection(transport())
     }
+  }
+
+  /**
+   * Azure's `api-key` header from `keys`, asked before each request (#2477), so a rotated key is sent without
+   * rebuilding the client. The SDK reads the header from an [[AzureApiKeyCredential]] when it prepares each request,
+   * and takes no supplier for it, so the credential is updated - through the SDK's own `update` - before each call.
+   * Updates are serialised and made only when the key differs, so a slower call never puts back a key the provider
+   * has since replaced. A failure to get the key rides through the SDK in an [[IdentityTokenException]], so it
+   * reaches the caller as the `LLMError` it was; a provider that throws fails the request with an
+   * `AuthenticationError` naming the exception's class.
+   */
+  final private[provider] class RotatingAzureKey(keys: ApiKeyProvider) {
+    // A non-blank placeholder (the SDK refuses a blank key); never sent, as each call sets the current key first.
+    private val azureKey = AzureApiKeyCredential.create("llm4s-api-key-provider").asInstanceOf[AzureApiKeyCredential]
+
+    /** The credential to give the SDK builder. */
+    def credential: com.openai.credential.Credential = azureKey
+
+    private def refresh(): Unit = synchronized {
+      val key = CachingAccessTokenProvider
+        .guarded(keys.current())
+        .fold(error => throw new IdentityTokenException(error), _.asKey)
+      if (azureKey.apiKey() != key) azureKey.update(key): Unit
+    }
+
+    def refreshing(underlying: OpenAIClientTransport): OpenAIClientTransport =
+      new OpenAIClientTransport {
+        override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion = {
+          refresh()
+          underlying.createChatCompletion(params)
+        }
+        override def createChatCompletionStream(
+          params: ChatCompletionCreateParams
+        ): StreamResponse[ChatCompletionChunk] = {
+          refresh()
+          underlying.createChatCompletionStream(params)
+        }
+        override def close(): Unit = underlying.close()
+      }
   }
 
   /**

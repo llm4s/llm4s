@@ -137,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads them itself; [migration](docs/reference/migration.md#the-embeddings-samples-settings-left-llm4sconfig-2265).
 - `ServiceError`'s extractor binds five fields (`retryAfter` added) and `ServiceError.ServiceErrorOps` is gone
   (`isRecoverableStatus` is a method of `ServiceError`): four-field patterns and the import break; [migration](docs/reference/migration.md#serviceerror-extractor-and-isrecoverablestatus-2266).
+- `llm4s-java-api` and `llm4s-spring-boot-starter` no longer bring the provider modules: declare `llm4s-openai`,
+  `llm4s-ollama`, ... yourself; [migration](docs/reference/migration.md#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ### Observability
 
@@ -216,6 +218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream stops, every later chunk is refused at once; `ThreadBusy` refusals are tested in pekko, effect and zio [#1815](https://github.com/llm4s/llm4s/issues/1815).
 - **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
   returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
+- **Added** `StreamingBridgeContract`, one conformance suite that `llm4s-effect`, `llm4s-zio` and `llm4s-pekko` each run:
+  errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core [#2334](https://github.com/llm4s/llm4s/issues/2334).
 
 ### Agent runtime
 
@@ -235,11 +239,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Llm4sConfig.from(config)` (experimental): an `Llm4sSettings` with `Llm4sConfig`'s methods, reading a `Config` the app already
   has (Play, Pekko, per tenant or test) in place of `application.conf` [#2340](https://github.com/llm4s/llm4s/issues/2340).
+- **Fixed** `CheckPolicies` CLI now rejects unknown `--env` arguments with exit code 2 before loading any
+  configuration, and maps aliases such as `dev-sandbox` and `prod-safe` to their canonical environment [#2260](https://github.com/llm4s/llm4s/issues/2260).
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
   (for example `--env=production` with `prod-safe`, whose policies apply only to `prod`): nothing was checked, so a
   mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
-- **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: OpenAI, Requesty, Anthropic, OpenRouter
-  and generic OpenAI-compatible re-read a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313).
+- **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: every built-in provider that takes a key
+  re-reads a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313), [#2477](https://github.com/llm4s/llm4s/issues/2477).
 
 ### Providers
 
@@ -353,6 +359,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moved to `org.springframework.boot.health.contributor`, the `llmHealthIndicator` bean is an `LlmBoot4HealthIndicator`
   reporting what `LlmHealthIndicator` does on 3.x. CI runs the starter's specs on Spring Boot 4.0.8 and 4.1.1 as well as
   3.3.6 and 3.5.16 [#1467](https://github.com/llm4s/llm4s/issues/1467); see the [Spring Boot guide](docs/guide/spring-boot.md#what-the-starter-gives-you).
+- **Changed** `llm4s-java-api` and `llm4s-spring-boot-starter` to make the provider modules optional dependencies: a Java
+  user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
+  fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
 
 ### Tools
 
@@ -476,6 +485,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation label) and `scripts/check-doc-seo.sh`, which fails CI on a missing, duplicate or over-long title or description [#2314](https://github.com/llm4s/llm4s/issues/2314).
 - **Added** [Moving a Java app from LangChain4j or Spring AI](docs/guide/java-migration.md): concepts, compiled Java for
   each common task, provider configuration and the gaps; the Scala migration and comparison pages corrected for the Java API [#2282](https://github.com/llm4s/llm4s/issues/2282).
+- **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
+  LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 
 ### Embeddings & RAG
 
@@ -517,6 +528,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store built from a `Config` closes its own pool, also when the schema cannot be created
   [#2300](https://github.com/llm4s/llm4s/issues/2300); see
   [Postgres Memory Store](docs/reference/postgres-memory-store.md#sharing-your-applications-connection-pool).
+- **Changed** `PostgresMemoryStore.storeAll` sends its rows as JDBC batches (up to 1,000 per round trip) instead of one
+  statement per memory [#637](https://github.com/llm4s/llm4s/issues/637); see
+  [bulk ingestion](docs/reference/postgres-memory-store.md#bulk-ingestion).
 - **Changed** `MemoryManagerConfig` to a private constructor with `with*` setters (`.copy` is private) [#1847](https://github.com/llm4s/llm4s/issues/1847).
 - **Fixed** `autoExtractEntities` swallowing a cancellation: `recordMessage` returns the `CancelledError` (also a failure ending
   while the thread is interrupted, or a thrown `InterruptedException`) and the interrupt flag stays set [#1847](https://github.com/llm4s/llm4s/issues/1847).

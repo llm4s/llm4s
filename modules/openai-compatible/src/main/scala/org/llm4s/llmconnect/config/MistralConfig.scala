@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -28,6 +29,8 @@ import org.llm4s.types.Result
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2477): a section's `apiKeyFile` sets one
  */
 @Experimental
 final case class MistralConfig private (
@@ -37,13 +40,16 @@ final case class MistralConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                   = ProviderId("mistral")
-  override def endpointUrl: Option[String]                              = Some(baseUrl)
-  override def withModel(model: String): MistralConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): MistralConfig = copy(network = network)
+  override val providerId: ProviderId                                      = ProviderId("mistral")
+  override def endpointUrl: Option[String]                                 = Some(baseUrl)
+  override def withModel(model: String): MistralConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): MistralConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): MistralConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): MistralConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): MistralConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): MistralConfig                  = copy(baseUrl = baseUrl)
@@ -51,7 +57,7 @@ final case class MistralConfig private (
   def withReserveCompletion(reserveCompletion: Int): MistralConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"MistralConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 @Experimental
 object MistralConfig:
@@ -82,7 +88,8 @@ object MistralConfig:
       contextWindow,
       reserveCompletion,
       timeouts,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**

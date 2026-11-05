@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -35,6 +36,8 @@ import org.slf4j.LoggerFactory
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2477): a section's `apiKeyFile` sets one
  */
 @Experimental
 final case class CohereConfig private (
@@ -44,13 +47,16 @@ final case class CohereConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("cohere")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): CohereConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
+  override val providerId: ProviderId                                     = ProviderId("cohere")
+  override def endpointUrl: Option[String]                                = Some(baseUrl)
+  override def withModel(model: String): CohereConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): CohereConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): CohereConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
@@ -58,7 +64,7 @@ final case class CohereConfig private (
   def withReserveCompletion(reserveCompletion: Int): CohereConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"CohereConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 @Experimental
 object CohereConfig {
@@ -98,7 +104,8 @@ object CohereConfig {
       contextWindow,
       reserveCompletion,
       timeouts,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**

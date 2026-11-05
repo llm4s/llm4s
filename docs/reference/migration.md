@@ -25,7 +25,8 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
-[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); and [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311).
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
+[`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ## Credentials are Secret (#1932)
 
@@ -281,6 +282,35 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
   `DoctorPorts` are internal.
 - Without `--classpath`, the "Provider module" step reports the module as found "on this classpath": the doctor's
   classpath is now the one it is launched on, not one with every built-in provider module.
+
+## `llm4s-java-api` and the Spring Boot starter no longer bring the provider modules (#1496)
+
+`llm4s-java-api` depended on `llm4s-openai`, `llm4s-anthropic`, `llm4s-ollama`, `llm4s-gemini` and
+`llm4s-openai-compatible`, so every Java user received the OpenAI and Anthropic SDKs, OkHttp, Jackson and the Kotlin
+standard library ([dependency footprint](dependency-conflicts#dependency-footprint)). They are now optional
+dependencies: the facade's POM brings `llm4s-core` and `llm4s-agent`, and you declare the provider modules you call,
+at the same version. `llm4s-spring-boot-starter` does the same for `llm4s-openai`, `llm4s-anthropic` and `llm4s-ollama`,
+the providers its flat `llm4s.provider` keys build.
+
+| You use | Add |
+|---|---|
+| `Llm4s.openAi()`, `Llm4s.azureOpenAi()`, a section with `provider = "openai"`, `"azure"` or `"requesty"`, or `openai/` embeddings | `org.llm4s:llm4s-openai_3` |
+| `Llm4s.anthropic()`, or `provider = "anthropic"` | `org.llm4s:llm4s-anthropic_3` |
+| `Llm4s.gemini()`, or `provider = "gemini"` or `"vertexai"` | `org.llm4s:llm4s-gemini_3` |
+| `Llm4s.ollama()`, `provider = "ollama"`, or `ollama/` embeddings | `org.llm4s:llm4s-ollama_3` |
+| `Llm4s.openAiCompatible()`, or DeepSeek, Mistral, Cohere chat, OpenRouter, Z.ai, xAI or `openai-compatible` | `org.llm4s:llm4s-openai-compatible_3` |
+
+```kotlin
+dependencies {
+    implementation("org.llm4s:llm4s-java-api_3:$llm4sVersion")
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")   // was brought by llm4s-java-api
+}
+```
+
+Without the module, nothing fails at startup: a typed builder's `build()`, or the starter's `llm4s.provider`, returns a
+`CONFIGURATION` failure that names the artifact to add, and a configured section whose provider is absent fails as it
+always did for modules outside the facade. With `llm4s-bom` imported, the provider module needs no version. The
+Kotlin API (`llm4s-kotlin-api`) depends on `llm4s-java-api`, so the same applies to it.
 
 ## Smaller breaks since 0.4.1
 

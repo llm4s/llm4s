@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ CohereConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model.ResponseFormat
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -43,7 +43,7 @@ class CohereClient(
         displayName = "Cohere",
         model = config.model,
         baseUrl = CohereConfig.compatibilityBaseUrl(config.baseUrl),
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -58,13 +58,13 @@ class CohereClient(
 object CohereClient {
 
   def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
-    ProviderConfig
-      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new CohereClient(config)).toResult)
 
   def apply(config: CohereConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[CohereClient] =
-    ProviderConfig
-      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new CohereClient(config, metrics)).toResult)
 
   def apply(
@@ -72,8 +72,8 @@ object CohereClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[CohereClient] =
-    ProviderConfig
-      .nonEmpty("Cohere", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging)).toResult)
 }
 

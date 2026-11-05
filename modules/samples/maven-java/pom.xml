@@ -76,10 +76,17 @@
 
   <dependencies>
     <!-- Scala 3 only, and Maven does not add the cross-version suffix: write _3 yourself. The POM brings
-         llm4s-core, llm4s-agent and the provider modules, so nothing else is declared here. -->
+         llm4s-core and llm4s-agent. -->
     <dependency>
       <groupId>org.llm4s</groupId>
       <artifactId>llm4s-java-api_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+    <!-- The provider module the sample calls (application.conf's openai-main section). llm4s-java-api brings no
+         provider: declare the ones you use, llm4s-ollama_3, llm4s-anthropic_3, ... -->
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-openai_3</artifactId>
       <version>${llm4s.version}</version>
     </dependency>
 

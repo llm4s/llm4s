@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ MistralConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
@@ -42,7 +42,7 @@ class MistralClient(
         displayName = "Mistral",
         model = config.model,
         baseUrl = MistralConfig.apiBaseUrl(config.baseUrl),
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -57,13 +57,13 @@ class MistralClient(
 object MistralClient {
 
   def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new MistralClient(config)).toResult)
 
   def apply(config: MistralConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new MistralClient(config, metrics)).toResult)
 
   def apply(
@@ -71,8 +71,8 @@ object MistralClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey.reveal)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging)).toResult)
 }
 
