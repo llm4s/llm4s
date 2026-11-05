@@ -250,6 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
+  `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
   JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new
