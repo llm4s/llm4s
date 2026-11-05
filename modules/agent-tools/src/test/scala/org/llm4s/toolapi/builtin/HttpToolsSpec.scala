@@ -24,6 +24,25 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
     config.isDomainAllowed("google.com") shouldBe true
   }
 
+  it should "ignore a leading www prefix in blocked domains" in {
+    val config = HttpConfig(blockedDomains = Seq("www.example.com"))
+
+    config.isDomainAllowed("www.example.com") shouldBe false
+    config.isDomainAllowed("example.com") shouldBe false
+    config.isDomainAllowed("WWW.Example.COM") shouldBe false
+    config.isDomainAllowed("api.example.com") shouldBe false
+    config.isDomainAllowed("notexample.com") shouldBe true
+
+    val withoutPrefix = HttpConfig(blockedDomains = Seq("example.com"))
+    withoutPrefix.isDomainAllowed("www.example.com") shouldBe false
+
+    val blockedWins = HttpConfig(
+      allowedDomains = Some(Seq("example.com")),
+      blockedDomains = Seq("www.example.com")
+    )
+    blockedWins.isDomainAllowed("example.com") shouldBe false
+  }
+
   it should "restrict to allowed domains when specified" in {
     val config = HttpConfig(allowedDomains = Some(Seq("api.example.com", "data.example.org")))
 

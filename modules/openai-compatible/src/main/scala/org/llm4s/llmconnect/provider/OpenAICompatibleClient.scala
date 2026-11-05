@@ -12,7 +12,7 @@ import org.llm4s.llmconnect.auth.{
   TokenExchange,
   TokenExchangeConfig
 }
-import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -643,6 +643,17 @@ object OpenAICompatibleClient {
   private[provider] val AuthorizationHeaderRefusal: String =
     "an Authorization header cannot be sent with a Dynamic or Exchange credential: the request's Authorization " +
       "is the credential's token - remove the header"
+
+  /**
+   * A dialect client's bearer: the key `keys` holds at each request when the config carries an
+   * `ApiKeyProvider` (a section's `apiKeyFile`, #2477), otherwise `apiKey`.
+   */
+  private[provider] def keyCredential(apiKey: Secret, keys: Option[ApiKeyProvider]): Credential =
+    keys.fold(Credential.Static(apiKey))(Credential.Rotating(_))
+
+  /** A dialect client's key check: `apiKey` must not be blank, unless an `ApiKeyProvider` supplies the key. */
+  private[provider] def requireKey(displayName: String, apiKey: Secret, keys: Option[ApiKeyProvider]): Result[Unit] =
+    if keys.isDefined then Right(()) else ProviderConfig.nonEmpty(displayName, "apiKey", apiKey.reveal)
 
   /** Whether `headers` set `Authorization` (in any case) over a `credential` whose token is refreshed. */
   /**

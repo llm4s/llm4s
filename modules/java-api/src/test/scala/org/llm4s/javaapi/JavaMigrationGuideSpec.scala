@@ -103,9 +103,7 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
     }
 
     "link the issues it names as gaps, and be linked from the pages the issue lists" in {
-      Seq("2277", "2278", "2279", "1496").foreach(n =>
-        guide should include(s"https://github.com/llm4s/llm4s/issues/$n")
-      )
+      Seq("2277", "2278", "2279").foreach(n => guide should include(s"https://github.com/llm4s/llm4s/issues/$n"))
       Seq("migrating-from-langchain4j", "java", "spring-boot", "comparison").foreach { page =>
         withClue(s"docs/guide/$page.md does not link the Java migration guide: ") {
           GuideDocs.read(GuideFile, s"docs/guide/$page.md") should include("(java-migration")

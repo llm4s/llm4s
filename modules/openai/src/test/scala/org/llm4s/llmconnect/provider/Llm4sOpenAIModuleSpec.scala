@@ -191,6 +191,17 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       }
     }
 
+    "send the key its ApiKeyProvider holds at each request, for azure (#2477)" in {
+      val respond = LocalProviderTestServer.sendJsonResponse(_, 200, LocalProviderTestServer.openAICompletion("ok"))
+      assertHonoursApiKeyProvider(respond) { (baseUrl, keys) =>
+        val azure = section(AzureProvider)
+        AzureProvider
+          .buildConfig("rotation", azure.withExtras(azure.extras.updated(AzureProvider.EndpointKey, baseUrl)))
+          .flatMap(config => AzureProvider.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+          .fold(error => fail(error.message), identity)
+      }
+    }
+
     "send the content parts Chat Completions takes and refuse the rest before sending (#1913)" in {
       val supported = Seq(
         ContentPartCase.UserImageUrl,

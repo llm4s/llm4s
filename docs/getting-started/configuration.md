@@ -216,11 +216,12 @@ symbolic link as Kubernetes does, is sent from the next request on, without rebu
 restarting the application. The INFO line names the file, never the key.
 
 A section sets `apiKeyFile` or `apiKey` (or `auth`), never two of them, and with `apiKeyFile` the
-vendor's shared key is not used. The `openai`, `requesty`, `anthropic`, `openai-compatible` and
-`openrouter` clients re-read the file per request as above. Every other provider that takes an API
-key (`azure`, `gemini`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, `watsonx`) reads it once, when
-the section is loaded, and logs that it does; a rotated key reaches it when the section is loaded
-again. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refuses `apiKeyFile` with a
+vendor's shared key is not used. Every built-in provider that takes an API key re-reads the file per
+request as above: `openai`, `requesty`, `azure` (its `api-key` header), `anthropic`, `gemini`,
+`openai-compatible`, `openrouter`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, and `watsonx`, which
+exchanges a rotated key for a new IAM token at the next request. A provider from another module whose
+config cannot take an `ApiKeyProvider` reads the file once, when the section is loaded, and logs that
+it does. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refuses `apiKeyFile` with a
 `ConfigurationError`. On a POSIX file system, a key file readable by its group or by others is
 logged once as a WARN naming the path; mount it with mode `0400`.
 
@@ -396,7 +397,7 @@ section with an `apiKey`.
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
-| `apiKeyFile` | A file holding the API key, instead of `apiKey`. Re-read when it changes (no restart) by OpenAI, Requesty, Anthropic, OpenRouter and generic `openai-compatible`; read when the section is loaded by the other providers that take a key ([Rotating keys](#rotating-keys-apikeyfile-and-apikeyprovider)) |
+| `apiKeyFile` | A file holding the API key, instead of `apiKey`. Re-read when it changes (no restart) by every built-in provider that takes a key ([Rotating keys](#rotating-keys-apikeyfile-and-apikeyprovider)) |
 | `baseUrl` | Overrides the provider's default endpoint (`ollama`: `http://localhost:11434`); **required** for `openai-compatible`. Checked when the section is loaded: an absolute `http` or `https` URL with a host, or a `ConfigurationError` naming the key (a blank value counts as unset) |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
 | `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |

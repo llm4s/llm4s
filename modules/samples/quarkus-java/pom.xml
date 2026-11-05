@@ -49,10 +49,26 @@
 
   <dependencies>
     <!-- Scala 3 only, and Maven does not add the cross-version suffix: write _3 yourself. The POM brings
-         llm4s-core, llm4s-agent and the provider modules. -->
+         llm4s-core and llm4s-agent; the provider modules the producer builds clients for are declared below. -->
     <dependency>
       <groupId>org.llm4s</groupId>
       <artifactId>llm4s-java-api_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-ollama_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+    <!-- llm4s-openai also brings llm4s-openai-compatible, for the openai-compatible client. -->
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-openai_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-anthropic_3</artifactId>
       <version>${llm4s.version}</version>
     </dependency>
 

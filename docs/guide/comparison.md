@@ -34,7 +34,8 @@ refreshed at each LLM4S release.
 - **Scala developers.** LLM4S is written for Scala 3 only ([troubleshooting](../reference/troubleshooting)). It reports
   errors as `Result[A]` values, and its tools, agents, RAG and memory are Scala APIs. The other four projects in the
   table are Java or Kotlin libraries (see the first row); a Scala program can call them, but their documented APIs are
-  written for those languages.
+  written for those languages. Calling a model with a Scala client such as sttp-ai or openai-scala-client today:
+  [Coming from sttp-ai or openai-scala-client](migrating-from-scala-llm-clients).
 - **Java developers.** LLM4S has a Java facade (`llm4s-java-api`, [guide](java)). `JLlmClient` completes and streams a
   reply and returns structured output as a Java record; tools are defined from Java with `@Tool` methods or a lambda
   builder; and `JAgent` runs, continues, streams the events of, resumes and recovers an agent run (added in
