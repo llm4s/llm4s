@@ -16,6 +16,12 @@
       "type": "org.llm4s.spring.HealthProperties",
       "sourceType": "org.llm4s.spring.Llm4sProperties",
       "description": "Health indicator settings."
+    },
+    {
+      "name": "llm4s.agent",
+      "type": "org.llm4s.spring.AgentProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "The auto-configured agent."
     }
   ],
   "properties": [
@@ -91,6 +97,29 @@
       "type": "java.time.Duration",
       "description": "A probe taking longer than this is cancelled (interrupting the provider call) and reports DOWN. Must be positive.",
       "defaultValue": "10s"
+    },
+    {
+      "name": "llm4s.agent.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether to register the llm4sAgent bean; false registers none, the llm4sTools bean still.",
+      "defaultValue": true
+    },
+    {
+      "name": "llm4s.agent.id",
+      "type": "java.lang.String",
+      "description": "The id of the llm4sAgent, as its runs and traces name it.",
+      "defaultValue": "assistant"
+    },
+    {
+      "name": "llm4s.agent.system-prompt",
+      "type": "java.lang.String",
+      "description": "The llm4sAgent's system prompt, sent first on every model call; none when empty."
+    },
+    {
+      "name": "llm4s.agent.streaming",
+      "type": "java.lang.Boolean",
+      "description": "Whether the llm4sAgent's model calls stream, so JAgent.stream carries the answer's text deltas.",
+      "defaultValue": false
     },
     {
       "name": "llm4s.providers.provider",

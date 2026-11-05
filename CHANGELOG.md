@@ -359,6 +359,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** `llm4s-java-api` and `llm4s-spring-boot-starter` to make the provider modules optional dependencies: a Java
   user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
   fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Added** an agent to `llm4s-spring-boot-starter`: `llm4sTools` collects the `@Tool` methods of the application's beans
+  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
 
 ### Tools
 
