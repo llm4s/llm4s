@@ -107,6 +107,7 @@ llm4s/
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── tapir/                 # llm4s-tapir: tapir endpoints as tools, schemas derived from the endpoints (published)
 │   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── agent-checkpoint-sqlite/ # SqliteCheckpointer: the first durable Checkpointer, one SQLite file (published)
 │   ├── agent-checkpoint-postgres/ # PostgresCheckpointer: threads shared across machines, the database's clock (published)

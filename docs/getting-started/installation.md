@@ -708,6 +708,16 @@ JSON, file access, HTTP, shell, and the Brave, DuckDuckGo and Exa search tools -
 tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unchanged. See the
 [migration note](../reference/migration#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 
+### For tapir endpoints as tools
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-tapir" % llm4sVersion // same version as llm4s-core
+```
+
+`EndpointTools` turns tapir endpoints into tools, each schema derived from its endpoint's inputs, called through
+sttp client 3. It depends on `tapir-core` 1.11, not on the agent runtime (Experimental). See
+[Tapir Endpoints as Tools](../guide/tapir-tools).
+
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
 ```scala
