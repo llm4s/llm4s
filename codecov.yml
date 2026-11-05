@@ -142,6 +142,10 @@ flags:
     paths:
       - modules/schema-derivation/src/main/scala
     carryforward: true
+  prompt:
+    paths:
+      - modules/prompt/src/main/scala
+    carryforward: true
   testkit:
     paths:
       - modules/testkit/src/main/scala

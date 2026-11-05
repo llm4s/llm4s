@@ -88,6 +88,8 @@ object PomDescriptions {
       "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
     "llm4s-perplexity" ->
       "Perplexity Agent API chat provider for LLM4S: web search with citations.",
+    "llm4s-prompt" ->
+      "Compile-time checked prompt interpolators for LLM4S, with typed rendering and fenced untrusted input.",
     "llm4s-provider-testkit" ->
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->
