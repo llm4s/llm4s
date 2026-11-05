@@ -31,6 +31,7 @@ object KafkaTicketEnrichmentExample extends IOApp {
   val DeadLetterTopic = "tickets-dead-letter"
   val GroupId         = "llm4s-ticket-enrichment"
 
+  /** Reads `--bootstrap host:port` and `--scripted`, then enriches until cancelled. */
   def run(args: List[String]): IO[ExitCode] = {
     val bootstrap = args.dropWhile(_ != "--bootstrap").drop(1).headOption.getOrElse("localhost:9092")
     val client    = if (args.contains("--scripted")) scriptedClient else configuredClient

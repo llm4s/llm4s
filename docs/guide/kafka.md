@@ -118,7 +118,7 @@ def enrich(client: LLMClient, record: ConsumerRecord[String, String], retryPolic
 - **A model error that retrying does not fix** (an authentication error, a reply that does not match the schema)
   goes to the dead-letter topic with its type and message. The record's partition carries on.
 - **A transient error** (a rate limit, a timeout, a 5xx) is retried with backoff by the client, a
-  [`ReliableClient`](../reliability-guide) the pipeline wraps around yours. If it is still failing when the retries
+  [`ReliableClient`](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) the pipeline wraps around yours. If it is still failing when the retries
   run out, the record is fine and the provider is not: the pipeline stops with `TransientFailure` instead of
   dead-lettering, because during an outage every record would follow it into the dead-letter topic. Its offset is
   not committed, so a restart (by your supervisor, or a `Stream.retry` around the pipeline) reads it again.

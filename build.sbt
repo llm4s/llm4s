@@ -2195,9 +2195,7 @@ lazy val it = (project in file("modules/it"))
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
     deployService % Test,
     // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
-    schemaDerivation % Test,
-    // KafkaTicketPipelineSpec (#2297): the Kafka enrichment pipeline of docs/guide/kafka.md, against a real broker
-    samples % Test
+    schemaDerivation % Test
   )
   .settings(
     name := "llm4s-it",
@@ -2221,6 +2219,13 @@ lazy val it = (project in file("modules/it"))
     // ContainerisedWorkspaceTest runs against whatever `workspaceRunner/Docker/publishLocal`
     // produced; take the tag from the build so the test and the image cannot drift apart.
     Test / envVars += "LLM4S_WORKSPACE_IMAGE" -> s"llm4s/workspace-runner:${(workspaceRunner / Docker / version).value}",
+    // KafkaTicketPipelineSpec (#2297) runs the Kafka pipeline of docs/guide/kafka.md against a broker. Its two sources are
+    // compiled into this project's tests instead of depending on `samples`, whose resources (its application.conf, and
+    // termflow's reference.conf) would change the configuration every other suite here loads.
+    Test / unmanagedSources ++= {
+      val dir = (samples / baseDirectory).value / "src" / "main" / "scala" / "org" / "llm4s" / "samples" / "kafka"
+      Seq(dir / "Tickets.scala", dir / "TicketPipeline.scala")
+    },
     itTierCheck := ItTiers.check(
       (Test / definedTests).value.map(_.name),
       (Test / fullClasspath).value.map(_.data),
@@ -2230,7 +2235,9 @@ lazy val it = (project in file("modules/it"))
     // noticed rather than by quietly running nothing.
     Test / test := (Test / test).dependsOn(itTierCheck).value,
     libraryDependencies ++= Seq(
-      Deps.scalatest % Test
+      Deps.scalatest    % Test,
+      Deps.fs2Kafka     % Test,
+      Deps.kafkaClients % Test
     )
   )
 
