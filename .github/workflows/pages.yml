@@ -17,6 +17,10 @@ on:
       - 'modules/workspace/*/src/**'
       - '.github/workflows/pages.yml'
 
+  # Daily, so the GitHub numbers on the home page (scripts/update-site-stats.sh) are never more than a day old.
+  schedule:
+    - cron: '17 4 * * *'
+
   # Releases deploy by DISPATCHING this workflow on `main` from release.yml (scripts/dispatch-docs-deploy.sh), gated on
   # the Maven publish and the GitHub Release, with the release tag as `ref`.
   #
@@ -195,6 +199,18 @@ jobs:
           mkdir -p docs/scaladoc
           cp -r "$SCALADOC_DIR"/* docs/scaladoc/
           echo "Scaladoc copied successfully"
+
+      # The stars, forks, contributors, merged pull requests and releases in docs/_data/stats.yml, from the GitHub API on
+      # the day of the build. A failed call keeps the committed numbers. A release tag from before the script skips it.
+      - name: Refresh the GitHub numbers on the home page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f scripts/update-site-stats.sh ]; then
+            scripts/update-site-stats.sh "$GITHUB_REPOSITORY"
+          else
+            echo "::notice::This ref predates scripts/update-site-stats.sh: the committed numbers are used."
+          fi
 
       # llms.txt, llms-full.txt and llm4s-rules.md are generated from the pages, never kept by hand (#2287). They are
       # built for the latest release, and again under /llms/<major.minor>/ for it and the previous minor. The build

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Experimental
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -26,6 +27,8 @@ import org.llm4s.types.Result
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2477): a section's `apiKeyFile` sets one
  */
 @Experimental
 final case class XaiConfig private (
@@ -35,13 +38,16 @@ final case class XaiConfig private (
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                               = ProviderId("xai")
-  override def endpointUrl: Option[String]                          = Some(baseUrl)
-  override def withModel(model: String): XaiConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): XaiConfig = copy(network = network)
+  override val providerId: ProviderId                                  = ProviderId("xai")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): XaiConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): XaiConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): XaiConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): XaiConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): XaiConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): XaiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): XaiConfig                  = copy(baseUrl = baseUrl)
@@ -49,7 +55,7 @@ final case class XaiConfig private (
   def withReserveCompletion(reserveCompletion: Int): XaiConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"XaiConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 @Experimental
 object XaiConfig {
@@ -83,7 +89,8 @@ object XaiConfig {
       contextWindow,
       reserveCompletion,
       timeouts,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**

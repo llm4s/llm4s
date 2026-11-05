@@ -695,7 +695,10 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
       Deps.catsEffect,
       Deps.fs2,
       Deps.scalatest % Test
-    )
+    ),
+    // The effect bridges' shared conformance contract (#2334), `StreamingBridgeContract`: llm4s-zio and llm4s-pekko
+    // compile the same directory into their tests, so every bridge runs one suite.
+    Test / unmanagedSourceDirectories += (Test / sourceDirectory).value / "contract"
   )
 
 lazy val llm4sZio = (project in file("modules/llm4s-zio"))
@@ -713,9 +716,12 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zio,
       Deps.zioStreams,
       Deps.zioTest    % Test,
-      Deps.zioTestSbt % Test
+      Deps.zioTestSbt % Test,
+      Deps.scalatest  % Test
     ),
-    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
   )
 
 // `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
@@ -723,7 +729,8 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
 // the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
 // `org.apache.pekko` and Akka there).
 lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
-  .dependsOn(core, agent)
+  // `testkit % Test`: the bridges' shared conformance contract (#2334) drives every case from a `ScriptedLLMClient`.
+  .dependsOn(core, agent, testkit % Test)
   .settings(
     name := "llm4s-pekko",
     commonSettings,
@@ -737,7 +744,9 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
       Deps.scalatest          % Test,
       Deps.pekkoStreamTestkit % Test,
       Deps.pekkoTestkit       % Test
-    )
+    ),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
   )
 
 lazy val core = (project in file("modules/core"))
@@ -2342,16 +2351,20 @@ lazy val docs = (project in file("modules/docs"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// The provider modules are optional dependencies (#1496): the facade compiles its typed client builders against them,
+// but its POM marks them `<optional>`, so a Java user receives only core and the agent and declares the provider
+// modules they call (`llm4s-ollama`, `llm4s-openai`, ...). A builder whose module is absent fails with a
+// ConfigurationError naming the artifact to add (`ProviderModules`), not a NoClassDefFoundError.
 lazy val javaApi = (project in file("modules/java-api"))
   .dependsOn(
     core % "compile->compile;test->test",
     agent,
-    openai,
-    anthropic,
-    ollama,
-    gemini,
-    openaiCompatible,
-    providerTestkit % Test
+    openai           % "optional",
+    anthropic        % "optional",
+    ollama           % "optional",
+    gemini           % "optional",
+    openaiCompatible % "optional",
+    providerTestkit  % Test
   )
   .settings(
     name := "llm4s-java-api",
@@ -2423,11 +2436,18 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // starter puts no Micrometer jar on a classpath that did not ask for one (#1466).
   // `bedrock` is a test dependency only, for the health indicator's redaction of nested credentials (#1820), and
   // `azureIdentity` for an Azure section with `authentication = entra-id` read from properties (#2274).
+  // `openai`, `anthropic` and `ollama` are optional, as in java-api (#1496): the flat `llm4s.provider` keys build
+  // their configs, but the application declares the provider module it uses. `gemini` is a test dependency: the
+  // specs configure a Gemini section.
   .dependsOn(
     javaApi,
+    openai                  % "optional",
+    anthropic               % "optional",
+    ollama                  % "optional",
     observabilityMicrometer % "provided",
     core                    % "test->test",
     providerTestkit         % Test,
+    gemini                  % Test,
     bedrock                 % Test,
     azureIdentity           % Test
   )
@@ -2465,10 +2485,15 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
 // on a Boot 4 classpath: the specs are the starter's own, recompiled here with boot4/src/test's BootLine. The Boot
 // release is `Versions.springBoot4`; CI's "Spring Boot 4.x" job runs this on the 4.0 line and on the latest 4.x.
 lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/boot4"))
+  // The starter's optional provider modules (#1496) are not inherited: its specs build their configs.
   .dependsOn(
     springBootStarter,
     observabilityMicrometer,
     core            % "test->test",
+    openai          % Test,
+    anthropic       % Test,
+    ollama          % Test,
+    gemini          % Test,
     providerTestkit % Test,
     bedrock         % Test,
     azureIdentity   % Test

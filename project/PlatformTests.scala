@@ -88,8 +88,10 @@ object PlatformTests {
     ),
     "gemini" -> Seq(
       "org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec",
-      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec"
+      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec",
+      "org.llm4s.llmconnect.provider.GeminiApiKeyFileSpec"
     ),
+    "watsonx"      -> Seq("org.llm4s.llmconnect.provider.WatsonXApiKeyFileSpec"),
     "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
     "doctor" -> Seq(
       "org.llm4s.doctor.DoctorSpec",

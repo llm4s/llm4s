@@ -27,6 +27,6 @@ We bring impactful, open-source AI projects to the GSoC program. Our goal is to 
 ### Explore our GSoC Journey
 Select a page from the menu to see our yearly activities, project ideas, and contributor showcases.
 
-- **[GSoC 2027 Ideas](/gsoc/2027/)**: Fourteen project ideas for 2027, a large and a medium one for each of seven LLM4S Foundation projects.
+- **[GSoC 2027 Ideas](/gsoc/2027/)**: Nineteen project ideas for 2027: four for LLM4S itself, a large and a medium one for each of six projects built on it, and a large one each for TermFlow, GraphStore and Forge.
 - **[GSoC 2025](/gsoc/2025/)**: Meet our last cohort and explore their groundbreaking projects in Agents, RAG, and Multimodal AI.
 - **[Student Resources](/gsoc/resources/)**: Guides, onboarding links, and how to get involved.

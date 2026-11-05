@@ -601,6 +601,7 @@ released at the same version as every other llm4s module, so the BOM manages it 
 dependencies {
     implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
     implementation("org.llm4s:llm4s-kotlin-api")   // brings llm4s-java-api_3 and kotlinx-coroutines-core
+    implementation("org.llm4s:llm4s-ollama_3")     // the provider module you call
 }
 ```
 
