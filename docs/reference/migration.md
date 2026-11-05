@@ -22,7 +22,8 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [the context types](#context-types-are-growth-safe-2380),
 [the tool schemas and tool-call types](#tool-schemas-and-tool-call-types-are-growth-safe-2381),
 [two `ToolCallError` and `ToolParameterError` cases](#toolcallerror-and-toolparametererror-cases-2382),
-[the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383)
+[the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383),
+[`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
@@ -748,6 +749,23 @@ The seven `AssistantError` cases - `IOError`, `EOFError`, `DisplayError`, `Sessi
 - **Java and Kotlin**: call the companion's `apply` instead of the constructor, and chain the setters.
 - Pattern matching (`case AssistantError.FileError(message, path, operation, cause)`), the fields, `context` and
   `formatted` are unchanged.
+
+### `RerankProviderConfig` is growth-safe (#2478)
+
+`RerankProviderConfig` (`org.llm4s.reranker`, `llm4s-rag`) gains `apiKeyProvider`, the key a reranker asks for per
+request (a rotated `apiKeyFile`), and follows the growth-prone pattern
+([#2478](https://github.com/llm4s/llm4s/issues/2478)): its constructor and `copy` are private.
+
+- **Construction is unchanged**: `RerankProviderConfig(baseUrl, apiKey, model)`, positional or named, still compiles.
+  `new RerankProviderConfig(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**: `withBaseUrl`, `withApiKey`, `withModel` and `withApiKeyProvider` (the provider or
+  an `Option`).
+
+  ```scala
+  val other = config.withModel("rerank-v3.5")   // was config.copy(model = "rerank-v3.5")
+  ```
+
+- Pattern matching and the fields are unchanged; pattern matching now binds four fields.
 
 ### Provider SPI, caching, streaming and exchange-sink types are growth-safe (#2379)
 

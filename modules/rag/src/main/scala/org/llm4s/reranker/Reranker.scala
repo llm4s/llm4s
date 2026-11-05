@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
@@ -61,15 +62,65 @@ final case class RerankError(
 /**
  * Configuration for reranker providers.
  *
+ * Build one with [[RerankProviderConfig.apply]] and change it with the `with*` setters; the constructor and `copy`
+ * are private, so a new field never breaks callers.
+ *
  * @param baseUrl API endpoint
  * @param apiKey API key for authentication
  * @param model Model name (e.g., "rerank-english-v3.0")
+ * @param apiKeyProvider supplies the key per request in place of `apiKey`, so a rotated key is used without
+ *                       rebuilding the reranker (#2478): `llm4s.rerank.cohere.apiKeyFile`, or Cohere's shared
+ *                       `llm4s.credentials.cohere.apiKeyFile`, sets
+ *                       [[org.llm4s.llmconnect.auth.ApiKeyProvider.file]]. `apiKey` then holds the key read at load.
  */
-final case class RerankProviderConfig(
+final case class RerankProviderConfig private (
   baseUrl: String,
   apiKey: Secret,
-  model: String
-)
+  model: String,
+  apiKeyProvider: Option[ApiKeyProvider]
+) {
+
+  /** Sets the API endpoint. */
+  def withBaseUrl(baseUrl: String): RerankProviderConfig = copy(baseUrl = baseUrl)
+
+  /** Sets the API key. */
+  def withApiKey(apiKey: Secret): RerankProviderConfig = copy(apiKey = apiKey)
+
+  /** Sets the model. */
+  def withModel(model: String): RerankProviderConfig = copy(model = model)
+
+  /** Supplies the key per request from `provider` rather than sending `apiKey`. */
+  def withApiKeyProvider(provider: ApiKeyProvider): RerankProviderConfig = copy(apiKeyProvider = Some(provider))
+
+  /** Supplies the key per request from `provider`, or sends `apiKey` when it is `None`. */
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): RerankProviderConfig = copy(apiKeyProvider = provider)
+
+  /**
+   * The key to send with the next request: [[apiKeyProvider]]'s current key when one is set, otherwise `apiKey`.
+   * A key file that has become unreadable or empty is a `Left` naming its path, and a provider that throws is an
+   * `AuthenticationError` naming the exception's class, as it is for a chat client.
+   */
+  def currentApiKey(): Result[Secret] =
+    apiKeyProvider.fold[Result[Secret]](Right(apiKey))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(key => Secret(key.asKey))
+    )
+}
+
+object RerankProviderConfig {
+
+  /** Creates a [[RerankProviderConfig]]. `apiKeyProvider` defaults to none, so `apiKey` is sent. */
+  def apply(
+    baseUrl: String,
+    apiKey: Secret,
+    model: String,
+    apiKeyProvider: Option[ApiKeyProvider] = None
+  ): RerankProviderConfig =
+    new RerankProviderConfig(baseUrl, apiKey, model, apiKeyProvider)
+
+  /** The signature before `apiKeyProvider` was added, kept so code compiled against it still links. */
+  def apply(baseUrl: String, apiKey: Secret, model: String): RerankProviderConfig =
+    new RerankProviderConfig(baseUrl, apiKey, model, None)
+}
 
 /**
  * Cross-encoder reranker interface.

@@ -522,6 +522,33 @@ trait ProviderModuleChecks extends Assertions:
   def assertHonoursApiKeyProvider(respond: HttpExchange => Unit, path: String = "/")(
     client: (String, ApiKeyProvider) => LLMClient
   )(using pos: Position): Assertion =
+    assertSendsRotatedKey(respond, path, "complete") { (baseUrl, keys) =>
+      val built = client(baseUrl, keys)
+      (() => built.complete(Conversation(Seq(UserMessage("Hello")))), () => built.close())
+    }
+
+  /**
+   * The embedding provider sends the key its config's `ApiKeyProvider` holds at each request, not the key it held
+   * when it was built (#2478): two `embed` calls on one provider, the key rotated between them, must reach the
+   * server with the first key and then the second.
+   *
+   * @param respond  answers every request with a successful embeddings reply in the provider's format
+   * @param path     the path the server answers on; `/` answers every path
+   * @param provider builds the provider for the server's base URL, its config given the key provider with
+   *                 `EmbeddingProviderConfig.withApiKeyProvider`, as a block's `apiKeyFile` gives it one
+   */
+  def assertEmbeddingHonoursApiKeyProvider(respond: HttpExchange => Unit, path: String = "/")(
+    provider: (String, ApiKeyProvider) => EmbeddingProvider
+  )(using pos: Position): Assertion =
+    assertSendsRotatedKey(respond, path, "embed") { (baseUrl, keys) =>
+      val built = provider(baseUrl, keys)
+      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8))), () => ())
+    }
+
+  /** Two calls through what `open` builds, the key rotated between them; each must carry the key then held. */
+  private def assertSendsRotatedKey(respond: HttpExchange => Unit, path: String, what: String)(
+    open: (String, ApiKeyProvider) => (() => Result[?], () => Unit)
+  )(using pos: Position): Assertion =
     val first  = "llm4s-contract-key-first-0001"
     val second = "llm4s-contract-key-second-0002"
     val held   = new AtomicReference(first)
@@ -532,13 +559,13 @@ trait ProviderModuleChecks extends Assertions:
       seen.add(exchange.getRequestHeaders.values.asScala.toSeq.flatMap(_.asScala))
       respond(exchange)
     } { baseUrl =>
-      val built = client(baseUrl, keys)
+      val (call, close) = open(baseUrl, keys)
       val results = Seq(first, second).map { key =>
         held.set(key)
-        scala.util.Try(built.complete(Conversation(Seq(UserMessage("Hello"))))).fold(e => Left(e.toString), identity)
+        scala.util.Try(call()).fold(e => Left(e.toString), _.left.map(_.message))
       }
-      scala.util.Try(built.close()): Unit
-      results.collectFirst { case Left(error) => error }.foreach(error => failAt(s"complete failed: $error"))
+      scala.util.Try(close()): Unit
+      results.collectFirst { case Left(error) => error }.foreach(error => failAt(s"$what failed: $error"))
     }
     val requests                                   = seen.asScala.toSeq
     def carries(headers: Seq[String], key: String) = headers.exists(_.contains(key))

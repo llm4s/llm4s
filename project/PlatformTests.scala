@@ -51,6 +51,7 @@ object PlatformTests {
       "org.llm4s.llmconnect.auth.IdentityTokenSourceSpec",
       "org.llm4s.llmconnect.auth.ApiKeyProviderSpec",
       "org.llm4s.config.ApiKeyFileConfigSpec",
+      "org.llm4s.config.SharedApiKeyFileSpec",
       "org.llm4s.model.ModelRegistryServiceSpec",
       "org.llm4s.http.Llm4sHttpClientSpec"
     ),
