@@ -1606,10 +1606,11 @@ lazy val deployService = (project in file("modules/deploy-service"))
   .settings(DeployServiceDocker.settings)
 
 // Reference apps that serve an llm4s agent over HTTP, `POST /chat` and `POST /chat/stream` (#1459): http4s over
-// `llm4s-effect`, ZIO HTTP over `llm4s-zio`, and Tapir endpoints served by tapir-http4s-server on the http4s app's
-// Ember server. One module for all three: they share the protocol, the error mapping and the settings, and their
-// dependencies do not conflict (ZIO HTTP's Netty is on no other classpath here, its zio is `llm4s-zio`'s, and Tapir
-// 1.11.20 is built on the same cats-effect, fs2 and http4s). Its own module, not part of `samples`, so the HTTP
+// `llm4s-effect`, ZIO HTTP over `llm4s-zio`, Tapir endpoints served by tapir-http4s-server on the http4s app's
+// Ember server, and Play 3 over `llm4s-pekko` (#2339). One module for all four: they share the protocol, the error
+// mapping and the settings, and their dependencies do not conflict (ZIO HTTP's Netty is on no other classpath here,
+// its zio is `llm4s-zio`'s, Tapir 1.11.20 is built on the same cats-effect, fs2 and http4s, and Play runs on
+// `llm4s-pekko`'s Pekko, pinned below). Its own module, not part of `samples`, so the HTTP
 // stacks stay off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
 // service would, and it is in neither the published artifacts nor the `docs` Scaladoc aggregate.
 lazy val examplesHttp = (project in file("modules/examples-http"))
@@ -1618,6 +1619,7 @@ lazy val examplesHttp = (project in file("modules/examples-http"))
     agent,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     // `--fake` serves a scripted client, so the app runs with no model and no key.
     testkit,
     ollama,
@@ -1641,9 +1643,15 @@ lazy val examplesHttp = (project in file("modules/examples-http"))
       Deps.tapirHttp4sServer,
       Deps.tapirSwaggerUiBundle,
       Deps.zioHttp,
+      Deps.playGuice,
+      Deps.playPekkoHttpServer,
       Deps.http4sEmberClient % Test,
+      Deps.playTest          % Test,
       Deps.scalatest         % Test
     ),
+    // Play 3.0 is built on Pekko 1.0; `llm4s-pekko` brings 1.7. Pekko refuses to start with mixed versions, so every
+    // Pekko artifact Play brings is pinned to `llm4s-pekko`'s.
+    dependencyOverrides ++= Deps.pekkoAlignedWithPlay,
     appLogging,
     publish / skip := true,
     // The Tapir app's documentation types: `derives Schema` expands there to Tapir's derivation code, hundreds of

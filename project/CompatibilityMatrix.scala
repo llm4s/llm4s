@@ -71,6 +71,12 @@ object CompatibilityMatrix {
       Stack("http4s", "modules/examples-http (unpublished)", Seq(Versions.http4s), ""),
       Stack("Tapir", "modules/examples-http (unpublished)", Seq(Versions.tapir), ""),
       Stack("ZIO HTTP", "modules/examples-http (unpublished)", Seq(Versions.zioHttp), ""),
+      Stack(
+        "Play Framework",
+        "modules/examples-http (unpublished)",
+        Seq(Versions.play),
+        s"Play's Pekko artifacts pinned to llm4s-pekko's ${Versions.pekko}."
+      ),
       Stack("Micrometer", "llm4s-observability-micrometer", Seq(Versions.micrometer), ""),
       Stack("OpenTelemetry", "llm4s-observability-otel", Seq(Versions.opentelemetry), ""),
       Stack("Prometheus client", "llm4s-observability-prometheus", Seq(Versions.prometheus), ""),
