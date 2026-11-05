@@ -11,8 +11,7 @@ import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 import upickle.default.ReadWriter
 
 /**
- * The scoped tools of [[ScopedToolSpec]]. They live outside the spec, whose ScalaTest `fail` would otherwise be the
- * `fail` they call.
+ * The scoped tools of [[ScopedToolSpec]].
  */
 object ScopedToolFixtures {
 
@@ -36,7 +35,7 @@ object ScopedToolFixtures {
   def checked(lookups: Int => Result[Int], parse: Int => Either[String, Int]): Result[ToolFunction[AddArgs, Int]] =
     Tool.scoped[AddArgs, Int]("checked", "Add numbers, with checks") { args =>
       ensure(args.a >= 0, s"a must not be negative, was ${args.a}")
-      if (args.a == 13) fail("13 is unlucky")
+      if (args.a == 13) reject("13 is unlucky")
       val looked = lookups(args.a).?
       val parsed = parse(args.b).?
       looked + parsed
@@ -55,7 +54,7 @@ object ScopedToolFixtures {
   def nested: Result[ToolFunction[Echo, List[Int]]] =
     Tool.scoped[Echo, List[Int]]("digits", "Digits of a text") { e =>
       e.text.toList.foreach(c => ensure(!c.isWhitespace, "no spaces"))
-      e.text.toList.map(c => if (c.isDigit) c.asDigit else fail(s"'$c' is not a digit"))
+      e.text.toList.map(c => if (c.isDigit) c.asDigit else reject(s"'$c' is not a digit"))
     }
 
   def throwing: Result[ToolFunction[Echo, String]] =
@@ -133,7 +132,7 @@ class ScopedToolSpec extends AnyFlatSpec with Matchers with ScalaCheckPropertyCh
     registry.execute(ToolCallRequest("add", ujson.Obj("a" -> 2, "b" -> 3))) shouldBe Right(ujson.Num(5))
   }
 
-  "fail" should "end the call with its message as the tool's error" in {
+  "reject" should "end the call with its message as the tool's error" in {
     checkedTool.execute(ujson.Obj("a" -> 13, "b" -> 1)) shouldBe handlerError("checked", "13 is unlucky")
   }
 

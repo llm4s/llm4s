@@ -167,6 +167,39 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       }
   }
 
+  // ---- Scoped tools
+
+  object ScopedTools {
+    import org.llm4s.schema.*
+    import org.llm4s.toolapi.ToolFunction
+    import org.llm4s.types.Result
+    import upickle.default.ReadWriter
+
+    @description("A charge to a customer's saved card")
+    case class Charge(
+      @description("The customer to charge") customerId: String,
+      @description("Amount in cents, above zero") amountCents: Long,
+      @description("ISO 4217 code: EUR or USD") currency: String
+    ) derives SchemaOf,
+          ReadWriter
+
+    case class Receipt(chargeId: String) derives ReadWriter
+
+    case class Customer(id: String, blocked: Boolean)
+
+    trait Customers { def find(id: String): Result[Customer]                                                    }
+    trait Payments  { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
+
+    def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+      Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
+        ensure(c.amountCents > 0, "amountCents must be positive")
+        ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
+        val customer = customers.find(c.customerId).?
+        if (customer.blocked) reject("this customer cannot be charged")
+        Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
+      }
+  }
+
   // ---- An agent's answer
 
   object Agents {
@@ -405,40 +438,4 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       "recursive type P: llm4s-schema-derivation cannot describe recursive types; core's schema model has no $ref."
     )
   }
-}
-
-// ---- Scoped tools
-//
-// Outside the spec, as the guide advises: inside it, the spec's inherited ScalaTest `fail` would clash with the
-// `fail` that `import org.llm4s.schema.*` brings in.
-
-object ScopedTools {
-  import org.llm4s.schema.*
-  import org.llm4s.toolapi.ToolFunction
-  import org.llm4s.types.Result
-  import upickle.default.ReadWriter
-
-  @description("A charge to a customer's saved card")
-  case class Charge(
-    @description("The customer to charge") customerId: String,
-    @description("Amount in cents, above zero") amountCents: Long,
-    @description("ISO 4217 code: EUR or USD") currency: String
-  ) derives SchemaOf,
-        ReadWriter
-
-  case class Receipt(chargeId: String) derives ReadWriter
-
-  case class Customer(id: String, blocked: Boolean)
-
-  trait Customers { def find(id: String): Result[Customer]                                                    }
-  trait Payments  { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
-
-  def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
-    Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
-      ensure(c.amountCents > 0, "amountCents must be positive")
-      ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
-      val customer = customers.find(c.customerId).?
-      if (customer.blocked) fail("this customer cannot be charged")
-      Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
-    }
 }

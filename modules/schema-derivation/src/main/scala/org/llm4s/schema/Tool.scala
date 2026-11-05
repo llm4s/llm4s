@@ -75,7 +75,7 @@ object Tool {
 
   /**
    * Builds a tool from a function over its arguments that runs in a [[ToolScope]]: it returns its result directly,
-   * and ends the call early with [[fail]], [[ensure]] or `?` (on a `Result` or an `Either[String, T]`), whose message
+   * and ends the call early with [[reject]], [[ensure]] or `?` (on a `Result` or an `Either[String, T]`), whose message
    * is the error the model sees, as a `Left` from a [[of]] handler is. It reads the call it serves as
    * [[ToolScope.call]], and the key to pass to a system with a side effect as [[ToolScope.idempotencyKey]].
    *
@@ -83,7 +83,7 @@ object Tool {
    * Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
    *   ensure(c.amountCents > 0, "amountCents must be positive")
    *   val customer = customers.find(c.customerId).?   // a Result: its LLMError becomes the tool's error
-   *   if (customer.blocked) fail("this customer cannot be charged")
+   *   if (customer.blocked) reject("this customer cannot be charged")
    *   Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
    * }
    * }}}

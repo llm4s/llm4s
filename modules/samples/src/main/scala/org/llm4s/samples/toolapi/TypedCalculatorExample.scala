@@ -43,7 +43,7 @@ import upickle.default.ReadWriter
  * each parameter is described by its name, since a named tuple's elements cannot carry a `@description`.
  *
  * A fourth, [[TypedCalculator.scopedTool]], is built with `Tool.scoped`: its function returns the result itself and
- * ends the call early with `fail`, `ensure` or `?`, where the others return an `Either`.
+ * ends the call early with `reject`, `ensure` or `?`, where the others return an `Either`.
  *
  * The sample needs no model; it calls the tools with the same arguments and prints what each returns.
  *
@@ -132,7 +132,7 @@ object TypedCalculator {
       }
     }
 
-  /** The same calculator as a scoped tool: it returns the result, and ends the call early with `fail` or `?`. */
+  /** The same calculator as a scoped tool: it returns the result, and ends the call early with `reject` or `?`. */
   val scopedTool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.scoped[CalculatorArgs, CalculatorResult]("calculator", builtin.description) { args =>
@@ -145,7 +145,7 @@ object TypedCalculator {
           case Operation.multiply => a * b
           case Operation.divide =>
             val divisor = b
-            if (divisor == 0) fail("Division by zero") else a / divisor
+            if (divisor == 0) reject("Division by zero") else a / divisor
           case Operation.power => math.pow(a, b)
           case Operation.sqrt =>
             ensure(a >= 0, "Cannot compute square root of negative number")
@@ -156,7 +156,7 @@ object TypedCalculator {
           case Operation.max        => math.max(a, b)
           case Operation.modulo =>
             val divisor = b
-            if (divisor == 0) fail("Modulo by zero") else a % divisor
+            if (divisor == 0) reject("Modulo by zero") else a % divisor
         }
         ensure(!r.isNaN && !r.isInfinite, "Result is not a finite number (overflow or an undefined operation)")
         CalculatorResult(expression(args), r, formatted(r))

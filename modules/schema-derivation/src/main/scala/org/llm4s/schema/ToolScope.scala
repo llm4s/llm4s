@@ -12,17 +12,17 @@ import scala.annotation.{ implicitNotFound, targetName }
 import scala.util.boundary
 
 /**
- * The call a [[Tool.scoped]] handler is serving, given to the handler and nowhere else: [[fail]], [[ensure]], `?`,
+ * The call a [[Tool.scoped]] handler is serving, given to the handler and nowhere else: [[reject]], [[ensure]], `?`,
  * [[ToolScope.call]] and [[ToolScope.idempotencyKey]] need one, so using them outside a scoped handler does not
  * compile.
  *
- * [[fail]] ends the call with `scala.util.boundary`'s `break`, which is an exception the handler's own `Try` or
- * `catch NonFatal` would catch: do not wrap a call to `fail`, `ensure` or `?` in either. Nor keep the scope after the
+ * [[reject]] ends the call with `scala.util.boundary`'s `break`, which is an exception the handler's own `Try` or
+ * `catch NonFatal` would catch: do not wrap a call to `reject`, `ensure` or `?` in either. Nor keep the scope after the
  * handler returns, or use it on another thread: the call has then ended, and there is nothing to end.
  */
 @Experimental
 @implicitNotFound(
-  "fail, ensure, ? and ToolScope.call/idempotencyKey are only available inside a Tool.scoped handler: no ToolScope here"
+  "reject, ensure, ? and ToolScope.call/idempotencyKey are only available inside a Tool.scoped handler: no ToolScope here"
 )
 final class ToolScope private[schema] (
   private val callInfo: Option[ToolCallInfo],
@@ -68,12 +68,12 @@ object ToolScope {
  * Ends the [[Tool.scoped]] call being served: `message` is the tool's error, which the model sees, and the rest of
  * the handler does not run.
  */
-def fail(message: String)(using scope: ToolScope): Nothing =
+def reject(message: String)(using scope: ToolScope): Nothing =
   boundary.break(Left(message))(using scope.label)
 
 /** Ends the [[Tool.scoped]] call being served with `message` as its error unless `condition` holds. */
 def ensure(condition: Boolean, message: => String)(using ToolScope): Unit =
-  if (!condition) fail(message)
+  if (!condition) reject(message)
 
 extension [T](result: Result[T])
   /**
@@ -83,7 +83,7 @@ extension [T](result: Result[T])
   @targetName("valueOrFailResult")
   def ?(using ToolScope): T = result match {
     case Right(value)          => value
-    case Left(error: LLMError) => fail(error.formatted)
+    case Left(error: LLMError) => reject(error.formatted)
   }
 
 extension [T](either: Either[String, T])
@@ -91,5 +91,5 @@ extension [T](either: Either[String, T])
   @targetName("valueOrFailMessage")
   def ?(using ToolScope): T = either match {
     case Right(value)  => value
-    case Left(message) => fail(message)
+    case Left(message) => reject(message)
   }

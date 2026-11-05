@@ -3,20 +3,19 @@ package org.llm4s.schema
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/** `fail`, `ensure`, `?` and the call's details need a [[ToolScope]], which only a `Tool.scoped` handler is given. */
+/** `reject`, `ensure`, `?` and the call's details need a [[ToolScope]], which only a `Tool.scoped` handler is given. */
 class ScopedToolCompileErrorsSpec extends AnyFlatSpec with Matchers {
 
   private def messages(errors: List[scala.compiletime.testing.Error]): String = errors.map(_.message).mkString("\n")
 
   private val outside = "only available inside a Tool.scoped handler"
 
-  // The names are qualified because this spec's own `fail` is ScalaTest's.
-  "Outside a scoped handler, fail" should "not compile" in {
-    messages(scala.compiletime.testing.typeCheckErrors("""org.llm4s.schema.fail("nope")""")) should include(outside)
+  "Outside a scoped handler, reject" should "not compile" in {
+    messages(scala.compiletime.testing.typeCheckErrors("""reject("nope")""")) should include(outside)
   }
 
   "ensure" should "not compile" in {
-    messages(scala.compiletime.testing.typeCheckErrors("""org.llm4s.schema.ensure(false, "nope")""")) should include(
+    messages(scala.compiletime.testing.typeCheckErrors("""ensure(false, "nope")""")) should include(
       outside
     )
   }
@@ -49,8 +48,8 @@ class ScopedToolCompileErrorsSpec extends AnyFlatSpec with Matchers {
   "Inside a scoped handler, all of them" should "compile" in {
     scala.compiletime.testing.typeCheckErrors(
       """Tool.scoped[TypedToolFixtures.AddArgs, Int]("t", "d") { a =>
-        |  org.llm4s.schema.ensure(a.a > 0, "positive")
-        |  if (a.b == 0) org.llm4s.schema.fail("zero")
+        |  ensure(a.a > 0, "positive")
+        |  if (a.b == 0) reject("zero")
         |  val r: org.llm4s.types.Result[Int] = Right(a.a)
         |  val e: Either[String, Int] = Right(a.b)
         |  ToolScope.idempotencyKey.length + ToolScope.call.size + r.? + e.?

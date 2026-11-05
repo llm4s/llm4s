@@ -358,7 +358,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result, or an agent's answer, with no case class to declare [#2328](https://github.com/llm4s/llm4s/issues/2328);
   [guide](docs/guide/derived-schemas.md#named-tuples).
 - **Added** scoped typed tools to `llm4s-schema-derivation`: `Tool.scoped` builds a typed tool from a function that
-  returns its result and runs in a `ToolScope`, with `fail`, `ensure` and `.?` for early exit and
+  returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
