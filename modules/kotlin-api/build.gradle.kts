@@ -45,8 +45,10 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
-    // WrapClientTest builds an Ollama client in code. llm4s-java-api brings no provider module (#1496), and neither
-    // does this artifact: an application declares the ones it calls.
+    // The tests build OpenAI, OpenAI-compatible, Anthropic and Ollama configs and clients. llm4s-java-api brings no
+    // provider module (#1496), and neither does this artifact: an application declares the ones it calls.
+    testImplementation("org.llm4s:llm4s-openai_3:$llm4sVersion") // with llm4s-openai-compatible
+    testImplementation("org.llm4s:llm4s-anthropic_3:$llm4sVersion")
     testImplementation("org.llm4s:llm4s-ollama_3:$llm4sVersion")
     // mockk 1.13.x uses ByteBuddy self-attachment (no separate -javaagent needed).
     // mockk-agent-jvm must be on the test classpath so the instrumentation classes are available.
