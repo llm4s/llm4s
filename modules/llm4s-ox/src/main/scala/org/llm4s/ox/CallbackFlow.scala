@@ -1,7 +1,7 @@
 package org.llm4s.ox
 
 import _root_.ox.{ discard, fork, repeatWhile, supervised, tapException }
-import _root_.ox.channels.{ BufferCapacity, ChannelClosed }
+import _root_.ox.channels.{ BufferCapacity, Channel, ChannelClosed }
 import _root_.ox.flow.Flow
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
@@ -11,6 +11,17 @@ import scala.util.{ Failure, Success, Try }
 
 /** Turns a blocking call that pushes items to a callback into a pull-based Ox `Flow`. */
 private[ox] object CallbackFlow {
+
+  /**
+   * Sends `item`, waiting while the channel is full. A channel the consumer has closed refuses it with an
+   * `InterruptedException`, as an interrupt would: either way the consumer is gone, and llm4s providers return
+   * `CancelledError` for both.
+   */
+  private def offer[A](channel: Channel[A], item: A): Unit =
+    channel.sendOrClosed(item) match {
+      case _: ChannelClosed => throw new InterruptedException("the flow's consumer has stopped")
+      case _                => ()
+    }
 
   /**
    * A `Flow` of what `produce` hands its callback. Each run calls `produce` once, on a forked virtual thread, and
@@ -27,7 +38,7 @@ private[ox] object CallbackFlow {
       val failure = new AtomicReference[Option[Throwable]](None)
       supervised {
         fork {
-          Try(CancelledError.attempt(operation)(produce(a => channel.send(a)))) match {
+          Try(CancelledError.attempt(operation)(produce(a => offer(channel, a)))) match {
             case Success(Right(_))    => ()
             case Success(Left(error)) => failure.set(Some(new LLMException(error)))
             case Failure(thrown)      => failure.set(Some(thrown))
