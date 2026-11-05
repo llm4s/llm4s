@@ -955,7 +955,7 @@ lazy val memory = (project in file("modules/memory"))
     // Measured 81.10% statement coverage (`sbt coverage memory/test memory/coverageReport`)
     // on the code as carved out of core; 91.76% with `TransactionalMemoryStore` (#1911), when the
     // floor was raised. Floor is the measured value rounded down to the nearest 5. Never lower it.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1192,7 +1192,7 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
     // from core, and the generic provider's and dialects' own specs. Floor is the measured value
     // rounded down to the nearest 5. Never lower it. The `@Cloud` DeepSeek, OpenRouter and Cohere
     // smoke suites in `modules/it` are not counted here.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1367,7 +1367,7 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
     // Measured 92.10% statement coverage (`sbt coverage providerTestkit/test
     // providerTestkit/coverageReport`). Floor is the measured value rounded down to the nearest
     // 5. Never lower it.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1831,7 +1831,7 @@ lazy val doctor = (project in file("modules/doctor"))
     commonSettings,
     // Measured 92.85% statement and 80.80% branch coverage (`sbt coverage doctor/test doctor/coverageReport`).
     // Floor is the measured value rounded down to the nearest 5. Never lower it.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Compile / mainClass := Some("org.llm4s.doctor.DoctorCli"),
     // DoctorCli.main calls sys.exit with the report's exit code.
     run / fork  := true,
@@ -1872,7 +1872,7 @@ lazy val observability = (project in file("modules/observability"))
     // Measured 94.52% statement coverage (`sbt coverage observability/test
     // observability/coverageReport`) on the code as carved out of core. Floor is the measured
     // value rounded down to the nearest 5. Never lower it.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
@@ -1979,7 +1979,7 @@ lazy val agent = (project in file("modules/agent"))
     // Measured 80.80% statement coverage (`sbt coverage agent/test agent/coverageReport`) on the
     // code as carved out of core; 92.81% with run-claim leases and fencing (#1700), when the floor
     // was raised. Floor is the measured value rounded down to the nearest 5. Never lower it.
-    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
