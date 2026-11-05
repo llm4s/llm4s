@@ -471,6 +471,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   navigation label) and `scripts/check-doc-seo.sh`, which fails CI on a missing, duplicate or over-long title or description [#2314](https://github.com/llm4s/llm4s/issues/2314).
 - **Added** [Moving a Java app from LangChain4j or Spring AI](docs/guide/java-migration.md): concepts, compiled Java for
   each common task, provider configuration and the gaps; the Scala migration and comparison pages corrected for the Java API [#2282](https://github.com/llm4s/llm4s/issues/2282).
+- **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
+  LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 
 ### Embeddings & RAG
 

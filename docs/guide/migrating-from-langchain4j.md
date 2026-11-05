@@ -20,6 +20,10 @@ documents. For whether LLM4S is the right choice, read the [comparison](comparis
 > maps the same concepts to `llm4s-java-api`, with compiled Java for each: records as structured output, `@Tool`
 > methods, `FakeLlmClient` tests, the Spring Boot starter and provider configuration.
 
+{: .note }
+> Calling a model from Scala with **sttp-ai** or **openai-scala-client** today? [Coming from sttp-ai or
+> openai-scala-client](migrating-from-scala-llm-clients) puts that code next to the same thing in LLM4S.
+
 Every LLM4S snippet below is compiled by a test in this repository (`ComparisonGuideSpec`), which also checks that the
 code on this page is, word for word, the code it compiles, so the page cannot drift from the API. All but two are also run, against a scripted client, with no network. The two that are only compiled
 (the configuration one and the RAG one) say so. The LangChain4j and Spring AI sides show concept names taken from their
