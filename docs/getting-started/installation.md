@@ -778,6 +778,17 @@ libraryDependencies += "org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test
 `--live`, the model server, and says what to fix: `sbt "Test/runMain org.llm4s.doctor.DoctorCli"`. It depends on
 `llm4s-core` only. See [Doctor](../reference/doctor) for Maven, Gradle and Coursier.
 
+### Trying llm4s in the REPL
+
+```scala
+// same version as llm4s-core; for the REPL, worksheets and scripts, not for production code
+libraryDependencies += "org.llm4s" %% "llm4s-repl" % llm4sVersion
+```
+
+`ask`, `extract`, `chat()`, `history` and `lastUsage` behind one `import org.llm4s.repl.*`, with an offline session
+that needs no API key. It is experimental, and depends on `llm4s-core`, `llm4s-schema-derivation` and
+`llm4s-testkit`. See [Try llm4s in the REPL](repl).
+
 ### For provider authors (testing a provider module)
 
 ```scala

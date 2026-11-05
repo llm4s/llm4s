@@ -437,7 +437,7 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, doctor, observabilityMicrometer,
+            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, doctor, repl, observabilityMicrometer,
                       agentTools, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
@@ -558,6 +558,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/doctor/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: doctor
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload repl coverage to Codecov
+        if: contains(matrix.modules, 'repl')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/repl/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: repl
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1534,6 +1545,13 @@ jobs:
           REQUIRE_MAVEN: '1'
           REQUIRE_GRADLE: '1'
         run: scripts/check-doctor-launch.sh 0.1.0-SNAPSHOT
+
+      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
+
+      # examples/repl's Scala CLI script and Metals worksheet, run with `scala-cli run` against the llm4s-repl just
+      # published and Session.offline, so with no API key (#2342).
+      - name: Run the llm4s-repl script and worksheet with Scala CLI
+        run: scripts/check-repl-scripts.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()

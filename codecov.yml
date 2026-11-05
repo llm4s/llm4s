@@ -146,6 +146,10 @@ flags:
     paths:
       - modules/doctor/src/main/scala
     carryforward: true
+  repl:
+    paths:
+      - modules/repl/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala
