@@ -2549,7 +2549,8 @@ lazy val scalafixScala213 = "2.13.14"
 lazy val scalafixVersion  = "0.12.1"
 lazy val scalafixOldLlm4s = "0.4.1"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
-  publish / skip := true,
+  publish / skip       := true,
+  mimaFailOnNoPrevious := false,
   Compile / scalacOptions ++= {
     if (scalaVersion.value.startsWith("3.")) Seq("-java-output-version", javaRelease) else Seq("-release", javaRelease)
   },
@@ -2562,11 +2563,12 @@ lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
 
 lazy val scalafixRules = (project in file("modules/scalafix-rules/rules"))
   .settings(
-    name               := "llm4s-scalafix",
-    description        := "Scalafix rules that migrate user code across llm4s's breaking changes.",
-    scalaVersion       := scalafixScala213,
-    crossScalaVersions := Seq(scalafixScala213),
-    publish / skip     := true,
+    name                 := "llm4s-scalafix",
+    description          := "Scalafix rules that migrate user code across llm4s's breaking changes.",
+    scalaVersion         := scalafixScala213,
+    crossScalaVersions   := Seq(scalafixScala213),
+    publish / skip       := true,
+    mimaFailOnNoPrevious := false,
     // The build's SemanticDB plugin (4.15) has no Scala 2.13.14 artifact, and the only Scalafix rules the build runs
     // on these sources are syntactic, so neither 2.13 project emits SemanticDB.
     semanticdbEnabled := false,
