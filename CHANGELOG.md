@@ -239,8 +239,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
   (for example `--env=production` with `prod-safe`, whose policies apply only to `prod`): nothing was checked, so a
   mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
-- **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: OpenAI, Requesty, Anthropic, OpenRouter
-  and generic OpenAI-compatible re-read a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313).
+- **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: every built-in provider that takes a key
+  re-reads a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313), [#2477](https://github.com/llm4s/llm4s/issues/2477).
 
 ### Providers
 
