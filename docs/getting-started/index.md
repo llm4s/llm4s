@@ -11,6 +11,9 @@ has_children: true
 
 Get up and running with LLM4S in minutes.
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/llm4s/llm4s?quickstart=1)
+Nothing to install: the [playground](playground) runs the samples in your browser against a small local model.
+
 This section will guide you through:
 
 1. **[Installation](installation)** - Set up LLM4S in your project
@@ -28,6 +31,7 @@ This section will guide you through:
     {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
 12. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
 13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
+14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 

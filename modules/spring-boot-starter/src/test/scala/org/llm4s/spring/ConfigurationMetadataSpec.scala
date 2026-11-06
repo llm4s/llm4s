@@ -36,8 +36,8 @@ class ConfigurationMetadataSpec extends AnyFlatSpec with Matchers {
         val name  = s"$prefix.${kebab(d.getName)}"
         val value = d.getReadMethod.invoke(instance)
         d.getPropertyType match {
-          case t if t == classOf[AsyncProperties] || t == classOf[HealthProperties] => bound(name, value).toList
-          case t                                                                    => List(name -> (t, value))
+          case t if t.getName.startsWith("org.llm4s.spring.") => bound(name, value).toList
+          case t                                              => List(name -> (t, value))
         }
       }
       .toMap
@@ -70,6 +70,7 @@ class ConfigurationMetadataSpec extends AnyFlatSpec with Matchers {
           case b: Boolean  => listedDefault shouldBe Some(ujson.Bool(b))
           case i: Int      => listedDefault shouldBe Some(ujson.Num(i))
           case d: Duration => listedDefault.map(_.str) shouldBe Some(s"${d.getSeconds}s")
+          case s: String   => listedDefault shouldBe Some(ujson.Str(s))
           case other       => fail(s"no rule for a default of ${other.getClass}")
         }
       }
@@ -94,7 +95,7 @@ class ConfigurationMetadataSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "name a group for each properties class, and hint only flat-form providers" in {
-    metadata("groups").arr.map(_("name").str).toSet shouldBe Set("llm4s", "llm4s.async", "llm4s.health")
+    metadata("groups").arr.map(_("name").str).toSet shouldBe Set("llm4s", "llm4s.async", "llm4s.health", "llm4s.agent")
     val hints = metadata("hints").arr.find(_("name").str == "llm4s.provider").getOrElse(fail("no hint"))
     hints("values").arr.map(_("value").str).toSet shouldBe Set("openai", "anthropic", "ollama")
   }

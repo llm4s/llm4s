@@ -437,18 +437,18 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, doctor, observabilityMicrometer,
-                      agentTools, traceOpentelemetry, gradleDemo]
+            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities, doctor,
+                      observabilityMicrometer, agentTools, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      perplexity, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
-                      llm4sPekko]
+                      llm4sPekko, llm4sOx]
 
     # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
     # others it costs a few seconds of start-up.
@@ -558,6 +558,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/prompt/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: prompt
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload capabilities coverage to Codecov
+        if: contains(matrix.modules, 'capabilities')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/capabilities/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: capabilities
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -872,6 +883,17 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload perplexity coverage to Codecov
+        if: contains(matrix.modules, 'perplexity')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/perplexity/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: perplexity
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload provider-testkit coverage to Codecov
         if: contains(matrix.modules, 'providerTestkit')
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -1034,6 +1056,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: llm4s-pekko
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-ox coverage to Codecov
+        if: contains(matrix.modules, 'llm4sOx')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-ox/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-ox
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1993,6 +2026,10 @@ jobs:
           WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
           # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # PerplexitySmokeSpec (llm4s-perplexity): a Perplexity API key; billed per web search as well as per token.
+          # PERPLEXITY_MODEL is optional; unset, the suite uses perplexity/sonar.
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          PERPLEXITY_MODEL: ${{ secrets.PERPLEXITY_MODEL }}
           # Smoke suites added for #1213. With LLM4S_IT_STRICT=true each required one that is
           # missing from the repository secrets makes its suite FAIL (not skip).
           # AzureSmokeSpec: the resource key, its endpoint (https://<resource>.openai.azure.com) and a

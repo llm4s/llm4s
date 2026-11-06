@@ -100,6 +100,7 @@ map_file_to_project() {
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
     modules/llm4s-pekko/*)                echo "llm4sPekko" ;;
+    modules/llm4s-ox/*)                   echo "llm4sOx" ;;
     modules/java-api/*)                   echo "javaApi" ;;
     modules/java-rag/*)                   echo "javaRag" ;;
     modules/vectorstore-elasticsearch/*)  echo "vectorstoreElasticsearch" ;;
@@ -116,8 +117,10 @@ map_file_to_project() {
     modules/schema-iron/*)                echo "schemaIron" ;;
     modules/prompt/*)                     echo "prompt" ;;
     modules/testkit/*)                    echo "testkit" ;;
+    modules/capabilities/*)               echo "capabilities" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
+    modules/providers/perplexity/*)       echo "perplexity" ;;
     modules/providers/jina/*)             echo "jina" ;;
     modules/providers/jev/*)              echo "jev" ;;
     modules/providers/cohere/*)           echo "cohere" ;;
@@ -134,6 +137,9 @@ map_file_to_project() {
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
     modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
+    modules/scalafix-rules/rules/*)       echo "scalafixRules" ;;
+    # The testkit projects: `scalafixTests/test` compiles the input and output and runs every rule on them.
+    modules/scalafix-rules/*)             echo "scalafixTests" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
     modules/memory/*)                     echo "memory" ;;
@@ -239,6 +245,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
+    llm4sOx)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
     media)
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE image
@@ -265,6 +275,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE voyage
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
+      set_add DOWNSTREAM_COMPILE perplexity
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
@@ -291,6 +302,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE schemaIron
       set_add DOWNSTREAM_COMPILE prompt
       set_add DOWNSTREAM_COMPILE testkit
+      set_add DOWNSTREAM_COMPILE capabilities
       set_add DOWNSTREAM_COMPILE doctor
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
@@ -299,6 +311,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
       set_add DOWNSTREAM_COMPILE llm4sPekko
+      set_add DOWNSTREAM_COMPILE llm4sOx
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
@@ -412,6 +425,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    perplexity)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     voyage)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -506,6 +525,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
       set_add DOWNSTREAM_COMPILE llm4sPekko
+      set_add DOWNSTREAM_COMPILE llm4sOx
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -541,6 +561,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE voyage
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
+      set_add DOWNSTREAM_COMPILE perplexity
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
@@ -565,6 +586,9 @@ propagate_downstream() {
       ;;
     doctor)
       set_add DOWNSTREAM_COMPILE configPolicy
+      ;;
+    scalafixRules)
+      set_add DOWNSTREAM_COMPILE scalafixTests
       ;;
   esac
 }

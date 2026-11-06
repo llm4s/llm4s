@@ -559,6 +559,15 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
 `llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
+### For Perplexity
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
+```
+
+The Perplexity Agent API chat provider (`provider = "perplexity"`): answers grounded in web search, with
+citations. It brings no dependency beyond `llm4s-core`. See [Perplexity](../guide/providers#perplexity).
+
 ### For Java, Spring Boot, cats-effect and ZIO
 
 ```scala
@@ -570,6 +579,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
 libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
+libraryDependencies += "org.llm4s" %% "llm4s-ox"                   % llm4sVersion  // Ox direct style (Experimental)
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
@@ -581,7 +591,8 @@ pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a 
 facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-reactor` turns
 a streamed reply into a Reactor `Flux<String>` ([Java Reactor](../guide/java-reactor)), apart from the facade so that it
 does not bring `reactor-core` to an application without Reactor. `llm4s-effect`,
-`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. `llm4s-ox` adds an
+Ox `Flow` of a streamed reply, bounded fan-out, races and retries to direct-style code ([Direct style](../guide/direct-style)).
 
 ### For Kotlin (coroutines and Flow)
 
@@ -770,6 +781,17 @@ libraryDependencies += "org.llm4s" %% "llm4s-prompt" % llm4sVersion
 The `prompt"..."` and `system"..."` interpolators: each value is rendered by a `Promptable` checked at compile time,
 and `Untrusted` input is fenced. It is experimental, and depends on `llm4s-core` only. See
 [Typed Prompts](../guide/prompts).
+
+### Capability-typed clients
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
+```
+
+`client.requireCapabilities[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
+client not checked for one fails to compile. It is experimental, and depends on `llm4s-core` only. See
+[Capability-Typed Clients](../guide/capabilities).
 
 ### Testing your own code (the testkit)
 

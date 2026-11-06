@@ -224,3 +224,14 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
         http.lastUrl shouldBe Some(s"https://wx.example.com/ml/v1/text/chat?version=$version")
     }
   }
+
+  test("apply leaves a supplied HTTP client open when closed, and closes one it built (#2341)") {
+    val http     = new MockHttpClient(Seq(iam, generation))
+    val supplied = WatsonXClient(config, httpClient = http).fold(e => fail(e.message), identity)
+    supplied.close()
+    http.closed shouldBe false
+
+    val owned = WatsonXClient(config).fold(e => fail(e.message), identity)
+    owned.close()
+    owned.complete(hi, CompletionOptions()).left.toOption.exists(_.isInstanceOf[ConfigurationError]) shouldBe true
+  }
