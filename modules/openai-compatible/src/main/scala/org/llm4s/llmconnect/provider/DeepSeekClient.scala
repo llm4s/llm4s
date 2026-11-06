@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
@@ -29,7 +30,8 @@ import scala.util.Try
 class DeepSeekClient(
   config: DeepSeekConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -45,7 +47,8 @@ class DeepSeekClient(
       ),
       DeepSeekDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 object DeepSeekClient {
@@ -53,11 +56,12 @@ object DeepSeekClient {
   def apply(
     config: DeepSeekConfig,
     metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[DeepSeekClient] =
     OpenAICompatibleClient
       .requireKey("DeepSeek", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult)
+      .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging, httpClient)).toResult)
 
   def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
     OpenAICompatibleClient
