@@ -44,6 +44,7 @@ object DocSnippets {
     "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
+    "guide/tapir-tools.md",
     "guide/vector-store.md",
     "index.md",
     "reference/doctor.md",

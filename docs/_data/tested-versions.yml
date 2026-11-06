@@ -37,6 +37,10 @@ stacks:
     artifact: "llm4s-reactor"
     versions: ["3.8.8"]
     note: ""
+  - name: "Tapir"
+    artifact: "llm4s-tapir"
+    versions: ["1.11.20"]
+    note: "With sttp client 3.10.3."
   - name: "Kotlin"
     artifact: "llm4s-kotlin-api"
     versions: ["2.0.21"]
