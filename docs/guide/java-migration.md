@@ -296,8 +296,9 @@ public class AskController {
 `complete` blocks and throws `LlmException` on failure, so an `@ExceptionHandler` can map `getKind()` to a status;
 `tryComplete` returns the `LlmResult`, and `completeAsync` a `CompletableFuture<String>` on the starter's executor
 ([Spring Boot](spring-boot#use-the-template)). The starter auto-configures the client, the template, a health
-indicator and Micrometer metrics; it does not yet auto-configure embeddings, an agent from `@Tool` beans or streaming
-endpoints ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
+indicator, Micrometer metrics and an agent over your beans' `@Tool` methods
+([Spring Boot](spring-boot#an-agent-with-tools)); it does not yet auto-configure embeddings or streaming endpoints
+([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 
 ## A test with FakeLlmClient
 
@@ -401,7 +402,7 @@ Plainly, as of this page's sources:
   of your own needs the Scala `Agent.builder` and `Llm4s.wrapAgent`.
 - **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse
   ([#2278](https://github.com/llm4s/llm4s/issues/2278)).
-- **More Spring Boot auto-configuration.** Embeddings, an agent from `@Tool` beans and streaming endpoints
+- **More Spring Boot auto-configuration.** Embeddings and streaming endpoints
   ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).

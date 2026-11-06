@@ -3,8 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -19,6 +20,10 @@ import org.llm4s.types.Result
  */
 @Experimental
 object CohereProvider extends ProviderDescriptor:
+
+  /** Sends its requests through `LlmClientOptions.httpClient` when one is supplied (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(true)
+
   val id: ProviderId = ProviderId("cohere")
 
   val configSpec: ProviderConfigSpec =
@@ -41,4 +46,11 @@ object CohereProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[CohereConfig](id, config)
-      .flatMap(CohereClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        CohereClient(
+          _,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      )
