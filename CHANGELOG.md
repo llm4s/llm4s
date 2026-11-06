@@ -517,6 +517,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 - **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
+- **Added** [Enrich a Kafka topic with an LLM](docs/guide/kafka.md): an fs2-kafka pipeline (`org.llm4s.samples.kafka`) with bounded concurrency, retries,
+  a dead-letter topic and offsets committed after the produce, tested offline and against a broker in `modules/it` [#2297](https://github.com/llm4s/llm4s/issues/2297).
 - **Added** a Play 3 reference app to `modules/examples-http` over `llm4s-pekko`: Guice wiring with a stop hook, `llm4s` config in Play's
   `application.conf`, a blocking dispatcher, `Ok.chunked` SSE; [guide](docs/guide/http-reference-apps.md#the-play-app) [#2339](https://github.com/llm4s/llm4s/issues/2339).
 - **Added** llm4s.org share cards (a large Open Graph/X card on every page, rendered by `scripts/render-social-images.sh`), `SoftwareSourceCode`,

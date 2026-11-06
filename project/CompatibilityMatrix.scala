@@ -97,6 +97,7 @@ object CompatibilityMatrix {
         s"Pinned: later releases are built with a newer Scala 3 whose TASTy the ${Common.scala3} compiler cannot read."
       ),
       Stack("jsoniter-scala", "docs/guide/json-libraries.md (tested recipe)", Seq(Versions.jsoniterScala), ""),
+      Stack("fs2-kafka", "docs/guide/kafka.md (tested pipeline)", Seq(Versions.fs2Kafka), ""),
       Stack("OpenAI Java SDK", "llm4s-openai", Seq(Versions.openaiJava), ""),
       Stack("Anthropic Java SDK", "llm4s-anthropic", Seq(Versions.anthropic), ""),
       Stack("AWS SDK", "llm4s-bedrock", Seq(Versions.awsSdk), "")

@@ -41,6 +41,7 @@ object DocSnippets {
     "guide/direct-style.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
+    "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
     "guide/tapir-tools.md",
