@@ -437,7 +437,7 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, prompt, testkit, doctor, observabilityMicrometer,
+            modules: [core, memory, memoryPostgres, schemaDerivation, prompt, testkit, capabilities, doctor, observabilityMicrometer,
                       agentTools, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
@@ -547,6 +547,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/prompt/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: prompt
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload capabilities coverage to Codecov
+        if: contains(matrix.modules, 'capabilities')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/capabilities/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: capabilities
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

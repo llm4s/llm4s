@@ -141,6 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llm4s-java-api` and `llm4s-spring-boot-starter` no longer bring the provider modules: declare `llm4s-openai`,
   `llm4s-ollama`, ... yourself; [migration](docs/reference/migration.md#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
+### Capabilities
+
+- **Added** `llm4s-capabilities` (Experimental): `client.requireCapabilities[Vision & Tools](provider, model)` checks the model's metadata once and
+  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
+
 ### Observability
 
 - **Added** OpenTelemetry GenAI semantic conventions (`1.37.0`) for plain and streamed completions and embeddings:
@@ -754,7 +759,7 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
   [Mp3](docs/reference/migration.md#audioformatmp3-1307),
   [RegexValidator](docs/reference/migration.md#regexvalidators-constructor).
 
-### Core
+### Capabilities
 
 - **Added** `CancelledError`: an interrupted call returns `Left(CancelledError)` with the interrupt flag kept, never
   retried; chat, embedding, reranker, MCP, image and speech clients follow it

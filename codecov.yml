@@ -146,6 +146,10 @@ flags:
     paths:
       - modules/testkit/src/main/scala
     carryforward: true
+  capabilities:
+    paths:
+      - modules/capabilities/src/main/scala
+    carryforward: true
   doctor:
     paths:
       - modules/doctor/src/main/scala

@@ -103,6 +103,7 @@ llm4s/
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
+│   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)

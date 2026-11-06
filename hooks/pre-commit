@@ -115,6 +115,7 @@ map_file_to_project() {
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
     modules/prompt/*)                     echo "prompt" ;;
     modules/testkit/*)                    echo "testkit" ;;
+    modules/capabilities/*)               echo "capabilities" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
@@ -289,6 +290,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE schemaDerivation
       set_add DOWNSTREAM_COMPILE prompt
       set_add DOWNSTREAM_COMPILE testkit
+      set_add DOWNSTREAM_COMPILE capabilities
       set_add DOWNSTREAM_COMPILE doctor
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks

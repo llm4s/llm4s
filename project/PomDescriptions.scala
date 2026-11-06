@@ -36,6 +36,8 @@ object PomDescriptions {
       "Microsoft Entra ID for LLM4S's Azure OpenAI provider: keyless DefaultAzureCredential or any TokenCredential.",
     "llm4s-bedrock" ->
       "AWS Bedrock chat provider for LLM4S, using the Converse and ConverseStream APIs.",
+    "llm4s-capabilities" ->
+      "Capability-typed LLM4S clients: check a model's capabilities once, and passing a client not checked for one fails to compile.",
     "llm4s-cohere" ->
       "Cohere embedding provider for LLM4S.",
     "llm4s-core" ->
