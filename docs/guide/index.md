@@ -88,6 +88,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
 - **[Spark and Databricks](spark)** - enrich a DataFrame from a Spark job: a client per partition, `ReliableClient`, errors as data
+- **[Apache Flink](flink)** - enrich a Flink 2.x stream from Scala 3: `AsyncDataStream`, a client per task built in `open()`, dead letters as a side output
 
 ### Java
 
