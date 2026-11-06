@@ -453,7 +453,7 @@ jobs:
         include:
           - leg: core
             modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
-                      doctor, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
+                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -606,6 +606,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/doctor/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: doctor
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload repl coverage to Codecov
+        if: contains(matrix.modules, 'repl')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/repl/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: repl
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1343,6 +1354,17 @@ jobs:
           - 7687:7687
           - 7474:7474
 
+      # KafkaTicketPipelineSpec (#2297): a single-node broker in KRaft mode, advertised on localhost:9092.
+      kafka:
+        image: apache/kafka:3.9.1
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+        ports:
+          - 9092:9092
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1402,6 +1424,7 @@ jobs:
           OPENSEARCH_TEST_URL: http://localhost:9201
           REDIS_TEST_URL: redis://localhost:6379
           VALKEY_TEST_URL: redis://localhost:6380
+          KAFKA_TEST_BOOTSTRAP: localhost:9092
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
@@ -1615,6 +1638,13 @@ jobs:
           REQUIRE_MAVEN: '1'
           REQUIRE_GRADLE: '1'
         run: scripts/check-doctor-launch.sh 0.1.0-SNAPSHOT
+
+      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
+
+      # examples/repl's Scala CLI script and Metals worksheet, run with `scala-cli run` against the llm4s-repl just
+      # published and Session.offline, so with no API key (#2342).
+      - name: Run the llm4s-repl script and worksheet with Scala CLI
+        run: scripts/check-repl-scripts.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()

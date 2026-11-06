@@ -519,6 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 - **Added** a News section on llm4s.org (`/news/`, posts for 0.5.0 and 0.5.1) with an Atom feed, per-tag feeds and
   `scripts/new-release-post.sh`, which drafts a release's post from its CHANGELOG section [#2319](https://github.com/llm4s/llm4s/issues/2319); [release step](docs/reference/release.md#write-the-news-post).
+- **Added** [Enrich a Kafka topic with an LLM](docs/guide/kafka.md): an fs2-kafka pipeline (`org.llm4s.samples.kafka`) with bounded concurrency, retries,
+  a dead-letter topic and offsets committed after the produce, tested offline and against a broker in `modules/it` [#2297](https://github.com/llm4s/llm4s/issues/2297).
 - **Added** a Play 3 reference app to `modules/examples-http` over `llm4s-pekko`: Guice wiring with a stop hook, `llm4s` config in Play's
   `application.conf`, a blocking dispatcher, `Ok.chunked` SSE; [guide](docs/guide/http-reference-apps.md#the-play-app) [#2339](https://github.com/llm4s/llm4s/issues/2339).
 - **Added** llm4s.org share cards (a large Open Graph/X card on every page, rendered by `scripts/render-social-images.sh`), `SoftwareSourceCode`,
@@ -667,6 +669,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks the targets and docs agree [#1493](https://github.com/llm4s/llm4s/issues/1493); [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support).
 - **Added** `llm4s-doctor`: the doctor, published and run from your own project (`sbt "Test/runMain org.llm4s.doctor.DoctorCli"`,
   `cs launch`, Maven, Gradle) or code (`Doctor.run`) [#2283](https://github.com/llm4s/llm4s/issues/2283); [Doctor](docs/reference/doctor.md#running-it), [migration](docs/reference/migration.md#the-doctor-is-llm4s-doctor-2283).
+- **Added** `llm4s-repl` (experimental): `ask`, `extract`, `chat()`, `history` and `lastUsage` behind one import for the REPL, worksheets and scripts, with an offline `Session` that needs no key
+  [#2342](https://github.com/llm4s/llm4s/issues/2342); [Try llm4s in the REPL](docs/getting-started/repl.md), [migration](docs/reference/migration.md#llm4s-repl-a-new-module-2342).
 
 ## [0.5.1] - 2026-10-15
 
