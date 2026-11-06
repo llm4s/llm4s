@@ -61,6 +61,10 @@ stacks:
     artifact: "modules/examples-http (unpublished)"
     versions: ["3.2.0"]
     note: ""
+  - name: "Play Framework"
+    artifact: "modules/examples-http (unpublished)"
+    versions: ["3.0.12"]
+    note: "Play's Pekko artifacts pinned to llm4s-pekko's 1.7.1."
   - name: "Micrometer"
     artifact: "llm4s-observability-micrometer"
     versions: ["1.17.1"]

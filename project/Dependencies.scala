@@ -84,6 +84,12 @@ object Versions {
   // resolve it. Never Akka: its licence is not Apache-2.0.
   val pekko = "1.7.1"
 
+  // Play Framework 3 (Apache-2.0), for the unpublished reference app in modules/examples-http (#2339) only. 3.0.12 is
+  // the latest stable release (3.1 is still a milestone); it is built with Scala 3.3 LTS on Pekko 1.0.3 and Pekko HTTP
+  // 1.0.1. The module pins every Pekko artifact Play brings to `pekko` above (Pekko refuses mixed versions at startup),
+  // which Pekko's binary compatibility within 1.x allows.
+  val play = "3.0.12"
+
   // Other JSON libraries, test-only: `docs/guide/json-libraries.md` shows how to use them with llm4s and
   // `JsonLibrariesGuideSpec` (llm4s-samples, unpublished) runs those recipes. No published module depends on them.
   val circe    = "0.14.17"
@@ -191,6 +197,23 @@ object Deps {
 
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
+
+  // Play Framework (unpublished modules/examples-http only; see Versions). Guice wiring and the Pekko HTTP server,
+  // without the sbt plugin: the app routes with SIRD and starts its server itself. `play-test` is Test only.
+  val playGuice           = "org.playframework" %% "play-guice"             % Versions.play
+  val playPekkoHttpServer = "org.playframework" %% "play-pekko-http-server" % Versions.play
+  val playTest            = "org.playframework" %% "play-test"              % Versions.play
+  // The Pekko artifacts Play depends on beyond `pekko-stream`, pinned to `Versions.pekko` in modules/examples-http.
+  val pekkoAlignedWithPlay: Seq[ModuleID] =
+    Seq(
+      "pekko-actor",
+      "pekko-actor-typed",
+      "pekko-slf4j",
+      "pekko-serialization-jackson",
+      "pekko-protobuf-v3",
+      "pekko-stream"
+    )
+      .map(name => "org.apache.pekko" %% name % Versions.pekko)
 
   // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
   // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
