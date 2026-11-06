@@ -349,6 +349,7 @@ lazy val llm4s = (project in file("."))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
     prompt,
@@ -1345,6 +1346,29 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
     )
   )
 
+// `llm4s-perplexity` (#1026): Perplexity's Agent API (`/v1/agent`), which replaced Sonar Chat Completions. It
+// speaks the OpenAI Responses format, not `/chat/completions`, so it is a provider module of its own rather than a
+// dialect in `openai-compatible`. No dependency beyond core.
+
+lazy val perplexity = (project in file("modules/providers/perplexity"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-perplexity",
+    commonSettings,
+    // Measured 99.37% statement coverage (`sbt coverage perplexity/test perplexity/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The `@Cloud` `PerplexitySmokeSpec` in
+    // `modules/it` is not counted here.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -1724,6 +1748,7 @@ lazy val samples = (project in file("modules//samples"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1815,7 +1840,19 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
   // `doctor`: `org.llm4s.configpolicy.DoctorCli` forwards to the published doctor, so the in-repository command runs
   // it with every built-in provider module on the classpath.
-  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
+  .dependsOn(
+    core,
+    doctor,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    azureIdentity,
+    openaiCompatible,
+    bedrock,
+    watsonx,
+    perplexity
+  )
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -2197,6 +2234,7 @@ lazy val it = (project in file("modules/it"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -2291,6 +2329,7 @@ lazy val docs = (project in file("modules/docs"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
     prompt,
@@ -2350,6 +2389,7 @@ lazy val docs = (project in file("modules/docs"))
         (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
+        (perplexity / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (prompt / Compile / sources).value ++

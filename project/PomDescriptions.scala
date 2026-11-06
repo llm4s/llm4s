@@ -88,6 +88,8 @@ object PomDescriptions {
       "Chat client for OpenAI-compatible APIs in LLM4S: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any generic endpoint.",
     "llm4s-pekko" ->
       "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
+    "llm4s-perplexity" ->
+      "Perplexity Agent API chat provider for LLM4S: web search with citations.",
     "llm4s-prompt" ->
       "Compile-time checked prompt interpolators for LLM4S, with typed rendering and fenced untrusted input.",
     "llm4s-provider-testkit" ->

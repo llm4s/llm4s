@@ -444,7 +444,7 @@ jobs:
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      perplexity, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
@@ -868,6 +868,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: watsonx
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload perplexity coverage to Codecov
+        if: contains(matrix.modules, 'perplexity')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/perplexity/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: perplexity
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1993,6 +2004,10 @@ jobs:
           WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
           # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # PerplexitySmokeSpec (llm4s-perplexity): a Perplexity API key; billed per web search as well as per token.
+          # PERPLEXITY_MODEL is optional; unset, the suite uses perplexity/sonar.
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          PERPLEXITY_MODEL: ${{ secrets.PERPLEXITY_MODEL }}
           # Smoke suites added for #1213. With LLM4S_IT_STRICT=true each required one that is
           # missing from the repository secrets makes its suite FAIL (not skip).
           # AzureSmokeSpec: the resource key, its endpoint (https://<resource>.openai.azure.com) and a

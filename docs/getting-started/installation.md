@@ -559,6 +559,15 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
 `llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
+### For Perplexity
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
+```
+
+The Perplexity Agent API chat provider (`provider = "perplexity"`): answers grounded in web search, with
+citations. It brings no dependency beyond `llm4s-core`. See [Perplexity](../guide/providers#perplexity).
+
 ### For Java, Spring Boot, cats-effect and ZIO
 
 ```scala

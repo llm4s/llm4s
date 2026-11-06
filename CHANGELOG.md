@@ -275,6 +275,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `https://api.x.ai/v1` with `XAI_API_KEY` bound to `llm4s.credentials.xai.apiKey`; `reasoning_content` as thinking,
   reasoning tokens, `CompletionOptions.reasoning` as `reasoning_effort` on the Grok models that take it, and model
   listing [#1023](https://github.com/llm4s/llm4s/issues/1023).
+- **Added** `llm4s-perplexity` (Beta): `provider = "perplexity"` on Perplexity's Agent API (`/v1/agent`, which replaced
+  Sonar Chat Completions), with `web_search`, its sources on `Completion.citations`, tool calls and streaming [#1026](https://github.com/llm4s/llm4s/issues/1026).
 - **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
   `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
