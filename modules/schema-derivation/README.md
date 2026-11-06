@@ -34,6 +34,7 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
 | `Tool.of[A, R](name, description)(a => Either[String, R])` | a `ToolFunction` from a function over a case class: the schema derived from `A`, the arguments decoded into it, argument errors as `SafeParameterExtractor`'s `ToolParameterError`s |
 | `Tool.scoped[A, R](name, description)(a => R)` | the same tool from a function that returns `R` and ends the call early with `reject`, `ensure` or `.?`, reading `ToolScope.idempotencyKey`; these compile only inside it |
+| `Tool.fromMethod(service.method)`, `Tools.derive[S](service)` | a `ToolFunction` from one method, or one per public method of a trait or class: parameters from its parameter list, name from `@toolName` or `snake_case`, description from `@description` or Scaladoc; unsupported methods refused at compile time |
 
 ## Supported and not
 
@@ -60,4 +61,5 @@ schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writ
 schema-conformant documents back, and reads every sample `SchemaSamples` generates from each golden schema; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
 terminate); `RecursionGuardSpec` pins the run-time refusal of a recursion through hand-written givens, under a
 timeout so that a deadlock fails it instead of hanging the build; `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
-`TypedToolSpec` checks that a typed tool sends the hand-built calculator's and `add` tool's schemas and reports the argument errors a hand-written tool does; `DerivedSchemasGuideSpec` compiles the guide; `PartialJsonSpec` checks every prefix of golden and random documents, `StreamStructuredSpec` streams a reply in chunks of every size and `PartialTypesSpec` pins the partial types, with `StreamingStructuredOutputGuideSpec` compiling the streaming section of the structured-output guide.
+`TypedToolSpec` checks that a typed tool sends the hand-built calculator's and `add` tool's schemas and reports the argument errors a hand-written tool does; `DerivedToolsSpec`, `DerivedToolArgumentsSpec` and `DerivedToolsCompileErrorsSpec` check tools made from methods (names, descriptions from Scaladoc, the same argument errors as `Tool.of`, the compile-time refusals); `DerivedSchemasGuideSpec` compiles the guide; `PartialJsonSpec` checks every prefix of golden and random documents, `StreamStructuredSpec` streams a reply in chunks of every size and `PartialTypesSpec` pins the partial types, with `StreamingStructuredOutputGuideSpec` compiling the streaming section of the structured-output guide.
+

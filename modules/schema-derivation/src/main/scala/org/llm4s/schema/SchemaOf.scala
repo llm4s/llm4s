@@ -335,7 +335,7 @@ object SchemaOf {
   // itself being initialised, two hand-written givens of mutually recursive types (each deriving its type) would
   // each wait for the other's initialisation on the same thread, and the program would hang. Deferred, making an
   // instance touches no other given, and building the schema of a recursive type is refused by the guard above.
-  private def product[A](
+  private[schema] def product[A](
     name: String,
     described: Option[String],
     fields: List[String],
