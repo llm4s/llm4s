@@ -102,6 +102,7 @@ llm4s/
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
+│   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
 │   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
 │   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
