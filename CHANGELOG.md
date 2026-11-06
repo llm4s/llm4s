@@ -396,6 +396,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
+- **Added** tools derived from ordinary methods in `llm4s-schema-derivation`: `Tool.fromMethod(service.method)` and
+  `Tools.derive[S](service)`, named and described from `@toolName`, `@description` and Scaladoc, refusing unsupported
+  methods at compile time [#2326](https://github.com/llm4s/llm4s/issues/2326); [guide](docs/guide/derived-schemas.md#tools-from-methods).
 - **Added** streamed structured output to `llm4s-schema-derivation`: `client.streamStructuredOf[A](conversation)(onPartial)`
   hands `onPartial` typed partial values (`PartialOf[A]`, a named tuple of `Option`s) as the reply streams, parsed with the
   new `PartialJson` [#2329](https://github.com/llm4s/llm4s/issues/2329); [guide](docs/guide/structured-output.md#10-streaming-structured-output).
@@ -407,6 +410,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
 - **Added** `llm4s-prompt` (Experimental): `prompt"..."`/`system"..."` interpolators that render each value through a
   `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
+- **Added** `llm4s-tapir` (Experimental): `EndpointTools.registry` turns tapir endpoints into tools whose schemas derive
+  from the endpoints' inputs, called through sttp [#2299](https://github.com/llm4s/llm4s/issues/2299); [guide](docs/guide/tapir-tools.md).
 
 ### MCP
 
@@ -510,6 +515,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 - **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
+- **Added** llm4s.org share cards (a large Open Graph/X card on every page, rendered by `scripts/render-social-images.sh`), `SoftwareSourceCode`,
+  `Organization` and `BreadcrumbList` JSON-LD, and `scripts/check-site-share-cards.sh` in the Pages deploy [#2316](https://github.com/llm4s/llm4s/issues/2316).
 - **Added** [Using LLM4S from Apache Flink](docs/guide/flink.md): a Flink 2.x job in Scala 3 with `AsyncDataStream`, dead letters
   as a side output, and a sample (`modules/samples/flink`) tested on Flink's MiniCluster by `flink-sample.yml` [#2298](https://github.com/llm4s/llm4s/issues/2298).
 - **Added** a dev container and [Codespaces playground](docs/getting-started/playground.md): JDK 21, sbt, Scala CLI, Metals and a local Ollama model,

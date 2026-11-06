@@ -186,6 +186,10 @@ flags:
     paths:
       - modules/agent-tools/src/main/scala
     carryforward: true
+  tapir:
+    paths:
+      - modules/tapir/src/main/scala
+    carryforward: true
   agent:
     paths:
       - modules/agent/src/main/scala

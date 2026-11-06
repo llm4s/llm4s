@@ -146,3 +146,5 @@ guide/direct-style.md | 0b61c4d844 | skip | sbt build definition, not Scala sour
 getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not Scala source
+guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
