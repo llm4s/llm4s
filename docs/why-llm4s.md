@@ -105,6 +105,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
     <header class="lp-section__head">
       <p class="lp-eyebrow">Use cases</p>
       <h2 id="cases-heading">Where it fits</h2>
+      <p>Each in a page of its own, with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card lp-card--flat"><h3>Customer and internal assistants</h3><p>Assistants inside existing Spring Boot, Pekko or plain JVM services, with guardrails on input and output and traces in your observability stack.</p></li>

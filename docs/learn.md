@@ -41,6 +41,7 @@ description: "A free path to becoming an AI engineer with LLM4S: from your first
       <p class="lp-eyebrow">The learning path</p>
       <h2 id="the-learning-path">Six steps from first call to first contribution</h2>
       <p>Each step links to guides and runnable examples in this documentation. Ollama lets you work through most of it on a local model, without an API key.</p>
+      <p>Want the short version first? Five pages answer the common questions, each with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ol class="lp-steps">
       <li>
