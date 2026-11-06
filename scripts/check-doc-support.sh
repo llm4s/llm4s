@@ -183,7 +183,10 @@ ALL_KEYS = set(SHARED_KEYS).union(*(p.keys for p in PROJECTS.values()))
 ALL_CONFIG_IDS = set().union(*(p.config_by_id for p in PROJECTS.values()))
 SCOPE_AXES = {"ThisBuild", "Global", "Zero"}
 
-scala_versions = sorted({p.scala for p in PROJECTS.values() if p.scala})
+# The Scalafix migration rules (#2330) compile against scalafix-core, which is Scala 2.13 only: a build-tool module
+# that never enters a user's classpath, so its Scala version is not the one the docs document.
+SCALAFIX_213_PROJECTS = {"scalafixRules", "scalafixTests"}
+scala_versions = sorted({p.scala for p in PROJECTS.values() if p.scala and p.id not in SCALAFIX_213_PROJECTS})
 SCALA = scala_versions[0] if len(scala_versions) == 1 else None
 if SCALA is None:
     fail(MODEL_NAME, 1, f"projects must share one scalaVersion to be documented, found: {', '.join(scala_versions) or 'none'}")
