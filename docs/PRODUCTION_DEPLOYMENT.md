@@ -308,7 +308,9 @@ in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-ap
 
 ### Rate Limits
 
-LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`:
+LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`.
+`ReliableClient` ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)) retries a `429` with backoff, honouring the
+provider's `Retry-After`, and can rate-limit locally; by hand, the loop looks like this:
 
 ```scala
 import org.llm4s.error.{RateLimitError, LLMError}
@@ -334,35 +336,28 @@ def callWithBackoff(
 
 ### Timeout Configuration
 
-Set reasonable timeouts at multiple levels:
+Each provider section takes a `timeouts` block, which bounds how long one request and one stream may wait
+([Timeouts](getting-started/configuration#timeouts) lists each provider's defaults and what exactly they bound):
 
 ```hocon
-# application.conf
-akka.http.client {
-  connecting-timeout = 10s
-  idle-timeout = 60s
-}
-
-```
-
-### Provider Fallbacks (Planned)
-
-LLM4S doesn't yet have built-in provider fallback, but you can implement it:
-
-```scala
-def withFallback(
-  primary: LLMClient,
-  fallback: LLMClient,
-  conversation: Conversation
-): Result[Completion] = {
-  primary.complete(conversation) match {
-    case Left(_) => fallback.complete(conversation)
-    case success => success
-  }
+llm4s.providers.openai-main.timeouts {
+  request = 60s
+  stream  = 5m
 }
 ```
 
-Multi-provider resilience (circuit breakers, automatic failover) is planned for a future release.
+`ReliableClient`'s `deadline` (default 5 minutes) bounds a whole call, retries included.
+
+### Provider Fallbacks
+
+`ReliableClient` (`org.llm4s.reliability`) wraps any `LLMClient` with retries, a circuit breaker, a per-call
+deadline and an optional local rate limit ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)). To fail over to a second
+provider or region, wrap each client once and ask the second only when the first still fails after its own
+retries: the cookbook's
+[fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala)
+does exactly that, and the [reference architecture](guide/reference-architecture#resilience) shows it with a second
+gateway section. LLM4S does not pick the fallback for you: which provider may stand in for which is your decision,
+written in code.
 
 ### Validate on Startup
 
@@ -653,37 +648,15 @@ Key considerations:
 
 ### Enterprise VPC
 
-For regulated industries or multi-tenant deployments:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Private VPC                          │
-│                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐ │
-│  │  App Tier   │───▶│  LLM Proxy  │───▶│  Audit Log  │ │
-│  │  (LLM4S)    │    │  (Rate Lim) │    │  (S3/ELK)   │ │
-│  └─────────────┘    └─────────────┘    └─────────────┘ │
-│         │                  │                           │
-│         │           ┌──────┴──────┐                    │
-│         │           ▼             ▼                    │
-│         │     ┌──────────┐  ┌──────────┐              │
-│         │     │  Vault   │  │ Langfuse │              │
-│         │     │ (Secrets)│  │ (Self-   │              │
-│         │     └──────────┘  │  hosted) │              │
-│         │                   └──────────┘              │
-│         ▼                                              │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │          Azure OpenAI (Private Endpoint)        │  │
-│  └─────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-Key considerations:
-
-- Use Azure OpenAI with Private Link or AWS Bedrock for data residency
-- Deploy self-hosted Langfuse within your VPC
-- Implement centralized audit logging for compliance
-- Use HashiCorp Vault for secrets rotation, mounted as a file the section's `apiKeyFile` names
+For regulated industries or multi-tenant deployments, the
+[Enterprise Reference Architecture](guide/reference-architecture) is the tested picture: the app behind an AI
+gateway (a LiteLLM proxy in the example) through the generic `openai-compatible` provider with tenant headers, its
+gateway key a rotating file from the External Secrets Operator, NetworkPolicies that let only the gateway leave the
+cluster, `ReliableClient` and a second section for failover, quotas and spend at the gateway and in-process, and
+self-hosted tracing. Its Kubernetes manifests are
+[`deploy/overlays/enterprise`](https://github.com/llm4s/llm4s/tree/main/deploy/overlays/enterprise), rendered and
+schema-validated in CI. Azure OpenAI behind a private endpoint and Bedrock behind a VPC endpoint are covered there as
+the no-gateway alternative.
 
 ---
 
@@ -832,18 +805,16 @@ Before deploying to production, verify:
 
 ---
 
-## Known Limitations (v0.1.x)
+## Known Limitations
 
 Current limitations to be aware of in production:
 
-- **No built-in circuit breaker** - Implement at application level or use Resilience4j
-- **No automatic provider fallback** - Must implement manually
-- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart and import saved messages with `history`; the in-memory runtime does not survive a restart (durable checkpointers are Stage 2 of the typed agent runtime)
-- **Advanced semantic/embedding caching not included** - Add Redis/vector cache for high-volume RAG
+- **Fallback between providers is code you write** - `ReliableClient` retries, opens a circuit breaker and bounds each call, but which provider stands in for which is yours to wire, as the [fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala) shows
+- **`ReliableClient`'s rate limit is per client instance** - it counts one process's calls; a limit across replicas or tenants belongs in a gateway ([Reference Architecture](guide/reference-architecture#quotas-and-cost))
+- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart; a durable checkpointer ([SQLite or Postgres](guide/agents/durable-checkpointers)) keeps the threads, while the default in-memory store does not survive a restart
+- **Caches are per process** - the completion (semantic) cache is in memory; the embedding cache takes a store of your own ([Caching](guide/caching))
 
 These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap#production-readiness-pillars).
-
-This guide will evolve as LLM4S approaches v1.0.
 
 ---
 
