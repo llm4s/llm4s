@@ -131,6 +131,7 @@ llm4s/
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── doctor/                # llm4s-doctor: DoctorCli setup checker, run on the application's own classpath (published)
+│   ├── repl/                  # llm4s-repl: ask, extract, chat() helpers for the REPL, worksheets and scripts (published, experimental)
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)

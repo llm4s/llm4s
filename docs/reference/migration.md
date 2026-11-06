@@ -304,6 +304,13 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
 - Without `--classpath`, the "Provider module" step reports the module as found "on this classpath": the doctor's
   classpath is now the one it is launched on, not one with every built-in provider module.
 
+## `llm4s-repl`, a new module (#2342)
+
+Nothing to change: `llm4s-repl` is a new, experimental module, and no other module depends on it. To try llm4s from the
+Scala CLI REPL, a Metals worksheet or a script, add it (with a provider module) and `import org.llm4s.repl.*`; see
+[Try llm4s in the REPL](../getting-started/repl). Keep it out of production code: it prints to the console and keeps
+the conversation in memory.
+
 ## `llm4s-java-api` and the Spring Boot starter no longer bring the provider modules (#1496)
 
 `llm4s-java-api` depended on `llm4s-openai`, `llm4s-anthropic`, `llm4s-ollama`, `llm4s-gemini` and

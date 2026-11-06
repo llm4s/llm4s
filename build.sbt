@@ -370,6 +370,7 @@ lazy val llm4s = (project in file("."))
     springBootStarterBoot4,
     samples,
     doctor,
+    repl,
     configPolicy,
     workspaceShared,
     workspaceRunner,
@@ -1836,7 +1837,9 @@ lazy val samples = (project in file("modules//samples"))
     vectorstoreElasticsearch % Test,
     vectorstoreRedis         % Test,
     // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
-    doctor % Test
+    doctor % Test,
+    // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
+    repl % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1959,6 +1962,27 @@ lazy val doctor = (project in file("modules/doctor"))
     // DoctorCli.main calls sys.exit with the report's exit code.
     run / fork  := true,
     Test / fork := true
+  )
+
+// `llm4s-repl` (#2342): one-import helpers for the Scala CLI REPL, Metals worksheets and scripts (`ask`, `extract`,
+// `chat()`, `history`, `lastUsage`) over a `Session` context parameter. Experimental, and never a dependency of another
+// module: it prints to the console and keeps the conversation in memory, so it is not for production code. It depends
+// on core, `schemaDerivation` (`extract` is `completeStructuredOf`) and `testkit` (`Session.offline` is a
+// `ScriptedLLMClient`, so a worksheet runs with no key or network). `scripts/check-repl-scripts.sh` runs
+// `examples/repl/` against it with Scala CLI in CI.
+lazy val repl = (project in file("modules/repl"))
+  .dependsOn(core, schemaDerivation, testkit)
+  .settings(
+    name := "llm4s-repl",
+    commonSettings,
+    // Measured 96.06% statement and 93.33% branch coverage (`sbt coverage repl/test repl/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
@@ -2439,6 +2463,7 @@ lazy val docs = (project in file("modules/docs"))
     testkit,
     capabilities,
     doctor,
+    repl,
     workspaceShared,
     workspaceClient,
     observability,
@@ -2502,6 +2527,7 @@ lazy val docs = (project in file("modules/docs"))
         (testkit / Compile / sources).value ++
         (capabilities / Compile / sources).value ++
         (doctor / Compile / sources).value ++
+        (repl / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
