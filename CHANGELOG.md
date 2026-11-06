@@ -396,6 +396,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
+- **Added** `llm4s-schema-iron` (Experimental): Iron refinement types (`Int :| Interval.Closed[1, 5]`) add their bounds to
+  a derived schema and are refused on decode when broken [#2294](https://github.com/llm4s/llm4s/issues/2294); [guide](docs/guide/derived-schemas.md#iron-refinements).
 - **Added** tools derived from ordinary methods in `llm4s-schema-derivation`: `Tool.fromMethod(service.method)` and
   `Tools.derive[S](service)`, named and described from `@toolName`, `@description` and Scaladoc, refusing unsupported
   methods at compile time [#2326](https://github.com/llm4s/llm4s/issues/2326); [guide](docs/guide/derived-schemas.md#tools-from-methods).

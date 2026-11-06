@@ -41,6 +41,10 @@ stacks:
     artifact: "llm4s-tapir"
     versions: ["1.11.20"]
     note: "With sttp client 3.10.3."
+  - name: "Iron"
+    artifact: "llm4s-schema-iron"
+    versions: ["3.3.2"]
+    note: "Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the 3.7.1 compiler cannot read."
   - name: "Kotlin"
     artifact: "llm4s-kotlin-api"
     versions: ["2.0.21"]

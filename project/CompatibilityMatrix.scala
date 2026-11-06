@@ -63,6 +63,12 @@ object CompatibilityMatrix {
       Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
       Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
+      Stack(
+        "Iron",
+        "llm4s-schema-iron",
+        Seq(Versions.iron),
+        s"Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the ${Common.scala3} compiler cannot read."
+      ),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",

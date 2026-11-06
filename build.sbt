@@ -352,6 +352,7 @@ lazy val llm4s = (project in file("."))
     perplexity,
     providerTestkit,
     schemaDerivation,
+    schemaIron,
     prompt,
     testkit,
     capabilities,
@@ -1456,6 +1457,24 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// `llm4s-schema-iron` (#2294): `SchemaOf` and a uPickle `ReadWriter` for Iron refinement types (`Int :| Positive`),
+// so a derived schema carries the refinement's bounds and a reply that breaks them fails to decode. A module of its
+// own so that Iron (Apache-2.0) is not forced on every user of llm4s-schema-derivation; core gains no dependency.
+// `llm4s-testkit` is test-only: the structured-output specs script their model with `ScriptedLLMClient`.
+lazy val schemaIron = (project in file("modules/schema-iron"))
+  .dependsOn(schemaDerivation, core % "test->test", testkit % Test)
+  .settings(
+    name := "llm4s-schema-iron",
+    commonSettings,
+    // Measured 96.00% statement and 89.04% branch coverage (`sbt coverage schemaIron/test schemaIron/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The constraint walk is a macro,
+    // which runs inside the compiler where scoverage cannot see it; `IronCompileErrorsSpec` exercises it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies += Deps.iron
+  )
+
 // `llm4s-prompt` (#2325): the `prompt"..."` and `system"..."` interpolators, which render each value through a
 // `Promptable` found at compile time (derived with `Mirror` for case classes and enums) and fence `Untrusted` values.
 // It layers on core's public API (it builds `Message`s and a `Conversation`) and adds no dependency.
@@ -2402,6 +2421,7 @@ lazy val docs = (project in file("modules/docs"))
     perplexity,
     providerTestkit,
     schemaDerivation,
+    schemaIron,
     prompt,
     testkit,
     capabilities,
@@ -2464,6 +2484,7 @@ lazy val docs = (project in file("modules/docs"))
         (perplexity / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
+        (schemaIron / Compile / sources).value ++
         (prompt / Compile / sources).value ++
         (testkit / Compile / sources).value ++
         (capabilities / Compile / sources).value ++
