@@ -49,7 +49,11 @@ object DocSnippets {
     "guide/vector-store.md",
     "index.md",
     "reference/doctor.md",
-    "reliability-guide.md"
+    "reliability-guide.md",
+    "scala-ai/agents.md",
+    "scala-ai/llm-framework.md",
+    "scala-ai/providers.md",
+    "scala-ai/rag.md"
   )
 
   val packageName = "org.llm4s.docsnippets"
