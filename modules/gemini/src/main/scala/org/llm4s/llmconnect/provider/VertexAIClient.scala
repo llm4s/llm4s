@@ -483,11 +483,8 @@ class VertexAIClient(
       result = result
     )
 
-  override protected def releaseResources(): Unit =
-    (http: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object VertexAIClient {
@@ -510,7 +507,8 @@ object VertexAIClient {
   def apply(
     config: VertexAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[VertexAIClient] =
-    Try(new VertexAIClient(config, metrics, exchangeLogging)).toResult
+    Try(new VertexAIClient(config, metrics, exchangeLogging, httpClient)).toResult
 }
