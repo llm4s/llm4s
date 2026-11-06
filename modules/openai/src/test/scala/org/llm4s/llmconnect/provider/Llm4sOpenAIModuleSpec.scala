@@ -132,6 +132,10 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
+    "declare that the SDK ignores a supplied HTTP client (#2341)" in {
+      expectations.foreach((descriptor, _, _) => descriptor.features.customHttpClient shouldBe false)
+    }
+
     "declare a model lister where the provider has one" in {
       OpenAIProvider.modelLister shouldBe defined
       RequestyProvider.modelLister shouldBe defined

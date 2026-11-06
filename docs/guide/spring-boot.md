@@ -30,6 +30,8 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sClient` | the `JLlmClient`, built from the `llm4s.*` properties; closed when the context closes | defining a bean of type `JLlmClient` |
 | `llm4sTaskExecutor` | the `ExecutorService` behind `completeAsync` and the health probe | defining a bean named `llm4sTaskExecutor` |
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
+| `llm4sTools` | the `Llm4sTools`: every `@Tool` method of your beans (see [An agent with tools](#an-agent-with-tools)) | defining a bean of type `Llm4sTools` |
+| `llm4sAgent` | a `JAgent` over the client and those tools, configured by `llm4s.agent.*`; absent with `llm4s.agent.enabled=false` | defining a bean of type `JAgent` |
 | `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` (`LlmBoot4HealthIndicator` on Spring Boot 4) |
 | `llm4sMetricsCollector` | a `MicrometerMetrics` over your `MeterRegistry`, only when `llm4s-observability-micrometer` is on the classpath and there is a `MeterRegistry` bean; the client reports every call to it (see [Metrics](#metrics)) | defining a bean of type `MetricsCollector` |
 
@@ -125,6 +127,10 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | `llm4s.health.probe` | `false` | opt in to a real provider call per health check |
 | `llm4s.health.probe-ttl` | `60s` | how long a probe result is reused |
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports `DOWN` |
+| `llm4s.agent.enabled` | `true` | `false` registers no `llm4sAgent` (the `llm4sTools` bean stays) |
+| `llm4s.agent.id` | `assistant` | the agent's id, as its runs and traces name it |
+| `llm4s.agent.system-prompt` | empty | sent first on every model call of the agent; none when empty |
+| `llm4s.agent.streaming` | `false` | the agent's model calls stream, so `JAgent.stream` carries text deltas |
 
 The starter ships Spring Boot configuration metadata (`META-INF/spring-configuration-metadata.json`), so IntelliJ
 IDEA and the Spring tools for VS Code and Eclipse complete these keys, show their defaults and flag a misspelt one in
@@ -304,6 +310,56 @@ class SummaryController {
     }
 }
 ```
+
+## An agent with tools
+
+Annotate a public method of any bean with the Java API's `@Tool`, and the starter's agent offers it to the model: the
+`llm4sTools` bean collects the `@Tool` methods of every singleton bean, as
+[`JTool.fromAnnotated`](java#tools) reads them, and the `llm4sAgent` bean is a `JAgent` over
+the client and those tools.
+
+```java
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
+import org.springframework.stereotype.Component;
+
+@Component
+public class WeatherTools {
+
+    @Tool(description = "The current weather in a city")
+    public String weather(@Param(name = "city", description = "City name") String city) {
+        return "Sunny in " + city;
+    }
+}
+```
+
+Inject the agent where you need it. `run` blocks until the turn ends; `runAsync` runs the turn on the `llm4sTaskExecutor`.
+
+```java
+import org.llm4s.javaapi.JAgent;
+import org.springframework.stereotype.Service;
+
+@Service
+public class AssistantService {
+
+    private final JAgent agent;
+
+    public AssistantService(JAgent agent) {
+        this.agent = agent;
+    }
+
+    public String ask(String question) {
+        return agent.run(question).get().answer().orElse("");
+    }
+}
+```
+
+Its system prompt, id and streaming are the `llm4s.agent.*` [properties](#properties).
+
+The application fails to start, naming the bean, when a bean's `@Tool` methods cannot be read (a parameter type a tool
+cannot take, say), when two tools have the same name, or when a tool bean is an AOP proxy: the proxy would be bypassed,
+and with it advice such as `@Transactional`, so keep tools on a bean that is not proxied. For guardrails, a context
+window or several agents, build them with [`Llm4s.agentBuilder`](java#an-agent-with-a-system-prompt-guardrails-and-a-context-window) and inject `Llm4sTools` for the tools.
 
 ## Health
 

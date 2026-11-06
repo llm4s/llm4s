@@ -39,6 +39,7 @@ object DocSnippets {
     "guide/basic-usage.md",
     "guide/custom-tools.md",
     "guide/data-protection.md",
+    "guide/direct-style.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/prompts.md",

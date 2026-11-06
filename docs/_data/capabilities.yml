@@ -188,6 +188,21 @@ providers:
     vision_input: "not declared"
     reasoning_effort: "not declared"
     stream_usage: "not declared"
+  - id: "perplexity"
+    aliases: []
+    chat: true
+    chat_artifact: "llm4s-perplexity"
+    chat_module: "org.llm4s.llmconnect.provider.Llm4sPerplexityModule"
+    streaming: true
+    tool_calling: true
+    chat_api_key: "required"
+    chat_workload_identity: false
+    embeddings: false
+    cloud_smoke: ["PerplexitySmokeSpec"]
+    structured_output: "not declared"
+    vision_input: "not declared"
+    reasoning_effort: "not declared"
+    stream_usage: "not declared"
   - id: "requesty"
     aliases: []
     chat: true

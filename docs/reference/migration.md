@@ -29,6 +29,20 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
+## A supplied HTTP client is the caller's to close (#2341)
+
+`LlmClientOptions.withHttpClient` hands the SDK-free provider clients (`ollama`, `gemini`, `vertexai`, `watsonx`,
+`openai-compatible` and its dialects) an `Llm4sHttpClient` to send their requests through. A client supplied this
+way, or to the `httpClient` constructor parameter of `OllamaClient`, `GeminiClient`, `VertexAIClient`,
+`WatsonXClient` or an `OpenAICompatibleClient`, is no longer closed when the LLM client is closed: the caller owns
+it. Close it yourself when your application stops. A client the provider builds itself is still closed with it.
+
+`LlmClientOptions` gains `httpClient: Option[Llm4sHttpClient]` and `ProviderFeatures` gains `customHttpClient`,
+`false` by default (and for `openai`, `azure`, `requesty`, `anthropic` and `bedrock`, whose SDKs keep their own
+transport). A provider of your own that sends its requests through `options.httpClient` opts in with
+`ProviderFeatures.default.withCustomHttpClient(true)`. Their `apply` overloads without the new field remain; a
+pattern match on either type's extractor binds one more field.
+
 ## Credentials are Secret (#1932)
 
 `ApiKey` is now an opaque type over `org.llm4s.security.Secret`, and every credential field in a config is a `Secret` (or `Option[Secret]`): provider and embedding configs, HTTP proxy and TLS-store passwords, the MCP server key, Langfuse keys, search-tool keys, image, speech, watsonx, jev and Bedrock keys, the Cohere reranker key, and store credentials (Postgres, Neo4j, Qdrant, Elasticsearch/OpenSearch, Redis, the S3 loader, the URL loader token). Every `Secret` is registered, and removed by exact match from the error messages, exchange logs and diagnostic text llm4s builds (trace content in a follow-up).
@@ -271,6 +285,12 @@ for
   sandbox <- WorkspaceSandboxBackend("ws1", workspace)
 yield (files, ExecuteTool(sandbox))
 ```
+
+## Direct style with Ox: `llm4s-ox` (#2332)
+
+Nothing changes for existing code: `llm4s-ox` is a new, Experimental module over `llm4s-core` and Ox. To stream a reply
+as an Ox `Flow`, fan out, race providers or retry with Ox, add `"org.llm4s" %% "llm4s-ox"` and
+`import org.llm4s.ox.*`; see [Direct style and Ox](../guide/direct-style).
 
 ## The doctor is `llm4s-doctor` (#2283)
 
