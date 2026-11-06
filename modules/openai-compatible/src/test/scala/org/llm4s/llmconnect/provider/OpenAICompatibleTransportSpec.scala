@@ -27,6 +27,20 @@ class OpenAICompatibleTransportSpec extends AnyFlatSpec with Matchers {
     closed.get shouldBe true
   }
 
+  it should "leave an HTTP client its caller supplied open when it is closed (#2341)" in {
+    val closed = new AtomicBoolean(false)
+    val transport = new org.llm4s.http.JdkHttpClient(None) {
+      override def close(): Unit = closed.set(true)
+    }
+    val client = new OpenAICompatibleClient(
+      settings,
+      OpenAICompatibleDialect.Standard,
+      suppliedHttpClient = transport
+    )
+    client.close()
+    closed.get shouldBe false
+  }
+
   "OpenAICompatibleClient.combineRepeated" should "send a repeated header once, its values comma-joined in order" in {
     val combined = OpenAICompatibleClient.combineRepeated(
       Seq("X-Feature" -> "a", "X-Other" -> "1", "x-feature" -> "b", "X-Feature" -> "c")

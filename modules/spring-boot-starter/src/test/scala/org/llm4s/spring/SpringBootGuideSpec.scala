@@ -84,11 +84,14 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
 
   private def squash(text: String): String = StarterGuideDocs.squash(text)
 
-  private lazy val javaSources: String = Seq("SummaryService", "OtherProviderConfig", "SpringGuideSnippets")
-    .map(name =>
-      squash(StarterGuideDocs.read(GuideFile, s"modules/spring-boot-starter/src/test/java/org/llm4s/spring/$name.java"))
-    )
-    .mkString("\n")
+  private lazy val javaSources: String =
+    Seq("SummaryService", "OtherProviderConfig", "SpringGuideSnippets", "WeatherTools", "AssistantService")
+      .map(name =>
+        squash(
+          StarterGuideDocs.read(GuideFile, s"modules/spring-boot-starter/src/test/java/org/llm4s/spring/$name.java")
+        )
+      )
+      .mkString("\n")
 
   private val runner = new ApplicationContextRunner()
     .withConfiguration(
@@ -197,6 +200,8 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         "llm4sClient",
         "llm4sTaskExecutor",
         "llm4sTemplate",
+        "llm4sTools",
+        "llm4sAgent",
         "llmHealthIndicator",
         "llm4sMetricsCollector"
       )
@@ -213,6 +218,8 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         ctx.getStartupFailure shouldBe null
         ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 0
         ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[org.llm4s.javaapi.JAgent]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[Llm4sTools]).size() shouldBe 0
         ctx.getBeansOfType(classOf[java.util.concurrent.ExecutorService]).size() shouldBe 0
         ctx.getBeansOfType(classOf[org.llm4s.metrics.MetricsCollector]).size() shouldBe 0
       }
@@ -414,6 +421,21 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         recording.sent.asScala.toList.map(_.messages.map(m => (m.role.name, m.content))) shouldBe
           List(List(("user", "Summarise in one sentence: the meeting ran long")))
       }
+    }
+  }
+
+  "The agent of the guide" should {
+    "call the tool bean's method and answer with its result" in {
+      runner
+        .withUserConfiguration(
+          classOf[Llm4sAgentAutoConfigurationSpec.ScriptedClientConfig],
+          classOf[WeatherTools],
+          classOf[AssistantService]
+        )
+        .run { ctx =>
+          ctx.getStartupFailure shouldBe null
+          ctx.getBean(classOf[AssistantService]).ask("Weather in Paris?") shouldBe "tool said: Sunny in Paris"
+        }
     }
   }
 

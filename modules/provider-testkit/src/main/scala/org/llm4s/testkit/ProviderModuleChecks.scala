@@ -2,6 +2,7 @@ package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
+import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
@@ -27,9 +28,11 @@ import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
+import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.ListBuffer
 
@@ -233,6 +236,42 @@ trait ProviderModuleChecks extends Assertions:
       case Left(error)                => failAt(s"streamComplete failed: ${error.message}")
       case Right(_) if chunks.isEmpty => failAt("streamComplete succeeded without delivering a single chunk")
       case Right(_)                   => succeed
+
+  /**
+   * A client built with `LlmClientOptions.withHttpClient` sends its `complete` and `streamComplete` requests
+   * through the supplied client, and closing it leaves the supplied client open: the caller owns it (#2341).
+   * The supplied client records each request and answers `400`, so no server is needed and each call ends in a
+   * `Left`. Run it for every descriptor whose `features.customHttpClient` is `true`.
+   *
+   * @param descriptor    the chat descriptor under test; its `features.customHttpClient` must be `true`
+   * @param section       a section as validation would leave it
+   * @param modelRegistry the model registry the client sees
+   */
+  def assertUsesSuppliedHttpClient(
+    descriptor: ProviderDescriptor,
+    section: NamedProviderConfig,
+    modelRegistry: ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
+  )(using pos: Position): Assertion =
+    if !descriptor.features.customHttpClient then
+      failAt(s"${descriptor.id.asString} declares features.customHttpClient = false")
+    val http         = new ProviderModuleChecks.RecordingHttpClient
+    val options      = LlmClientOptions.default.withHttpClient(http)
+    val client       = assertBuildsClient(descriptor, section, options, modelRegistry)
+    val conversation = Conversation(Seq(UserMessage("Hello")))
+    def sent(what: String)(call: => Result[?]): Unit =
+      val before = http.requests.size
+      call
+      if http.requests.size == before then
+        failAt(s"${descriptor.id.asString}: $what sent no request through the supplied HTTP client")
+    // the LLM client is closed even when a check fails, so a failing provider leaks nothing
+    val checked = scala.util
+      .Try(sent("complete")(client.complete(conversation)))
+      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))))
+    val closing = scala.util.Try(client.close())
+    checked.get
+    closing.get
+    if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
+    succeed
 
   /**
    * `client.complete` honours interruption: run on a virtual thread (as the agent runtime runs
@@ -648,6 +687,42 @@ object ProviderModuleChecks extends ProviderModuleChecks:
     ModelRegistryService
       .default()
       .fold(error => failAt(s"llm4s model registry failed to load: ${error.message}"), identity)
+
+  /**
+   * The HTTP client [[assertUsesSuppliedHttpClient]] supplies: it records each request's method and URL and
+   * answers every one `400` with an OpenAI-style error body.
+   */
+  final private[testkit] class RecordingHttpClient extends Llm4sHttpClient:
+    private val sentRequests     = new ConcurrentLinkedQueue[String]
+    @volatile private var isOpen = true
+    private val ErrorBody = """{"error":{"message":"refused by provider-testkit","type":"invalid_request_error"}}"""
+
+    def requests: Seq[String] = sentRequests.asScala.toSeq
+    def closed: Boolean       = !isOpen
+
+    private def record(method: String, url: String): Result[HttpResponse] =
+      sentRequests.add(s"$method $url")
+      Right(HttpResponse(400, ErrorBody))
+
+    def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: FiniteDuration) =
+      record("GET", url)
+    def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url)
+    def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) =
+      record("POST", url)
+    def postMultipart(url: String, headers: Map[String, String], parts: Seq[MultipartPart], timeout: FiniteDuration) =
+      record("POST", url)
+    def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("PUT", url)
+    def delete(url: String, headers: Map[String, String], timeout: FiniteDuration) =
+      record("DELETE", url)
+    def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url).map(r => HttpRawResponse(r.statusCode, r.body.getBytes(StandardCharsets.UTF_8)))
+    def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url).map(r =>
+        StreamingHttpResponse(r.statusCode, new ByteArrayInputStream(r.body.getBytes(StandardCharsets.UTF_8)))
+      )
+    override def close(): Unit = isOpen = false
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */
   private object ForeignConfig extends ProviderConfig:
