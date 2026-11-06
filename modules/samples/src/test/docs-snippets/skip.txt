@@ -143,6 +143,10 @@ getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not 
 getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source
 reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
 guide/direct-style.md | 0b61c4d844 | skip | sbt build definition, not Scala source
+scala-ai/agents.md | 825dc005dd | skip | sbt build definition, not Scala source
+scala-ai/llm-framework.md | f41ac720c4 | skip | sbt build definition, not Scala source
+scala-ai/providers.md | 6bfa1a8590 | skip | sbt build definition, not Scala source
+scala-ai/rag.md | e66ecd7f53 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
