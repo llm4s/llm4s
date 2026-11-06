@@ -286,6 +286,12 @@ for
 yield (files, ExecuteTool(sandbox))
 ```
 
+## Direct style with Ox: `llm4s-ox` (#2332)
+
+Nothing changes for existing code: `llm4s-ox` is a new, Experimental module over `llm4s-core` and Ox. To stream a reply
+as an Ox `Flow`, fan out, race providers or retry with Ox, add `"org.llm4s" %% "llm4s-ox"` and
+`import org.llm4s.ox.*`; see [Direct style and Ox](../guide/direct-style).
+
 ## The doctor is `llm4s-doctor` (#2283)
 
 The doctor moved from the unpublished `llm4s-config-policy` to the published `llm4s-doctor`, package `org.llm4s.doctor`

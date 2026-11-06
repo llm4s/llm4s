@@ -43,7 +43,7 @@ getting-started/installation.md | ae34e42f15 | skip | sbt build definition, not 
 getting-started/installation.md | 9aef71a790 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 975f60b158 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 99cfae3041 | skip | sbt build definition, not Scala source
-getting-started/installation.md | 870bda0003 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 5b7a066a84 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 425f37584b | skip | sbt build definition, not Scala source
 getting-started/installation.md | 6b26cf14c7 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 4f8485e651 | skip | sbt build definition, not Scala source
@@ -141,6 +141,7 @@ guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
 guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue
 getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
 reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
+guide/direct-style.md | 0b61c4d844 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source

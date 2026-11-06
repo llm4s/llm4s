@@ -579,6 +579,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
 libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
+libraryDependencies += "org.llm4s" %% "llm4s-ox"                   % llm4sVersion  // Ox direct style (Experimental)
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
@@ -590,7 +591,8 @@ pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a 
 facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-reactor` turns
 a streamed reply into a Reactor `Flux<String>` ([Java Reactor](../guide/java-reactor)), apart from the facade so that it
 does not bring `reactor-core` to an application without Reactor. `llm4s-effect`,
-`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. `llm4s-ox` adds an
+Ox `Flow` of a streamed reply, bounded fan-out, races and retries to direct-style code ([Direct style](../guide/direct-style)).
 
 ### For Kotlin (coroutines and Flow)
 

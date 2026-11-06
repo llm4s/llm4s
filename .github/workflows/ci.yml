@@ -448,7 +448,7 @@ jobs:
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
-                      llm4sPekko]
+                      llm4sPekko, llm4sOx]
 
     # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
     # others it costs a few seconds of start-up.
@@ -1045,6 +1045,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/llm4s-pekko/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: llm4s-pekko
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-ox coverage to Codecov
+        if: contains(matrix.modules, 'llm4sOx')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-ox/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-ox
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

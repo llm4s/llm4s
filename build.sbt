@@ -362,6 +362,7 @@ lazy val llm4s = (project in file("."))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     javaApi,
     javaRag,
     springBootStarter,
@@ -746,6 +747,28 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
       Deps.scalatest          % Test,
       Deps.pekkoStreamTestkit % Test,
       Deps.pekkoTestkit       % Test
+    ),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
+  )
+
+// `llm4s-ox` (#2332): direct style on JDK 21 virtual threads with SoftwareMill's Ox (Apache-2.0, Scala 3 only, JDK 21
+// bytecode; already `llm4s-agent`'s runtime dependency). A streamed completion as an Ox `Flow`, `parComplete`,
+// `raceProviders` and `RetrySchedule`, all over `LLMClient`: it depends on core and Ox only. `agent` and `testkit` are
+// test scope, for the bridges' shared conformance contract (#2334), whose agent cases need an `Agent`.
+lazy val llm4sOx = (project in file("modules/llm4s-ox"))
+  .dependsOn(core, agent % Test, testkit % Test)
+  .settings(
+    name := "llm4s-ox",
+    commonSettings,
+    // Measured 96.39% statement coverage (CI's agent coverage leg).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ox,
+      Deps.scalatest % Test
     ),
     // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
     Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
@@ -1762,6 +1785,7 @@ lazy val samples = (project in file("modules//samples"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
     javaRag,
     // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
@@ -2352,6 +2376,7 @@ lazy val docs = (project in file("modules/docs"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     javaApi,
     javaRag,
     reactor,
@@ -2412,6 +2437,7 @@ lazy val docs = (project in file("modules/docs"))
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
         (llm4sPekko / Compile / sources).value ++
+        (llm4sOx / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (javaRag / Compile / sources).value ++
         (reactor / Compile / sources).value ++

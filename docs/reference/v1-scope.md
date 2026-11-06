@@ -119,6 +119,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
 | `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, published with each release at the release's version (no `_3` suffix; managed by `llm4s-bom`) — **new** <!-- tier-drift: ignore (a Gradle-built artifact, not an sbt project; see PublishedArtifacts.Gradle) --> | `llm4s-kotlin-api` (`modules/kotlin-api`) | Experimental |
 | `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
+| `ox` — `LLMClientOx` (`streamFlow`, `parComplete`, `raceProviders`), `RetrySchedule`, `LLMException` (direct style with Ox on JDK 21 virtual threads) — **new** | `llm4s-ox` (`modules/llm4s-ox`) | Experimental |
 
 Notes:
 
