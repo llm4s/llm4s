@@ -4,10 +4,11 @@ import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -83,6 +84,10 @@ import scala.util.Try
  */
 @Stable
 object OpenAICompatibleProvider extends ProviderDescriptor:
+
+  /** Sends its requests through `LlmClientOptions.httpClient` when one is supplied (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(true)
+
   val id: ProviderId = ProviderId(OpenAICompatibleConfig.ProviderIdName)
 
   /** The key that turns `stream_options.include_usage` off for a server that rejects it. */
@@ -345,4 +350,11 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[OpenAICompatibleConfig](id, config)
-      .flatMap(OpenAICompatibleClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        OpenAICompatibleClient(
+          _,
+          options.metrics,
+          options.exchangeLogging,
+          Llm4sHttpClient.suppliedOrFromConfig(options.httpClient)
+        )
+      )

@@ -612,7 +612,8 @@ class WatsonXClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override protected def releaseResources(): Unit = http.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object WatsonXClient {
@@ -832,7 +833,8 @@ object WatsonXClient {
   def apply(
     config: WatsonXConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[WatsonXClient] =
-    Try(new WatsonXClient(config, metrics, exchangeLogging)).toResult
+    Try(new WatsonXClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

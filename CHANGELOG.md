@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- A `Llm4sHttpClient` passed to an SDK-free provider client is no longer closed with it, and `LlmClientOptions` and
+  `ProviderFeatures` gain a field; [migration](docs/reference/migration.md#a-supplied-http-client-is-the-callers-to-close-2341).
 - `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;
   [migration](docs/reference/migration.md#rerankproviderconfig-is-growth-safe-2478).
 - `ApiKey` and every config credential field (`apiKey`, Langfuse keys, search-tool keys) are `org.llm4s.security.Secret`, not `String`; [migration](docs/reference/migration.md#credentials-are-secret-1932).
@@ -139,6 +141,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llm4s-java-api` and `llm4s-spring-boot-starter` no longer bring the provider modules: declare `llm4s-openai`,
   `llm4s-ollama`, ... yourself; [migration](docs/reference/migration.md#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
+### Capabilities
+
+- **Added** `llm4s-capabilities` (Experimental): `client.requireCapabilities[Vision & Tools](provider, model)` checks the model's metadata once and
+  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
+
 ### Observability
 
 - **Added** OpenTelemetry GenAI semantic conventions (`1.37.0`) for plain and streamed completions and embeddings:
@@ -219,6 +226,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
 - **Added** `StreamingBridgeContract`, one conformance suite that `llm4s-effect`, `llm4s-zio` and `llm4s-pekko` each run:
   errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core [#2334](https://github.com/llm4s/llm4s/issues/2334).
+- **Added** `llm4s-ox` (Experimental): a streamed completion as an Ox `Flow`, `parComplete`, `raceProviders` and `RetrySchedule`
+  for direct-style code on virtual threads, and the [direct-style guide](docs/guide/direct-style.md) [#2332](https://github.com/llm4s/llm4s/issues/2332).
 
 ### Agent runtime
 
@@ -250,6 +259,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
+  `Llm4sHttpClient`, which you keep owning; `ProviderFeatures.customHttpClient` (opt-in, `false` by default) says which honour it [#2341](https://github.com/llm4s/llm4s/issues/2341).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
   JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new
@@ -266,6 +277,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `https://api.x.ai/v1` with `XAI_API_KEY` bound to `llm4s.credentials.xai.apiKey`; `reasoning_content` as thinking,
   reasoning tokens, `CompletionOptions.reasoning` as `reasoning_effort` on the Grok models that take it, and model
   listing [#1023](https://github.com/llm4s/llm4s/issues/1023).
+- **Added** `llm4s-perplexity` (Beta): `provider = "perplexity"` on Perplexity's Agent API (`/v1/agent`, which replaced
+  Sonar Chat Completions), with `web_search`, its sources on `Completion.citations`, tool calls and streaming [#1026](https://github.com/llm4s/llm4s/issues/1026).
 - **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
   `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
@@ -359,6 +372,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** `llm4s-java-api` and `llm4s-spring-boot-starter` to make the provider modules optional dependencies: a Java
   user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
   fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
+- **Added** an agent to `llm4s-spring-boot-starter`: `llm4sTools` collects the `@Tool` methods of the application's beans
+  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
 
 ### Tools
 
@@ -381,12 +396,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns its result and runs in a `ToolScope`, with `reject`, `ensure` and `.?` for early exit and
   `ToolScope.idempotencyKey` for the call's key; outside one they do not compile [#2336](https://github.com/llm4s/llm4s/issues/2336);
   [guide](docs/guide/derived-schemas.md#scoped-tools).
+- **Added** streamed structured output to `llm4s-schema-derivation`: `client.streamStructuredOf[A](conversation)(onPartial)`
+  hands `onPartial` typed partial values (`PartialOf[A]`, a named tuple of `Option`s) as the reply streams, parsed with the
+  new `PartialJson` [#2329](https://github.com/llm4s/llm4s/issues/2329); [guide](docs/guide/structured-output.md#10-streaming-structured-output).
 - **Fixed** `generate_uuid` (`UUIDTool`) refuses a `count` that is not a whole number (`3.5`, `"5"`, `null`) instead
   of silently generating one UUID; an absent `count` still gives one, and out-of-range values are still clamped to 1..10
   [#1514](https://github.com/llm4s/llm4s/issues/1514).
 - **Added** optional jitter to tool retries: `ToolRetryPolicy(jitter = ...)` / `.withJitter`, a fraction from 0.0 (the
   default, exact delays as before) to 1.0 ("full jitter") of each backoff that is randomised, so concurrent retries do
   not hit a backend together [#1708](https://github.com/llm4s/llm4s/issues/1708); [guide](docs/reliability-guide.md).
+- **Added** `llm4s-prompt` (Experimental): `prompt"..."`/`system"..."` interpolators that render each value through a
+  `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
 
 ### MCP
 
@@ -492,6 +512,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 - **Added** llm4s.org share cards (a large Open Graph/X card on every page, rendered by `scripts/render-social-images.sh`), `SoftwareSourceCode`,
   `Organization` and `BreadcrumbList` JSON-LD, and `scripts/check-site-share-cards.sh` in the Pages deploy [#2316](https://github.com/llm4s/llm4s/issues/2316).
+- **Added** a dev container and [Codespaces playground](docs/getting-started/playground.md): JDK 21, sbt, Scala CLI, Metals and a local Ollama model,
+  no API key; the `devcontainer.yml` workflow builds it and runs the page's five commands inside it [#2286](https://github.com/llm4s/llm4s/issues/2286).
 
 ### Embeddings & RAG
 
@@ -570,6 +592,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** Scalafix migration rules (`modules/scalafix-rules`, not yet published): `Llm4sMigrate_0_5` rewrites `.copy`
+  to `with*` setters, millisecond fields to `FiniteDuration`, `isRecoverable`, moved config loaders and message
+  extractors, and lints removed APIs; tested with scalafix-testkit against 0.4.1 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).
 - **Added** a per-module dependency licence report (`sbt licenseReport`, SPDX ids, attached to each GitHub Release) and
   `sbt licenseCheck`, a CI quick check that fails on a denied or unknown runtime licence [#2308](https://github.com/llm4s/llm4s/issues/2308); [Dependency licences](docs/reference/licences.md).
 - **Added** `stabilityTierCheck` enforces RFC 0002 growth safety: it fails for a `case class` in a `@Stable` type of a
@@ -746,7 +771,7 @@ OpenAI-compatible provider); workload identity, configurable timeouts, testkits 
   [Mp3](docs/reference/migration.md#audioformatmp3-1307),
   [RegexValidator](docs/reference/migration.md#regexvalidators-constructor).
 
-### Core
+### Capabilities
 
 - **Added** `CancelledError`: an interrupted call returns `Left(CancelledError)` with the interrupt flag kept, never
   retried; chat, embedding, reranker, MCP, image and speech clients follow it

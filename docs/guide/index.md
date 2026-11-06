@@ -31,6 +31,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Testing with the Testkit](testing-with-the-testkit)** - Script an `LLMClient` in your tests: canned replies, tool calls, injected errors, recorded requests
+- **[Typed Prompts](prompts)** - `prompt"..."` and `system"..."`: values rendered by a type class checked at compile time, and untrusted input fenced
 - **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
 - **[Comparing LLM4S](comparison)** - A sourced comparison with LangChain4j, Spring AI, Koog and Embabel, and a [migration guide](migrating-from-langchain4j)
