@@ -4,7 +4,7 @@ title: Apache Flink
 description: "Enrich an Apache Flink 2.x stream with LLM calls from Scala 3: an async function per task, timeouts and capacity, and failed calls sent to a dead-letter side output."
 search_title: "Call LLMs from Apache Flink 2.x with LLM4S"
 parent: User Guide
-nav_order: 43
+nav_order: 48
 ---
 
 # Using LLM4S from Apache Flink
