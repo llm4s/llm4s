@@ -29,6 +29,34 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       val p = PolicyBuilder.allowedProviders(Set("azure"), Set("dev"))
       p.evaluate(base, "prod") shouldBe PolicySkip("allowed-providers")
     }
+
+    it("should pass when provider is in allowed list ignoring case of allowed list") {
+      val p = PolicyBuilder.allowedProviders(Set("OpEnAI", "AzUrE"), Set("prod"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should pass when provider is in allowed list ignoring case of env") {
+      val p = PolicyBuilder.allowedProviders(Set("OpEnAI", "AzUrE"), Set("PrOd"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should pass when provider is in allowed list ignoring case of given provider") {
+      val p = PolicyBuilder.allowedProviders(Set("openai", "azure"), Set("prod"))
+      p.evaluate(base.copy(provider = Some("OpenAI")), "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should pass when provider is in allowed list ignoring padded white spaces") {
+      val p = PolicyBuilder.allowedProviders(Set(" openai ", "       azure"), Set(" prod "))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-providers")
+    }
+
+    it("should return a PolicyFail with unset value when provider is unset in config") {
+      val p = PolicyBuilder.allowedProviders(Set("openai", "azure"), Set("prod"))
+      p.evaluate(base.copy(provider = None), "prod") shouldBe PolicyFail(
+        "allowed-providers",
+        "provider is not set (env 'prod')"
+      )
+    }
   }
 
   describe("PolicyBuilder.allowedModels") {
@@ -37,15 +65,30 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       p.evaluate(base, "prod") shouldBe PolicyPass("allowed-models")
     }
 
+    it("should pass when model is in allowed list ignoring case of env") {
+      val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("PrOd"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("allowed-models")
+    }
+
     it("should fail when model is not in allowed list") {
       val p = PolicyBuilder.allowedModels(Set("claude-3-5-sonnet"), Set("prod"))
       p.evaluate(base, "prod").isInstanceOf[PolicyFail] shouldBe true
+    }
+
+    it("should return a PolicyFail with unset value when model is unset in config") {
+      val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
+      p.evaluate(base.copy(model = None), "prod") shouldBe PolicyFail("allowed-models", "model is not set (env 'prod')")
     }
   }
 
   describe("PolicyBuilder.maxTokensLimit") {
     it("should pass when tokens are within limit") {
       val p = PolicyBuilder.maxTokensLimit(4096, Set("prod"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("max-tokens-limit")
+    }
+
+    it("should pass when tokens are within limit ignoring case of env") {
+      val p = PolicyBuilder.maxTokensLimit(4096, Set("PrOd"))
       p.evaluate(base, "prod") shouldBe PolicyPass("max-tokens-limit")
     }
 
@@ -76,6 +119,11 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       p.evaluate(base, "prod") shouldBe PolicyPass("required-region")
     }
 
+    it("should pass when region matches allowed list ignoring case of env") {
+      val p = PolicyBuilder.requiredRegion(Set("eastus", "westeurope"), Set("PrOd"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("required-region")
+    }
+
     it("should fail when region is not in allowed list") {
       val p = PolicyBuilder.requiredRegion(Set("westeurope"), Set("prod"))
       p.evaluate(base, "prod").isInstanceOf[PolicyFail] shouldBe true
@@ -88,6 +136,11 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       p.evaluate(base, "prod") shouldBe PolicyPass("reasoning-budget-limit")
     }
 
+    it("should pass when budget is within limit ignoring case of env") {
+      val p = PolicyBuilder.reasoningBudgetLimit(8000, Set("PrOd"))
+      p.evaluate(base, "prod") shouldBe PolicyPass("reasoning-budget-limit")
+    }
+
     it("should fail when budget exceeds limit") {
       val p = PolicyBuilder.reasoningBudgetLimit(1000, Set("prod"))
       p.evaluate(base, "prod").isInstanceOf[PolicyFail] shouldBe true
@@ -95,6 +148,11 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
 
     it("should pass when budget is not set") {
       val p = PolicyBuilder.reasoningBudgetLimit(1000, Set("prod"))
+      p.evaluate(base.copy(reasoningBudget = None), "prod").isInstanceOf[PolicyPass] shouldBe true
+    }
+
+    it("should pass when budget is not set ignoring case of env") {
+      val p = PolicyBuilder.reasoningBudgetLimit(1000, Set("PrOd"))
       p.evaluate(base.copy(reasoningBudget = None), "prod").isInstanceOf[PolicyPass] shouldBe true
     }
   }

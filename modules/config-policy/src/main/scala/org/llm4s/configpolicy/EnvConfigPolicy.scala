@@ -1,5 +1,6 @@
 package org.llm4s.configpolicy
 
+import java.util.Locale
 import scala.util.Try
 
 /**
@@ -20,12 +21,16 @@ final case class ConfigSnapshot(
 
 sealed trait PolicyResult {
   def policyName: String
+
   def message: String
 }
 
-final case class PolicyPass(policyName: String, message: String = "passed")                       extends PolicyResult
-final case class PolicyFail(policyName: String, message: String)                                  extends PolicyResult
-final case class PolicyWarn(policyName: String, message: String)                                  extends PolicyResult
+final case class PolicyPass(policyName: String, message: String = "passed") extends PolicyResult
+
+final case class PolicyFail(policyName: String, message: String) extends PolicyResult
+
+final case class PolicyWarn(policyName: String, message: String) extends PolicyResult
+
 final case class PolicySkip(policyName: String, message: String = "skipped for this environment") extends PolicyResult
 
 final case class PolicyEvaluationResult(results: List[PolicyResult]) {
@@ -44,37 +49,48 @@ final case class PolicyEvaluationResult(results: List[PolicyResult]) {
  */
 trait EnvConfigPolicy {
   def name: String
+
   def evaluate(config: ConfigSnapshot, env: String): PolicyResult
 }
 
 object PolicyBuilder {
 
   private def shouldRun(targetEnvs: Set[String], env: String): Boolean =
-    targetEnvs.isEmpty || targetEnvs.contains(env)
+    targetEnvs.isEmpty || targetEnvs.map(_.trim.toLowerCase(Locale.ROOT)).contains(env.trim.toLowerCase(Locale.ROOT))
 
   def allowedProviders(allowed: Set[String], envs: Set[String] = Set.empty): EnvConfigPolicy =
     new EnvConfigPolicy {
       override val name: String = "allowed-providers"
 
+      val allowedLowerCase: Set[String] = allowed.map(_.trim.toLowerCase(Locale.ROOT))
+
       override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
         if (!shouldRun(envs, env)) PolicySkip(name)
         else {
-          val provider = config.provider.getOrElse("")
-          if (provider.nonEmpty && allowed.contains(provider.toLowerCase)) PolicyPass(name)
-          else PolicyFail(name, s"provider '$provider' is not allowed in env '$env'")
+          config.provider match {
+            case Some(provider) =>
+              if (allowedLowerCase.contains(provider.trim.toLowerCase(Locale.ROOT))) PolicyPass(name)
+              else PolicyFail(name, s"provider '$provider' is not allowed in env '$env'")
+            case None =>
+              PolicyFail(name, s"provider is not set (env '$env')")
+          }
+
         }
     }
 
   def allowedModels(allowed: Set[String], envs: Set[String] = Set.empty): EnvConfigPolicy =
     new EnvConfigPolicy {
       override val name: String = "allowed-models"
-
       override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
         if (!shouldRun(envs, env)) PolicySkip(name)
         else {
-          val model = config.model.getOrElse("")
-          if (model.nonEmpty && allowed.contains(model)) PolicyPass(name)
-          else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
+          config.model match {
+            case Some(model) =>
+              if (allowed.contains(model)) PolicyPass(name)
+              else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
+            case None =>
+              PolicyFail(name, s"model is not set (env '$env')")
+          }
         }
     }
 
@@ -148,6 +164,7 @@ object PolicyBuilder {
 }
 
 object DefaultPolicies {
+
   import PolicyBuilder._
 
   val productionSafeDefaults: List[EnvConfigPolicy] = List(
