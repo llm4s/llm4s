@@ -44,6 +44,7 @@ object DocSnippets {
     "guide/prompts.md",
     "guide/providers.md",
     "guide/replacing-a-python-sidecar.md",
+    "guide/tapir-tools.md",
     "guide/vector-store.md",
     "index.md",
     "reference/doctor.md",
