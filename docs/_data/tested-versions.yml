@@ -37,6 +37,10 @@ stacks:
     artifact: "llm4s-reactor"
     versions: ["3.8.8"]
     note: ""
+  - name: "Tapir"
+    artifact: "llm4s-tapir"
+    versions: ["1.11.20"]
+    note: "With sttp client 3.10.3."
   - name: "Iron"
     artifact: "llm4s-schema-iron"
     versions: ["3.3.2"]

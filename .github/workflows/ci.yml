@@ -132,6 +132,11 @@ jobs:
           scripts/test-check-doc-seo.sh
           scripts/check-doc-seo.sh
 
+      # The share-card and structured-data check that pages.yml runs on the built site (#2316), on fixture sites: a page
+      # without og:image or a large card, invalid JSON-LD or a stale SoftwareSourceCode version must fail it.
+      - name: Test the share-card and structured-data check
+        run: scripts/test-check-site-share-cards.sh
+
       # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
       # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
       - name: Check llms.txt and llms-full.txt build from the docs
@@ -442,8 +447,8 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities, doctor,
-                      observabilityMicrometer, agentTools, traceOpentelemetry, gradleDemo]
+            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
+                      doctor, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -618,6 +623,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-tools/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-tools
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload tapir coverage to Codecov
+        if: contains(matrix.modules, 'llm4sTapir')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/tapir/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: tapir
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
