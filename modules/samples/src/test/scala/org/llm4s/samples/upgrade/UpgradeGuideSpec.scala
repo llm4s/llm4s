@@ -46,11 +46,12 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
       Set("openai-compatible", "deepseek", "zai", "openrouter", "mistral", "cohere", "xai"),
       Set.empty[String]
     ),
-    "Llm4sBedrockModule" -> (Set("bedrock"), Set.empty[String]),
-    "Llm4sWatsonXModule" -> (Set("watsonx"), Set.empty[String]),
-    "Llm4sVoyageModule"  -> (Set.empty[String], Set("voyage")),
-    "Llm4sJinaModule"    -> (Set.empty[String], Set("jina")),
-    "Llm4sCohereModule"  -> (Set.empty[String], Set("cohere"))
+    "Llm4sBedrockModule"    -> (Set("bedrock"), Set.empty[String]),
+    "Llm4sWatsonXModule"    -> (Set("watsonx"), Set.empty[String]),
+    "Llm4sPerplexityModule" -> (Set("perplexity"), Set.empty[String]),
+    "Llm4sVoyageModule"     -> (Set.empty[String], Set("voyage")),
+    "Llm4sJinaModule"       -> (Set.empty[String], Set("jina")),
+    "Llm4sCohereModule"     -> (Set.empty[String], Set("cohere"))
   )
 
   "The provider table" should "name exactly the ids each provider module registers" in {

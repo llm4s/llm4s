@@ -78,6 +78,10 @@ which is
 
 This is exactly the schema that `Schema.object[Invoice](...)` with three `withRequiredField` calls builds by hand; the module's tests compare the two.
 
+To show the value while the model writes it, `client.streamStructuredOf[Invoice](conversation) { p => ... }` streams
+the same request and hands each partial value to your function, typed: see
+[Streaming structured output](structured-output#10-streaming-structured-output).
+
 ## What is derived
 
 | Scala type | JSON schema |

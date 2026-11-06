@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model.ResponseFormat
@@ -35,7 +36,8 @@ import scala.util.Try
 class CohereClient(
   config: CohereConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -51,7 +53,8 @@ class CohereClient(
       ),
       CohereDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 @Experimental
@@ -70,11 +73,12 @@ object CohereClient {
   def apply(
     config: CohereConfig,
     metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[CohereClient] =
     OpenAICompatibleClient
       .requireKey("Cohere", config.apiKey, config.apiKeyProvider)
-      .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging)).toResult)
+      .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging, httpClient)).toResult)
 }
 
 /**
