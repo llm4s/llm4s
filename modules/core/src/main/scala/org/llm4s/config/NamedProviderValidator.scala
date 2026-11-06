@@ -360,7 +360,12 @@ private[llm4s] object NamedProviderConfigValidator:
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))
-      validated
+      // A key that came from the vendor's shared `llm4s.credentials.<id>.apiKeyFile` (#2478) is re-read as a
+      // section's own file is: the loader gives the config an `ApiKeyProvider.file` over it.
+      resolved.flatMap(_.file) match
+        case Some(file) if normalized.apiKeyFile.isEmpty && descriptor.configSpec.requiresApiKey =>
+          validated.withApiKeyFile(file)
+        case _ => validated
 
   /** The key `file` holds now, logged as coming from the file; an unreadable or empty file names its path. */
   private def keyFromFile(sectionPath: String, file: java.nio.file.Path): Result[SharedCredentials.Resolved] =

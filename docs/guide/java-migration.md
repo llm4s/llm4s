@@ -5,7 +5,7 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [2277, 2278, 2279, 2476]
+cites_open_issues: [2277, 2278, 2279]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -161,10 +161,19 @@ JAgentResult first = agent.run("My name is Ada.").get();
 JAgentResult second = agent.continueConversation(first, "What is my name?").get();   // same thread
 ```
 
-Keep the latest `JAgentResult` per user where you kept a memory id; `agent.forget(result)` drops the thread. Neither
-form trims the history to a window as `MessageWindowChatMemory` does: from Java, that (`ContextWindowMiddleware`) and a
-system prompt on an agent need an agent built with the Scala `Agent.builder` and wrapped with `Llm4s.wrapAgent`
-([what has no equivalent](#what-has-no-direct-equivalent-yet)). Facts that outlive a conversation are
+Keep the latest `JAgentResult` per user where you kept a memory id; `agent.forget(result)` drops the thread. For a
+window like `MessageWindowChatMemory`'s, and a system prompt, build the agent with `Llm4s.agentBuilder`:
+
+```java
+JAgent agent = Llm4s.agentBuilder("assistant", client)
+    .systemPrompt("You are a helpful assistant.")
+    .contextWindow(JContextWindow.lastMessages(20))   // each call is sent the last 20 messages
+    .build()
+    .get();
+```
+
+The window prunes what each model call is sent, not what the thread keeps; the builder also takes tools and guardrails
+([Java](java#an-agent-with-a-system-prompt-guardrails-and-a-context-window)). Facts that outlive a conversation are
 `llm4s-memory`'s job ([memory](agents/memory)), a Scala API.
 
 ## Embeddings
@@ -287,8 +296,9 @@ public class AskController {
 `complete` blocks and throws `LlmException` on failure, so an `@ExceptionHandler` can map `getKind()` to a status;
 `tryComplete` returns the `LlmResult`, and `completeAsync` a `CompletableFuture<String>` on the starter's executor
 ([Spring Boot](spring-boot#use-the-template)). The starter auto-configures the client, the template, a health
-indicator and Micrometer metrics; it does not yet auto-configure embeddings, an agent from `@Tool` beans or streaming
-endpoints ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
+indicator, Micrometer metrics and an agent over your beans' `@Tool` methods
+([Spring Boot](spring-boot#an-agent-with-tools)); it does not yet auto-configure embeddings or streaming endpoints
+([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 
 ## A test with FakeLlmClient
 
@@ -386,14 +396,13 @@ Plainly, as of this page's sources:
 - **Declarative AI services.** No annotated interface that llm4s implements, as LangChain4j's AI Services and
   `@AiService` do [L1][L6], and so no `@SystemMessage` / `@UserMessage` prompt templates: you call the client.
   Tracked in [#2277](https://github.com/llm4s/llm4s/issues/2277).
-- **An agent's system prompt, guardrails or memory window from plain Java.** `Llm4s.createAgent` and
-  `createAgentWithTools` take a client and tools; the rest needs the Scala `Agent.builder` and `Llm4s.wrapAgent`
-  ([streaming an agent](agents/streaming#java-and-kotlin)). There is no Java `MessageWindowChatMemory`
-  equivalent, and no chat-memory store keyed by a conversation id, as Spring AI's `ChatMemoryRepository`s are [S3].
-  A Java agent builder is tracked in [#2476](https://github.com/llm4s/llm4s/issues/2476).
+- **A chat-memory store keyed by a conversation id**, as Spring AI's `ChatMemoryRepository`s are [S3]. An agent keeps
+  its threads in memory until `forget`; you keep the `JAgentResult` that names each one.
+- **Guardrails written in Java.** `JGuardrails` offers the built-in ones (length, profanity, regex, JSON); a guardrail
+  of your own needs the Scala `Agent.builder` and `Llm4s.wrapAgent`.
 - **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse
   ([#2278](https://github.com/llm4s/llm4s/issues/2278)).
-- **More Spring Boot auto-configuration.** Embeddings, an agent from `@Tool` beans and streaming endpoints
+- **More Spring Boot auto-configuration.** Embeddings and streaming endpoints
   ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).

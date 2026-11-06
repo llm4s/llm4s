@@ -115,7 +115,7 @@ trait LLMClient extends AutoCloseable {
       // `A` is read from the text, not from `parsed`: a `ujson` number is a double, so an integer above
       // 2^53 in the AST is already rounded, while uPickle reads a `Long` exactly from text (#1597)
       result <- Try(upickle.default.read[A](json)).toEither.left.map(e =>
-        ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
+        ValidationError("structured_output", s"Response does not match expected schema: ${LLMClient.readFailure(e)}")
       )
     } yield result
   }
@@ -187,6 +187,26 @@ object LLMClient {
 
   /** Upper bound on how many `{`/`[` start positions are tried, keeping extraction linear in practice. */
   private val MaxCandidateStarts = 16
+
+  /**
+   * Why reading a reply into `A` failed, for the message of a `ValidationError`.
+   *
+   * uPickle wraps whatever a `Reader` throws in a `TraceException` whose own message is only the JSON path (`$.id`),
+   * so the reason, such as a mismatched type or the message of a bridged decoder (circe, jsoniter-scala), is in the
+   * innermost cause. Both are kept: the path, then the reason.
+   */
+  private[llm4s] def readFailure(error: Throwable): String = error match {
+    case traced: upickle.core.TraceVisitor.TraceException =>
+      Option(innermostCause(traced).getMessage).fold(traced.jsonPath)(reason => s"${traced.jsonPath}: $reason")
+    case other => Option(other.getMessage).getOrElse(other.getClass.getName)
+  }
+
+  @scala.annotation.tailrec
+  private def innermostCause(error: Throwable): Throwable =
+    Option(error.getCause).filter(_ ne error) match {
+      case Some(cause) => innermostCause(cause)
+      case None        => error
+    }
 
   /**
    * Best-effort normalisation of model output that should contain a JSON value.

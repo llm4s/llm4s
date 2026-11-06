@@ -55,13 +55,16 @@ import scala.util.{ Try, Using }
  * @param dialect         how this provider departs from the standard format.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ * @param suppliedHttpClient the HTTP client to send requests through, which the caller keeps owning (#2341);
+ *                        by default one built from `settings.network`, closed with this client.
  */
 @Stable
 class OpenAICompatibleClient(
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  suppliedHttpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
@@ -92,8 +95,9 @@ class OpenAICompatibleClient(
   // before the previous one is released. The provider may be the caller's own code, so it is registered here.
   private val bearers = new TokenGenerations
 
-  // Scoped to the provider package so specs can substitute one
-  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
+  // The supplied client, or one routed by the settings' proxy and TLS settings; scoped to the provider package so
+  // specs can substitute one
+  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
   private val endpoint                                = s"${settings.baseUrl}/chat/completions"
 
@@ -652,7 +656,8 @@ class OpenAICompatibleClient(
 
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
-  override protected def releaseResources(): Unit = httpClient.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(suppliedHttpClient, httpClient)
 }
 
 object OpenAICompatibleClient {
@@ -922,7 +927,8 @@ object OpenAICompatibleClient {
   def apply(
     config: OpenAICompatibleConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[OpenAICompatibleClient] =
     // A config built with `apply` or the `with*` setters skipped `fromValues`; its rules are applied here too.
     OpenAICompatibleConfig
@@ -933,7 +939,8 @@ object OpenAICompatibleClient {
             settings(valid),
             OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage),
             metrics,
-            exchangeLogging
+            exchangeLogging,
+            httpClient
           )
         ).toResult
       )

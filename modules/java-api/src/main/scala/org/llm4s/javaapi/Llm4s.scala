@@ -8,8 +8,6 @@ import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 
-import scala.jdk.CollectionConverters.*
-
 import java.util.{ Objects, OptionalInt }
 
 /**
@@ -184,22 +182,28 @@ object Llm4s {
    * }}}
    */
   def createAgentWithTools(client: JLlmClient, tools: java.util.List[JTool]): LlmResult[JAgent] =
-    FacadeInternals.result(for {
-      c  <- Option(client).toRight(org.llm4s.error.ValidationError.required("client"))
-      ts <- Option(tools).map(_.asScala.toVector).toRight(org.llm4s.error.ValidationError.required("tools"))
-      _  <- Either.cond(!ts.contains(null), (), org.llm4s.error.ValidationError("tools", "a tool is null"))
-      _ <- ts
-        .groupBy(_.name())
-        .collectFirst { case (n, same) if same.size > 1 => n }
-        .toLeft(())
-        .left
-        .map(n => org.llm4s.error.ValidationError("tools", s"two tools are named '$n'"))
-      agent <- Agent.builder("assistant", c.underlying).withTools(new ToolRegistry(ts.map(_.function))).build()
-    } yield new JAgent(FacadeToken.INSTANCE, Right(agent)))
+    agentBuilder("assistant", client).tools(tools).build()
 
   /**
-   * Wraps an `Agent` built with `Agent.builder`, for what the factories above do not set: its
-   * middleware (guardrails, approvals), handoffs, system prompt or runtime.
+   * A builder for an agent called `id` over `client`, with a system prompt, tools, input and output guardrails
+   * ([[JGuardrails]]), a context window ([[JContextWindow]]) and streaming, set from Java (#2476). [[createAgent]] and
+   * [[createAgentWithTools]] are its zero-option cases. Neither argument is checked here: a `null` one is a failed
+   * result of `build()`.
+   *
+   * {{{
+   * LlmResult<JAgent> agent = Llm4s.agentBuilder("support", client)
+   *     .systemPrompt("You are a support assistant.")
+   *     .inputGuardrails(List.of(JGuardrails.length(1, 10_000)))
+   *     .contextWindow(JContextWindow.lastMessages(20))
+   *     .build();
+   * }}}
+   */
+  def agentBuilder(id: String, client: JLlmClient): JAgentBuilder =
+    new JAgentBuilder(FacadeToken.INSTANCE, AgentBuilds.Spec(id, client))
+
+  /**
+   * Wraps an `Agent` built with `Agent.builder`, for what [[agentBuilder]] does not set: its
+   * other middleware (approvals, permissions), handoffs, subagents or runtime.
    */
   def wrapAgent(agent: Agent): JAgent = {
     Objects.requireNonNull(agent, "agent must not be null")

@@ -349,9 +349,12 @@ lazy val llm4s = (project in file("."))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
+    prompt,
     testkit,
+    capabilities,
     agentTestkit,
     agentCheckpointSqlite,
     agentCheckpointPostgres,
@@ -359,6 +362,7 @@ lazy val llm4s = (project in file("."))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     javaApi,
     javaRag,
     springBootStarter,
@@ -379,6 +383,11 @@ lazy val llm4s = (project in file("."))
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
+    // Scala 2.13 Scalafix rules and their testkit projects (#2330); see `scalafixRules` below.
+    scalafixRules,
+    scalafixInput,
+    scalafixOutput,
+    scalafixTests,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -743,6 +752,28 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
       Deps.scalatest          % Test,
       Deps.pekkoStreamTestkit % Test,
       Deps.pekkoTestkit       % Test
+    ),
+    // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
+    Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
+  )
+
+// `llm4s-ox` (#2332): direct style on JDK 21 virtual threads with SoftwareMill's Ox (Apache-2.0, Scala 3 only, JDK 21
+// bytecode; already `llm4s-agent`'s runtime dependency). A streamed completion as an Ox `Flow`, `parComplete`,
+// `raceProviders` and `RetrySchedule`, all over `LLMClient`: it depends on core and Ox only. `agent` and `testkit` are
+// test scope, for the bridges' shared conformance contract (#2334), whose agent cases need an `Agent`.
+lazy val llm4sOx = (project in file("modules/llm4s-ox"))
+  .dependsOn(core, agent % Test, testkit % Test)
+  .settings(
+    name := "llm4s-ox",
+    commonSettings,
+    // Measured 96.39% statement coverage (CI's agent coverage leg).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ox,
+      Deps.scalatest % Test
     ),
     // The effect bridges' shared conformance contract (#2334), kept in llm4s-effect's tests.
     Test / unmanagedSourceDirectories += (llm4sEffect / Test / sourceDirectory).value / "contract"
@@ -1343,6 +1374,29 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
     )
   )
 
+// `llm4s-perplexity` (#1026): Perplexity's Agent API (`/v1/agent`), which replaced Sonar Chat Completions. It
+// speaks the OpenAI Responses format, not `/chat/completions`, so it is a provider module of its own rather than a
+// dialect in `openai-compatible`. No dependency beyond core.
+
+lazy val perplexity = (project in file("modules/providers/perplexity"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-perplexity",
+    commonSettings,
+    // Measured 99.37% statement coverage (`sbt coverage perplexity/test perplexity/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The `@Cloud` `PerplexitySmokeSpec` in
+    // `modules/it` is not counted here.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -1381,9 +1435,10 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
 // `llm4s-agent` is test-only (#1912): `DerivedAgentOutputSpec` and the guide check that a derived schema is an
 // agent's response format (`withOutput(SchemaOf[A].definition)`). The module itself never depends on the agent.
 // `llm4s-agent-tools` is test-only too (#1473): `TypedToolSpec` compares a typed tool's schema and argument errors
-// with the hand-built calculator's.
+// with the hand-built calculator's. `llm4s-testkit` is test-only too (#2329): `StreamStructuredSpec` streams a reply
+// in chunks of every size with its `ScriptedLLMClient`.
 lazy val schemaDerivation = (project in file("modules/schema-derivation"))
-  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test)
+  .dependsOn(core % "compile->compile;test->test", agent % Test, agentTools % Test, testkit % Test)
   .settings(
     name := "llm4s-schema-derivation",
     commonSettings,
@@ -1392,6 +1447,22 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     // tool specs were added, and from 98.62% / 93.33% when the case keys and the given-aware check were; 99.38% / 96.00% with the run-time recursion guard; 96.24% / 93.13% with sum types (#2327), whose new code is mostly compile-time checks scoverage cannot see. Floor is the measured value rounded down to the nearest 5. Never lower it. Macro
     // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
     // specs exercise it when they compile.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
+// `llm4s-prompt` (#2325): the `prompt"..."` and `system"..."` interpolators, which render each value through a
+// `Promptable` found at compile time (derived with `Mirror` for case classes and enums) and fence `Untrusted` values.
+// It layers on core's public API (it builds `Message`s and a `Conversation`) and adds no dependency.
+lazy val prompt = (project in file("modules/prompt"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-prompt",
+    commonSettings,
+    // Measured 98.06% statement and 95.08% branch coverage (`sbt coverage prompt/test prompt/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The interpolator's macro runs inside
+    // the compiler, where scoverage cannot see it; `PromptCompileErrorsSpec` and the golden specs exercise it.
     coverageFloor(95),
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
@@ -1414,6 +1485,27 @@ lazy val testkit = (project in file("modules/testkit"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
+// `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.requireCapabilities[Vision & Tools](provider,
+// model)` checks the model's `ModelMetadata` once, at the application's edge, and returns a `Capable[Vision & Tools]`;
+// operations that need a capability take a `Capable[...]` of it, so passing a client not checked for it is a compile
+// error. Depends on core only; `llm4s-testkit` scripts the client in its specs.
+lazy val capabilities = (project in file("modules/capabilities"))
+  .dependsOn(core, testkit % Test)
+  .settings(
+    name := "llm4s-capabilities",
+    commonSettings,
+    // Measured 100.00% statement and 100.00% branch coverage (`sbt coverage capabilities/test
+    // capabilities/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never lower it. The
+    // `CapabilityCheck` macro runs inside the compiler, where scoverage cannot see it; `CapabilityCompileErrorsSpec`
+    // exercises it when it compiles.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
   )
@@ -1663,6 +1755,8 @@ lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
     schemaDerivation,
+    // `org.llm4s.samples.prompt.TypedPromptExample` (#2325), and docs/guide/prompts.md's snippets
+    prompt,
     rag,
     knowledgegraph,
     memory,
@@ -1682,6 +1776,7 @@ lazy val samples = (project in file("modules//samples"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1695,11 +1790,14 @@ lazy val samples = (project in file("modules//samples"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
     javaRag,
-    // Test scope: the guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit
-    // examples' acceptance suites script their model with it.
-    testkit      % Test,
+    // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
+    // acceptance suites script their model with it. Compile scope since #2295: the runnable
+    // `org.llm4s.samples.json.JsoniterStructuredOutputExample` and (#2325)
+    // `org.llm4s.samples.prompt.TypedPromptExample` script their model with it, so they need no API key.
+    testkit,
     agentTestkit % Test,
     // Test scope: docs/guide/vector-store.md's Elasticsearch, OpenSearch and Redis snippets are compiled (#2359).
     vectorstoreElasticsearch % Test,
@@ -1715,13 +1813,17 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
-    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
-    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    // Test scope unless noted: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the
+    // real libraries. Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
     libraryDependencies ++= Seq(
       Deps.circeCore  % Test,
       Deps.ujsonCirce % Test,
       Deps.playJson   % Test,
       Deps.zioJson    % Test,
+      // docs/guide/json-libraries.md's jsoniter-scala section (#2295). Compile scope: the runnable
+      // `org.llm4s.samples.json.JsoniterStructuredOutputExample` uses the same bridge.
+      Deps.jsoniterScalaCore,
+      Deps.jsoniterScalaMacros,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
@@ -1767,7 +1869,19 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
   // `doctor`: `org.llm4s.configpolicy.DoctorCli` forwards to the published doctor, so the in-repository command runs
   // it with every built-in provider module on the classpath.
-  .dependsOn(core, doctor, ollama, gemini, anthropic, openai, azureIdentity, openaiCompatible, bedrock, watsonx)
+  .dependsOn(
+    core,
+    doctor,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    azureIdentity,
+    openaiCompatible,
+    bedrock,
+    watsonx,
+    perplexity
+  )
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -2149,6 +2263,7 @@ lazy val it = (project in file("modules/it"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -2243,9 +2358,12 @@ lazy val docs = (project in file("modules/docs"))
     jev,
     cohere,
     watsonx,
+    perplexity,
     providerTestkit,
     schemaDerivation,
+    prompt,
     testkit,
+    capabilities,
     doctor,
     workspaceShared,
     workspaceClient,
@@ -2263,6 +2381,7 @@ lazy val docs = (project in file("modules/docs"))
     llm4sEffect,
     llm4sZio,
     llm4sPekko,
+    llm4sOx,
     javaApi,
     javaRag,
     reactor,
@@ -2300,9 +2419,12 @@ lazy val docs = (project in file("modules/docs"))
         (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
+        (perplexity / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
+        (prompt / Compile / sources).value ++
         (testkit / Compile / sources).value ++
+        (capabilities / Compile / sources).value ++
         (doctor / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
@@ -2320,6 +2442,7 @@ lazy val docs = (project in file("modules/docs"))
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
         (llm4sPekko / Compile / sources).value ++
+        (llm4sOx / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (javaRag / Compile / sources).value ++
         (reactor / Compile / sources).value ++
@@ -2521,6 +2644,87 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
     // Measured 100.00% statement coverage (`sbt coverage gradleDemo/test
     // gradleDemo/coverageReport`); floor is the measured value rounded down to the nearest 5.
     coverageFloor(100)
+  )
+
+// ---- Scalafix migration rules (#2330) ----
+// Semantic rewrite rules that move user code across llm4s's breaking changes (docs/reference/scalafix.md#migration-rules).
+// Scalafix rules compile against `scalafix-core`, which is Scala 2.13 only, so `scalafixRules` is a Scala 2.13
+// build-tool module: Scalafix loads it into the build, and it never enters a user's runtime classpath. That does not
+// conflict with the Scala 3-only library policy (#1126). It is not published yet; publishing it with the release
+// workflow, and listing it in the BOM, are the rest of #2330.
+//
+// The other three projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
+// against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
+// compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
+// output. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
+// compared byte for byte.
+lazy val scalafixScala213 = "2.13.14"
+lazy val scalafixVersion  = "0.12.1"
+lazy val scalafixOldLlm4s = "0.4.1"
+lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
+  publish / skip       := true,
+  mimaFailOnNoPrevious := false,
+  Compile / scalacOptions ++= {
+    if (scalaVersion.value.startsWith("3.")) Seq("-java-output-version", javaRelease) else Seq("-release", javaRelease)
+  },
+  Compile / doc / sources         := Seq.empty,
+  Compile / mainClass             := None,
+  Compile / discoveredMainClasses := Seq.empty
+) ++
+  // Verified by the golden files of `scalafixTests`; there is nothing of their own to measure.
+  coverageDisabled
+
+lazy val scalafixRules = (project in file("modules/scalafix-rules/rules"))
+  .settings(
+    name                 := "llm4s-scalafix",
+    description          := "Scalafix rules that migrate user code across llm4s's breaking changes.",
+    scalaVersion         := scalafixScala213,
+    crossScalaVersions   := Seq(scalafixScala213),
+    publish / skip       := true,
+    mimaFailOnNoPrevious := false,
+    // The build's SemanticDB plugin (4.15) has no Scala 2.13.14 artifact, and the only Scalafix rules the build runs
+    // on these sources are syntactic, so neither 2.13 project emits SemanticDB.
+    semanticdbEnabled := false,
+    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Xlint", "-Werror", "-release", javaRelease),
+    libraryDependencies += "ch.epfl.scala" %% "scalafix-core" % scalafixVersion,
+    // Unpublished, so no Scaladoc; the rules are documented in docs/reference/scalafix.md.
+    Compile / doc / sources := Seq.empty,
+    // The rule code is measured by the golden files of `scalafixTests`, which run in another project; scoverage
+    // cannot attribute those measurements here, so the module declares no floor of its own.
+    coverageDisabled
+  )
+
+lazy val scalafixInput = (project in file("modules/scalafix-rules/input"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled                  := true,
+    libraryDependencies += "org.llm4s" %% "llm4s-core" % scalafixOldLlm4s
+  )
+
+lazy val scalafixOutput = (project in file("modules/scalafix-rules/output"))
+  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, anthropic, ollama)
+  .settings(scalafixTestLayout)
+
+lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput / Compile / scalaVersion).value,
+    // The output must compile against this checkout: that is what proves a rewrite lands on the new API.
+    Test / test     := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )
 
 // ---- relocation stubs for the 0.4.0 artifact rename ----

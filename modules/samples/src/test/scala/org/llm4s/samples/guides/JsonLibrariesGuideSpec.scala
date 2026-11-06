@@ -16,7 +16,8 @@ import scala.jdk.CollectionConverters._
 import java.time.Instant
 
 /**
- * Compiles and runs the recipes of `docs/guide/json-libraries.md` against the real circe, play-json and zio-json.
+ * Compiles and runs the recipes of `docs/guide/json-libraries.md` against the real circe, play-json, zio-json and
+ * jsoniter-scala.
  *
  * Every recipe sits between a `// snippet: <name>` line and an `// end snippet` line, in the order the page shows
  * them. The last tests read this file and the page and fail unless each Scala block of the page is one of those
@@ -179,6 +180,66 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     client.completeStructured[Order](conversation, orderSchema)(using zioReader[Order])
   // end snippet
 
+  // snippet: jsoniter-codecs
+  import com.github.plokhotnyuk.jsoniter_scala.core.{ readFromArray, writeToArray, JsonValueCodec, ReaderConfig }
+  import com.github.plokhotnyuk.jsoniter_scala.macros.JsonCodecMaker
+
+  given JsonValueCodec[Order] = JsonCodecMaker.make
+  // end snippet
+
+  // snippet: jsoniter-conversion
+  // No hex dump of the model's reply in error messages: they end up in logs and in the Left.
+  val jsoniterReaderConfig: ReaderConfig = ReaderConfig.withAppendHexDumpToParseException(false)
+
+  def readJsoniter[A](value: ujson.Value)(using codec: JsonValueCodec[A]): A =
+    readFromArray[A](ujson.writeToByteArray(value), jsoniterReaderConfig)
+
+  def fromJsoniter[A](value: A)(using codec: JsonValueCodec[A]): ujson.Value = ujson.read(writeToArray(value))
+  // end snippet
+
+  // snippet: jsoniter-reader
+  import upickle.default.{ readwriter, ReadWriter }
+
+  def jsoniterReader[A](using JsonValueCodec[A]): Reader[A] =
+    reader[ujson.Value].map(value => readJsoniter[A](value))
+
+  def jsoniterReadWriter[A](using JsonValueCodec[A]): ReadWriter[A] =
+    readwriter[ujson.Value].bimap[A](value => fromJsoniter(value), json => readJsoniter[A](json))
+  // end snippet
+
+  // snippet: jsoniter-structured
+  def orderViaJsoniter(client: LLMClient, conversation: Conversation): Result[Order] =
+    client.completeStructured[Order](conversation, orderSchema)(using jsoniterReader[Order])
+  // end snippet
+
+  // snippet: jsoniter-error
+  import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+
+  val malformed = ScriptedLLMClient.always(
+    Reply.text("""{"id":"seven","total":19.5,"address":{"city":"Oslo"},"tags":[]}""")
+  )
+
+  def malformedOrder(conversation: Conversation): Result[Order] = orderViaJsoniter(malformed, conversation)
+  // Left(ValidationError: Response does not match expected schema: $: illegal number, offset: 0x00000006)
+  // end snippet
+
+  // snippet: jsoniter-tool
+  import scala.util.Try
+
+  given JsonValueCodec[AddArgs]   = JsonCodecMaker.make
+  given JsonValueCodec[AddResult] = JsonCodecMaker.make
+  given ReadWriter[AddResult]     = jsoniterReadWriter[AddResult]
+
+  val addToolViaJsoniter = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+    .withHandler { extractor =>
+      Try(readJsoniter[AddArgs](extractor.params)).toEither
+        .map(args => AddResult(args.a.toLong + args.b))
+        .left
+        .map(_.getMessage)
+    }
+    .buildSafe()
+  // end snippet
+
   // snippet: numbers
   val big = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
 
@@ -279,6 +340,53 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     orderViaZio(new ScriptedClient(wrongType), conversation).left.value shouldBe a[ValidationError]
   }
 
+  "A jsoniter-scala JsonValueCodec used as a uPickle Reader" should "let completeStructured return the application's own type" in {
+    val client = ScriptedLLMClient.always(Reply.text(orderJson))
+
+    orderViaJsoniter(client, conversation).value shouldBe order
+    // The schema reaches the provider as a response format, exactly as with a uPickle Reader.
+    client.calls.flatMap(_.options.responseFormat) should have size 1
+  }
+
+  it should "read Option fields given as null or left out, and nested objects" in {
+    val reply = """{"id":1,"total":2,"address":{"city":"Bergen","zip":"5003"},"tags":[]}"""
+
+    orderViaJsoniter(ScriptedLLMClient.always(Reply.text(reply)), conversation).value shouldBe
+      Order(1, 2.0, Address("Bergen", Some("5003")), Nil, None)
+  }
+
+  it should "turn a jsoniter decoding failure into a ValidationError that names the jsoniter error" in {
+    malformedOrder(conversation).left.value match {
+      case error: ValidationError =>
+        error.field shouldBe "structured_output"
+        error.message should endWith("Response does not match expected schema: $: illegal number, offset: 0x00000006")
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  it should "not turn a JSON null answer into Right(null)" in {
+    orderViaJsoniter(ScriptedLLMClient.always(Reply.text("null")), conversation).isLeft shouldBe true
+  }
+
+  it should "leave a None field and an empty collection out when it encodes, and read both forms back" in {
+    val empty = order.copy(tags = Nil)
+
+    fromJsoniter(empty) shouldBe ujson.read("""{"id":7,"total":19.5,"address":{"city":"Oslo"}}""")
+    readJsoniter[Order](ujson.read("""{"id":7,"total":19.5,"address":{"city":"Oslo","zip":null},"tags":[]}""")) shouldBe
+      empty
+    readJsoniter[Order](fromJsoniter(empty)) shouldBe empty
+  }
+
+  "A tool whose arguments and result use jsoniter-scala" should "decode the model's arguments and round trip its result" in {
+    val tool = addToolViaJsoniter.value
+
+    tool.execute(ujson.Obj("a" -> 2, "b" -> 40)) shouldBe Right(ujson.Obj("sum" -> 42))
+    upickle.default.read[AddResult](upickle.default.write(AddResult(42L))) shouldBe AddResult(42L)
+    // A value that does not fit the case class comes back as an error for the model to read, not an exception.
+    tool.execute(ujson.Obj("a" -> "two", "b" -> 40)).isLeft shouldBe true
+    tool.execute(ujson.Obj("a" -> 2)).isLeft shouldBe true
+  }
+
   "A whole number above 2^53" should "reach a uPickle Long field exactly, since completeStructured reads the text" in {
     final case class Id(id: Long)
     given upickle.default.Reader[Id] = upickle.default.macroR
@@ -297,6 +405,11 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
       .completeStructured[Id](conversation, idSchema[Id]("id", Schema.integer("id")))(using circeReader[Id])
 
     viaCirce.value shouldBe Id(big - 1)
+
+    given JsonValueCodec[Id] = JsonCodecMaker.make
+    new ScriptedClient(s"""{"id":$big}""")
+      .completeStructured[Id](conversation, idSchema[Id]("id", Schema.integer("id")))(using jsoniterReader[Id])
+      .value shouldBe Id(big - 1)
   }
 
   it should "survive when it travels as a string" in {
@@ -368,5 +481,7 @@ class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues
     page should include(s""""ujson-circe" % "${versionOf("ujson")}"""")
     page should include(s""""play-json" % "${versionOf("playJson")}"""")
     page should include(s""""zio-json" % "${versionOf("zioJson")}"""")
+    page should include(s""""jsoniter-scala-core"   % "${versionOf("jsoniterScala")}"""")
+    page should include(s""""jsoniter-scala-macros" % "${versionOf("jsoniterScala")}"""")
   }
 }

@@ -29,6 +29,10 @@ stacks:
     artifact: "llm4s-pekko"
     versions: ["1.7.1"]
     note: ""
+  - name: "Ox"
+    artifact: "llm4s-ox"
+    versions: ["1.0.9"]
+    note: ""
   - name: "Project Reactor"
     artifact: "llm4s-reactor"
     versions: ["3.8.8"]
@@ -77,6 +81,10 @@ stacks:
     artifact: "docs/guide/json-libraries.md (tested recipe)"
     versions: ["1.0.0"]
     note: "Pinned: later releases are built with a newer Scala 3 whose TASTy the 3.7.1 compiler cannot read."
+  - name: "jsoniter-scala"
+    artifact: "docs/guide/json-libraries.md (tested recipe)"
+    versions: ["2.42.2"]
+    note: ""
   - name: "OpenAI Java SDK"
     artifact: "llm4s-openai"
     versions: ["4.69.3"]

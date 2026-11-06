@@ -17,7 +17,7 @@ import org.llm4s.toolapi.{
 import org.llm4s.types.Result
 import upickle.default.{ ReadWriter, Reader }
 
-import scala.util.Try
+import scala.util.{ Try, boundary }
 
 /**
  * Tools defined from a function over a case class: the parameter schema is derived from the argument type
@@ -70,6 +70,50 @@ object Tool {
         description,
         parameters,
         extractor => decode[A](parameters, extractor.params).left.map(message).flatMap(handler)
+      )
+    }
+
+  /**
+   * Builds a tool from a function over its arguments that runs in a [[ToolScope]]: it returns its result directly,
+   * and ends the call early with [[reject]], [[ensure]] or `?` (on a `Result` or an `Either[String, T]`), whose message
+   * is the error the model sees, as a `Left` from a [[of]] handler is. It reads the call it serves as
+   * [[ToolScope.call]], and the key to pass to a system with a side effect as [[ToolScope.idempotencyKey]].
+   *
+   * {{{
+   * Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
+   *   ensure(c.amountCents > 0, "amountCents must be positive")
+   *   val customer = customers.find(c.customerId).?   // a Result: its LLMError becomes the tool's error
+   *   if (customer.blocked) reject("this customer cannot be charged")
+   *   Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
+   * }
+   * }}}
+   *
+   * The arguments are decoded, and refused, exactly as by [[of]]. An exception the handler throws propagates, as from
+   * an [[of]] handler; a `ToolRegistry` turns it into the tool's error.
+   *
+   * @param name        the tool's name, as the model calls it
+   * @param description what the tool does, for the model
+   * @param handler     the tool's logic, given the call's [[ToolScope]]
+   * @tparam A the arguments: a case class with a [[SchemaOf]] (`derives SchemaOf`) and a uPickle reader
+   * @tparam R the result, written with its uPickle `ReadWriter` (which `ToolFunction` requires)
+   * @return the tool, or a `ValidationError` as from [[of]]
+   */
+  def scoped[A, R](name: String, description: String)(
+    handler: ToolScope ?=> A => R
+  )(using schemaOf: SchemaOf[A], reader: Reader[A], writer: ReadWriter[R]): Result[ToolFunction[A, R]] =
+    parametersOf(name, schemaOf).map { parameters =>
+      ToolFunction[A, R](
+        name,
+        description,
+        parameters,
+        extractor =>
+          decode[A](parameters, extractor.params).left.map(message).flatMap { arguments =>
+            val key = extractor.call.fold(ToolScope.fallbackKey(name, extractor.params))(_.idempotencyKey)
+            boundary[Either[String, R]] {
+              given ToolScope = new ToolScope(extractor.call, key, summon[boundary.Label[Either[String, R]]])
+              Right(handler(arguments))
+            }
+          }
       )
     }
 

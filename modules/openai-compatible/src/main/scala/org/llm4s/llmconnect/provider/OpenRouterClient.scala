@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
@@ -74,7 +75,8 @@ import scala.util.Try
 class OpenRouterClient(
   config: OpenAIConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -90,7 +92,8 @@ class OpenRouterClient(
       ),
       OpenRouterDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 object OpenRouterClient {
@@ -143,7 +146,16 @@ object OpenRouterClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenRouterClient] =
-    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics, exchangeLogging)).toResult)
+    apply(config, metrics, exchangeLogging, Llm4sHttpClient.FromConfig)
+
+  /** As the three-argument `apply`, sending requests through `httpClient`, which the caller keeps owning. */
+  def apply(
+    config: OpenAIConfig,
+    metrics: MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient
+  )(using ModelRegistryService): Result[OpenRouterClient] =
+    validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics, exchangeLogging, httpClient)).toResult)
 }
 
 /**

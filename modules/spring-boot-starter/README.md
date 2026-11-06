@@ -94,6 +94,8 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 | `llm4sClient` (`JLlmClient`) | closed on context shutdown |
 | `llm4sTaskExecutor` (`ExecutorService`) | defined by name: a bean called `llm4sTaskExecutor` replaces it |
 | `llm4sTemplate` (`LLM4STemplate`) | |
+| `llm4sTools` (`Llm4sTools`) | the `@Tool` (`org.llm4s.javaapi.Tool`) methods of every singleton bean; a tool bean must not be an AOP proxy |
+| `llm4sAgent` (`JAgent`) | over the client and `llm4sTools`; `llm4s.agent.system-prompt`, `.id`, `.streaming`; off with `llm4s.agent.enabled=false` |
 | `llmHealthIndicator` (`LlmHealthIndicator`, or `LlmBoot4HealthIndicator` on Spring Boot 4; only with Spring Boot Actuator) | |
 | `llm4sMetricsCollector` (`MicrometerMetrics`, only with `llm4s-observability-micrometer` and a `MeterRegistry` bean) | any `MetricsCollector` bean; the client reports to all of them |
 

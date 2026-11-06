@@ -48,7 +48,7 @@ description: "A free path to becoming an AI engineer with LLM4S: from your first
         <div>
           <h3>Get set up and make your first call</h3>
           <p>Install LLM4S, configure a provider and send your first conversation. New to Scala? Scala CLI is the quickest way in.</p>
-          <p class="lp-steps__links"><a href="{{ '/getting-started/installation' | relative_url }}">Installation</a> <a href="{{ '/getting-started/ollama-quickstart' | relative_url }}">Ollama quickstart</a> <a href="{{ '/getting-started/first-example' | relative_url }}">First example</a> <a href="{{ '/getting-started/scala-cli' | relative_url }}">Scala CLI</a></p>
+          <p class="lp-steps__links"><a href="{{ '/getting-started/installation' | relative_url }}">Installation</a> <a href="{{ '/getting-started/ollama-quickstart' | relative_url }}">Ollama quickstart</a> <a href="{{ '/getting-started/first-example' | relative_url }}">First example</a> <a href="{{ '/getting-started/scala-cli' | relative_url }}">Scala CLI</a> <a href="{{ '/getting-started/playground' | relative_url }}">Try it in a Codespace</a></p>
         </div>
       </li>
       <li>
