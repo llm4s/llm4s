@@ -383,6 +383,11 @@ lazy val llm4s = (project in file("."))
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
+    // Scala 2.13 Scalafix rules and their testkit projects (#2330); see `scalafixRules` below.
+    scalafixRules,
+    scalafixInput,
+    scalafixOutput,
+    scalafixTests,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -2639,6 +2644,87 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
     // Measured 100.00% statement coverage (`sbt coverage gradleDemo/test
     // gradleDemo/coverageReport`); floor is the measured value rounded down to the nearest 5.
     coverageFloor(100)
+  )
+
+// ---- Scalafix migration rules (#2330) ----
+// Semantic rewrite rules that move user code across llm4s's breaking changes (docs/reference/scalafix.md#migration-rules).
+// Scalafix rules compile against `scalafix-core`, which is Scala 2.13 only, so `scalafixRules` is a Scala 2.13
+// build-tool module: Scalafix loads it into the build, and it never enters a user's runtime classpath. That does not
+// conflict with the Scala 3-only library policy (#1126). It is not published yet; publishing it with the release
+// workflow, and listing it in the BOM, are the rest of #2330.
+//
+// The other three projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
+// against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
+// compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
+// output. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
+// compared byte for byte.
+lazy val scalafixScala213 = "2.13.14"
+lazy val scalafixVersion  = "0.12.1"
+lazy val scalafixOldLlm4s = "0.4.1"
+lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
+  publish / skip       := true,
+  mimaFailOnNoPrevious := false,
+  Compile / scalacOptions ++= {
+    if (scalaVersion.value.startsWith("3.")) Seq("-java-output-version", javaRelease) else Seq("-release", javaRelease)
+  },
+  Compile / doc / sources         := Seq.empty,
+  Compile / mainClass             := None,
+  Compile / discoveredMainClasses := Seq.empty
+) ++
+  // Verified by the golden files of `scalafixTests`; there is nothing of their own to measure.
+  coverageDisabled
+
+lazy val scalafixRules = (project in file("modules/scalafix-rules/rules"))
+  .settings(
+    name                 := "llm4s-scalafix",
+    description          := "Scalafix rules that migrate user code across llm4s's breaking changes.",
+    scalaVersion         := scalafixScala213,
+    crossScalaVersions   := Seq(scalafixScala213),
+    publish / skip       := true,
+    mimaFailOnNoPrevious := false,
+    // The build's SemanticDB plugin (4.15) has no Scala 2.13.14 artifact, and the only Scalafix rules the build runs
+    // on these sources are syntactic, so neither 2.13 project emits SemanticDB.
+    semanticdbEnabled := false,
+    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Xlint", "-Werror", "-release", javaRelease),
+    libraryDependencies += "ch.epfl.scala" %% "scalafix-core" % scalafixVersion,
+    // Unpublished, so no Scaladoc; the rules are documented in docs/reference/scalafix.md.
+    Compile / doc / sources := Seq.empty,
+    // The rule code is measured by the golden files of `scalafixTests`, which run in another project; scoverage
+    // cannot attribute those measurements here, so the module declares no floor of its own.
+    coverageDisabled
+  )
+
+lazy val scalafixInput = (project in file("modules/scalafix-rules/input"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled                  := true,
+    libraryDependencies += "org.llm4s" %% "llm4s-core" % scalafixOldLlm4s
+  )
+
+lazy val scalafixOutput = (project in file("modules/scalafix-rules/output"))
+  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, anthropic, ollama)
+  .settings(scalafixTestLayout)
+
+lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput / Compile / scalaVersion).value,
+    // The output must compile against this checkout: that is what proves a rewrite lands on the new API.
+    Test / test     := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )
 
 // ---- relocation stubs for the 0.4.0 artifact rename ----

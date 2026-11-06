@@ -136,6 +136,9 @@ map_file_to_project() {
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
     modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
+    modules/scalafix-rules/rules/*)       echo "scalafixRules" ;;
+    # The testkit projects: `scalafixTests/test` compiles the input and output and runs every rule on them.
+    modules/scalafix-rules/*)             echo "scalafixTests" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
     modules/memory/*)                     echo "memory" ;;
@@ -580,6 +583,9 @@ propagate_downstream() {
       ;;
     doctor)
       set_add DOWNSTREAM_COMPILE configPolicy
+      ;;
+    scalafixRules)
+      set_add DOWNSTREAM_COMPILE scalafixTests
       ;;
   esac
 }
