@@ -34,6 +34,15 @@ libraryDependencies ++= Seq(
   </div>
 </section>
 
+{%- assign latest_post = site.posts | first %}
+{%- if latest_post %}
+<section class="lp-news-strip" aria-label="Latest news">
+  <div class="lp-wrap">
+    <p><strong>Latest:</strong> <a href="{{ latest_post.url | relative_url }}">{{ latest_post.title }}</a> ({{ latest_post.date | date: "%-d %B %Y" }}) &middot; <a href="{{ '/news/' | relative_url }}">All news</a> &middot; <a href="{{ '/feed.xml' | relative_url }}">Subscribe (Atom)</a></p>
+  </div>
+</section>
+{%- endif %}
+
 {% include stats-band.html %}
 
 <section class="lp-section" aria-labelledby="why-heading">
