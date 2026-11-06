@@ -1234,7 +1234,16 @@ jobs:
           cache: 'sbt'
       
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
-      
+
+      # The MCP Python SDK, pinned, for samples' PythonToolBridgeExampleSpec (#2333): it starts sentiment_tool.py with
+      # the `python3` first on the PATH, so the venv goes there. Without it the spec is cancelled, not run.
+      - name: Install the MCP Python SDK for the Python sidecar sample
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mcp-venv"
+          "$RUNNER_TEMP/mcp-venv/bin/pip" install --quiet -r modules/samples/src/main/python/requirements.txt
+          echo "$RUNNER_TEMP/mcp-venv/bin" >> "$GITHUB_PATH"
+
       # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
       - name: Run tests
         run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || 'test' }}

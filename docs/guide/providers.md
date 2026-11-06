@@ -1205,7 +1205,7 @@ lmstudio {
 #### llama.cpp (`llama-server`)
 
 ```bash
-llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384
+llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384 --port 8080
 ```
 
 ```hocon
@@ -1218,8 +1218,9 @@ llama-cpp {
 }
 ```
 
-- `llama-server` listens on `127.0.0.1:8080` by default. Without `--alias` the model id is the
-  model file's path; `--alias` gives it a stable name.
+- `llama-server` listens on `127.0.0.1`, on port 9931 by default in current builds; the command
+  above pins 8080 with `--port`. Without `--alias` the model id is the model file's path; `--alias`
+  gives it a stable name.
 - Tool calling uses the Jinja chat template (`--jinja`, on by default), and some models need a
   `--chat-template-file` override to get a tool-capable template.
 

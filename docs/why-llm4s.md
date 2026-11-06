@@ -28,7 +28,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
       <p>Most LLM tooling is Python-first, while many production systems in finance, telecom, data platforms and enterprise software are built on Scala and the JVM.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
-      <li class="lp-card lp-card--flat"><h3>No Python sidecar</h3><p>The LLM code runs in the same process, build and deployment as the rest of your service: one language to review, one artifact to ship, one runtime to patch.</p></li>
+      <li class="lp-card lp-card--flat"><h3>No Python sidecar</h3><p>The LLM code runs in the same process, build and deployment as the rest of your service: one language to review, one artifact to ship, one runtime to patch. <a href="{{ '/guide/replacing-a-python-sidecar' | relative_url }}">Replacing a Python sidecar</a> shows the migration.</p></li>
       <li class="lp-card lp-card--flat"><h3>Operations you already have</h3><p>Your logging, metrics, tracing, secrets handling, CI and security review apply unchanged. LLM4S reports through OpenTelemetry, Prometheus and Micrometer.</p></li>
       <li class="lp-card lp-card--flat"><h3>Concurrency that scales</h3><p>LLM calls are slow I/O. On JDK 21, LLM4S runs tools on virtual threads and integrates with cats-effect, ZIO, Pekko Streams and Reactor for streaming and cancellation.</p></li>
     </ul>
