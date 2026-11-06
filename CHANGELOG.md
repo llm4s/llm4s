@@ -519,6 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 - **Added** the [Enterprise Reference Architecture](docs/guide/reference-architecture.md) (AI gateway, secret injection, egress, failover, spend) with a tested
   `deploy/overlays/enterprise` (LiteLLM, NetworkPolicy, ExternalSecret) validated by `kubeconform`; stale *Production Deployment* sections corrected [#2315](https://github.com/llm4s/llm4s/issues/2315).
+- **Added** a News section on llm4s.org (`/news/`, posts for 0.5.0 and 0.5.1) with an Atom feed, per-tag feeds and
+  `scripts/new-release-post.sh`, which drafts a release's post from its CHANGELOG section [#2319](https://github.com/llm4s/llm4s/issues/2319); [release step](docs/reference/release.md#write-the-news-post).
 - **Added** [Enrich a Kafka topic with an LLM](docs/guide/kafka.md): an fs2-kafka pipeline (`org.llm4s.samples.kafka`) with bounded concurrency, retries,
   a dead-letter topic and offsets committed after the produce, tested offline and against a broker in `modules/it` [#2297](https://github.com/llm4s/llm4s/issues/2297).
 - **Added** a Play 3 reference app to `modules/examples-http` over `llm4s-pekko`: Guice wiring with a stop hook, `llm4s` config in Play's

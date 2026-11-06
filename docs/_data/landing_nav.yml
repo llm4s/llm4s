@@ -10,6 +10,8 @@ main:
     url: /learn/
   - title: Showcase
     url: /showcase/
+  - title: News
+    url: /news/
   - title: Events
     url: /events/
   - title: Foundation
@@ -42,6 +44,8 @@ footer:
         url: /gsoc/
       - title: Events and Dev Hour
         url: /events/
+      - title: News
+        url: /news/
       - title: People
         url: /people/
   - heading: Foundation
