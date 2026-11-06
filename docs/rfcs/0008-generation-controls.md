@@ -21,7 +21,7 @@ and PRs 1–6 throughout, so the two never share a number.
 - **Part 1: Reported adjustments.** Today, when a provider or model can't honour a request option, it is dropped and
   logged only at DEBUG. This part reports each such drop to the caller instead. `RequestTransformer`'s existing
   violations become a public value, `RequestAdjustment`. Every `Completion`, streamed or not, carries them, and so
-  does an agent's `ModelCallCompleted` event. Purely additive.
+  does an agent's `ModelCallCompleted` event. Additive, apart from one provider-SPI change (decision 13).
 - **Part 2: Thinking, separated from effort.** `CompletionOptions` gains `thinking: Option[Thinking]` (`Off`,
   `Adaptive`, `Budget(n)`). `ReasoningEffort` keeps its name and its meaning (how hard to think) and gains the levels
   providers now accept. Two members that blur the two ideas go, as a clean break before the MiMa baseline:
@@ -327,7 +327,8 @@ below).
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
   `ModelCallCompleted`). Part 2 breaks code that uses `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None`
-  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels.
+  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels. Part 1 also breaks an
+  `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
 - **Behaviour:** a call that compiles after PR 4 sends the same request as before, except a `reasoning`-only call to
   a model that rejects a thinking budget, which fails today and now succeeds with `output_config.effort`. The new
   parts come into play only through the new setters. Two visible additions from PR 1:
@@ -339,7 +340,9 @@ below).
 
 ## Migration
 
-Parts 1 and 3 need none. Part 2 (PR 4):
+Part 3 needs none. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
+`addReasoning`: it returns what it did not send (PR 1, decision 13; `docs/reference/migration.md` has the
+before and after). Part 2 (PR 4):
 
 ```scala
 // Before
@@ -361,8 +364,8 @@ One behaviour to note: on OpenAI, `ReasoningEffort.None` sent no `reasoning_effo
 while `Thinking.Off` asks for the lowest effort the model accepts. A caller who wants the provider default sets
 neither.
 
-The CHANGELOG gets **Added** entries for each PR and, for PR 4, one line under `### Breaking changes`.
-`docs/reference/migration.md` gets a section for PR 4, and `docs/guide/cost-controls.md` documents the mapping
+The CHANGELOG gets **Added** entries for each PR and, for PR 1 and PR 4, one line each under
+`### Breaking changes`. `docs/reference/migration.md` gets a section for each of those two, and `docs/guide/cost-controls.md` documents the mapping
 table, the precedence rule and its exception, and the cache warm-up pattern.
 
 New controls, for reference:
@@ -380,7 +383,7 @@ Each PR has its own review:
 1. **PR 1 (Part 1).** `RequestOption` and `RequestAdjustment` on `TransformationResult` and `Completion`, the
    transformer's existing drops reported, a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama and the standard
    OpenAI-compatible dialect do not send reported as `Dropped` (decision 13), the sampling options OpenAI leaves out of a
-   reasoning model's request reported, and per-client, capped warn-once
+   reasoning model's request reported when set away from their defaults, and per-client, capped warn-once
    logging. No new options.
 2. **PR 2 (Part 1).** `AgentEvents.ModelCallCompleted.adjustments`, filled from each call's `Completion`.
 3. **PR 3 (Part 2).** `ModelCapabilities` reads the metadata keys above, plus `supportsBudgetThinking` from the

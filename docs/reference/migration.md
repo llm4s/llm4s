@@ -26,7 +26,8 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
-[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311);
+[`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ## A supplied HTTP client is the caller's to close (#2341)

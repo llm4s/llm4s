@@ -129,4 +129,12 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
     c.complete(hello, CompletionOptions(temperature = 0.2)).value.adjustments shouldBe
       notSent("gpt-5", RequestOption.Temperature)
   }
+
+  it should "replace the transformer's adjusted o-series temperature with a drop, since none is sent" in {
+    // OpenAIModelRules would send 1.0 in place of 0.2, but the request carries no temperature at all
+    val (c, sent) = client("o3-mini")
+    c.complete(hello, CompletionOptions(temperature = 0.2)).value.adjustments shouldBe
+      notSent("o3-mini", RequestOption.Temperature)
+    sendsNoSampling(sent.head)
+  }
 }

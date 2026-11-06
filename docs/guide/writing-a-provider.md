@@ -893,6 +893,8 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
 - [ ] client built on `BaseLifecycleLLMClient`, errors via `HttpErrorMapper`, cost via
       `CostEstimator`, exchanges via `ProviderExchangeRecorder`
 - [ ] no exceptions escape, no environment reads
+- [ ] `t.adjustments` on every `Completion`, streamed or not, plus a `Dropped` for each option the
+      request mapping cannot send ([reporting adjustments](#requesttransformer-and-transformationresult))
 - [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
       explicit registration, the config-to-client round trip and the credential binding
 - [ ] a chat provider that takes tools runs `assertOneToolResultPerCall`

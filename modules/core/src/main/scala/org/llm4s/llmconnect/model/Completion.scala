@@ -24,7 +24,8 @@ import java.time.Instant
  *                  and for a completion assembled from streamed chunks, which carry none.
  * @param adjustments The requested options the client reports it could not honour as asked, each
  *                    dropped, adjusted or not needed (see [[RequestAdjustment]]). Streamed and
- *                    non-streamed calls report the same. Coverage is growing under RFC 0008, so an
+ *                    non-streamed calls report the same; a completion assembled from streamed
+ *                    chunks has none, since chunks carry none. Coverage is growing under RFC 0008, so an
  *                    empty list means nothing was reported, not that every option was sent: see
  *                    [[RequestAdjustment]] for what is reported today.
  */
