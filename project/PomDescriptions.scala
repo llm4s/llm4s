@@ -104,6 +104,8 @@ object PomDescriptions {
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
+    "llm4s-tapir" ->
+      "Tapir endpoints as LLM4S tools: each tool's parameter schema derived from its endpoint, called through sttp.",
     "llm4s-testkit" ->
       "Scriptable fake LLM client and recorded calls for testing applications built with LLM4S.",
     "llm4s-vectorstore-elasticsearch" ->

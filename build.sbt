@@ -380,6 +380,7 @@ lazy val llm4s = (project in file("."))
     traceOpentelemetry,
     agent,
     agentTools,
+    llm4sTapir,
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
@@ -1785,6 +1786,8 @@ lazy val samples = (project in file("modules//samples"))
     observabilityPrometheus,
     agent,
     agentTools,
+    // The tapir sample (#2299) and docs/guide/tapir-tools.md's compiled snippets.
+    llm4sTapir,
     agentCheckpointSqlite,
     // The exit examples (design 4.38): semantic memory, and the coding agent's workspace backends. Test scope:
     // the workspace client's `FakeWorkspace`, and agent-testkit's `ManualClock` for the claims a stopped run leaves.
@@ -1835,7 +1838,10 @@ lazy val samples = (project in file("modules//samples"))
       Deps.munitCatsEffect   % Test,
       Deps.weaverCats        % Test,
       Deps.zioTestSamples    % Test,
-      Deps.zioTestSbtSamples % Test
+      Deps.zioTestSbtSamples % Test,
+      // The tapir sample (#2299), `org.llm4s.samples.tapir.TapirEndpointToolsExample`: its endpoints run on tapir's
+      // in-process stub server, so it needs no network. Compile scope, like the sample.
+      Deps.tapirSttpStubServer
     ),
     testFrameworks ++= Seq(
       new TestFramework("munit.Framework"),
@@ -2212,6 +2218,30 @@ lazy val agentTools = (project in file("modules/agent-tools"))
     )
   )
 
+// `llm4s-tapir` (#2299) turns tapir endpoints into tools: each tool's parameter schema is derived from its endpoint's
+// inputs, and a call decodes the model's arguments with the endpoint's codecs and sends them with sttp client 3. Like
+// `llm4s-agent-tools` it depends on core's tool API only, not on the agent runtime; its end-to-end spec runs an agent,
+// so the agent and the testkit are test dependencies. tapir-core and sttp's model and shared libraries reach no
+// other published module. Experimental.
+lazy val llm4sTapir = (project in file("modules/tapir"))
+  .dependsOn(core, agent % Test, testkit % Test)
+  .settings(
+    name := "llm4s-tapir",
+    commonSettings,
+    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    Test / fork                     := true,
+    Test / parallelExecution        := false,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.tapirCore,
+      Deps.sttpClient3,
+      Deps.ujson,
+      Deps.tapirSttpStubServer % Test,
+      Deps.scalatest           % Test
+    )
+  )
+
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core, knowledgegraph)
   .settings(
@@ -2380,6 +2410,7 @@ lazy val docs = (project in file("modules/docs"))
     agentCheckpointPostgres,
     agentMemory,
     agentTools,
+    llm4sTapir,
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
@@ -2441,6 +2472,7 @@ lazy val docs = (project in file("modules/docs"))
         (agentCheckpointPostgres / Compile / sources).value ++
         (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
+        (llm4sTapir / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
