@@ -60,10 +60,10 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
   private def notSent(model: String, options: RequestOption*) =
     options.toList.map(Dropped(_, s"$model is a reasoning model, which takes no sampling parameters"))
 
-  // An o-series model takes no top_p, which the transformer drops; temperature it would fix at 1.0, but a
-  // reasoning model's request sends none at all, so that is what is reported.
-  private val oSeries =
-    Dropped(RequestOption.TopP, "top_p not supported for o3-mini") :: notSent("o3-mini", RequestOption.Temperature)
+  // An o-series model takes no top_p, which the transformer drops, and would have its temperature fixed at 1.0;
+  // but a reasoning model's request sends no sampling options at all, so that is what is reported, and only for
+  // the top_p the caller set: the temperature was left at its default.
+  private val oSeries = notSent("o3-mini", RequestOption.TopP)
 
   "OpenAIClient.complete" should "report the options the model's rules dropped or left out" in {
     val (c, sent) = client("o3-mini")
@@ -112,8 +112,21 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
     }
   }
 
-  it should "report only the temperature when the other sampling options are at their defaults" in {
+  it should "report nothing for a default call, though nothing is sent for the defaults" in {
+    // o3-mini also has the transformer's report that it moved the default temperature to 1.0 replaced
+    for (model <- List("gpt-5", "o3-mini")) {
+      val (c, sent) = client(model)
+      withClue(model) {
+        c.complete(hello, CompletionOptions()).value.adjustments shouldBe empty
+        c.streamComplete(hello, CompletionOptions(), _ => ()).value.adjustments shouldBe empty
+        sent.foreach(sendsNoSampling)
+      }
+    }
+  }
+
+  it should "report only the sampling options set away from their defaults" in {
     val (c, _) = client("gpt-5")
-    c.complete(hello, CompletionOptions()).value.adjustments shouldBe notSent("gpt-5", RequestOption.Temperature)
+    c.complete(hello, CompletionOptions(temperature = 0.2)).value.adjustments shouldBe
+      notSent("gpt-5", RequestOption.Temperature)
   }
 }

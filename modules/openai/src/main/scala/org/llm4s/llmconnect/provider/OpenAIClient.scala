@@ -200,7 +200,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = withUnsentSampling(transformed.options, transformed.adjustments)
+      adjustments             = withUnsentSampling(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -241,7 +241,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val adjustments             = withUnsentSampling(transformed.options, transformed.adjustments)
+        val adjustments             = withUnsentSampling(options, transformed)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -497,25 +497,35 @@ class OpenAIClient private[provider] (
     isReasoningRequest(options) && OpenAIReasoning.restrictsSampling(model)
 
   /**
-   * `adjustments` with the sampling options a reasoning-model request leaves out reported as `Dropped`
-   * (RFC 0008): `temperature` always, since it always has a value, and `top_p` and the penalties when set
-   * away from their defaults. Each replaces any report the transformer made for the same option, such as
-   * the o-series temperature it adjusts to 1.0, because in the end nothing is sent for it.
+   * `transformed`'s adjustments with the sampling options a reasoning-model request leaves out
+   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it
+   * away from its `CompletionOptions` default. `requested` is what the caller asked for, before the
+   * transformer moved anything, such as the o-series temperature it adjusts to 1.0.
+   *
+   * A default is not reported, so a default call reports nothing and logs no warning: a caller that treats
+   * any `Dropped` as a failure can still use these models without setting anything. The cost is that an
+   * explicit value equal to the default goes unreported too, since `CompletionOptions` cannot tell the two apart.
+   *
+   * Any report the transformer made for one of these options is replaced, because in the end nothing is sent
+   * for it.
    */
   private def withUnsentSampling(
-    options: CompletionOptions,
-    adjustments: List[RequestAdjustment]
+    requested: CompletionOptions,
+    transformed: TransformationResult
   ): List[RequestAdjustment] =
-    if (!omitsSampling(options)) adjustments
+    if (!omitsSampling(transformed.options)) transformed.adjustments
     else {
-      val reason = s"$model is a reasoning model, which takes no sampling parameters"
-      val unsent = List(
-        Some(RequestOption.Temperature),
-        Option.when(options.topP != 1.0)(RequestOption.TopP),
-        Option.when(options.presencePenalty != 0.0)(RequestOption.PresencePenalty),
-        Option.when(options.frequencyPenalty != 0.0)(RequestOption.FrequencyPenalty)
-      ).flatten
-      adjustments.filterNot(a => unsent.contains(a.option)) ++ unsent.map(RequestAdjustment.Dropped(_, reason))
+      val reason   = s"$model is a reasoning model, which takes no sampling parameters"
+      val defaults = CompletionOptions()
+      val sampling = List(
+        RequestOption.Temperature      -> (requested.temperature != defaults.temperature),
+        RequestOption.TopP             -> (requested.topP != defaults.topP),
+        RequestOption.PresencePenalty  -> (requested.presencePenalty != defaults.presencePenalty),
+        RequestOption.FrequencyPenalty -> (requested.frequencyPenalty != defaults.frequencyPenalty)
+      )
+      val unsent = sampling.collect { case (option, true) => option }
+      transformed.adjustments.filterNot(a => sampling.exists(_._1 == a.option)) ++
+        unsent.map(RequestAdjustment.Dropped(_, reason))
     }
 
   /**

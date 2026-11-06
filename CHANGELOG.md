@@ -253,8 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@Stable` `RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`) naming a `@Stable` `RequestOption`, also on
   `TransformationResult`; logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
   Bedrock, Ollama and the standard OpenAI-compatible dialect (Mistral, Cohere, DeepSeek, generic) report a requested
-  `reasoning` they do not send as `Dropped`, and OpenAI reports the `temperature`, `top_p` and penalties a reasoning
-  model's request leaves out, and xAI the penalties it leaves out of one, where each was dropped silently. An empty
+  `reasoning` they do not send as `Dropped`, and OpenAI reports the `temperature`, `top_p` and penalties set away
+  from their defaults that a reasoning model's request leaves out, and xAI the penalties it leaves out of one, where
+  each was dropped silently. An empty
   list means nothing was reported, not that every option was sent: other omissions follow under RFC 0008. Both types are
   promoted from the `@Experimental` tier RFC 0008 first gave them, because the `@Stable` `Completion` exposes them
   (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).

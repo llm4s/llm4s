@@ -440,7 +440,9 @@ PR 1 settled these:
 13. **PR 1 also reports the provider-side drops that #2115's three-PR plan put in its first step**: a `reasoning`
     ignored by Gemini, Vertex AI, Bedrock, Ollama and the standard OpenAI-compatible dialect. The OpenAI client reports the
     sampling options (`temperature`, `top_p`, the penalties) a reasoning model's request leaves out, replacing the
-    transformer's report for the same option, since nothing is sent for it. `addReasoning` returns
+    transformer's report for the same option, since nothing is sent for it. Each is reported only when set away from
+    its `CompletionOptions` default, so a default call reports no `Dropped` that a caller treating one as a failure
+    would trip on; an explicit value equal to the default goes unreported, since it cannot be told apart. `addReasoning` returns
     what it could not send, as "Where they come from" describes, which for xAI includes the penalties it strips from
     a reasoning model's request. The dialects that map reasoning themselves (Z.ai,
     xAI, OpenRouter) report nothing new yet; a level one of them leaves unsent is a follow-up under this RFC.
