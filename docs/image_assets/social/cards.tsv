@@ -1,0 +1,13 @@
+# The llm4s.org share cards (#2316), one per line: file name (without .png), heading, first line, second line.
+# Tab-separated. scripts/render-social-images.sh renders each into <name>.png from template.svg; docs/_config.yml
+# points the pages at them (`image:` in `defaults`) and holds each card's alt text, which must say what the card says.
+# Keep a heading to about 16 characters and a line to about 32, or the text runs into the logo.
+default	LLM4S	LLM framework for Scala	and the JVM
+why-llm4s	Why LLM4S	LLM applications in Scala,	on the JVM you already run
+learn	Learn	From your first LLM call	to agents, RAG, tools and MCP
+showcase	Showcase	Open-source projects	built with LLM4S
+foundation	LLM4S Foundation	Support the foundation	that stewards LLM4S
+getting-started	Getting Started	Install LLM4S and run	your first program
+guide	User Guide	Providers, agents, tools,	RAG and observability
+examples	Examples	Runnable Scala samples, from	a first LLM call to agents
+reference	Reference	API stability, compatibility,	security and the roadmap
