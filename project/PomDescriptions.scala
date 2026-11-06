@@ -102,6 +102,8 @@ object PomDescriptions {
       "One-import helpers for trying LLM4S in the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat and pretty-printed history and usage.",
     "llm4s-schema-derivation" ->
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
+    "llm4s-schema-iron" ->
+      "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->

@@ -8,6 +8,7 @@ JSON) and `POST /chat/stream` (the answer as server-sent events). Unpublished: r
 | http4s (Ember) | `org.llm4s.examples.http.http4s.Http4sChatServerMain` | `llm4s-effect` (`AgentIO[IO]`, fs2) |
 | ZIO HTTP (Netty) | `org.llm4s.examples.http.ziohttp.ZioChatServerMain` | `llm4s-zio` (`AgentZ`, `ZStream`) |
 | Tapir, on http4s (Ember) | `org.llm4s.examples.http.tapir.TapirChatServerMain` | Tapir endpoints (`tapir-http4s-server`) over `AgentIO[IO]`, with OpenAPI docs |
+| Play 3 (Pekko HTTP) | `org.llm4s.examples.http.playframework.PlayChatServerMain` | `llm4s-pekko` (`AgentPekko`, Pekko `Source`), Guice wiring, no Play sbt plugin |
 
 ## Run
 
@@ -17,14 +18,19 @@ sbt examplesHttp/run                                # the samples' default: a lo
 LLM4S_PROVIDER=openai-main sbt examplesHttp/run     # with OPENAI_API_KEY set
 ```
 
-`run` starts the http4s app. The ZIO HTTP and Tapir apps take the same arguments through `runMain`:
+`run` starts the http4s app. The ZIO HTTP, Tapir and Play apps take the same arguments through `runMain`:
 
 ```bash
 sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"
 sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain"
 sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain --fake"
 sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain"
+sbt "examplesHttp/runMain org.llm4s.examples.http.playframework.PlayChatServerMain --fake"
+sbt "examplesHttp/runMain org.llm4s.examples.http.playframework.PlayChatServerMain"
 ```
+
+The Play app reads the same `application.conf` as Play's own configuration: its `play` and `examples.chat` keys (the
+Guice module, the router, the blocking dispatcher) sit beside the `llm4s` block.
 
 The Tapir app also serves its OpenAPI documentation, generated from the endpoint definitions: the Swagger UI at
 `http://localhost:8080/docs` and the document at `http://localhost:8080/docs/openapi.yaml`.
@@ -45,6 +51,6 @@ sbt examplesHttp/test
 
 The tests use `ScriptedLLMClient` (`llm4s-testkit`) and a parking fake client: no key, no network beyond loopback.
 
-The guide, with the event format, the error-to-status mapping, how a disconnect cancels the run and the Tapir
-endpoint definitions, is
+The guide, with the event format, the error-to-status mapping, how a disconnect cancels the run, the Tapir
+endpoint definitions and the Play app's wiring, is
 `docs/guide/http-reference-apps.md`.

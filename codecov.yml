@@ -146,6 +146,10 @@ flags:
     paths:
       - modules/schema-derivation/src/main/scala
     carryforward: true
+  schema-iron:
+    paths:
+      - modules/schema-iron/src/main/scala
+    carryforward: true
   prompt:
     paths:
       - modules/prompt/src/main/scala
