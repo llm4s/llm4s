@@ -63,6 +63,12 @@ object CompatibilityMatrix {
       Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
       Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
+      Stack(
+        "Iron",
+        "llm4s-schema-iron",
+        Seq(Versions.iron),
+        s"Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the ${Common.scala3} compiler cannot read."
+      ),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",
@@ -73,6 +79,12 @@ object CompatibilityMatrix {
       Stack("http4s", "modules/examples-http (unpublished)", Seq(Versions.http4s), ""),
       Stack("Tapir", "modules/examples-http (unpublished)", Seq(Versions.tapir), ""),
       Stack("ZIO HTTP", "modules/examples-http (unpublished)", Seq(Versions.zioHttp), ""),
+      Stack(
+        "Play Framework",
+        "modules/examples-http (unpublished)",
+        Seq(Versions.play),
+        s"Play's Pekko artifacts pinned to llm4s-pekko's ${Versions.pekko}."
+      ),
       Stack("Micrometer", "llm4s-observability-micrometer", Seq(Versions.micrometer), ""),
       Stack("OpenTelemetry", "llm4s-observability-otel", Seq(Versions.opentelemetry), ""),
       Stack("Prometheus client", "llm4s-observability-prometheus", Seq(Versions.prometheus), ""),
