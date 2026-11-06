@@ -370,6 +370,7 @@ lazy val llm4s = (project in file("."))
     springBootStarterBoot4,
     samples,
     doctor,
+    repl,
     configPolicy,
     workspaceShared,
     workspaceRunner,
@@ -1841,7 +1842,9 @@ lazy val samples = (project in file("modules//samples"))
     // enterprise overlay's application.conf (#2315), whose gateway section is driven against provider-testkit's
     // local server.
     configPolicy    % Test,
-    providerTestkit % Test
+    providerTestkit % Test,
+    // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
+    repl % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1862,6 +1865,10 @@ lazy val samples = (project in file("modules//samples"))
       // `org.llm4s.samples.json.JsoniterStructuredOutputExample` uses the same bridge.
       Deps.jsoniterScalaCore,
       Deps.jsoniterScalaMacros,
+      // docs/guide/kafka.md (#2297). Compile scope: the runnable pipeline `org.llm4s.samples.kafka` is built on it,
+      // and modules/it runs that pipeline against a broker.
+      Deps.fs2Kafka,
+      Deps.kafkaClients,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
@@ -1960,6 +1967,27 @@ lazy val doctor = (project in file("modules/doctor"))
     // DoctorCli.main calls sys.exit with the report's exit code.
     run / fork  := true,
     Test / fork := true
+  )
+
+// `llm4s-repl` (#2342): one-import helpers for the Scala CLI REPL, Metals worksheets and scripts (`ask`, `extract`,
+// `chat()`, `history`, `lastUsage`) over a `Session` context parameter. Experimental, and never a dependency of another
+// module: it prints to the console and keeps the conversation in memory, so it is not for production code. It depends
+// on core, `schemaDerivation` (`extract` is `completeStructuredOf`) and `testkit` (`Session.offline` is a
+// `ScriptedLLMClient`, so a worksheet runs with no key or network). `scripts/check-repl-scripts.sh` runs
+// `examples/repl/` against it with Scala CLI in CI.
+lazy val repl = (project in file("modules/repl"))
+  .dependsOn(core, schemaDerivation, testkit)
+  .settings(
+    name := "llm4s-repl",
+    commonSettings,
+    // Measured 96.06% statement and 93.33% branch coverage (`sbt coverage repl/test repl/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
@@ -2370,6 +2398,13 @@ lazy val it = (project in file("modules/it"))
     // ContainerisedWorkspaceTest runs against whatever `workspaceRunner/Docker/publishLocal`
     // produced; take the tag from the build so the test and the image cannot drift apart.
     Test / envVars += "LLM4S_WORKSPACE_IMAGE" -> s"llm4s/workspace-runner:${(workspaceRunner / Docker / version).value}",
+    // KafkaTicketPipelineSpec (#2297) runs the Kafka pipeline of docs/guide/kafka.md against a broker. Its two sources are
+    // compiled into this project's tests instead of depending on `samples`, whose resources (its application.conf, and
+    // termflow's reference.conf) would change the configuration every other suite here loads.
+    Test / unmanagedSources ++= {
+      val dir = (samples / baseDirectory).value / "src" / "main" / "scala" / "org" / "llm4s" / "samples" / "kafka"
+      Seq(dir / "Tickets.scala", dir / "TicketPipeline.scala")
+    },
     itTierCheck := ItTiers.check(
       (Test / definedTests).value.map(_.name),
       (Test / fullClasspath).value.map(_.data),
@@ -2379,7 +2414,9 @@ lazy val it = (project in file("modules/it"))
     // noticed rather than by quietly running nothing.
     Test / test := (Test / test).dependsOn(itTierCheck).value,
     libraryDependencies ++= Seq(
-      Deps.scalatest % Test
+      Deps.scalatest    % Test,
+      Deps.fs2Kafka     % Test,
+      Deps.kafkaClients % Test
     )
   )
 
@@ -2431,6 +2468,7 @@ lazy val docs = (project in file("modules/docs"))
     testkit,
     capabilities,
     doctor,
+    repl,
     workspaceShared,
     workspaceClient,
     observability,
@@ -2494,6 +2532,7 @@ lazy val docs = (project in file("modules/docs"))
         (testkit / Compile / sources).value ++
         (capabilities / Compile / sources).value ++
         (doctor / Compile / sources).value ++
+        (repl / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
