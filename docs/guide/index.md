@@ -51,6 +51,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
 - **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`.
+- **[Tapir Endpoints as Tools](tapir-tools)** - `llm4s-tapir` turns the tapir endpoints a service already has into tools, with each schema derived from its endpoint
 
 ### RAG & Semantic Search
 
@@ -87,6 +88,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
 - **[Spark and Databricks](spark)** - enrich a DataFrame from a Spark job: a client per partition, `ReliableClient`, errors as data
+- **[Apache Flink](flink)** - enrich a Flink 2.x stream from Scala 3: `AsyncDataStream`, a client per task built in `open()`, dead letters as a side output
 
 ### Java
 

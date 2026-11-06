@@ -87,6 +87,10 @@ flags:
     paths:
       - modules/llm4s-pekko/src/main/scala
     carryforward: true
+  llm4s-ox:
+    paths:
+      - modules/llm4s-ox/src/main/scala
+    carryforward: true
   ollama:
     paths:
       - modules/ollama/src/main/scala
@@ -130,6 +134,10 @@ flags:
     paths:
       - modules/providers/watsonx/src/main/scala
     carryforward: true
+  perplexity:
+    paths:
+      - modules/providers/perplexity/src/main/scala
+    carryforward: true
   provider-testkit:
     paths:
       - modules/provider-testkit/src/main/scala
@@ -145,6 +153,10 @@ flags:
   testkit:
     paths:
       - modules/testkit/src/main/scala
+    carryforward: true
+  capabilities:
+    paths:
+      - modules/capabilities/src/main/scala
     carryforward: true
   doctor:
     paths:
@@ -169,6 +181,10 @@ flags:
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala
+    carryforward: true
+  tapir:
+    paths:
+      - modules/tapir/src/main/scala
     carryforward: true
   agent:
     paths:

@@ -60,7 +60,9 @@ object CompatibilityMatrix {
       Stack("fs2", "llm4s-effect", Seq(Versions.fs2), ""),
       Stack("ZIO", "llm4s-zio", Seq(Versions.zio), ""),
       Stack("Apache Pekko", "llm4s-pekko", Seq(Versions.pekko), ""),
+      Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
+      Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",

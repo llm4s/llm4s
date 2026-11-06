@@ -587,11 +587,8 @@ class GeminiClient(
       .tapRight(c => recordExchange(startedAt, requestBody, successResponse, Right(c)))
       .tapLeft(e => recordExchange(startedAt, requestBody, failureResponse, Left(e)))
 
-  override protected def releaseResources(): Unit =
-    (http: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object GeminiClient {
@@ -614,7 +611,8 @@ object GeminiClient {
   def apply(
     config: GeminiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[GeminiClient] =
-    Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
+    Try(new GeminiClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

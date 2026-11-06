@@ -78,6 +78,10 @@ which is
 
 This is exactly the schema that `Schema.object[Invoice](...)` with three `withRequiredField` calls builds by hand; the module's tests compare the two.
 
+To show the value while the model writes it, `client.streamStructuredOf[Invoice](conversation) { p => ... }` streams
+the same request and hands each partial value to your function, typed: see
+[Streaming structured output](structured-output#10-streaming-structured-output).
+
 ## What is derived
 
 | Scala type | JSON schema |
@@ -221,6 +225,65 @@ The arguments are decoded, and refused, exactly as by `Tool.of`, and the result 
 `reject`, `ensure`, `.?` and `ToolScope` need the scope, so using them outside a `Tool.scoped` function does not compile; the message says they are only available inside one. They end the call with `scala.util.boundary`'s `break`, which works from a lambda inside the function (in a `map` or a `foreach`) but is an exception underneath: a `Try` or a `catch NonFatal` around them catches it, so leave them outside one, and do not use the scope on another thread or after the function returns. An exception the function throws is not caught by the tool: a `ToolRegistry` turns it into the tool's error, as for `Tool.of`.
 
 The `TypedCalculatorExample` sample has a scoped calculator next to the others.
+
+## Tools from methods
+
+Most tools already exist as methods on a service. `Tools.derive[S](service)` makes one tool per public method of the trait or class `S`, and `Tool.fromMethod(service.method)` makes the tool of one method, with no argument case class: the method's parameters are the tool's, and its Scaladoc describes it.
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+case class Order(id: String, totalCents: Long) derives ReadWriter
+case class Cancellation(orderId: String, refunded: Boolean) derives ReadWriter
+
+trait CustomerService {
+
+  /**
+   * Orders placed by a customer, newest first.
+   *
+   * @param customerId the customer's id, for example C-1001
+   * @param limit      at most this many orders
+   */
+  def findOrders(customerId: String, limit: Option[Int]): Result[List[Order]]
+
+  /** Cancel an order that has not shipped yet. */
+  @toolName("cancel")
+  def cancelOrder(
+    @description("The order's id, for example O-17") orderId: String,
+    reason: String
+  ): Either[String, Cancellation]
+
+  @notATool
+  def poolSize: Int
+}
+
+def supportTools(service: CustomerService): Result[ToolRegistry] =
+  Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+
+def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
+  Tool.fromMethod(service.cancelOrder)
+```
+
+`supportTools` has two tools, `find_orders` and `cancel`:
+
+| | Comes from |
+|---|---|
+| Name | the method's `@toolName`, else its name in `snake_case` |
+| Description | the method's `@description`, else its Scaladoc's text before the first tag, else its name |
+| A parameter's description | its `@description`, else its Scaladoc `@param`, else its type's `@description`, else its name |
+| Parameters | the method's parameters: the schema, the checks and the errors `Tool.of` gives a case class with those fields |
+| The error the model sees | a `Left(message)`; a `Result`'s `LLMError`, formatted; a `Try`'s failure, its message. Any other result is the answer. |
+
+Methods inherited from `Any`, `Object`, `Product`, `Equals` and `Serializable`, synthetic, private, protected and extension methods, `val`s and methods marked `@notATool` are left out; the tools come in the order of their names. A parameter with a default value is still required, as a case class field with one is.
+
+Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, and a `@toolName` providers do not accept. Mark a method the model should not call `@notATool`.
+
+Scaladoc is read from the source when the service is compiled in the same run as the call to `Tools.derive`, with no compiler flag. For a service compiled separately (another module of your build, or a library), the compiler reads Scaladoc from its TASTy only when asked: add `scalacOptions += "-Xread-docs"` to the project that calls `Tools.derive`. Without it such a service's tools fall back to their names, unless `@description` describes them. A method that overrides another without Scaladoc or annotations of its own takes those of the method it overrides, so `Tool.fromMethod(live.cancelOrder)` on the implementing class describes the tool as the trait does.
+
+The `DerivedToolsExample` sample derives a service's tools and runs an agent on them with a scripted model, so it needs no API key.
 
 ## An agent's answer
 

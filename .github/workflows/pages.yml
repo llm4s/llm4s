@@ -239,6 +239,12 @@ jobs:
       - name: Check the pages' titles and descriptions
         run: scripts/check-doc-seo.sh --site docs/_site
 
+      # Every page's share card (og:image with its alt text, twitter:image, a large twitter:card, a valid
+      # twitter:creator) and its JSON-LD: valid JSON with an @type, the home page's SoftwareSourceCode version equal to
+      # the latest release written into project.yml above, an Organization on /foundation/ (#2316).
+      - name: Check the pages' share cards and structured data
+        run: scripts/check-site-share-cards.sh docs/_site
+
       # sitemap.xml (jekyll-sitemap) lists the guide pages only; the Scaladoc, copied in above, gets its own file (#2318).
       # The check fails the deploy if sitemap.xml lists a /scaladoc/ URL, a PDF or too many URLs, or robots.txt omits one.
       - name: Generate and check the sitemaps

@@ -101,6 +101,27 @@ bundle exec jekyll serve
 - `index.md` - Homepage
 - `CNAME` - Custom domain (llm4s.org)
 
+### Share Images and Structured Data
+
+Every page has a 1200x630 share card, the picture a link shows in Discord, Slack, LinkedIn, X or Mastodon. The
+landing pages and the top-level docs sections each have their own; every other page uses `default.png`.
+
+- `image_assets/social/template.svg` is the card's design and `image_assets/social/cards.tsv` holds each card's
+  heading and two lines of text. After changing either (for a release such as 1.0), regenerate the PNGs and commit
+  them:
+
+  ```bash
+  scripts/render-social-images.sh            # every card; or name some: scripts/render-social-images.sh guide
+  ```
+
+  It needs `rsvg-convert` (librsvg) or Chrome/Chromium (set `CHROME` to its path if it is not found).
+- `_config.yml` points the pages at the cards (`image:` in `defaults`, by path) and holds each card's alt text, which
+  must say what the card says.
+- `_includes/structured-data.html` writes the Schema.org JSON-LD: `SoftwareSourceCode` on the home page (its version
+  is `latest_release`), `Organization` on `/foundation/` and a `BreadcrumbList` on each page with a `parent`.
+  `_plugins/structured_data.rb` removes jekyll-seo-tag's generic block where it would describe the same page twice.
+- `scripts/check-site-share-cards.sh docs/_site` checks the built site; the deploy (`pages.yml`) runs it.
+
 ---
 
 ## Contributing to Documentation
