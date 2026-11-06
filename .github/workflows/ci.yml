@@ -249,6 +249,11 @@ jobs:
           scripts/test-check-mill-quickstart.sh
           scripts/check-mill-quickstart.sh
 
+      # The Flink guide's Scala snippets are excerpts of modules/samples/flink, which pins latest_release (#2298);
+      # flink-sample.yml runs the sample's MiniCluster test.
+      - name: Check the Flink guide's snippets are the sample's
+        run: scripts/check-flink-guide-snippets.sh
+
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
       # script's checks stay able to fail between releases.
