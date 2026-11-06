@@ -21,6 +21,11 @@ and every one runs with **no API key**: by default a scripted client stands in f
 flow work in seconds. Add `--live` to run the same code against the provider your configuration names
 (`llm4s.providers.provider`, see [running the samples](../getting-started/configuration#running-the-samples)).
 
+To run the recipes with no local setup at all, open a GitHub Codespace from the
+[playground](../getting-started/playground): it has sbt and a small local model, so `--live` works there too.
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/llm4s/llm4s?quickstart=1)
+
 CI runs every recipe against its scripted client on every pull request, and checks that the program on each page is
 the source file, so what you read compiles and works.
 

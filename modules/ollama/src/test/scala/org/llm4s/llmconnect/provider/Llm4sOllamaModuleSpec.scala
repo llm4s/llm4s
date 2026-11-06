@@ -97,6 +97,10 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
   "a client built by the ollama descriptor" should {
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      assertUsesSuppliedHttpClient(OllamaProvider, section)
+    }
+
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
         assertStreams(clientAt(baseUrl))
