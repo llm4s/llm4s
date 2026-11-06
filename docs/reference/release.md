@@ -275,6 +275,10 @@ it never overwrites. Write whatever the release deserves once it exists.
   `llm4sVersion` in `modules/samples/mill/build.mill` is the release now on Maven Central (bump it with
   `docs/_data/project.yml` in the prepare commit) and runs `./mill app.compile + app.test`; it also runs weekly.
   Locally: `scripts/check-mill-quickstart.sh --central --build`.
+- Test the Flink sample: `gh workflow run flink-sample.yml`. Bump the `org.llm4s::llm4s-*` versions in
+  `modules/samples/flink/project.scala` with `docs/_data/project.yml` in the prepare commit (ci.yml's
+  `scripts/check-flink-guide-snippets.sh` fails otherwise); the workflow runs the sample's MiniCluster test, and also
+  runs weekly. Locally: `cd modules/samples/flink && scala-cli test .`.
 
 - After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
   Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's
