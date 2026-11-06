@@ -381,6 +381,22 @@ jobs:
       - name: Check the deployment manifests render
         run: deploy/scripts/deploy.sh check
 
+      # Every overlay, the enterprise one's ExternalSecrets and NetworkPolicies included (#2315), validated against
+      # the Kubernetes and External Secrets Operator schemas: an unknown field or a wrong type fails here, not at
+      # `kubectl apply`. The binary is checked against the release's own checksums.
+      - name: Validate the deployment manifests with kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+        run: |
+          dir="$RUNNER_TEMP/kubeconform"
+          mkdir -p "$dir"
+          base="https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION"
+          curl -fsSL --retry 3 -o "$dir/kubeconform-linux-amd64.tar.gz" "$base/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$dir/CHECKSUMS" "$base/CHECKSUMS"
+          (cd "$dir" && sha256sum --check --ignore-missing --strict CHECKSUMS)
+          tar -xzf "$dir/kubeconform-linux-amd64.tar.gz" -C "$dir" kubeconform
+          KUBECONFORM="$dir/kubeconform" deploy/scripts/deploy.sh validate
+
       - name: Check the deploy-service image definition
         run: |
           sbt --client deployService/Docker/stage

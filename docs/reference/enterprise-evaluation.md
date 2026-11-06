@@ -79,7 +79,7 @@ linked to its open issue.
 
 | Question | Answer and evidence |
 |---|---|
-| How is it deployed in production? | As a library inside your service. Configuration, secrets, timeouts, lifecycle and deployment patterns: [Production Deployment](../PRODUCTION_DEPLOYMENT). A staged dev, staging and prod template with Kubernetes manifests and rollback: [deploy/](https://github.com/llm4s/llm4s/blob/main/deploy/README.md). |
+| How is it deployed in production? | As a library inside your service. Configuration, secrets, timeouts, lifecycle and deployment patterns: [Production Deployment](../PRODUCTION_DEPLOYMENT). A staged dev, staging and prod template with Kubernetes manifests and rollback: [deploy/](https://github.com/llm4s/llm4s/blob/main/deploy/README.md). Behind an AI gateway, with secret injection, egress policy, failover and spend controls: [Reference Architecture](../guide/reference-architecture). |
 | Is there a reference architecture? | Not yet: see [Known gaps](#known-gaps). |
 | Observability? | Tracing to Langfuse or OpenTelemetry, metrics to Prometheus or Micrometer: [Monitoring](../guide/observability/). |
 | Health checks? | [Production Deployment](../PRODUCTION_DEPLOYMENT#health-checks), and the `/health` and `/llm-check` endpoints of the deploy template. [Doctor](doctor) checks a developer's setup. |
@@ -119,7 +119,7 @@ closes, so this list is updated when the gap is.
 | Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
-| No enterprise reference architecture (gateway, secret injection, egress, failover, spend controls) | [#2315](https://github.com/llm4s/llm4s/issues/2315) |
+| No integration test that drives a client through a real LiteLLM container for the [reference architecture](../guide/reference-architecture)'s gateway path | [#2315](https://github.com/llm4s/llm4s/issues/2315) |
 
 ---
 

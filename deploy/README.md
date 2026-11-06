@@ -177,6 +177,16 @@ it, and a run whose pod dies is recovered by another. It is applied by hand (the
 The store creates its schema on first start (several pods starting together migrate it once). A PodDisruptionBudget
 keeps a node drain to one pod at a time.
 
+### The enterprise overlay: behind an AI gateway
+
+[`deploy/overlays/enterprise`](overlays/enterprise) runs the example agent service behind a LiteLLM proxy, the
+deployment the [Enterprise Reference Architecture](../docs/guide/reference-architecture.md) guide describes: the
+gateway holds the provider keys; the app calls it through an `openai-compatible` section with tenant headers
+([`application.conf`](overlays/enterprise/application.conf), mounted from a ConfigMap), reading its own gateway key
+from a Secret volume that the External Secrets Operator keeps in step with your secret store; and NetworkPolicies let
+the app reach only the gateway and DNS, and only the gateway leave the cluster. It is applied by hand, after
+installing the operator and creating the `ClusterSecretStore` it names; the guide lists the steps.
+
 ## The pipeline
 
 [`deploy-staged.yml`](../.github/workflows/deploy-staged.yml) is **opt-in**: it runs only when started from the
@@ -226,7 +236,12 @@ exists.
 deploy/scripts/deploy.sh check        # renders every overlay and verifies image, namespace, replicas, hardening, store
 ```
 
-CI runs it on every pull request (it needs `kubectl`, which the GitHub-hosted runners have).
+```bash
+KUBECONFORM=<path> deploy/scripts/deploy.sh validate   # validates every overlay against the Kubernetes and ESO schemas
+```
+
+CI runs both on every pull request (`check` needs `kubectl`, which the GitHub-hosted runners have; CI downloads
+`kubeconform` and verifies its checksum).
 `modules/deploy-service` has unit tests, and the real routes are tested over HTTP on an ephemeral port:
 `sbt deployService/test`. `DeployServiceSmokeSpec` in `modules/it` (`@Docker`) starts the service as a JVM process
 on Postgres, runs and streams a run, and stops it with SIGTERM.

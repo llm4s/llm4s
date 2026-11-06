@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The example agent service behind an AI gateway (docs/guide/reference-architecture.md, issue #2315): a LiteLLM proxy
+# holds the provider keys, the app holds only its own gateway key, mounted as a file it re-reads when the key rotates,
+# and NetworkPolicies let only the gateway leave the cluster. An example to copy, not a product: see deploy/README.md.
+#
+# Before applying: install the External Secrets Operator, create the ClusterSecretStore externalsecret.yaml names, and
+# set the image like the other overlays'.
+namespace: llm4s-enterprise
+resources:
+  - ../../base
+  - litellm.yaml
+  - networkpolicy.yaml
+  - externalsecret.yaml
+configMapGenerator:
+  # The app's application.conf: the gateway section the guide shows, tested by ReferenceArchitectureGuideSpec.
+  - name: llm4s-app-config
+    files:
+      - application.conf
+  - name: litellm-config
+    files:
+      - config.yaml=litellm-config.yaml
+patches:
+  - path: deployment-gateway.yaml
