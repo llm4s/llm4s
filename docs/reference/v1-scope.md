@@ -83,6 +83,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Jina AI embeddings — **new** | `llm4s-jina` (`modules/providers/jina`) | Beta |
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
 | `llmconnect/provider` — IBM watsonx.ai, on the chat endpoints (never run against the live service: verification against it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
+| `llmconnect/provider` — Perplexity Agent API (`/v1/agent`), with web search and citations (never run against the live service) — **new** | `llm4s-perplexity` (`modules/providers/perplexity`) | Beta |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
 | `jev` — typed client for TypeSafe's Jev decision model (Noul, Choice, Score); not a chat provider — **new** | `llm4s-jev` (`modules/providers/jev`) | Beta |
 | `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
@@ -90,6 +91,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `agent/graph/postgres` — `PostgresCheckpointer`: threads, events and run claims in a PostgreSQL schema that runtimes on several machines share, claims and retention by the database's clock — **new** | `llm4s-agent-checkpoint-postgres` (`modules/agent-checkpoint-postgres`); carries the PostgreSQL JDBC driver and HikariCP | Beta |
 | `schema` — `SchemaOf`, a JSON schema derived from a case class with `derives`, and `completeStructuredOf`; builds core's `ObjectSchema` and adds no dependency (Map, recursive types and sealed hierarchies with fields are refused at compile time; a recursion through a hand-written given that derives its type fails on first use) — **new** | `llm4s-schema-derivation` (`modules/schema-derivation`) | Experimental |
 | `prompt` — the `prompt"..."` and `system"..."` interpolators: each value rendered by a `Promptable` found at compile time (`derives Promptable` for case classes and enums), `Untrusted` values fenced, `PromptTemplate`; adds no dependency — **new** | `llm4s-prompt` (`modules/prompt`) | Experimental |
+| `capability` — `Capable[C]`, a client whose model was checked once for the capability set `C` (`client.requireCapabilities[Vision & Tools](provider, model)`, or `Capable.assume`), and the operations a capability gates (`describe`, `completeWithTools`) — **new** | `llm4s-capabilities` (`modules/capabilities`) | Experimental |
 | `tapir` — `EndpointTools`, `EndpointTool`: tapir endpoints as tools, each schema derived from the endpoint's inputs and each call made through sttp client 3; depends on core's tool API, not on the agent runtime — **new** | `llm4s-tapir` (`modules/tapir`) | Experimental |
 | `testkit` — a scriptable fake `LLMClient` for the tests of code that uses llm4s (`ScriptedLLMClient`, `Reply`, `RecordedCall`, `UnscriptedCallError`) — **new** | `llm4s-testkit` (`modules/testkit`), a test-scope dependency | Beta |
 | `doctor` — the setup checker: `DoctorCli` (its options, text report, JSON output and exit codes are a user contract), `Doctor.run` and its report, run on the application's own classpath — **new** | `llm4s-doctor` (`modules/doctor`), usually a test-scope dependency | Experimental |
@@ -118,6 +120,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
 | `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, published with each release at the release's version (no `_3` suffix; managed by `llm4s-bom`) — **new** <!-- tier-drift: ignore (a Gradle-built artifact, not an sbt project; see PublishedArtifacts.Gradle) --> | `llm4s-kotlin-api` (`modules/kotlin-api`) | Experimental |
 | `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
+| `ox` — `LLMClientOx` (`streamFlow`, `parComplete`, `raceProviders`), `RetrySchedule`, `LLMException` (direct style with Ox on JDK 21 virtual threads) — **new** | `llm4s-ox` (`modules/llm4s-ox`) | Experimental |
 
 Notes:
 

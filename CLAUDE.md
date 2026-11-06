@@ -98,11 +98,13 @@ llm4s/
 │   │   ├── jev/               # Jev decision client (TypeSafe System One: typed Noul/Choice/Score questions); not an LLMClient
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
 │   │   ├── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
+│   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
+│   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
@@ -117,6 +119,7 @@ llm4s/
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
+│   ├── llm4s-ox/              # Ox direct style: a streamed reply as a Flow, parComplete, raceProviders, RetrySchedule (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
@@ -131,6 +134,7 @@ llm4s/
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
+│   ├── scalafix-rules/        # Scalafix rules migrating user code across breaking changes (a scalac 2.13 build-tool module; unpublished)
 │   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
 │   └── it/                    # Integration tests
 ├── docs/                # Documentation
@@ -267,6 +271,7 @@ GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY whe
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY, XAI_API_KEY
 COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
+PERPLEXITY_API_KEY=...               # llm4s-perplexity (the Agent API)
 TYPESAFE_API_KEY=...                 # llm4s-jev (Jev decision client, not a provider) -> llm4s.credentials.typesafe.apiKey
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)

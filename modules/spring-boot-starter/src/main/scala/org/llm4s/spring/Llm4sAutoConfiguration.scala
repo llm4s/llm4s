@@ -1,9 +1,10 @@
 package org.llm4s.spring
 
-import org.llm4s.javaapi.{ JLlmClient, Llm4s }
+import org.llm4s.javaapi.{ JAgent, JLlmClient, Llm4s }
 import org.llm4s.metrics.MetricsCollector
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.{
   ConditionalOnClass,
@@ -96,4 +97,28 @@ class Llm4sAutoConfiguration {
   @ConditionalOnMissingBean
   def llm4sTemplate(client: JLlmClient, @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService): LLM4STemplate =
     new LLM4STemplate(client, executor)
+
+  /** The `@Tool` methods of the application's beans (#2279); a bean of type `Llm4sTools` replaces them. */
+  @Bean
+  @ConditionalOnMissingBean
+  def llm4sTools(beans: ConfigurableListableBeanFactory): Llm4sTools = Llm4sTools.collect(beans)
+
+  /**
+   * An agent over the client and the collected tools, configured by `llm4s.agent.*` (#2279), its `runAsync` calls on
+   * the `llm4sTaskExecutor`. A bean of type `JAgent` replaces it; `llm4s.agent.enabled=false` registers none.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnProperty(prefix = "llm4s.agent", name = Array("enabled"), havingValue = "true", matchIfMissing = true)
+  def llm4sAgent(
+    client: JLlmClient,
+    tools: Llm4sTools,
+    properties: Llm4sProperties,
+    @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService
+  ): JAgent = {
+    val agent = properties.agent
+    val base  = Llm4s.agentBuilder(agent.id, client).tools(tools.tools()).streaming(agent.streaming)
+    val built = if (agent.systemPrompt.isEmpty) base else base.systemPrompt(agent.systemPrompt)
+    built.build().get().withAsyncExecutor(executor)
+  }
 }
