@@ -10,7 +10,8 @@
 #
 # Scala CLI `//> using dep org.llm4s::llm4s-...:<version>` lines are checked like the others.
 # A SNAPSHOT version is a locally built one, not a release, and is not checked.
-# Release notes, the migration guides and design documents name versions on purpose and are not checked.
+# Release notes, the News posts (docs/_posts), the migration guides and design documents name versions on purpose
+# and are not checked.
 # Exit code 0 = no literal pin. Non-zero = file:line of each one.
 set -euo pipefail
 
@@ -20,7 +21,7 @@ cd "$REPO_ROOT"
 python3 - <<'PYEOF'
 import re, sys, pathlib
 
-SKIP_DIRS = ("docs/migrations/", "docs/design/", "docs/_data/", "docs/_site/")
+SKIP_DIRS = ("docs/migrations/", "docs/design/", "docs/_data/", "docs/_site/", "docs/_posts/")
 SKIP_FILES = {"docs/reference/migration.md", "docs/reference/release.md", "CHANGELOG.md"}
 
 SBT    = re.compile(r'"org\.llm4s"\s*%+\s*"llm4s-[a-z0-9-]+"\s*%\s*"(\d+\.\d+\.\d+[^"]*)"')

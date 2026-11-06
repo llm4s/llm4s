@@ -5,6 +5,8 @@ description: >-
   for building LLM-powered applications with multi-provider support, agents,
   tools, and observability.
 baseurl: ""
+# Post dates and their /news/YYYY/MM/DD/ URLs are read in UTC, whatever the build machine's time zone (#2319).
+timezone: Etc/UTC
 url: "https://llm4s.org"
 logo: "/image_assets/llm4s_logo.png"
 
@@ -24,6 +26,11 @@ plugins:
   - jekyll-sitemap
   - jekyll-seo-tag
   - jekyll-redirect-from
+
+# jekyll-feed (#2319): /feed.xml carries every post in docs/_posts, newest first; `tags: true` adds one feed per tag a
+# post uses, at /feed/by_tag/<tag>.xml (release, community, guides), and none for a tag no post has yet.
+feed:
+  tags: true
 
 # Code block settings
 enable_copy_code_button: true
@@ -138,6 +145,14 @@ defaults:
       path: "image_assets"
     values:
       sitemap: false
+  # News posts (#2319): docs/_posts/YYYY-MM-DD-<slug>.md, served at /news/YYYY/MM/DD/<slug>/ and listed on /news/
+  # and in feed.xml. scripts/check-docs-site-links.sh resolves post URLs with this same pattern.
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: "post"
+      permalink: /news/:year/:month/:day/:title/
   - scope:
       path: ""
       type: "guide"
