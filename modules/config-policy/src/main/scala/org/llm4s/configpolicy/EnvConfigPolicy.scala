@@ -25,12 +25,9 @@ sealed trait PolicyResult {
   def message: String
 }
 
-final case class PolicyPass(policyName: String, message: String = "passed") extends PolicyResult
-
-final case class PolicyFail(policyName: String, message: String) extends PolicyResult
-
-final case class PolicyWarn(policyName: String, message: String) extends PolicyResult
-
+final case class PolicyPass(policyName: String, message: String = "passed")                       extends PolicyResult
+final case class PolicyFail(policyName: String, message: String)                                  extends PolicyResult
+final case class PolicyWarn(policyName: String, message: String)                                  extends PolicyResult
 final case class PolicySkip(policyName: String, message: String = "skipped for this environment") extends PolicyResult
 
 final case class PolicyEvaluationResult(results: List[PolicyResult]) {
@@ -164,7 +161,6 @@ object PolicyBuilder {
 }
 
 object DefaultPolicies {
-
   import PolicyBuilder._
 
   val productionSafeDefaults: List[EnvConfigPolicy] = List(
