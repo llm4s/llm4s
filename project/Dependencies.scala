@@ -62,10 +62,13 @@ object Versions {
   // cats-effect and fs2 versions above.
   val http4s = "0.23.30"
 
-  // Tapir, for the unpublished reference app in modules/examples-http (#1459) only. 1.11.20 is the last release
-  // built on the cats-effect, fs2 and http4s versions above (1.11.21 needs cats-effect 3.6); its Swagger UI bundle
-  // brings tapir-openapi-docs, sttp-apispec's YAML writer (circe, circe-yaml) and the swagger-ui webjar.
+  // Tapir (Apache 2.0), for the unpublished reference app in modules/examples-http (#1459) and for llm4s-tapir
+  // (#2299), whose tapir-core needs none of these. 1.11.20 is the last release built on the cats-effect, fs2 and
+  // http4s versions above (1.11.21 needs cats-effect 3.6); its Swagger UI bundle brings tapir-openapi-docs,
+  // sttp-apispec's YAML writer (circe, circe-yaml) and the swagger-ui webjar.
   val tapir = "1.11.20"
+  // sttp client 3 (Apache 2.0), for llm4s-tapir: the version tapir-sttp-client 1.11.20 is built on.
+  val sttpClient3 = "3.10.3"
 
   // ZIO
   val zio = "2.1.16"
@@ -179,6 +182,12 @@ object Deps {
   // Tapir (unpublished modules/examples-http only; see Versions)
   val tapirHttp4sServer    = "com.softwaremill.sttp.tapir" %% "tapir-http4s-server"     % Versions.tapir
   val tapirSwaggerUiBundle = "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % Versions.tapir
+
+  // llm4s-tapir (#2299): an endpoint's inputs, schemas and codecs, and sttp client 3 to call it. The stub server
+  // runs endpoints in-process, for its specs and the sample only.
+  val tapirCore           = "com.softwaremill.sttp.tapir"   %% "tapir-core"             % Versions.tapir
+  val tapirSttpStubServer = "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server" % Versions.tapir
+  val sttpClient3         = "com.softwaremill.sttp.client3" %% "core"                   % Versions.sttpClient3
 
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
