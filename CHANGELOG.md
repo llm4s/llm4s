@@ -512,6 +512,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
 - **Added** [Enrich a Kafka topic with an LLM](docs/guide/kafka.md): an fs2-kafka pipeline (`org.llm4s.samples.kafka`) with bounded concurrency, retries,
   a dead-letter topic and offsets committed after the produce, tested offline and against a broker in `modules/it` [#2297](https://github.com/llm4s/llm4s/issues/2297).
+- **Added** [Using LLM4S from Apache Flink](docs/guide/flink.md): a Flink 2.x job in Scala 3 with `AsyncDataStream`, dead letters
+  as a side output, and a sample (`modules/samples/flink`) tested on Flink's MiniCluster by `flink-sample.yml` [#2298](https://github.com/llm4s/llm4s/issues/2298).
 - **Added** a dev container and [Codespaces playground](docs/getting-started/playground.md): JDK 21, sbt, Scala CLI, Metals and a local Ollama model,
   no API key; the `devcontainer.yml` workflow builds it and runs the page's five commands inside it [#2286](https://github.com/llm4s/llm4s/issues/2286).
 
