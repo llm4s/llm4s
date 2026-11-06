@@ -129,6 +129,7 @@ map_file_to_project() {
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
     modules/doctor/*)                     echo "doctor" ;;
+    modules/repl/*)                       echo "repl" ;;
     modules/config-policy/*)              echo "configPolicy" ;;
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
@@ -306,6 +307,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE testkit
       set_add DOWNSTREAM_COMPILE capabilities
       set_add DOWNSTREAM_COMPILE doctor
+      set_add DOWNSTREAM_COMPILE repl
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
@@ -549,6 +551,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE repl
       ;;
     providerTestkit)
       set_add DOWNSTREAM_COMPILE rag
@@ -585,6 +588,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE schemaIron
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE repl
       ;;
     prompt)
       set_add DOWNSTREAM_COMPILE samples
@@ -594,6 +598,8 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+    repl)
+      set_add DOWNSTREAM_COMPILE samples
       ;;
   esac
 }

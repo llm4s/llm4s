@@ -32,6 +32,7 @@ This section will guide you through:
 12. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
 13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
 14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
+15. **[Try llm4s in the REPL](repl)** - `ask`, `extract` and `chat()` behind one import, in the Scala CLI REPL, a worksheet or a script
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 
