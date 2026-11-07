@@ -168,6 +168,33 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
     processed.exists(_.content == "Answer") shouldBe true
   }
 
+  it should "keep every message in its original position, digests included" in {
+    val firstDigest  = SystemMessage("[HISTORY_SUMMARY]\n" + ("Early history. " * 50))
+    val secondDigest = SystemMessage("[HISTORY_SUMMARY]\n" + ("Later history. " * 50))
+    val messages = Seq(
+      firstDigest,
+      UserMessage("Question one"),
+      AssistantMessage("Answer one"),
+      secondDigest,
+      UserMessage("Question two")
+    )
+    val capTokens = 10 // small cap, forces compression of both digests
+
+    val processed = LLMCompressor.squeezeDigest(messages, counter, mockLLMClient, capTokens).toOption.get
+
+    processed.length shouldBe messages.length
+    // every slot that held a digest still holds a (now compressed) digest; every other slot is untouched
+    processed.zip(messages).foreach { case (actual, original) =>
+      if (isDigest(original)) isDigest(actual) shouldBe true
+      else actual shouldBe original
+    }
+  }
+
+  private def isDigest(message: Message): Boolean = message match {
+    case s: SystemMessage => s.content.contains("[HISTORY_SUMMARY]")
+    case _                => false
+  }
+
   "squeezeDigest" should "never replace a user message, even one whose text names a summary" in {
     val chart = ContentPart
       .image(
