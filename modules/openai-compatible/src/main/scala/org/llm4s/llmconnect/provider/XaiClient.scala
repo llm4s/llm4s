@@ -4,7 +4,7 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.XaiConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -121,7 +121,7 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
    *
    * With `reasoning` unset nothing is sent for it.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = {
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
     options.reasoning.foreach { effort =>
       XaiDialect.family(model) match {
         case XaiDialect.Family.Effort =>
@@ -139,13 +139,16 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
         case XaiDialect.Family.Other => ()
       }
     }
-    if (XaiDialect.isReasoningModel(model)) {
-      val dropped = Seq("presence_penalty", "frequency_penalty").filter(body.value.contains)
-      if (dropped.nonEmpty) {
-        dropped.foreach(body.value.remove)
-        warnPenaltiesDropped(model, dropped)
-      }
-    }
+    // a reasoning model rejects the penalties, so they are left out and reported (the client logs them once)
+    val penalties =
+      Seq("presence_penalty" -> RequestOption.PresencePenalty, "frequency_penalty" -> RequestOption.FrequencyPenalty)
+    val unsent =
+      if (XaiDialect.isReasoningModel(model)) penalties.filter((field, _) => body.value.contains(field)) else Nil
+    unsent.foreach((field, _) => body.value.remove(field))
+    // a reasoning effort a Family.Other model is not sent is not reported yet: a follow-up under RFC 0008
+    unsent.toList.map((field, option) =>
+      RequestAdjustment.Dropped(option, s"$model is a reasoning model, which rejects $field")
+    )
   }
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -153,20 +156,11 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
   /** Whether the `ReasoningEffort.None` warning has been logged in this process. */
   private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
 
-  /** Whether the dropped-penalties warning has been logged in this process. */
-  private[provider] val warnedPenaltiesDropped = new AtomicBoolean(false)
-
   private def warnReasoningNotDisabled(model: String): Unit =
     if (warnedReasoningNotDisabled.compareAndSet(false, true))
       logger.warn(
         s"xAI model $model cannot disable reasoning: ReasoningEffort.None is sent as reasoning_effort=low, " +
           "and reasoning tokens are still generated and billed. Logged once per process."
-      )
-
-  private def warnPenaltiesDropped(model: String, dropped: Seq[String]): Unit =
-    if (warnedPenaltiesDropped.compareAndSet(false, true))
-      logger.warn(
-        s"xAI reasoning model $model rejects ${dropped.mkString(" and ")}; not sent. Logged once per process."
       )
 
   /** How a Grok model takes `reasoning_effort`. */

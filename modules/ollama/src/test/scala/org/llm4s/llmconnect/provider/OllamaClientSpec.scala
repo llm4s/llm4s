@@ -328,6 +328,32 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(opts("top_p").num == 0.9)
   }
 
+  test("a requested reasoning effort is reported as dropped, from complete and from a stream (RFC 0008)") {
+    // Ollama's request carries no reasoning setting (`think` is not mapped yet), so it is reported, not dropped silently
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"message":{"content":"Hi"}}""")))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .onCall((_: String, _: Map[String, String], _: String, _: FiniteDuration) =>
+        Right(
+          StreamingHttpResponse(
+            200,
+            new ByteArrayInputStream("""{"message":{"content":"Hi"},"done":true}""".getBytes(StandardCharsets.UTF_8))
+          )
+        )
+      )
+    val client    = mkClient(mockHttp)
+    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
+    val dropped =
+      List(
+        RequestAdjustment.Dropped(RequestOption.Reasoning, "reasoning effort is not sent to llama3.1 by this client")
+      )
+
+    assert(client.complete(conversation("Hello"), reasoning).toOption.get.adjustments == dropped)
+    assert(client.streamComplete(conversation("Hello"), reasoning, _ => ()).toOption.get.adjustments == dropped)
+    assert(client.complete(conversation("Hello"), CompletionOptions()).toOption.get.adjustments.isEmpty)
+  }
+
   // ── streamComplete() tests ───────────────────────────────────────────────
 
   test("streamComplete() parses JSON lines and accumulates content") {
