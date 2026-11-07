@@ -39,6 +39,15 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
        | "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""".stripMargin
 
+  // the shape Gemini returns when thinking spent the whole maxOutputTokens: content with no `parts` (seen from
+  // gemini-3.5-flash on 2026-11-05; Vertex AI serves the same response format)
+  private val noPartsMaxTokensBody =
+    """|{"candidates":[{"content":{"role":"model"},"finishReason":"MAX_TOKENS","index":0}],
+       | "usageMetadata":{"promptTokenCount":8,"totalTokenCount":539,"thoughtsTokenCount":531}}""".stripMargin
+
+  private val noPartsUsage =
+    TokenUsage(promptTokens = 8, completionTokens = 0, totalTokens = 539, thinkingTokens = Some(531))
+
   /**
    * Creates a VertexAIClient backed by a mock HTTP client that:
    *  - routes POST to the oauth2 token endpoint → returns a valid token
@@ -118,6 +127,19 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "return an empty answer with its usage when thinking spent the whole token budget (no parts)" in {
+    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(noPartsMaxTokensBody))
+
+    val completion = client.complete(conversation("Hi"), CompletionOptions()) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.message.contentOpt shouldBe None
+    completion.toolCalls shouldBe empty
+    completion.usage shouldBe Some(noPartsUsage)
   }
 
   it should "parse a tool call response" in {
@@ -380,6 +402,32 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "end with the MAX_TOKENS finish reason and the usage when the last chunk has no parts" in {
+    val sseData     = "data: " + ujson.read(noPartsMaxTokensBody).render() + "\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val completion = client.streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.usage shouldBe Some(noPartsUsage)
+    chunks.flatMap(_.finishReason) shouldBe List("MAX_TOKENS")
+    chunks.flatMap(_.content) shouldBe empty
   }
 
   it should "return an error for non-200 stream status" in {
