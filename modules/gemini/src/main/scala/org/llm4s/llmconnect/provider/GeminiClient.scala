@@ -456,11 +456,11 @@ class GeminiClient(
         } else {
           val candidate = candidates.head
           val content   = candidate("content")
-          val parts     = content("parts").arr
+          val parts     = GeminiThoughtSignatures.partsOf(content) // none when the model wrote nothing
 
           // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
           // thought summary if one was requested, and the thought signatures, split by part
-          val parsed = GeminiThoughtSignatures.parse(providerName, parts.toSeq, 0, () => UUID.randomUUID().toString)
+          val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
           val textContent = parsed.text
           val toolCalls   = parsed.calls
 
@@ -510,11 +510,11 @@ class GeminiClient(
       if (candidates.nonEmpty) {
         val candidate = candidates.head
         val content   = candidate("content")
-        val parts     = content("parts").arr
+        val parts     = GeminiThoughtSignatures.partsOf(content) // none: the chunk still ends the stream
 
         // Extract text delta, function calls and thought signatures
         val parsed =
-          GeminiThoughtSignatures.parse(providerName, parts.toSeq, textOffset, () => UUID.randomUUID().toString)
+          GeminiThoughtSignatures.parse(providerName, parts, textOffset, () => UUID.randomUUID().toString)
 
         // Extract finish reason
         val finishReason = Try(candidate("finishReason").str).toOption
