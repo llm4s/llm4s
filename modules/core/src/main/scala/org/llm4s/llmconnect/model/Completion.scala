@@ -110,9 +110,12 @@ object Completion {
  * @param promptTokens Number of tokens in the prompt (input).
  * @param completionTokens Number of tokens in the completion (output).
  * @param totalTokens Total tokens (prompt + completion).
- * @param thinkingTokens Optional number of tokens used for thinking/reasoning.
- *                       Present when using reasoning modes with Claude or o1/o3 models.
- *                       These tokens count toward billing but are separate from completion tokens.
+ * @param thinkingTokens Optional number of tokens used for thinking/reasoning, billed as output.
+ *                       Providers report them two ways, and each client passes on what its provider
+ *                       sent: Gemini and xAI count them apart from the completion, while OpenAI and
+ *                       servers that copy its format count them inside `completion_tokens` (their
+ *                       `total_tokens` is prompt plus completion). [[totalOutputTokens]] counts each
+ *                       output token once either way.
  * @param cachedTokens Optional number of tokens served from the provider's prompt cache (cache read).
  *                     When present, these tokens are billed at the cheaper cache-read rate.
  * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
@@ -141,11 +144,21 @@ final case class TokenUsage private (
     copy(cacheCreationTokens = cacheCreationTokens)
 
   /**
-   * Total output tokens including thinking.
+   * Total output tokens including thinking, each counted once.
    *
-   * For billing purposes, thinking tokens are typically billed at the same rate as output tokens.
+   * Thinking tokens are added to `completionTokens` unless the provider already counted them in it,
+   * which it did when they fit inside the completion and the reported total is prompt plus completion
+   * (OpenAI's `reasoning_tokens` are part of `completion_tokens`). Gemini's thoughts and xAI's reasoning
+   * are counted apart, and their totals include them, so they are added.
    */
-  def totalOutputTokens: Int = completionTokens + thinkingTokens.getOrElse(0)
+  def totalOutputTokens: Int = completionTokens + thinkingOutsideCompletion
+
+  /** The thinking tokens `completionTokens` does not already include (see [[totalOutputTokens]]). */
+  private def thinkingOutsideCompletion: Int = thinkingTokens.filter(_ > 0) match {
+    case Some(thinking) if thinking <= completionTokens && totalTokens == promptTokens + completionTokens => 0
+    case Some(thinking)                                                                                   => thinking
+    case None                                                                                             => 0
+  }
 
   /**
    * Check if thinking tokens were used.
