@@ -86,6 +86,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 
 ### Effect Systems
 
+- **[Pick your stack](effect-systems)** - One program in plain `Result`, cats-effect, ZIO and Pekko side by side: the semantics every bridge shares, and the differences
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
