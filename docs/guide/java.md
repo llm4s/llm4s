@@ -902,6 +902,14 @@ that does not answer in time `TIMEOUT`; any other failure with no status, such a
 `OTHER`. To keep the vectors in a store, search them and answer questions from what they find, see
 [Java RAG](java-rag) (`llm4s-java-rag`).
 
+## AI services
+
+Declare an interface, annotate its methods with their prompts, and `Llm4s.aiService(MyService.class).client(client).build()`
+implements it: `@SystemMessage` and `@UserMessage` templates filled from `@V` parameters, answers returned as `String`,
+an enum, a record, `JCompletion`, `LlmResult<T>`, `CompletableFuture<T>` or a streamed `Flow.Publisher<String>`,
+per-conversation memory through `@MemoryId`, and tools run in an agent turn. Mistakes in the interface fail at
+`build()`. It is experimental; [Java AI services](java-ai-services) is its guide, with compiled examples.
+
 ## Testing your code
 
 For a complete runnable example, see the [Java offline ticket classifier](../examples/#java-offline-example).
@@ -959,6 +967,8 @@ available from Java yet, each with the issue that tracks it:
 
 ## Where next
 
+- [Java AI services](java-ai-services): an annotated interface that llm4s implements - prompt templates, typed
+  answers, memory and tools.
 - [Moving a Java app from LangChain4j or Spring AI](java-migration): each LangChain4j and Spring AI concept mapped to
   this API, with compiled before-and-after code and provider configuration.
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.

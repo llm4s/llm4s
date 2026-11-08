@@ -102,6 +102,27 @@ object Llm4s {
     new JLlmClient(FacadeToken.INSTANCE, Objects.requireNonNull(client, "client must not be null"))
 
   /**
+   * A builder for the implementation of `serviceInterface`, an AI service (#2277): an interface whose methods are
+   * annotated with `@SystemMessage`, `@UserMessage`, `@V` and `@MemoryId` from `org.llm4s.javaapi.services`. Each call
+   * of a method renders its prompt from its arguments, asks the model - in one agent turn when the service has tools -
+   * and returns the answer as the method's return type. Experimental.
+   *
+   * {{{
+   * interface Assistant {
+   *     @SystemMessage("You are a support agent for {{product}}. Answer briefly.")
+   *     String answer(@UserMessage String question, @V("product") String product);
+   * }
+   * Assistant assistant = Llm4s.aiService(Assistant.class).client(client).build();
+   * }}}
+   *
+   * @throws NullPointerException when `serviceInterface` is `null`
+   */
+  def aiService[T](serviceInterface: Class[T]): AiServiceBuilder[T] =
+    new AiServiceBuilder(
+      AiServices.Spec(Objects.requireNonNull(serviceInterface, "serviceInterface must not be null"))
+    )
+
+  /**
    * Creates a [[JEmbeddingClient]] for the embedding model configured as chat providers are, in the application's
    * `application.conf`: `llm4s.embeddings.model`, `provider/model` (for example `openai/text-embedding-3-small`), which
    * `EMBEDDING_MODEL` sets; the provider's key comes from its `llm4s.embeddings.<provider>` block or its vendor

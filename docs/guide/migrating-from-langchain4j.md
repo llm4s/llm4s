@@ -36,7 +36,7 @@ own documentation, linked at the end, and no invented API.
 
 | You use | In LLM4S | Note |
 |---|---|---|
-| An AI Service, a Java interface that the library implements [L1] | `LLMClient`, or an `Agent` when tools are involved | There is no declarative interface-to-implementation layer, in Scala or Java: you call the client, or build an agent. See [the comparison](comparison) |
+| An AI Service, a Java interface that the library implements [L1] | From Java, `Llm4s.aiService(MyService.class)`; in Scala, `LLMClient`, or an `Agent` when tools are involved | Java has declarative AI services: `@SystemMessage`, `@UserMessage`, `@V` and `@MemoryId` on an interface that llm4s implements, experimental ([Java AI services](java-ai-services)). Scala has no declarative layer: you call the client, or build an agent. See [the comparison](comparison) |
 | A chat model | `LLMClient`, from `LLMConnect.getClient(providerConfig)` | The provider is chosen by configuration, in a named section of `application.conf` ([providers](providers)) |
 | Structured output by return type [L1][L7] | `client.completeStructured[A](conversation, schema)` | The schema is written by hand below; `llm4s-schema-derivation` derives it from a case class ([derived schemas](derived-schemas)). From Java, `client.complete(prompt, SomeRecord.class)` derives it from the record ([Java](java-migration#structured-output-into-a-record)) |
 | Tools [L1] | `ToolBuilder` and a `ToolRegistry`, run by an `Agent` | Parameter schemas are written by hand with `ToolBuilder`, or derived with `Tool.of` ([typed tools](derived-schemas#typed-tools)). From Java, `@Tool` methods with `@Param` parameters ([Java](java-migration#a-tool)) |
@@ -227,7 +227,7 @@ reranking are in the [vector store guide](vector-store).
 
 ## What you will miss, and what you gain
 
-You will miss, today: a declarative AI-services layer, and the breadth of integrations the other projects list. Schema
+You will miss, today: a declarative AI-services layer in Scala (Java has one, experimental: [Java AI services](java-ai-services)), and the breadth of integrations the other projects list. Schema
 and tool derivation is Experimental ([derived schemas](derived-schemas)); the Java API covers the client, tools,
 agents, structured output, embeddings, RAG and streaming, with gaps listed in the
 [Java migration guide](java-migration#what-has-no-direct-equivalent-yet); and `llm4s-testkit` and the Java
