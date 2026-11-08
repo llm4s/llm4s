@@ -18,7 +18,7 @@ on:
       tier:
         description: 'On-demand tier(s) to run besides the PR jobs'
         type: choice
-        options: [all, workspace, mcp-reference, cloud-smoke, none]
+        options: [all, workspace, mcp-reference, ollama, cloud-smoke, none]
         default: all
   workflow_call:
 
@@ -1816,7 +1816,7 @@ jobs:
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
-  # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  # local LLM. Runs on pushes to main, and by `workflow_dispatch` with tier=ollama, to avoid slowing down PR builds.
   #
   # Carries a pgvector service as well as Ollama, because the RAG pipeline suite needs both:
   # real embeddings are the whole point of it, and pgvector is where the hybrid-search half
@@ -1826,11 +1826,26 @@ jobs:
     name: Ollama Integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'ollama'))
     permissions:
       contents: read
 
     services:
+      # The official image, pinned by digest rather than installed with `curl ... | sh`, which Scorecard's
+      # Pinned-Dependencies check flags (#2306). Dependabot does not watch service images: bump the tag
+      # comment and the digest together.
+      ollama:
+        image: ollama/ollama@sha256:0e59999e0e8f9fd4e704bd788a89b7e4cad399367fb1365f8c102ac662288761 # 0.40.15
+        options: >-
+          --health-cmd "ollama list"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 11434:11434
+
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -1855,32 +1870,30 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Start Ollama server
+      - name: Wait for the Ollama server
         run: |
-          ollama serve &
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
               echo "Ollama server is ready"
-              break
+              exit 0
             fi
             echo "Waiting for Ollama server... ($i/30)"
             sleep 1
           done
+          echo "Ollama server did not start" >&2
+          exit 1
 
       # Two models: one to answer with, one to embed with. RAGPipelineOllamaIntegrationSpec
       # is the only suite in the repo that exercises retrieval against a real embedding
       # model, so leaving nomic-embed-text out would make it fail rather than skip here.
       - name: Pull test models
         run: |
-          ollama pull qwen2.5:0.5b
-          ollama pull nomic-embed-text
+          docker exec ${{ job.services.ollama.id }} ollama pull qwen2.5:0.5b
+          docker exec ${{ job.services.ollama.id }} ollama pull nomic-embed-text
 
       - name: Run Ollama integration tests
         env:
-          # This job installs Ollama, pulls the models and runs pgvector, so "not available"
+          # This job runs Ollama, pulls the models and runs pgvector, so "not available"
           # here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
