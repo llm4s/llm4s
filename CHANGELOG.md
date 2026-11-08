@@ -330,6 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
   streaming, from Java types only [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
+- **Added** declarative AI services to `llm4s-java-api` (experimental): `Llm4s.aiService(MyService.class)` implements an
+  interface annotated `@SystemMessage`/`@UserMessage`/`@V`/`@MemoryId` (`org.llm4s.javaapi.services`), with typed returns, memory and tools, checked at `build()` [#2277](https://github.com/llm4s/llm4s/issues/2277); see [Java AI services](docs/guide/java-ai-services.md).
 - **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
   included), `JAgent.runAsync`/`continueConversationAsync`/`resumeAsync`/`recoverAsync` and `embedAsync`, failing with
   `LlmException`, `cancel(true)` interrupting the call, on a virtual thread or a `withAsyncExecutor` executor;
