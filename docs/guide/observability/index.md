@@ -187,6 +187,9 @@ val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTraci
 | `invoke_agent <agent>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.provider.name` (the run's first model call's), `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, thread, run, status |
 | `execute_tool <tool>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; with `captureContent` (for `ToolExecuted`), `tool.input` and `tool.output` |
 
+Only model, embedding and image generation calls (and their failures) are `CLIENT` spans; every other span, such as cost,
+cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
+
 `gen_ai.provider.name` is the conventions' well-known value where there is one (`gemini` is `gcp.gemini`, `vertexai`
 `gcp.vertex_ai`, `bedrock` `aws.bedrock`, `azure` `azure.ai.openai`, `watsonx` `ibm.watsonx.ai`, `mistral`
 `mistral_ai`, `xai` `x_ai`), else the llm4s provider id (`openai`, `anthropic`, `ollama`, ...). A client reports its
