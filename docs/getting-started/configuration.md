@@ -694,7 +694,7 @@ such as a `${VAR}` substitution with no value.
 1.0.
 
 To skip HOCON altogether - values from ciris, zio-config or your own code - see
-[Configuration in Code](configuration-in-code.md): each provider's `fromValues` and
+[Configuration in Code](configuration-in-code): each provider's `fromValues` and
 `ModelRegistryService.default()`.
 
 ---

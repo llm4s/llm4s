@@ -34,7 +34,7 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 
 Every provider config's `fromValues` now takes its common parameters in one order - model, then API key, then base
 URL - with whatever is optional after what is required
-([Configuration in code](../getting-started/configuration-in-code.md)). Two did not:
+([Configuration in code](../getting-started/configuration-in-code)). Two did not:
 
 - `OpenAIConfig.fromValues(model, apiKey, organization, baseUrl)` is
   `OpenAIConfig.fromValues(model, apiKey, baseUrl, organization = None)`. Drop a `None` organization, or move it

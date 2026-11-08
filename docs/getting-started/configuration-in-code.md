@@ -31,7 +31,7 @@ Use the configuration your application already has instead of llm4s's `applicati
   `ProviderRegistry.default`, every provider module found on the classpath.
 
 `Llm4sConfig` reads all of these from `application.conf`
-([Configuration](configuration.md)). Nothing requires it: the same provider can be set up
+([Configuration](configuration)). Nothing requires it: the same provider can be set up
 in any of the four ways below, and they produce the same client.
 
 ## 1. `application.conf`
@@ -91,7 +91,7 @@ val client: Result[LLMClient] = for {
 
 System properties still override the given config, every module's `reference.conf` still sits
 beneath it, and the shared `llm4s.credentials.<id>.apiKey` fallback applies, exactly as for
-`application.conf`. See [Using a config your application already has](configuration.md#using-a-config-your-application-already-has).
+`application.conf`. See [Using a config your application already has](configuration#using-a-config-your-application-already-has).
 
 ## 3. Plain values
 
@@ -247,5 +247,5 @@ val client: ZIO[Any, Throwable, LLMClient] =
 
 ## See also
 
-- [Configuration](configuration.md): `application.conf`, API keys, precedence and every section key.
-- [Providers](../guide/providers.md): what each provider supports.
+- [Configuration](configuration): `application.conf`, API keys, precedence and every section key.
+- [Providers](../guide/providers): what each provider supports.
