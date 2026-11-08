@@ -11,12 +11,30 @@ import com.typesafe.sbt.packager.Keys.{ packageName, maintainer }
  */
 object WorkspaceRunnerDocker {
 
+  /**
+   * GNU coreutils, which the runner's command policy models (#1774). Ubuntu 26.04, the base of `eclipse-temurin:21-jdk`,
+   * ships `coreutils-from-uutils`: `sort`, `ln`, `ls`, `cat` and most others are uutils (rust-coreutils 0.10.0), and
+   * only `cp`, `mv`, `rm`, `df` and `true` GNU. `coreutils-from-gnu` points every name at GNU coreutils; it replaces a
+   * protected package, hence `--allow-remove-essential`. A base without it (Debian, an older Ubuntu) already has GNU.
+   * The build then fails if any coreutils program in `/usr/bin` or `/usr/sbin` is still a uutils one, or if `sort` or
+   * `cp` does not report GNU coreutils, so the image cannot drift back with a base image update.
+   */
+  private val gnuCoreutils: CmdLike = Cmd(
+    "RUN",
+    "if apt-cache show coreutils-from-gnu > /dev/null 2>&1; then " +
+      "apt-get install -y --allow-remove-essential coreutils-from-gnu; fi && " +
+      "! find /usr/bin /usr/sbin -lname '*/cargo/*' | grep . && " +
+      "sort --version | head -n 1 | grep -F '(GNU coreutils)' && " +
+      "cp --version | head -n 1 | grep -F '(GNU coreutils)'"
+  )
+
   // Extra system packages and tooling currently installed in the image. `acl` (getfacl, setfacl) lets the runner keep a
   // file's POSIX ACL when a compare-and-set write replaces it (#1906).
   // Note: This is the existing behaviour moved out of build.sbt for clarity.
   val devToolingCommands: Seq[CmdLike] = Seq(
     Cmd("USER", "root"),
     Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip acl"),
+    gnuCoreutils,
     // Use the modern signed-by keyring approach. `apt-key` was deprecated long ago and
     // is no longer present in recent base images (Ubuntu 24.04+/temurin), so piping the
     // key into `apt-key add` fails with "apt-key: not found".
