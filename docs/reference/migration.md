@@ -549,6 +549,23 @@ as `provider: Option[ProviderId]`, stored as the plain id, so events stored befo
 `EmbeddingClient` takes `providerId` as its fourth parameter, before the `ModelRegistryService`: Java and Kotlin
 callers of the constructor pass `Option.empty()` there.
 
+### Only remote calls are `CLIENT` spans (#2531)
+
+`llm4s-observability-otel` gives an event the `CLIENT` span kind only when it records a request to a remote service:
+a completion, an embedding or image generation call, an agent's model call, or the failure of one of them (an
+`ErrorOccurred` with an `operation`). Every other event, and any event added later, is `INTERNAL`, OpenTelemetry's
+default ([#2531](https://github.com/llm4s/llm4s/issues/2531)). A dashboard or query that selects `CLIENT` spans no
+longer sees:
+
+| Span | Was | Now |
+|---|---|---|
+| `Error` (an `ErrorOccurred` with no operation) | `CLIENT` | `INTERNAL` |
+| `ToolExecuted`'s `execute_tool <tool>` | `CLIENT` | `INTERNAL`, as an agent's `execute_tool` span already was |
+| `CostRecorded`, `CacheHit`, `CacheMiss`, `RAGOperationCompleted` | `CLIENT` | `INTERNAL` |
+| a `CustomEvent` with no `span` | `CLIENT` | `INTERNAL`, as a placed one already was |
+
+No API changes.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last

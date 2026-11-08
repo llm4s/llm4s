@@ -296,6 +296,42 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     }
   }
 
+  "The span kind" should {
+
+    val failure = new RuntimeException("rate limited")
+
+    "be CLIENT for an event that records a request to a remote service, or its failure" in {
+      kind(TraceEvent.CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)) shouldBe SpanKind.CLIENT
+      kind(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(1, 1), "m", "index", 1, at)) shouldBe SpanKind.CLIENT
+      kind(
+        TraceEvent.ImageGenerationCompleted("gpt-image-1", "openai", "generate", 1, "1024x1024", "hd", 1.second)
+      ) shouldBe SpanKind.CLIENT
+      kind(TraceEvent.ErrorOccurred(failure, "chat", at, operation = Some("chat"))) shouldBe SpanKind.CLIENT
+      kind(TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj(), at)) shouldBe SpanKind.CLIENT
+    }
+
+    "be INTERNAL for an event that calls no remote service (#2531)" in {
+      kind(TraceEvent.ErrorOccurred(failure, "loading config", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.CostRecorded(0.01, "gpt-4o", "completion", 500, "total", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.CacheHit(0.97, 0.9, at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired, at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.RAGOperationCompleted("index", 1.second, timestamp = at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.ToolExecuted("search", "in", "out", 100.millis, true, at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.CustomEvent(TraceAttributes.AgentToolExecuted, ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.CustomEvent("x", ujson.Obj(), at)) shouldBe SpanKind.INTERNAL
+      kind(
+        TraceEvent.CustomEvent("x", ujson.Obj(), at, Some(TraceSpan(TraceContext.random(), None, at)))
+      ) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", at)) shouldBe SpanKind.INTERNAL
+      kind(TraceEvent.AgentInitialized("q", Vector.empty, at)) shouldBe SpanKind.INTERNAL
+    }
+
+    "be exported as INTERNAL for a cache hit" in withTracing() { (tracing, spans) =>
+      tracing.traceEvent(TraceEvent.CacheHit(0.97, 0.9, at)) shouldBe Right(())
+      spans().map(_.getKind) shouldBe Vector(SpanKind.INTERNAL)
+    }
+  }
+
   "The convenience methods" should {
 
     "export one span each, with the name of the event they trace" in withTracing() { (tracing, spans) =>

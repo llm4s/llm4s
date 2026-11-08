@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Embedding Usage - <op>` is `embeddings <model>`, and no span carries message content unless
   `llm4s.tracing.opentelemetry.captureContent = true`; positional patterns on four `TraceEvent`s break;
   [migration](docs/reference/migration.md#opentelemetry-spans-follow-the-genai-conventions-content-is-opt-in-2275).
+- OpenTelemetry spans of events that call no remote service (`ToolExecuted`, `CostRecorded`, `CacheHit`/`CacheMiss`,
+  `RAGOperationCompleted`, an unplaced `CustomEvent`, an `ErrorOccurred` with no operation) are `INTERNAL`, not `CLIENT`:
+  dashboards filtering on span kind change; [migration](docs/reference/migration.md#only-remote-calls-are-client-spans-2531).
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
@@ -152,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CLIENT` spans `chat <model>` / `embeddings <model>` with `gen_ai.provider.name`, request and response attributes and
   `error.type`; `TracingLLMClient` traces a client's calls; content capture is opt-in and redacted; agent spans gain
   `gen_ai.provider.name` ([#2275](https://github.com/llm4s/llm4s/issues/2275)).
+- **Changed** OpenTelemetry's span kind defaults to `INTERNAL`: only a model, embedding or image call, or its failure, is a
+  `CLIENT` span ([#2531](https://github.com/llm4s/llm4s/issues/2531)).
 
 ### Agent subagents (Phase 4)
 
