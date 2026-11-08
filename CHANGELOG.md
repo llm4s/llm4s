@@ -336,6 +336,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ollama`, `openAiCompatible`, `azureOpenAi`) and `Llm4s.createAgent(client, tools)`; cancelling the coroutine that
   runs a turn cancels a suspended handler [#1495](https://github.com/llm4s/llm4s/issues/1495); see the
   [Java guide](docs/guide/java.md#the-kotlin-dsl).
+- **Added** `agent(id, client) { ... }` to `llm4s-kotlin-api`, over `Llm4s.agentBuilder`: a system prompt, tools,
+  input and output guardrails, `contextWindow(lastMessages = n)` and `streaming()`, returning a `Result<AgentKt>`
+  rather than throwing [#2534](https://github.com/llm4s/llm4s/issues/2534); see the [Java guide](docs/guide/java.md#an-agent-block).
 - **Fixed** `JLlmClient.streamAsPublisher` (and so `llm4s-reactor`'s `Streams.toFlux`) delivering a failed call's
   `onError` ahead of pieces still buffered: every piece streamed before the failure now reaches the subscriber, in
   order, before the error, with any demand and with a full buffer, and a subscriber that cancels gets no signal after it
