@@ -547,6 +547,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Organization` and `BreadcrumbList` JSON-LD, and `scripts/check-site-share-cards.sh` in the Pages deploy [#2316](https://github.com/llm4s/llm4s/issues/2316).
 - **Added** [Using LLM4S from Apache Flink](docs/guide/flink.md): a Flink 2.x job in Scala 3 with `AsyncDataStream`, dead letters
   as a side output, and a sample (`modules/samples/flink`) tested on Flink's MiniCluster by `flink-sample.yml` [#2298](https://github.com/llm4s/llm4s/issues/2298).
+- **Added** a [press kit](docs/press.md) on llm4s.org (`/press/`: logo, 50- and 150-word descriptions, fact sheet,
+  contact), linked from the footer and `/foundation/`, and the [1.0 launch plan](docs/community/launch-1.0.md) for JVM channels beyond Scala [#2323](https://github.com/llm4s/llm4s/issues/2323).
 - **Added** a dev container and [Codespaces playground](docs/getting-started/playground.md): JDK 21, sbt, Scala CLI, Metals and a local Ollama model,
   no API key; the `devcontainer.yml` workflow builds it and runs the page's five commands inside it [#2286](https://github.com/llm4s/llm4s/issues/2286).
 
