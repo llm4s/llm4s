@@ -3,7 +3,7 @@ layout: page
 title: Legal and IP FAQ
 parent: Reference
 nav_order: 27
-description: "Which licence covers LLM4S, who holds copyright, how contributions come in (DCO), MIT's patent position and provider terms, and what is still undecided."
+description: "Which licence covers LLM4S, who holds copyright, how contributions come in (DCO), MIT's patent position, provider terms, cryptography, and what is still undecided."
 ---
 
 # Legal and IP FAQ
@@ -95,9 +95,26 @@ would without llm4s. llm4s grants no rights in a provider's models or services.
 **Where does my data go?** Only to the destinations your configuration or code names; the library sends no telemetry.
 See [Data Protection](../guide/data-protection).
 
+## Export control
+
+**Does llm4s contain cryptography?** llm4s implements no cryptographic algorithm of its own. Where it needs
+cryptography it calls what the JDK provides (`java.security`, `javax.net.ssl`):
+
+- **TLS** for HTTPS connections. Optional trust and key stores in the HTTP settings are loaded into a JDK `SSLContext`
+  (`org.llm4s.http.HttpNetwork`, in `llm4s-core`).
+- **SHA-256 hashing** (`MessageDigest`) for cache keys, replay and idempotency keys, and content checksums.
+- **Random numbers** (`SecureRandom`) for trace ids.
+- **RSA signing** (`SHA256withRSA`) of the signed token a Vertex AI service account exchanges for an OAuth2 access
+  token, in `llm4s-gemini`.
+
+llm4s does not itself encrypt stored data. Dependencies such as the provider SDKs and database drivers also open TLS
+connections, through the JDK or their own HTTP stacks; their [licence reports](licences) and [SBOMs](sbom) list them.
+
+**What is its export classification?** The project has not classified llm4s for export control and makes no statement
+about it. That is for your own trade-compliance or legal team.
+
 ## Not covered yet
 
-- **Export control.** The project has made no statement about cryptography or export classification.
 - **Name and logo use.** No trademark and name-use policy is published yet; it is tracked in
   [#2310](https://github.com/llm4s/llm4s/issues/2310).
 
