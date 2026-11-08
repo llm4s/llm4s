@@ -482,7 +482,9 @@ unchanged.
 > `WatsonXClient`'s Scaladoc): the token-limit field, the encoding of tool-call arguments, the finish reasons
 > and the stream's usage chunk are all shown there. IBM's
 > [tool-calling guide](https://www.ibm.com/docs/SSYOK8/wsj/analyze-data/fm-api-chat-tools.html) shows the
-> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. That proves IBM's clients send them, not that the
+> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. `WatsonXChatOverHttpSpec` runs the client through the real HTTP stack against
+> a local server: tool calls whole and streamed, structured messages with no role-marker prompt, and the error
+> mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
 > which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has
