@@ -24,6 +24,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Java AI services](java-ai-services)** - Declare an annotated interface and let `llm4s-java-api` implement it: prompt templates, typed answers, memory and tools (experimental)
 - **[Java RAG](java-rag)** - Ingest documents and ask questions from Java with `llm4s-java-rag`: answers with their sources
 - **[Moving a Java app from LangChain4j or Spring AI](java-migration)** - Each LangChain4j and Spring AI concept in `llm4s-java-api` terms, with compiled before-and-after Java, provider configuration and the gaps
 - **[Java Reactor](java-reactor)** - Stream a reply as a Reactor `Flux<String>` with `llm4s-reactor`, for Spring WebFlux and other reactive pipelines

@@ -754,7 +754,8 @@ result.status().guardrail().ifPresent(g ->
 The builder is immutable - each method returns a new one, and a setting replaces the one set before - and nothing in it
 throws: a `null` argument, an invalid guardrail or window (`length(5, 1)`, `lastMessages(0)`), a blank id or two tools
 with one name is a failed result of `build()`. For what it does not set - approvals, handoffs, subagents, another
-runtime - build the agent with the Scala `Agent.builder` and wrap it with `Llm4s.wrapAgent`.
+runtime - build the agent with the Scala `Agent.builder` and wrap it with `Llm4s.wrapAgent`. From Kotlin, the
+[`agent { ... }` block](#an-agent-block) sets the same.
 
 ## The Kotlin DSL
 
@@ -809,6 +810,46 @@ The handler is a `suspend` function. The agent runs a tool on a thread of its ow
 coroutine of its own (`runBlocking`), not in the caller's. Cancelling the coroutine that runs the turn - the caller of
 `run`, a collector of `stream`, a `withTimeout` - cancels the turn, which interrupts that thread and so cancels the
 handler: a suspended `delay`, `withContext` or other cancellable call throws `CancellationException`.
+
+### An agent block
+
+`agent(id, client) { ... }` is [`Llm4s.agentBuilder`](#an-agent-with-a-system-prompt-guardrails-and-a-context-window)
+in Kotlin ([#2534](https://github.com/llm4s/llm4s/issues/2534)): a system prompt, tools, guardrails on each query and
+on each final answer, a context window and streaming, each meaning what it means in the Java builder.
+
+```kotlin
+import org.llm4s.javaapi.JGuardrails
+import org.llm4s.kotlin.AgentKt
+import org.llm4s.kotlin.agent
+
+val built: Result<AgentKt> = agent("support", client) {
+    systemPrompt("You are a support assistant. Answer in JSON.")
+    tools {
+        tool("add", "Adds two numbers") {
+            param<Long>("a", "First")
+            param<Long>("b", "Second")
+            handler { args -> args.get<Long>("a") + args.get<Long>("b") }
+        }
+    }
+    inputGuardrails(JGuardrails.length(1, 10_000), JGuardrails.profanity())
+    outputGuardrails(JGuardrails.json())   // inputGuardrails(JGuardrails.json()) does not compile
+    contextWindow(lastMessages = 20)
+    streaming()
+}
+
+val support = built.getOrThrow()          // or built.onFailure { e -> log(e.message) }
+val result = support.run("What is 2 + 3?")
+result.status().guardrail().ifPresent { g ->
+    println("Blocked by $g: ${result.status().reason().orElse("")}")
+}
+```
+
+Unlike the other blocks, `agent` does not throw: as with the Java builder, a blank id, an invalid guardrail or window
+(`JGuardrails.length(5, 1)`, `lastMessages = 0`), two tools with one name, or a tool in `tools { ... }` that cannot be
+built gives a failed Kotlin `Result` holding an `LLMException` that names the first problem. `tools` also takes `JTool`s
+(`tools(add, refund)`, or a list), and each guardrail setter a list. A setting given twice replaces the first. The agent
+is an `AgentKt`, so its turns are the suspend functions and `Flow`s of `Llm4s.createAgent`'s: `run`,
+`continueConversation`, `stream` and the rest.
 
 ## Embeddings
 
@@ -902,6 +943,14 @@ that does not answer in time `TIMEOUT`; any other failure with no status, such a
 `OTHER`. To keep the vectors in a store, search them and answer questions from what they find, see
 [Java RAG](java-rag) (`llm4s-java-rag`).
 
+## AI services
+
+Declare an interface, annotate its methods with their prompts, and `Llm4s.aiService(MyService.class).client(client).build()`
+implements it: `@SystemMessage` and `@UserMessage` templates filled from `@V` parameters, answers returned as `String`,
+an enum, a record, `JCompletion`, `LlmResult<T>`, `CompletableFuture<T>` or a streamed `Flow.Publisher<String>`,
+per-conversation memory through `@MemoryId`, and tools run in an agent turn. Mistakes in the interface fail at
+`build()`. It is experimental; [Java AI services](java-ai-services) is its guide, with compiled examples.
+
 ## Testing your code
 
 For a complete runnable example, see the [Java offline ticket classifier](../examples/#java-offline-example).
@@ -959,6 +1008,8 @@ available from Java yet, each with the issue that tracks it:
 
 ## Where next
 
+- [Java AI services](java-ai-services): an annotated interface that llm4s implements - prompt templates, typed
+  answers, memory and tools.
 - [Moving a Java app from LangChain4j or Spring AI](java-migration): each LangChain4j and Spring AI concept mapped to
   this API, with compiled before-and-after code and provider configuration.
 - [Java RAG](java-rag): ingest documents and ask questions about them, with `llm4s-java-rag`.

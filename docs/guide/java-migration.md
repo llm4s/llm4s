@@ -51,7 +51,7 @@ llm4s needs **JDK 21**.
 | LangChain4j | Spring AI | llm4s (Java) |
 |---|---|---|
 | `ChatModel`, built with e.g. `OpenAiChatModel.builder()` [L1][L3] | `ChatModel`, and the fluent `ChatClient` [S1] | `JLlmClient`, from `Llm4s.openAi()` and the other builders, or `Llm4s.createDefaultClient()`; in Spring, the `LLM4STemplate` bean |
-| An AI Service: an interface `AiServices` implements [L1] | `ChatClient.prompt().user(...).call().content()` [S1] | `client.complete(prompt)`. No declarative interface yet ([#2277](https://github.com/llm4s/llm4s/issues/2277)) |
+| An AI Service: an interface `AiServices` implements [L1] | `ChatClient.prompt().user(...).call().content()` [S1] | `Llm4s.aiService(MyService.class).client(client).build()`, with `@SystemMessage`, `@UserMessage`, `@V` and `@MemoryId` ([Java AI services](java-ai-services)); or `client.complete(prompt)` |
 | A POJO or record as an AI Service return type [L1] | `.call().entity(SomeClass.class)` [S1] | `client.complete(prompt, SomeRecord.class)` |
 | `@Tool` methods, `@P` parameters [L2] | `@Tool` methods, `@ToolParam` parameters; `MethodToolCallback`, `FunctionToolCallback` [S2] | `@Tool` methods with `@Param` parameters (`JTool.fromAnnotated`), or `JTool.builder(...)` with a lambda; run by a `JAgent` |
 | `ChatMemory`, `MessageWindowChatMemory`, `@MemoryId` with a `ChatMemoryProvider` [L1] | `ChatMemory`, `MessageWindowChatMemory`, `MessageChatMemoryAdvisor`, `ChatMemory.CONVERSATION_ID` [S3] | A `Conversation` you build and pass (`ConversationBuilder`), or a `JAgent` thread you continue (`continueConversation`) |
@@ -393,11 +393,14 @@ provider module binds its vendor's variable ([configuration](../getting-started/
 
 Plainly, as of this page's sources:
 
-- **Declarative AI services.** No annotated interface that llm4s implements, as LangChain4j's AI Services and
-  `@AiService` do [L1][L6], and so no `@SystemMessage` / `@UserMessage` prompt templates: you call the client.
-  Tracked in [#2277](https://github.com/llm4s/llm4s/issues/2277).
+- **Spring Boot discovery of AI services.** `Llm4s.aiService` implements an annotated interface
+  ([Java AI services](java-ai-services)), but the starter does not yet register such interfaces as beans, as
+  LangChain4j's `@AiService` does [L6]: declare a `@Bean` that builds the service. Tracked in
+  [#2277](https://github.com/llm4s/llm4s/issues/2277).
 - **A chat-memory store keyed by a conversation id**, as Spring AI's `ChatMemoryRepository`s are [S3]. An agent keeps
-  its threads in memory until `forget`; you keep the `JAgentResult` that names each one.
+  its threads in memory until `forget`; you keep the `JAgentResult` that names each one. An AI service's `@MemoryId`
+  methods do keep one conversation per id, in a `ChatMemoryStore` you can implement
+  ([Java AI services](java-ai-services#memory)).
 - **Guardrails written in Java.** `JGuardrails` offers the built-in ones (length, profanity, regex, JSON); a guardrail
   of your own needs the Scala `Agent.builder` and `Llm4s.wrapAgent`.
 - **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse

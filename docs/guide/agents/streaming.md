@@ -354,7 +354,8 @@ run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails i
 `LLMException`, as in fs2 and ZIO. So does a delivery that dies of a fatal error (an
 `OutOfMemoryError`, a `LinkageError`): the Java listener then hears no terminal callback, and the flow -
 or `run`, `continueConversation`, `resume` or `recover` - ends with the facade's report of it instead of
-suspending.
+suspending. An agent from the [`agent { ... }` block](../java#an-agent-block) streams text deltas when the block
+calls `streaming()`.
 
 ```kotlin
 val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)
