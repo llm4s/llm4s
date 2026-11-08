@@ -21,13 +21,13 @@ class OpenAICompatibleConfigFallbackSpec extends AnyFlatSpec with Matchers with 
   val baseUrl = "https://api.example.com"
 
   "OpenAIConfig fallback" should "return 128000 for gpt-4o-like model" in {
-    val cfg = OpenAIConfig.fromValues("patch-cov-gpt-4o", Secret(apiKey), None, baseUrl).value
+    val cfg = OpenAIConfig.fromValues("patch-cov-gpt-4o", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }
 
   it should "return 8192 for unknown model" in {
-    val cfg = OpenAIConfig.fromValues("patch-cov-unknown", Secret(apiKey), None, baseUrl).value
+    val cfg = OpenAIConfig.fromValues("patch-cov-unknown", Secret(apiKey), baseUrl).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }

@@ -60,6 +60,11 @@ object Versions {
   // ZIO Test for those examples: the zio that zio-json above brings onto the samples' Test classpath (2.1.26, not
   // `zio` below), since zio-test's macros must match the zio they run with.
   val zioTestSamples = "2.1.26"
+  // docs/getting-started/configuration-in-code.md's ciris and zio-config examples (#2340), samples' Test scope only.
+  // ciris 3.7.0 is the last release on cats-effect 3.5 (3.8.0 needs 3.6); zio-config 4.0.8 is built on the zio
+  // 2.1.26 above.
+  val ciris     = "3.7.0"
+  val zioConfig = "4.0.8"
 
   // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
   // cats-effect and fs2 versions above.
@@ -247,6 +252,9 @@ object Deps {
   val weaverCats        = "com.disneystreaming" %% "weaver-cats"       % Versions.weaver
   val zioTestSamples    = "dev.zio"             %% "zio-test"          % Versions.zioTestSamples
   val zioTestSbtSamples = "dev.zio"             %% "zio-test-sbt"      % Versions.zioTestSamples
+  // Configuration libraries for docs/getting-started/configuration-in-code.md (#2340), samples' Test scope only
+  val ciris     = "is.cir"  %% "ciris"      % Versions.ciris
+  val zioConfig = "dev.zio" %% "zio-config" % Versions.zioConfig
 
   // ZIO
   val zio        = "dev.zio" %% "zio"          % Versions.zio

@@ -1878,6 +1878,10 @@ lazy val samples = (project in file("modules//samples"))
       Deps.weaverCats        % Test,
       Deps.zioTestSamples    % Test,
       Deps.zioTestSbtSamples % Test,
+      // docs/getting-started/configuration-in-code.md's ciris and zio-config examples (#2340), compiled by DocSnippets
+      // and run by ConfigurationInCodeGuideSpec. Never a dependency of a published module.
+      Deps.ciris     % Test,
+      Deps.zioConfig % Test,
       // The tapir sample (#2299), `org.llm4s.samples.tapir.TapirEndpointToolsExample`: its endpoints run on tapir's
       // in-process stub server, so it needs no network. Compile scope, like the sample.
       Deps.tapirSttpStubServer

@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `PgVectorStore.apply(dataSource, tableName)`, and `PgKeywordIndex.apply(dataSource, ...)`. Source-compatible for
   callers passing a Hikari pool; recompile against the new signatures. `PgSearchIndex.close()` no longer closes a pool it
   did not create; [migration](docs/reference/migration.md#postgres-stores-take-a-javaxsqldatasource-2300).
+- `OpenAIConfig.fromValues` takes `baseUrl` before `organization` (now defaulted to `None`), and `AzureConfig.fromValues` and
+  `fromTokenProvider` take the key (or token provider) before `endpoint`; [migration](docs/reference/migration.md#provider-fromvalues-take-model-key-then-base-url-2340).
 - The default console tracer prints metadata only: queries, completion content, tool input/output, custom event data
   and error messages are withheld unless `llm4s.tracing.console.captureContent = true`
   (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT`) or `new ConsoleTracing(captureContent = true)`; see the new
@@ -248,6 +250,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Llm4sConfig.from(config)` (experimental): an `Llm4sSettings` with `Llm4sConfig`'s methods, reading a `Config` the app already
   has (Play, Pekko, per tenant or test) in place of `application.conf` [#2340](https://github.com/llm4s/llm4s/issues/2340).
+- **Added** configuration in code: every provider's `fromValues` takes model, key, then base URL; a `ModelRegistryService`
+  in scope supplies `fromValues`' `ContextWindowResolver`; guide `docs/getting-started/configuration-in-code.md` with
+  ciris and zio-config examples [#2340](https://github.com/llm4s/llm4s/issues/2340).
 - **Fixed** `CheckPolicies` CLI now rejects unknown `--env` arguments with exit code 2 before loading any
   configuration, and maps aliases such as `dev-sandbox` and `prod-safe` to their canonical environment [#2260](https://github.com/llm4s/llm4s/issues/2260).
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`

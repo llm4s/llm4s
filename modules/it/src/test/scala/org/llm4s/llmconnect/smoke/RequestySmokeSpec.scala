@@ -40,7 +40,7 @@ class RequestySmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
   private def client(key: String): Result[LLMClient] =
     OpenAIConfig
-      .fromValues(Model, Secret(key), None, RequestyProvider.DEFAULT_BASE_URL, Some(RequestyProvider.id))
+      .fromValues(Model, Secret(key), RequestyProvider.DEFAULT_BASE_URL, None, Some(RequestyProvider.id))
       .flatMap(RequestyProvider.buildClient(_, LlmClientOptions.default))
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))

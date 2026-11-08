@@ -70,13 +70,13 @@ class SmokeContractOfflineSpec
     DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
 
   private def openRouter(): LLMClient =
-    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), None, server.baseUrl).value)
+    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value)
 
   private def cohere(): LLMClient =
     CohereClient(CohereConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
 
   private def openAI(): LLMClient =
-    OpenAIClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), None, s"${server.baseUrl}/v1").value).value
+    OpenAIClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), s"${server.baseUrl}/v1").value).value
 
   /**
    * The real clients the contract runs through, with how each reports reasoning: DeepSeek returns the thinking text

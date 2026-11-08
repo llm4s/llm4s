@@ -20,14 +20,14 @@ final class OpenAICredentialEchoSpec extends AnyFlatSpec with Matchers with Eith
 
   "OpenAIClient" should "keep an echoed OpenAI key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = OpenAIConfig.fromValues("gpt-4o", Secret(echoKey), None, s"$baseUrl/v1").value
+      val config = OpenAIConfig.fromValues("gpt-4o", Secret(echoKey), s"$baseUrl/v1").value
       OpenAIClient(config).value.complete(hello, CompletionOptions())
     }
   }
 
   it should "keep an echoed Azure key out of the error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = AzureConfig.fromValues("gpt-4o", baseUrl, Secret(echoKey), "2025-01-01-preview").value
+      val config = AzureConfig.fromValues("gpt-4o", Secret(echoKey), baseUrl, "2025-01-01-preview").value
       OpenAIClient(config).value.complete(hello, CompletionOptions())
     }
   }

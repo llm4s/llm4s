@@ -170,7 +170,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     def openAIClientAt(baseUrl: String): LLMClient =
       OpenAIConfig
-        .fromValues("gpt-4o", Secret("sk-test"), None, baseUrl)
+        .fromValues("gpt-4o", Secret("sk-test"), baseUrl, None)
         .flatMap(OpenAIClient(_)) match
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
@@ -224,13 +224,13 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       )(openAIClientAt)
       assertContentParts("openai", respond)(supported*)(openAIClientAt)
       assertContentParts("requesty", respond)(supported*) { baseUrl =>
-        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), None, baseUrl).toOption.get
+        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).toOption.get
         RequestyProvider.buildClient(config, LlmClientOptions.default).toOption.get
       }
       assertContentParts("azure", respond)(supported*) { baseUrl =>
         val config =
           AzureConfig
-            .fromValues("my-deploy", baseUrl, Secret("azure-key"), AzureConfig.DEFAULT_API_VERSION)
+            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
             .toOption
             .get
         AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get

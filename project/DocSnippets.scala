@@ -29,6 +29,7 @@ object DocSnippets {
   val pages: Seq[String] = Seq(
     "ai-assistants.md",
     "getting-started/configuration.md",
+    "getting-started/configuration-in-code.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
     "getting-started/next-steps.md",

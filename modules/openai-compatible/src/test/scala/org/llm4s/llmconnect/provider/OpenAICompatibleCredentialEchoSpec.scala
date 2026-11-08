@@ -65,7 +65,7 @@ final class OpenAICompatibleCredentialEchoSpec extends AnyFlatSpec with Matchers
 
   it should "keep an echoed key out of OpenRouter's error" in KnownSecrets.isolated {
     CredentialEchoChecks.assertNotEchoed(echoKey) { baseUrl =>
-      val config = OpenAIConfig.fromValues("openai/gpt-4o", Secret(echoKey), None, baseUrl).value
+      val config = OpenAIConfig.fromValues("openai/gpt-4o", Secret(echoKey), baseUrl).value
       OpenRouterClient(config).value.complete(hello, opts)
     }
   }

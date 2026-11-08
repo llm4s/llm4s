@@ -76,6 +76,25 @@ final private[model] class DefaultModelRegistryService(
 object ModelRegistryService:
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /**
+   * The registry of the model catalogue bundled with llm4s, read from the classpath: no
+   * configuration file is consulted. This is how code that builds a provider config from values
+   * satisfies the `using ModelRegistryService` of `LLMConnect.getClient` (and, through
+   * `ContextWindowResolver.fromModelRegistry`, a config's `fromValues`) without an
+   * `application.conf`:
+   *
+   * {{{
+   * for {
+   *   registry <- ModelRegistryService.default()
+   *   given ModelRegistryService = registry
+   *   config <- OllamaConfig.fromValues("llama3", "http://localhost:11434")
+   *   client <- LLMConnect.getClient(config)
+   * } yield client
+   * }}}
+   *
+   * `Llm4sConfig.modelRegistryService()` reads the `llm4s.modelRegistry` block instead, for an
+   * application that points the registry at its own catalogue.
+   */
   def default(): Result[ModelRegistryService] =
     fromConfig(ModelRegistryConfig.default)
 
