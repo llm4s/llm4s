@@ -103,12 +103,16 @@ cryptography it calls what the JDK provides (`java.security`, `javax.net.ssl`):
 - **TLS** for HTTPS connections. Optional trust and key stores in the HTTP settings are loaded into a JDK `SSLContext`
   (`org.llm4s.http.HttpNetwork`, in `llm4s-core`).
 - **SHA-256 hashing** (`MessageDigest`) for cache keys, replay and idempotency keys, and content checksums.
-- **Random numbers** (`SecureRandom`) for trace ids.
+- **Random numbers** (`SecureRandom`), for example for trace ids and probe file names.
 - **RSA signing** (`SHA256withRSA`) of the signed token a Vertex AI service account exchanges for an OAuth2 access
   token, in `llm4s-gemini`.
+- **EC key generation and ECDSA signing** (P-256, `SHA256withECDSAinP1363Format`) of test JWTs in
+  `llm4s-provider-testkit`, a published test-support artifact (`org.llm4s.testkit.TestJwt`).
 
-llm4s does not itself encrypt stored data. Dependencies such as the provider SDKs and database drivers also open TLS
-connections, through the JDK or their own HTTP stacks; their [licence reports](licences) and [SBOMs](sbom) list them.
+llm4s does not itself encrypt stored data. Dependencies such as the provider SDKs and database drivers also use
+cryptography of their own: TLS through the JDK or their own HTTP stacks, and their own request signing or
+authentication (for example AWS SigV4 in `llm4s-bedrock`, SCRAM in JDBC drivers). Their [licence reports](licences)
+and [SBOMs](sbom) list them.
 
 **What is its export classification?** The project has not classified llm4s for export control and makes no statement
 about it. That is for your own trade-compliance or legal team.
