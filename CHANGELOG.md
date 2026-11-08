@@ -623,6 +623,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also doubly escaped in JSON inside a JSON string): `token = "..."`, `password: ...`, `token='...'`. The rest of such
   a line is now replaced, and the JSON still parses [#1765](https://github.com/llm4s/llm4s/issues/1765),
   [#1799](https://github.com/llm4s/llm4s/issues/1799).
+- **Fixed** `Redaction` read the quote that closes a JSON string as the opening quote of an empty `key=` value at its
+  end (`{"q":"a=1&token=","n":"x"}`, also escaped in JSON inside a string) and masked the `,` or `}` after it, so the
+  JSON no longer parsed; the value is now empty [#1800](https://github.com/llm4s/llm4s/issues/1800).
 
 ### Build & tooling
 
