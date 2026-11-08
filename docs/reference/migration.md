@@ -11,7 +11,7 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
-[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
+[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). From 0.5.1 to 0.6.0, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708),
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
 [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346),
