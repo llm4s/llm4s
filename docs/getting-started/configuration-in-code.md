@@ -1,10 +1,10 @@
 ---
 layout: page
 title: Configuration in Code
-description: "Configure LLM4S from the configuration your application already has: an explicit Typesafe Config (Play, Pekko, tests), plain values, ciris or zio-config, with no application.conf."
-search_title: "Configure LLM4S from ciris, zio-config, Play or plain Scala values"
+description: "Configure LLM4S from the config your app already has: a Typesafe Config (Play, Pekko, tests), plain values, ciris or zio-config, no application.conf."
+search_title: "Configure LLM4S from ciris, zio-config or plain values"
 parent: Getting Started
-nav_order: 14
+nav_order: 17
 ---
 
 # Configuration in Code
