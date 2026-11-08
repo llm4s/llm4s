@@ -281,14 +281,23 @@ abbreviation of at least one letter (`sort --outp=out`), as GNU programs and git
 
 On POSIX, `sort` also refuses an operand after `--` that starts with `-t` (`sort -- -tNAME`,
 [#1774](https://github.com/llm4s/llm4s/issues/1774)). GNU and BSD sort open a file named `-tNAME`, but uutils
-coreutils (the Rust implementation that Ubuntu 26.04, the base of the runner image's `eclipse-temurin:21-jdk`, may
-ship as its `coreutils`) rewrites, in its development line though not yet in a release (0.8.0, 0.10.0), every argument starting with `-t` into `--field-separator=<rest>` before it parses
+coreutils (the Rust implementation that Ubuntu 25.10 and later ship as `coreutils`) rewrites, in its development
+line though not yet in a release (0.8.0, 0.10.0), every argument starting with `-t` into `--field-separator=<rest>` before it parses
 its options, including after `--`, and would then open a file literally named `--field-separator=NAME`, which the path
 rule never sees. The `--` counts wherever it is, even as another option's value (`sort -k -- -t,` is refused too).
 Name such a file `./-tNAME`, or give `-t` before the `--`. Other option-looking operands after `--` need no rule of
 their own: `-o`, `--output`, `--compress-program` and `--files0-from` are refused there as anywhere, and every other
-operand is path-checked as the file it names (`sort -- -T/../..` is refused as a path out of the workspace). Which coreutils the built image ships is not yet confirmed or pinned
-(the rest of #1774).
+operand is path-checked as the file it names (`sort -- -T/../..` is refused as a path out of the workspace). The rule
+stays although the runner image runs GNU coreutils (below), since a runner on another host or image may not.
+
+The option tables model GNU and BSD `sort` and `cp`, so the runner image runs GNU coreutils ([#1774](https://github.com/llm4s/llm4s/issues/1774)).
+Its base, `eclipse-temurin:21-jdk`, is Ubuntu 26.04, which ships `coreutils-from-uutils`: `sort`, `ls`, `cat`, `ln`
+and most other programs are uutils (rust-coreutils 0.10.0), and only `cp`, `mv`, `rm`, `df` and `true` are GNU. The
+image installs `coreutils-from-gnu`, which points every name at GNU coreutils (9.7), and its build fails if any
+program in `/usr/bin` or `/usr/sbin` is still a uutils one or if `sort` or `cp` does not report `(GNU coreutils)`.
+`WorkspaceCoreutilsIntegrationSpec` (the `@Workspace` tier) checks the built image's coreutils and runs the `sort`
+and `cp` refusals against them. An image of your own built on another base should do the same, or be checked
+against these rules.
 
 Every argument of every program except `echo`, `pwd`, `whoami` and `hostname` is then held to the workspace. Each
 candidate path is resolved from the real working directory the way the kernel resolves it, one component at a time,
