@@ -81,6 +81,21 @@ sbt "samples/testOnly org.llm4s.samples.java.JavaOfflineExampleSpec"
 
 See [Testing your Java code](../guide/java#testing-your-code) for scripting replies, failures and checking calls.
 
+## Java AI Service Example
+
+**File:** [`JavaAiServiceExample.java`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/java/org/llm4s/samples/java/JavaAiServiceExample.java)
+
+An annotated `SupportAssistant` interface that `Llm4s.aiService` implements: a templated system message, an enum and a
+record as return types, an `LlmResult` for explicit failure handling and a `@MemoryId` conversation, all answered by
+`FakeLlmClient`, without an API key or network access.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.java.JavaAiServiceExample"
+sbt "samples/testOnly org.llm4s.samples.java.JavaAiServiceExampleSpec"
+```
+
+See [Java AI services](../guide/java-ai-services) for the annotations, return types, memory and tools.
+
 ## Playground
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/playground/`

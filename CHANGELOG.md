@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Embedding Usage - <op>` is `embeddings <model>`, and no span carries message content unless
   `llm4s.tracing.opentelemetry.captureContent = true`; positional patterns on four `TraceEvent`s break;
   [migration](docs/reference/migration.md#opentelemetry-spans-follow-the-genai-conventions-content-is-opt-in-2275).
+- OpenTelemetry spans of events that call no remote service (`ToolExecuted`, `CostRecorded`, `CacheHit`/`CacheMiss`,
+  `RAGOperationCompleted`, an unplaced `CustomEvent`, an `ErrorOccurred` with no operation) are `INTERNAL`, not `CLIENT`:
+  dashboards filtering on span kind change; [migration](docs/reference/migration.md#only-remote-calls-are-client-spans-2531).
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
@@ -152,6 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CLIENT` spans `chat <model>` / `embeddings <model>` with `gen_ai.provider.name`, request and response attributes and
   `error.type`; `TracingLLMClient` traces a client's calls; content capture is opt-in and redacted; agent spans gain
   `gen_ai.provider.name` ([#2275](https://github.com/llm4s/llm4s/issues/2275)).
+- **Changed** OpenTelemetry's span kind defaults to `INTERNAL`: only a model, embedding or image call, or its failure, is a
+  `CLIENT` span ([#2531](https://github.com/llm4s/llm4s/issues/2531)).
 
 ### Agent subagents (Phase 4)
 
@@ -226,7 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** `LLMClientPekko.streamComplete` to materialize a `Future[Done]` that completes once the provider call has
   returned, as `AgentPekko`'s streams already do, decided before the Pekko API is frozen [#1848](https://github.com/llm4s/llm4s/issues/1848).
 - **Added** `StreamingBridgeContract`, one conformance suite that `llm4s-effect`, `llm4s-zio` and `llm4s-pekko` each run:
-  errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core [#2334](https://github.com/llm4s/llm4s/issues/2334).
+  errors, cancellation, early stop, mid-stream failure, agent event order and tool threads match core; the
+  [pick-your-stack page](docs/guide/effect-systems.md) shows one program in plain `Result`, cats-effect, ZIO and Pekko, run by a spec [#2334](https://github.com/llm4s/llm4s/issues/2334).
 - **Added** `llm4s-ox` (Experimental): a streamed completion as an Ox `Flow`, `parComplete`, `raceProviders` and `RetrySchedule`
   for direct-style code on virtual threads, and the [direct-style guide](docs/guide/direct-style.md) [#2332](https://github.com/llm4s/llm4s/issues/2332).
 
@@ -325,6 +331,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
   streaming, from Java types only [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
+- **Added** declarative AI services to `llm4s-java-api` (experimental): `Llm4s.aiService(MyService.class)` implements an
+  interface annotated `@SystemMessage`/`@UserMessage`/`@V`/`@MemoryId` (`org.llm4s.javaapi.services`), with typed returns, memory and tools, checked at `build()` [#2277](https://github.com/llm4s/llm4s/issues/2277); see [Java AI services](docs/guide/java-ai-services.md).
 - **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
   included), `JAgent.runAsync`/`continueConversationAsync`/`resumeAsync`/`recoverAsync` and `embedAsync`, failing with
   `LlmException`, `cancel(true)` interrupting the call, on a virtual thread or a `withAsyncExecutor` executor;
@@ -336,6 +344,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ollama`, `openAiCompatible`, `azureOpenAi`) and `Llm4s.createAgent(client, tools)`; cancelling the coroutine that
   runs a turn cancels a suspended handler [#1495](https://github.com/llm4s/llm4s/issues/1495); see the
   [Java guide](docs/guide/java.md#the-kotlin-dsl).
+- **Added** `agent(id, client) { ... }` to `llm4s-kotlin-api`, over `Llm4s.agentBuilder`: a system prompt, tools,
+  input and output guardrails, `contextWindow(lastMessages = n)` and `streaming()`, returning a `Result<AgentKt>`
+  rather than throwing [#2534](https://github.com/llm4s/llm4s/issues/2534); see the [Java guide](docs/guide/java.md#an-agent-block).
 - **Fixed** `JLlmClient.streamAsPublisher` (and so `llm4s-reactor`'s `Streams.toFlux`) delivering a failed call's
   `onError` ahead of pieces still buffered: every piece streamed before the failure now reaches the subscriber, in
   order, before the error, with any demand and with a full buffer, and a subscriber that cancels gets no signal after it
@@ -427,8 +438,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation & samples
 
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
-- **Added** the [support policy](docs/reference/support-policy.md): current lines and their status (`docs/_data/support.yml`), platform
-  support and end of support; cadence and post-1.0 lines are marked to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+- **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
+  and the release workflow check; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
 - **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
   unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per
@@ -595,9 +606,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
   actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
-  (`sort -- -tNAME`): uutils coreutils, which the runner's Ubuntu-based image may ship, rewrites it on its unreleased
-  main branch into
-  `--field-separator=NAME` and opens a file of that name, which was never path-checked. Write `./-tNAME` instead
+  (`sort -- -tNAME`): uutils coreutils (Ubuntu 25.10 and later) rewrites it on its unreleased main branch into
+  `--field-separator=NAME` and opens a file of that name, which was never path-checked. Write `./-tNAME` instead.
+  The runner image, whose Ubuntu 26.04 base ran uutils `sort`, now installs GNU coreutils, which the policy models
   [#1774](https://github.com/llm4s/llm4s/issues/1774); [sandbox](docs/reference/workspace-sandbox.md).
 - **Fixed** (security) `Redaction` left the value of a sensitive key on an indented YAML line in the clear
   (`  apiKey: ...` under a section, `  - password: ...` in a list), whatever the key and quoting style; only a key at the
@@ -613,6 +624,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also doubly escaped in JSON inside a JSON string): `token = "..."`, `password: ...`, `token='...'`. The rest of such
   a line is now replaced, and the JSON still parses [#1765](https://github.com/llm4s/llm4s/issues/1765),
   [#1799](https://github.com/llm4s/llm4s/issues/1799).
+- **Fixed** `Redaction` read the quote that closes a JSON string as the opening quote of an empty `key=` value at its
+  end (`{"q":"a=1&token=","n":"x"}`, also escaped in JSON inside a string) and masked the `,` or `}` after it, so the
+  JSON no longer parsed; the value is now empty [#1800](https://github.com/llm4s/llm4s/issues/1800).
 
 ### Build & tooling
 

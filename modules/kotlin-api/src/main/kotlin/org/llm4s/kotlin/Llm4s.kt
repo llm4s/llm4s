@@ -131,8 +131,8 @@ object Llm4s {
         AgentKt(JLlm4s.createAgentWithTools(client.underlying, tools).unwrap("Failed to create agent", cancellation = false))
 
     /**
-     * Wraps an [Agent] built with `Agent.builder`, for what [createAgent] does not set: its middleware
-     * (guardrails, approvals), handoffs, system prompt or runtime.
+     * Wraps an [Agent] built with `Agent.builder`, for what [createAgent] and the [agent] block do not set: its other
+     * middleware (approvals, permissions), handoffs, subagents or runtime.
      */
     fun wrapAgent(agent: Agent): AgentKt = AgentKt(JLlm4s.wrapAgent(agent))
 }
