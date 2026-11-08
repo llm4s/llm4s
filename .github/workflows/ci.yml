@@ -124,6 +124,13 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # Fails when docs/_data/support.yml (the Support Policy's table of release lines) lacks CHANGELOG.md's newest
+      # release, or is malformed. The release workflow runs the same check against the tag before publishing (#2289).
+      - name: Check the support table lists the latest release
+        run: |
+          scripts/test-check-support-table.sh
+          scripts/check-support-table.sh
+
       # Every docs page has its own search title and meta description, not the site-wide one: jekyll-seo-tag falls back
       # to it, so a page without one looks like every other page in a search result. This reads the front matter; the
       # built site is checked again in pages.yml before a deploy (#2314).
