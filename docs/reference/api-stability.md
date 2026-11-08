@@ -162,7 +162,7 @@ compares it with its own release, `"llm4s-<name>" -> None` holds it back with no
 have one. A module not in the map uses `mimaBaselineVersion`. Today `mimaBaselineVersion` is `None` and the
 map is empty, so no frozen module has a baseline, `sbt mimaReportBinaryIssues` checks nothing and CI passes.
 
-No release so far has set one. 0.5.0 and 0.5.1 are the first releases with the split coordinates, and were
+No release so far has set one. 0.5.0, 0.5.1 and 0.6.0 are the releases with the split coordinates so far, and were
 published without a baseline. 0.4.1 and earlier are a single `llm4s-core` of the pre-modularisation code, so
 they are not usable baselines for the split modules: the packages they hold have since moved to other
 artifacts, and `llm4s-agent` and the provider modules do not exist there. The baseline is set at a pre-1.0

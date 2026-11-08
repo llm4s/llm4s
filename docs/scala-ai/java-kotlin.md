@@ -89,11 +89,6 @@ dependencies {
 }
 ```
 
-{: .warning }
-> `llm4s-kotlin-api` {{ site.data.project.latest_release }} is not on Maven Central: a release workflow fault left it
-> out of the 0.5.0 and 0.5.1 releases. Until a release includes it, build it locally as the
-> [installation guide](../getting-started/installation#for-kotlin-coroutines-and-flow) describes.
-
 Each provider has a builder block, and every call is a suspend function:
 
 ```kotlin

@@ -289,6 +289,7 @@ val ticket: Result[Ticket] = for {
       <li class="is-done"><strong>0.4.x</strong><span>Artifacts renamed to <code>llm4s-*</code></span></li>
       <li class="is-done"><strong>0.5.0</strong><span>Modular artifacts, provider SPI, Java, Spring Boot, cats-effect and ZIO modules</span></li>
       <li class="is-done"><strong>0.5.1</strong><span>Multimodal messages, agent harness SPIs, Agent Skills</span></li>
+      <li class="is-done"><strong>0.6.0</strong><span>Subagents, durable multi-machine agents, Secret credentials, Kotlin API</span></li>
       <li><strong>Pre-1.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
       <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>
