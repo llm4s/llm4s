@@ -249,10 +249,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Configuration
 
 - **Added** `Llm4sConfig.from(config)` (experimental): an `Llm4sSettings` with `Llm4sConfig`'s methods, reading a `Config` the app already
-  has (Play, Pekko, per tenant or test) in place of `application.conf` [#2340](https://github.com/llm4s/llm4s/issues/2340).
-- **Added** configuration in code: every provider's `fromValues` takes model, key, then base URL; a `ModelRegistryService`
-  in scope supplies `fromValues`' `ContextWindowResolver`; guide `docs/getting-started/configuration-in-code.md` with
-  ciris and zio-config examples [#2340](https://github.com/llm4s/llm4s/issues/2340).
+  has (Play, Pekko, per tenant or test) in place of `application.conf`, or set up in code: a `ModelRegistryService` in scope
+  supplies `fromValues`' `ContextWindowResolver`; guide `docs/getting-started/configuration-in-code.md` with ciris and
+  zio-config examples [#2340](https://github.com/llm4s/llm4s/issues/2340).
 - **Fixed** `CheckPolicies` CLI now rejects unknown `--env` arguments with exit code 2 before loading any
   configuration, and maps aliases such as `dev-sandbox` and `prod-safe` to their canonical environment [#2260](https://github.com/llm4s/llm4s/issues/2260).
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`

@@ -32,7 +32,7 @@ Use the configuration your application already has instead of llm4s's `applicati
 
 `Llm4sConfig` reads all of these from `application.conf`
 ([Configuration](configuration)). Nothing requires it: the same provider can be set up
-in any of the four ways below, and they produce the same client.
+in any of the five ways below, and they produce the same client.
 
 ## 1. `application.conf`
 
