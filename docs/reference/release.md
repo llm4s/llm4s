@@ -428,6 +428,6 @@ We follow semantic versioning (MAJOR.MINOR.PATCH):
 - MINOR: New features, backwards compatible
 - PATCH: Bug fixes, backwards compatible
 
-Current documented version series: 0.5.x (pre-1.0 development). Until the MiMa baseline is set, any release,
+Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set, any release,
 patch included, may carry a breaking change, listed in the CHANGELOG with a migration note; see
 [Compatibility Policy](compatibility-policy#versions).

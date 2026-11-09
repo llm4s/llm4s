@@ -34,7 +34,7 @@ You need **JDK 21 or newer** and **Maven 3.9 or newer**. The sample's default pr
 ```bash
 ollama pull llama3.2
 cd modules/samples/quarkus-java
-mvn quarkus:dev -Dllm4s.version=0.5.1
+mvn quarkus:dev -Dllm4s.version=0.6.0
 ```
 
 Then ask it something:

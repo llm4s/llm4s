@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Roadmap
-description: "The LLM4S roadmap to 1.0 as of October 2026: current status, maturity of each capability, the production-readiness pillars and phases."
+description: "The LLM4S roadmap to 1.0 as of November 2026: current status, maturity of each capability, the production-readiness pillars and phases."
 search_title: "LLM4S roadmap: the path to 1.0"
 parent: Reference
 nav_order: 5
@@ -9,7 +9,7 @@ nav_order: 5
 
 # LLM4S Roadmap
 
-This page reflects the pre-1.0 roadmap as of **October 2026**: the latest release is **v0.5.1**; v0.5.0 was the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan for getting there.
+This page reflects the pre-1.0 roadmap as of **November 2026**: the latest release is **v0.6.0**; v0.5.0 was the first with the split module artifacts. It replaces the June 2026 snapshot, which still named v0.3.2 as current, and it links the community mentorship tracks ([LFX](https://github.com/llm4s/llm4s/blob/main/LFX%20Mentorship/Project%20Ideas/2026.md), [ESoC](https://github.com/llm4s/llm4s/blob/main/European%20Summer%20of%20Code/Project%20Ideas/2026.md)) to the phases they advance. Which packages 1.0 freezes is stated on [1.0 Scope](v1-scope); this page is the plan for getting there.
 
 LLM4S has broad, working framework functionality today: multi-provider clients (including Vertex AI and AWS Bedrock), agents, tool calling, RAG/vector stores, GraphRAG/Neo4j, memory, guardrails (including prompt-injection detection), tracing, metrics, JMH benchmarks, reliability wrappers, workspace isolation, MCP transports with auth hardening, multimodal APIs (vision, image generation, speech), and Java, Kotlin, Spring Boot, cats-effect and ZIO integrations. The code that used to ship as one `core` artifact is split into per-concern modules ([#1126](https://github.com/llm4s/llm4s/issues/1126)); that split shipped in 0.5.0. The remaining v1.0 work is productization: a binary-compatibility baseline, provider capability parity, default-deny tool/MCP security, unified cost telemetry, deterministic CI, runnable docs, and polished reference applications.
 
@@ -17,9 +17,9 @@ LLM4S has broad, working framework functionality today: multi-provider clients (
 
 | | |
 |---|---|
-| **Latest release tag** | v0.5.1 (2026-10-15) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
-| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), with 0.5.2 adding the Kotlin API → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
-| **Main branch** | Work after 0.5.1; see the CHANGELOG's `Unreleased` section |
+| **Latest release tag** | v0.6.0 (2026-11-08) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
+| **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), → **0.6.0**: subagents, production agent adapters, the Kotlin API (**done**) → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
+| **Main branch** | Work after 0.6.0; see the CHANGELOG's `Unreleased` section |
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |
 | **Stability** | Pre-1.0, API stabilizing; each package's tier is on [1.0 Scope](v1-scope) |
 | **Scala support** | Scala 3.7.1 only. Scala 2.13 is deferred to after 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)) |
@@ -51,7 +51,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 | **Tooling and MCP** | The tool API stays in `llm4s-core`; the built-in tools are in `llm4s-agent-tools`; `llm4s-mcp` has client and server, Streamable HTTP, HTTP+SSE, bearer-token auth, and public-bind protection; workspace isolation is in `llm4s-workspace-*`. | Default-deny policies, allowlists, capability scoping, audit logs, tool-poisoning mitigations, computer-use tool, strict schema validation. *(ESoC tracks)* |
 | **Observability** | Console tracing in core; Langfuse, the trace collector and `CostTracker` in `llm4s-observability`; OpenTelemetry in `llm4s-observability-otel`; Prometheus in `llm4s-observability-prometheus`; tracing backends are discovered through an SPI. Image-generation cost hooks and agent usage summaries exist. | Unified cost/token telemetry across request/agent/session/RAG/multimodal; retention/redaction guidance; agent run replay; regression thresholds on JMH. *(ESoC track)* |
 | **Reliability** | `ReliableClient` supports retry, circuit breaker, deadlines, rate limiting and metrics; every client sends through one HTTP layer that honours a 503's `Retry-After`; a sample exists. | Multi-provider **failover & hedging**; consistent timeouts/retries across providers; health checks. *(LFX track)* |
-| **JVM interop** | `llm4s-java-api` (Java-friendly layer), a Kotlin coroutine API, `llm4s-spring-boot-starter`, `llm4s-effect` (cats-effect), `llm4s-zio` and `llm4s-pekko` (Apache Pekko Streams), plus a Gradle integration guide and `gradle-demo`. These ship in 0.5.0, except the Kotlin API, which ships from 0.5.2. | Maven quickstart; CI-tested sample projects for each path. |
+| **JVM interop** | `llm4s-java-api` (Java-friendly layer), a Kotlin coroutine API, `llm4s-spring-boot-starter`, `llm4s-effect` (cats-effect), `llm4s-zio` and `llm4s-pekko` (Apache Pekko Streams), plus a Gradle integration guide and `gradle-demo`. These ship in 0.5.0, except the Kotlin API, which ships from 0.6.0. | Maven quickstart; CI-tested sample projects for each path. |
 | **Docs and examples** | Broad docs and samples, migration guides (`0x-to-1x`), troubleshooting, [1.0 Scope](v1-scope), the [compatibility policy](compatibility-policy), GOVERNANCE/MAINTAINERS/RELEASES, Scaladoc for every module, and install snippets that follow the latest release (checked by `scripts/check-doc-versions.sh`). | Remove/label remaining pseudocode placeholders; runnable golden-path tutorials from capability metadata. |
 | **Security and governance** | Secret scanning, API-key redaction, workspace sandboxing, Dependabot, a **threat model** ([`security.md`](security)), config-policy module + CI gate, MCP auth hardening, DCO checks. | SBOM, default-deny tool/MCP policies, audit guidance, release-gate security suite. *(ESoC track)* |
 
@@ -62,7 +62,7 @@ The **Status** column in the phase tables below is separate from maturity: **Lan
 | **Testing and CI** | Broad suite, Ubuntu/Windows CI, integration suites in tiers (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud`) enforced by `it/itTierCheck`, per-module coverage floors, DCO, config-policy check. | Suite timeouts / hang isolation; split fast/integration/Docker/provider/benchmark jobs. |
 | **API stability** | `@Stable`/`@Experimental` mark a public type's tier in the code; a [compatibility and deprecation policy](compatibility-policy) is published; `frozenDependencyCheck` and `publishedArtifactsCheck` guard the frozen modules and the artifact list; MiMa is wired into the build. | Set the MiMa baseline at a pre-1.0 release once the designs are final, and enforce it from 1.0 once the frozen surface has survived two releases. |
 | **Provider parity** | Broad coverage, one SPI, a provider testkit; uneven feature parity. | Fake-provider contracts; more declared facts in the generated capability matrix. |
-| **JVM adoption** | Strong Scala-native design; Java, Spring Boot, cats-effect and ZIO modules, published from 0.5.0, and Kotlin from 0.5.2. | Maven and Gradle paths with CI-tested runnable samples. |
+| **JVM adoption** | Strong Scala-native design; Java, Spring Boot, cats-effect and ZIO modules, published from 0.5.0, and Kotlin from 0.6.0. | Maven and Gradle paths with CI-tested runnable samples. |
 | **Security** | Threat model, Dependabot, MCP auth/bind, redaction, config-policy, prompt-injection detector. | Default-deny tool/MCP, allowlists, audit logs, SBOM, release-gate tests. |
 | **Performance and cost** | JMH module, `CostTracker`, image/agent usage hooks. | Unified cost telemetry; JMH regression thresholds; failover/hedging. |
 | **Documentation trust** | Migrations, troubleshooting, governance docs, 1.0 scope, versioned install snippets, many samples. | Golden-path tutorials generated from tested capability metadata. |
@@ -159,6 +159,7 @@ Target: v1.0 RC · **LFX + ESoC tracks**.
 | **v0.4.1** | Fixes to the Neo4j and Qdrant stores, and integration suites that had been run by nothing now run in tiers. |
 | **v0.5.0** | The modular split (slices 1–7); the provider SPI and testkit; Bedrock, watsonx.ai and Jina providers; `llm4s-java-api`, Spring Boot, cats-effect and ZIO modules; the typed graph runtime prototype; the `@Stable`/`@Experimental` tiers, the compatibility policy and MiMa wiring; the staged-deployment template. |
 | **v0.5.1** | Multimodal content parts in user messages and tool results; the agent harness's backend SPIs (`FileBackend`, `SandboxBackend`, `LongTermStore`), filesystem tools, context management (summarisation, tool-output offload), Agent Skills, instruction memory (`AGENTS.md`) and the harness profile (`HarnessProfile`). |
+| **v0.6.0** | Typed subagents (child threads, budgets, supervision, nested streams); `PostgresCheckpointer`, the durable run queue and `AgentWorker`; `Secret` credentials, `apiKeyFile` and `ApiKeyProvider`; content-free tracing by default and the OpenTelemetry GenAI conventions; xAI, Perplexity and Entra ID for Azure; the Java agent, streaming, tools and RAG facades; the first published `llm4s-kotlin-api`; `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-tapir`, `llm4s-repl` and `llm4s-doctor`; Elasticsearch/OpenSearch and Redis vector stores. |
 
 ## Community Mentorship Tracks (2026)
 
