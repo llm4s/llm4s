@@ -20,15 +20,6 @@ import upickle.default.ReadWriter
 
 import scala.collection.concurrent.TrieMap
 
-final case class WriteFileArgs(path: String, content: String) derives ReadWriter
-
-final case class PermissionRulesResult(
-  decisions: Vector[String],
-  deniedResult: String,
-  files: Map[String, String],
-  finalAnswer: String
-)
-
 /**
  * Shows allow, deny and ask permission rules with an in-memory file tool and a scripted model.
  *
@@ -36,6 +27,15 @@ final case class PermissionRulesResult(
  * `sbt "samples/runMain org.llm4s.samples.agent.PermissionRulesExample"`
  */
 object PermissionRulesExample {
+  final case class WriteFileArgs(path: String, content: String) derives ReadWriter
+
+  final case class PermissionRulesResult(
+    decisions: Vector[String],
+    deniedResult: String,
+    files: Map[String, String],
+    finalAnswer: String
+  )
+
   private val SourcePath = "/src/A.scala"
   private val DeniedPath = "/etc/passwd"
   private val DeployPath = "/deploy/app.yaml"
@@ -104,12 +104,14 @@ object PermissionRulesExample {
       denied <- toolResults
         .find(_.contains(s"Denied: write $DeniedPath"))
         .toRight(ValidationError("permission rules example", "the model did not receive the denied tool result"))
+      allowedWriteObserved  = files.contains(SourcePath) && toolResults.exists(_.contains(SourcePath))
+      approvedWriteObserved = files.contains(DeployPath) && toolResults.exists(_.contains(DeployPath))
     } yield PermissionRulesResult(
       decisions = Vector(
-        s"allowed write $SourcePath",
-        s"denied write $DeniedPath",
-        s"asked write $DeployPath -> approved"
-      ),
+        Option.when(allowedWriteObserved)(s"allowed write $SourcePath"),
+        Option.when(!files.contains(DeniedPath) && denied.nonEmpty)(s"denied write $DeniedPath"),
+        Option.when(approvedWriteObserved)(s"asked write $DeployPath -> approved")
+      ).flatten,
       deniedResult = denied,
       files = files.toMap,
       finalAnswer = answer
