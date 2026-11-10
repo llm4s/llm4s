@@ -1,0 +1,11 @@
+# The client the sample builds (see Llm4sSettings). The default is a local Ollama server at http://localhost:11434,
+# which needs no key: `ollama pull llama3.2` first. Override any key with -D, for example
+#   gradle run -Dllm4s.provider=openai-compatible -Dllm4s.base-url=https://api.openai.com/v1 -Dllm4s.model=gpt-4o-mini
+# or with an environment variable (LLM4S_MODEL, LLM4S_API_KEY).
+server:
+  port: 8080
+llm4s:
+  provider: ollama
+  model: llama3.2
+  # base-url: http://localhost:11434
+  # api-key:

@@ -483,6 +483,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
   suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
   [#1468](https://github.com/llm4s/llm4s/issues/1468).
+- **Added** Micronaut 4 and Helidon SE 4 guides ([micronaut](docs/guide/micronaut.md), [helidon](docs/guide/helidon.md))
+  with runnable Gradle samples, tested in CI with `FakeLlmClient` [#2281](https://github.com/llm4s/llm4s/issues/2281).
 - **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
   directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
   extractor used, character and line counts, metadata, a preview and any extraction error
