@@ -151,8 +151,81 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     Message.validateConversation(sent.toList) shouldBe Right(())
   }
 
-  "ContextPruning.defaultTokenCounter" should "estimate words times 1.3" in {
-    ContextPruning.defaultTokenCounter(UserMessage("one two three four five six seven eight nine ten")) shouldBe 13
+  // The counter's job is the tokens a provider is sent, so `maxTokens` keeps a request inside the window.
+  "ContextPruning.defaultTokenCounter" should "count ten common words as about ten tokens, plus message framing" in {
+    val n = ContextPruning.defaultTokenCounter(UserMessage("one two three four five six seven eight nine ten"))
+    n should ((be >= 10).and(be <= 20))
+  }
+
+  /** A tool result as providers return it: minified JSON, no whitespace. */
+  private lazy val minifiedJson: String =
+    ujson
+      .Arr((1 to 3000).map(i => ujson.Obj("id" -> i, "name" -> s"item-$i", "tags" -> ujson.Arr("alpha", "beta")))*)
+      .render()
+
+  it should "count minified JSON by its tokens, not by its spaces" in {
+    minifiedJson.exists(_.isWhitespace) shouldBe false
+    // any BPE tokenizer averages at most four characters a token on JSON
+    ContextPruning.defaultTokenCounter(ToolMessage(minifiedJson, "c1")) should be >= minifiedJson.length / 4
+    ContextPruning.defaultTokenCounter(
+      AssistantMessage(None, Seq(ToolCall("c1", "t", ujson.read(minifiedJson))))
+    ) should be >= minifiedJson.length / 4
+  }
+
+  it should "count text with no spaces, such as a base64 blob or a long URL, by its length" in {
+    val blob = java.util.Base64.getEncoder.encodeToString(Array.tabulate[Byte](30_000)(i => (i * 31).toByte))
+    ContextPruning.defaultTokenCounter(UserMessage(blob)) should be >= blob.length / 4
+  }
+
+  // The default counter keeps counts by message; a count must follow the message, never another with the same text.
+  it should "give each message its own count when messages share their text" in {
+    val text  = minifiedJson.take(2_000)
+    val plain = AssistantMessage(text)
+    val withCalls =
+      AssistantMessage(
+        Some(text),
+        Seq(ToolCall("c1", "search", ujson.Arr(ujson.read(minifiedJson).arr.take(100).toSeq*)))
+      )
+    val counted = ContextPruning.defaultTokenCounter(plain)
+    ContextPruning.defaultTokenCounter(withCalls) should be > counted + 1_000
+    ContextPruning.defaultTokenCounter(plain) shouldBe counted
+    ContextPruning.defaultTokenCounter(UserMessage(text)) shouldBe counted // same text and framing, either role
+  }
+
+  it should "count a message with inline media bytes, media included (counting only; whether it is cached isn't visible)" in {
+    val pixels = org.llm4s.media.MediaSource.Inline(IArray.fill[Byte](64 * 1024)(1))
+    val image  = ContentPart.image(pixels, org.llm4s.media.MediaType.Png).value
+    val asked  = UserMessage(Vector(ContentPart.Text("what is in this chart?"), image))
+    ContextPruning.defaultTokenCounter(asked) should be > ContextPruning.defaultTokenCounter(
+      UserMessage("what is in this chart?")
+    )
+    ContextPruning.defaultTokenCounter(asked) shouldBe ContextPruning.defaultTokenCounter(asked)
+  }
+
+  it should "count a tool result containing special-token names instead of failing" in {
+    val page = "a page about LLMs: <|endoftext|> ends a document, <|fim_prefix|> starts a fill-in"
+    ContextPruning.defaultTokenCounter(ToolMessage(page, "c1")) should be > 10
+    ContextPruning
+      .prune(
+        Seq(UserMessage("q1"), AssistantMessage("a1"), UserMessage(page)),
+        ContextWindowConfig(maxTokens = Some(8_000)),
+        ContextPruning.defaultTokenCounter
+      )
+      .last shouldBe UserMessage(page)
+  }
+
+  it should "let pruning drop an old tool result that does not fit maxTokens" in {
+    val old = Seq(
+      UserMessage("q1"),
+      AssistantMessage(None, Seq(ToolCall("c1", "search", ujson.Obj("q" -> "items")))),
+      ToolMessage(minifiedJson, "c1"),
+      AssistantMessage("a1")
+    )
+    val current = UserMessage("q2")
+    val cfg     = ContextWindowConfig(maxTokens = Some(8_000))
+    val sent    = ContextPruning.prune(old :+ current, cfg, ContextPruning.defaultTokenCounter)
+    sent.collect { case t: ToolMessage => t } shouldBe empty
+    sent.last shouldBe current
   }
 
   it should "leave a conversation under the limit untouched" in {
