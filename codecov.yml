@@ -226,6 +226,10 @@ flags:
     paths:
       - modules/reactor/src/main/scala
     carryforward: true
+  spring-ai:
+    paths:
+      - modules/spring-ai/src/main/scala
+    carryforward: true
   deploy-service:
     paths:
       - modules/deploy-service/src/main/scala

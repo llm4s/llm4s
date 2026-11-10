@@ -106,6 +106,8 @@ object PomDescriptions {
       "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
+    "llm4s-spring-ai" ->
+      "Spring AI interop for LLM4S: an LLM4S client as a Spring AI ChatModel and EmbeddingModel, and a Spring AI ChatModel as an LLM4S client.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
     "llm4s-tapir" ->

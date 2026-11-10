@@ -16,6 +16,9 @@ replaces it - a first call, structured output, a tool, a conversation, embedding
 Spring Boot controller and a test. No Scala is needed.
 {: .fs-6 .fw-300 }
 
+To keep your Spring AI `ChatClient` code and run it over llm4s instead of replacing it, see
+[Using LLM4S with Spring AI](spring-ai).
+
 Every llm4s Java block on this page is compiled by javac in CI and run against `FakeLlmClient` or a scripted client,
 with no network: `JavaMigrationGuideSpec` checks that each block is, word for word, in one of the source files the
 build compiles (in `llm4s-java-api`, `llm4s-java-rag`, `llm4s-reactor` and the Spring Boot starter's tests), so the

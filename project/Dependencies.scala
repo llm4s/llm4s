@@ -141,6 +141,12 @@ object Versions {
   // release by default, and CI's "Spring Boot 4.x" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
   val springBoot4Baseline = "4.0.8"
   val springBoot4         = sys.props.getOrElse("llm4s.springBoot4Version", springBoot4Baseline)
+
+  // Spring AI (Apache-2.0), only llm4s-spring-ai (#2278), as a provided dependency. The module is built against the
+  // oldest supported 2.0.x release; CI's "Spring AI 2.0.x (latest)" job runs its specs again with
+  // `-Dllm4s.springAiVersion=<latest 2.0.x>`, so the range docs/guide/spring-ai.md states is tested at both ends.
+  val springAiBaseline = "2.0.0"
+  val springAi         = sys.props.getOrElse("llm4s.springAiVersion", springAiBaseline)
 }
 
 object Deps {
@@ -304,6 +310,9 @@ object Deps {
   // The release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
   val springWebAnnotations =
     ("org.springframework" % "spring-web" % Versions.springFrameworkBaseline).excludeAll(ExclusionRule("*", "*"))
+  // Spring Boot 4's auto-configuration annotations, for llm4s-spring-ai's auto-configuration (#2278): Spring AI 2.0
+  // needs Spring Framework 7, so that module is built against Boot 4.
+  val springBoot4AutoConfigure = "org.springframework.boot" % "spring-boot-autoconfigure" % Versions.springBoot4
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",
@@ -314,6 +323,10 @@ object Deps {
     "spring-boot-starter-test",
     "spring-boot-test-autoconfigure"
   ).map(name => "org.springframework.boot" % name % Versions.springBoot4)
+  // Spring AI's model API (ChatModel, EmbeddingModel, messages, tool callbacks), for llm4s-spring-ai (#2278), and its
+  // ChatClient, which the module's specs and the sample build over the adapted model.
+  val springAiModel      = "org.springframework.ai" % "spring-ai-model"       % Versions.springAi
+  val springAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAi
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().

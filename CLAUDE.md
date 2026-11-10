@@ -125,6 +125,7 @@ llm4s/
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
+│   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
