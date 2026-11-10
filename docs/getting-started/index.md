@@ -33,6 +33,7 @@ This section will guide you through:
 13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
 14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
 15. **[Try llm4s in the REPL](repl)** - `ask`, `extract` and `chat()` behind one import, in the Scala CLI REPL, a worksheet or a script
+16. **[Coming from Python?](../guide/for-python-developers)** - OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3, one Scala concept at a time
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 

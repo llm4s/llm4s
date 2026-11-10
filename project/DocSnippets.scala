@@ -42,6 +42,7 @@ object DocSnippets {
     "guide/direct-style.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
+    "guide/for-python-developers.md",
     "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",

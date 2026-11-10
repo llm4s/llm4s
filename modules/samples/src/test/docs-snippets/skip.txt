@@ -152,3 +152,4 @@ getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not 
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not Scala source
 guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
+guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
