@@ -100,7 +100,7 @@ that the program on this page is the source file, so what you read here compiles
 ## Use a real provider
 
 Run with `--live`, or build the agent on your provider's client. For checks code cannot do, such as "is this
-answer on topic", the LLM-as-judge guardrails (`LLMSafetyGuardrail`, `LLMQualityGuardrail`, ...) in
+answer on topic", the LLM-as-judge guardrails ({% include api.html t="org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail" %}, `LLMQualityGuardrail`, ...) in
 `org.llm4s.agent.guardrails.builtin` take a client of their own, often a smaller, cheaper model. See
 [Guardrails](../../guide/agents/guardrails).
 

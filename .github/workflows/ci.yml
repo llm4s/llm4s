@@ -170,6 +170,14 @@ jobs:
       - name: Test the sitemap scripts
         run: scripts/test-check-site-sitemaps.sh
 
+      # Guides and Scaladoc cross-linked (#2291): the api.html link check and the Scaladoc cross-link check, which the
+      # ScalaDoc job runs on the real output, against a fake Scaladoc; the unified search index and its 20 queries,
+      # which pages.yml runs on the built site, against a fake site searched with just-the-docs's lunr (from npm).
+      - name: Test the Scaladoc cross-link and site search scripts
+        run: |
+          scripts/test-check-api-links.sh
+          scripts/test-check-site-search.sh
+
       # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
       # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
       # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
@@ -442,6 +450,17 @@ jobs:
           scripts/test-check-scaladoc-warnings.sh
           sbt doc docs/doc 2>&1 | tee scaladoc.log
           scripts/check-scaladoc-warnings.sh scaladoc.log
+
+      # The aggregate Scaladoc's cross-links (#2291): source links at the revision the build chose (the release tag on a
+      # tagged commit, as sbt-dynver sees it, else `main`), links to JDK and Scala library types, a root page linking
+      # the guides; and every `{% include api.html t="..." %}` in the guides names a page it generated, so a moved or
+      # renamed type fails here rather than 404ing on the site.
+      - name: Check the Scaladoc's cross-links and the guides' API links
+        run: |
+          API_DIR=$(ls -d modules/docs/target/scala-3*/api)
+          REV=$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo main)
+          scripts/check-scaladoc-crosslinks.sh "$API_DIR" "$REV"
+          scripts/check-api-links.sh "$API_DIR"
 
   # Code coverage, measured on one configuration (ubuntu) to avoid duplication, in four legs that run in parallel.
   #
