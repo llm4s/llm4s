@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  A standalone Quarkus application that calls llm4s from Java through llm4s-java-api: a CDI producer for the
-  JLlmClient, configured with @ConfigMapping, and a REST resource at /chat. See README.md and docs/guide/quarkus.md.
+  A standalone Quarkus application that calls llm4s from Java through the quarkus-llm4s extension (modules/quarkus):
+  the JLlmClient bean the extension builds from application.properties, a REST resource at /chat and the extension's
+  readiness check. See README.md and docs/guide/quarkus.md.
 
-  Build against a release with -Dllm4s.version=0.5.1 (or later). The default is the locally built snapshot that
-  `sbt publishM2` puts in your local Maven repository; CI builds and tests the sample against it, so the sample cannot
-  drift from the API on main.
+  quarkus-llm4s is not published yet (#2280), so the sample builds against the snapshot in your local Maven
+  repository: `sbt publishM2` for the llm4s modules, then `mvn install` in modules/quarkus. CI builds and tests the
+  sample against both, so the sample cannot drift from the extension on main.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -48,11 +49,12 @@
   </dependencyManagement>
 
   <dependencies>
-    <!-- Scala 3 only, and Maven does not add the cross-version suffix: write _3 yourself. The POM brings
-         llm4s-core and llm4s-agent; the provider modules the producer builds clients for are declared below. -->
+    <!-- The extension: llm4s-java-api, and the client beans built from the llm4s.* properties. It brings no provider
+         module: declare the ones your sections name. Those are Scala 3 only, and Maven does not add the cross-version
+         suffix: write _3 yourself. -->
     <dependency>
       <groupId>org.llm4s</groupId>
-      <artifactId>llm4s-java-api_3</artifactId>
+      <artifactId>quarkus-llm4s</artifactId>
       <version>${llm4s.version}</version>
     </dependency>
     <dependency>
@@ -72,15 +74,16 @@
       <version>${llm4s.version}</version>
     </dependency>
 
-    <!-- Quarkus REST (RESTEasy Reactive) and CDI (ArC). Quarkus routes SLF4J to its own log manager, so llm4s's logs
+    <!-- Quarkus REST (RESTEasy Reactive). Quarkus routes SLF4J to its own log manager, so llm4s's logs
          appear in the Quarkus log with no logging backend added here: do not add logback. -->
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-rest</artifactId>
     </dependency>
+    <!-- With it, the extension registers a readiness check of the client at /q/health/ready. -->
     <dependency>
       <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-arc</artifactId>
+      <artifactId>quarkus-smallrye-health</artifactId>
     </dependency>
 
     <dependency>
@@ -116,10 +119,6 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.14.0</version>
-        <configuration>
-          <!-- @ConfigMapping and CDI read parameter names. -->
-          <parameters>true</parameters>
-        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

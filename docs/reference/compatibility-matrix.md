@@ -58,7 +58,7 @@ configuration alone ([recipes](../guide/providers#openai-compatible-endpoints)).
 
 Read from the build: the Scala version and the JDK floor from `project/Dependencies.scala`, the JDKs and the latest
 Spring Boot releases from the CI workflow, Kotlin from the Kotlin API's Gradle build and Quarkus from the Quarkus
-sample.
+extension's Maven build.
 
 - **Scala**: {{ site.data["tested-versions"].scala }}, Scala 3 only.
 - **Scala 2.13**: call-only, via the TASTy reader ([Using LLM4S from Scala 2.13](../getting-started/scala-2-13)); CI
