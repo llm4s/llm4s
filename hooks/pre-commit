@@ -96,6 +96,7 @@ map_file_to_project() {
     modules/workspace/workspaceClient/*)  echo "workspaceClient" ;;
     modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
     modules/spring-boot-starter/*)        echo "springBootStarter" ;;
+    modules/secrets-vault/*)              echo "secretsVault" ;;
     modules/deploy-service/*)             echo "deployService" ;;
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
@@ -283,6 +284,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE azureIdentity
+      set_add DOWNSTREAM_COMPILE secretsVault
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
@@ -453,6 +455,9 @@ propagate_downstream() {
       ;;
     jev)
       set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    secretsVault)
       set_add DOWNSTREAM_COMPILE it
       ;;
     cohere)

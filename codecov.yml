@@ -127,6 +127,9 @@ flags:
   jev:
     paths:
       - modules/providers/jev/src/main/scala
+  secrets-vault:
+    paths:
+      - modules/secrets-vault/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala

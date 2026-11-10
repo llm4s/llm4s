@@ -342,6 +342,7 @@ lazy val llm4s = (project in file("."))
     anthropic,
     openai,
     azureIdentity,
+    secretsVault,
     openaiCompatible,
     voyage,
     bedrock,
@@ -1591,6 +1592,26 @@ lazy val azureIdentity = (project in file("modules/providers/azure-identity"))
     )
   )
 
+// HashiCorp Vault (#2479): an `ApiKeyProvider` reading a provider's API key from Vault's KV secrets engine, cached
+// and read again every refresh interval. One `GET` over llm4s's own HTTP client, so no Vault SDK and no dependency
+// beyond core; `VaultApiKeyProviderSpec` in modules/it runs it against Vault in a container (@Docker).
+lazy val secretsVault = (project in file("modules/secrets-vault"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-secrets-vault",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage secretsVault/test secretsVault/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -2374,7 +2395,9 @@ lazy val it = (project in file("modules/it"))
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
     deployService % Test,
     // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
-    schemaDerivation % Test
+    schemaDerivation % Test,
+    // VaultApiKeyProviderSpec (#2479), a @Docker suite against Vault in dev mode
+    secretsVault % Test
   )
   .settings(
     name := "llm4s-it",
@@ -2453,6 +2476,7 @@ lazy val docs = (project in file("modules/docs"))
     anthropic,
     openai,
     azureIdentity,
+    secretsVault,
     openaiCompatible,
     voyage,
     bedrock,
@@ -2517,6 +2541,7 @@ lazy val docs = (project in file("modules/docs"))
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
         (azureIdentity / Compile / sources).value ++
+        (secretsVault / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
