@@ -4,7 +4,7 @@ title: Micronaut
 description: "Call a model from a Micronaut 4 app with LLM4S: a @Factory bean for JLlmClient, settings in application.yml, blocking and streamed endpoints and a health indicator."
 search_title: "Use LLM4S with Micronaut: LLM client as a bean"
 parent: User Guide
-nav_order: 52
+nav_order: 54
 ---
 
 # Using LLM4S with Micronaut
