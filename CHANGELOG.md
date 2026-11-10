@@ -147,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Capabilities
 
 - **Added** `llm4s-capabilities` (Experimental): `client.requireCapabilities[Vision & Tools](provider, model)` checks the model's metadata once and
-  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
+  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile; `model"openai/gpt-4o"` is typed from the bundled model data at compile time, and `completeStructuredOf` is gated on `StructuredOutput` ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
 
 ### Observability
 

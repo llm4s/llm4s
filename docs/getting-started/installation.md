@@ -800,8 +800,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
 ```
 
 `client.requireCapabilities[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
-client not checked for one fails to compile. It is experimental, and depends on `llm4s-core` only. See
-[Capability-Typed Clients](../guide/capabilities).
+client not checked for one fails to compile; `model"openai/gpt-4o"` is typed from the bundled model data at compile
+time. It is experimental, and depends on `llm4s-core`; its `completeStructuredOf` also needs `llm4s-schema-derivation`
+(optional). See [Capability-Typed Clients](../guide/capabilities).
 
 ### Testing your own code (the testkit)
 
