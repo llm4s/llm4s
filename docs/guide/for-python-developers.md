@@ -4,7 +4,7 @@ title: Coming from Python
 description: "LLM code in Python (OpenAI SDK, LangChain, LlamaIndex, Pydantic) next to the same thing in Scala 3 with LLM4S, one Scala concept per step."
 search_title: "From Python LangChain and OpenAI SDK to Scala 3 with LLM4S"
 parent: User Guide
-nav_order: 52
+nav_order: 53
 # scripts/check-cited-issues.sh fails when an issue listed here is closed: refresh the tooling section then.
 cites_open_issues: [2296]
 ---
