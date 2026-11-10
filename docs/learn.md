@@ -64,8 +64,8 @@ description: "A free path to becoming an AI engineer with LLM4S: from your first
         <b>3</b>
         <div>
           <h3>Build your first agent</h3>
-          <p>Give a model tools, keep multi-turn state, add guardrails and hand off to a specialist agent.</p>
-          <p class="lp-steps__links"><a href="{{ '/guide/agents/' | relative_url }}">Agents</a> <a href="{{ '/guide/custom-tools' | relative_url }}">Custom tools</a> <a href="{{ '/guide/agents/guardrails' | relative_url }}">Guardrails</a> <a href="{{ '/guide/agents/handoffs' | relative_url }}">Handoffs</a></p>
+          <p>Give a model tools, keep multi-turn state, add guardrails and hand off to a specialist agent. The support-assistant tutorial builds one a part at a time, with exercises a test suite checks.</p>
+          <p class="lp-steps__links"><a href="{{ '/tutorials/support-assistant/' | relative_url }}">Tutorial: build a support assistant</a> <a href="{{ '/guide/agents/' | relative_url }}">Agents</a> <a href="{{ '/guide/custom-tools' | relative_url }}">Custom tools</a> <a href="{{ '/guide/agents/guardrails' | relative_url }}">Guardrails</a> <a href="{{ '/guide/agents/handoffs' | relative_url }}">Handoffs</a></p>
         </div>
       </li>
       <li>
