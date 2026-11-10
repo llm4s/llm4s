@@ -24,6 +24,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Java AI services](java-ai-services)** - Declare an annotated interface and let `llm4s-java-api` implement it: prompt templates, typed answers, memory and tools (experimental)
 - **[Java RAG](java-rag)** - Ingest documents and ask questions from Java with `llm4s-java-rag`: answers with their sources
 - **[Moving a Java app from LangChain4j or Spring AI](java-migration)** - Each LangChain4j and Spring AI concept in `llm4s-java-api` terms, with compiled before-and-after Java, provider configuration and the gaps
 - **[Java Reactor](java-reactor)** - Stream a reply as a Reactor `Flux<String>` with `llm4s-reactor`, for Spring WebFlux and other reactive pipelines
@@ -39,6 +40,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
 - **[JSON Libraries](json-libraries)** - Use circe, play-json, zio-json or jsoniter-scala with LLM4S: converting at the boundary, structured output and tools
+- **[Replacing a Python Sidecar](replacing-a-python-sidecar)** - Move the LLM logic of a Python sidecar into your Scala service: Python-served models (vLLM, TGI, llama.cpp) as an OpenAI-compatible section, Python-only functions as agent tools over MCP, and a staged migration
 
 ### Agent Framework
 
@@ -51,6 +53,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
 - **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`.
+- **[Tapir Endpoints as Tools](tapir-tools)** - `llm4s-tapir` turns the tapir endpoints a service already has into tools, with each schema derived from its endpoint
 
 ### RAG & Semantic Search
 
@@ -83,10 +86,13 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 
 ### Effect Systems
 
+- **[Pick your stack](effect-systems)** - One program in plain `Result`, cats-effect, ZIO and Pekko side by side: the semantics every bridge shares, and the differences
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
 - **[Spark and Databricks](spark)** - enrich a DataFrame from a Spark job: a client per partition, `ReliableClient`, errors as data
+- **[Apache Flink](flink)** - enrich a Flink 2.x stream from Scala 3: `AsyncDataStream`, a client per task built in `open()`, dead letters as a side output
+- **[Kafka](kafka)** - enrich a Kafka topic with fs2-kafka: bounded concurrency, retries, a dead-letter topic, offsets committed after the produce
 
 ### Java
 

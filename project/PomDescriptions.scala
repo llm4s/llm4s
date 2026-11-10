@@ -98,12 +98,18 @@ object PomDescriptions {
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->
       "Retrieval-augmented generation for LLM4S: vector stores, chunking, reranking, evaluation and extraction.",
+    "llm4s-repl" ->
+      "One-import helpers for trying LLM4S in the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat and pretty-printed history and usage.",
     "llm4s-schema-derivation" ->
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
+    "llm4s-schema-iron" ->
+      "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
+    "llm4s-tapir" ->
+      "Tapir endpoints as LLM4S tools: each tool's parameter schema derived from its endpoint, called through sttp.",
     "llm4s-testkit" ->
       "Scriptable fake LLM client and recorded calls for testing applications built with LLM4S.",
     "llm4s-vectorstore-elasticsearch" ->

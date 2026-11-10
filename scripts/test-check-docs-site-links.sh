@@ -228,5 +228,24 @@ expect_pass "the same links without .md pass"
 new_case; printf -- '---\ntitle: S\n---\n# S\n' > "$C/docs/_hidden.md"; page t '[h](_hidden) [g](/Gemfile)'
 expect_fail "files under an underscore name and the _config.yml exclude list are not served" "(page-missing)"
 
+# ---- news posts (#2319): docs/_posts is checked, and a post is served at /news/YYYY/MM/DD/<slug>/
+post() { # FILE BODY [EXTRA_FRONT_MATTER]
+  mkdir -p "$C/docs/_posts"
+  printf -- '---\ntitle: P\n%s---\n%s\n' "${3:-}" "$2" > "$C/docs/_posts/$1"
+}
+new_case; post 2026-10-15-llm4s-1.0.0.md '# P
+
+## Install
+
+[a](/guide/a#intro) [n](#install)'; page t '[p](/news/2026/10/15/llm4s-1.0.0/#install) [q](/news/2026/10/15/llm4s-1.0.0/)'
+expect_pass "a post's links are checked, and links to a post by its /news/ URL pass"
+
+new_case; post 2026-10-15-x.md '[b](/guide/nope)'
+expect_fail "a broken link in a post fails" "NEW BROKEN LINK docs/_posts/2026-10-15-x.md:4 -> /guide/nope (page-missing)"
+
+new_case; post 2026-10-15-x.md 'x' 'date: 2026-10-16 08:00:00 +0000
+'; page t '[p](/news/2026/10/16/x/) [q](/news/2026/10/15/x/)'
+expect_fail "a post's date front matter sets its URL" "NEW BROKEN LINK docs/guide/t.md:4 -> /news/2026/10/15/x/ (page-missing)"
+
 echo
 if [ "$FAILURES" -eq 0 ]; then echo "All $CASE docs-link cases passed"; else echo "$FAILURES failure(s)"; exit 1; fi

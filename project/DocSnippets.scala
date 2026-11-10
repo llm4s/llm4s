@@ -33,6 +33,7 @@ object DocSnippets {
     "getting-started/installation.md",
     "getting-started/next-steps.md",
     "getting-started/ollama-quickstart.md",
+    "getting-started/repl.md",
     "getting-started/testing-guide.md",
     "guide/agents/handoffs.md",
     "guide/basic-usage.md",
@@ -41,12 +42,20 @@ object DocSnippets {
     "guide/direct-style.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
+    "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
+    "guide/reference-architecture.md",
+    "guide/replacing-a-python-sidecar.md",
+    "guide/tapir-tools.md",
     "guide/vector-store.md",
     "index.md",
     "reference/doctor.md",
-    "reliability-guide.md"
+    "reliability-guide.md",
+    "scala-ai/agents.md",
+    "scala-ai/llm-framework.md",
+    "scala-ai/providers.md",
+    "scala-ai/rag.md"
   )
 
   val packageName = "org.llm4s.docsnippets"

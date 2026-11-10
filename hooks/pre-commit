@@ -114,6 +114,7 @@ map_file_to_project() {
     modules/providers/azure-identity/*)   echo "azureIdentity" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/schema-derivation/*)          echo "schemaDerivation" ;;
+    modules/schema-iron/*)                echo "schemaIron" ;;
     modules/prompt/*)                     echo "prompt" ;;
     modules/testkit/*)                    echo "testkit" ;;
     modules/capabilities/*)               echo "capabilities" ;;
@@ -128,9 +129,11 @@ map_file_to_project() {
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
     modules/doctor/*)                     echo "doctor" ;;
+    modules/repl/*)                       echo "repl" ;;
     modules/config-policy/*)              echo "configPolicy" ;;
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
+    modules/tapir/*)                      echo "llm4sTapir" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
@@ -294,14 +297,17 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agentCheckpointPostgres
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
+      set_add DOWNSTREAM_COMPILE llm4sTapir
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE schemaDerivation
+      set_add DOWNSTREAM_COMPILE schemaIron
       set_add DOWNSTREAM_COMPILE prompt
       set_add DOWNSTREAM_COMPILE testkit
       set_add DOWNSTREAM_COMPILE capabilities
       set_add DOWNSTREAM_COMPILE doctor
+      set_add DOWNSTREAM_COMPILE repl
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
@@ -538,10 +544,14 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
+    llm4sTapir)
+      set_add DOWNSTREAM_COMPILE samples
+      ;;
     testkit)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE repl
       ;;
     providerTestkit)
       set_add DOWNSTREAM_COMPILE rag
@@ -575,8 +585,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       ;;
     schemaDerivation)
+      set_add DOWNSTREAM_COMPILE schemaIron
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE repl
       ;;
     prompt)
       set_add DOWNSTREAM_COMPILE samples
@@ -586,6 +598,8 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+    repl)
+      set_add DOWNSTREAM_COMPILE samples
       ;;
   esac
 }

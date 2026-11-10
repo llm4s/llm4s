@@ -12,11 +12,14 @@ object Versions {
   val scalatestplusScalacheck = "3.2.19.0"
   val junitJupiter            = "5.12.2"
   val reactor                 = "3.8.8"
-  val fansi                   = "0.5.1"
-  val ox                      = "1.0.9"
-  val postgres                = "42.7.11"
-  val sqlite                  = "3.53.2.0"
-  val config                  = "1.4.9"
+  // Apache-2.0. Only llm4s-schema-iron (#2294). Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the
+  // 3.7 compiler cannot read; 3.3.x is built with Scala 3.3 LTS.
+  val iron     = "3.3.2"
+  val fansi    = "0.5.1"
+  val ox       = "1.0.9"
+  val postgres = "42.7.11"
+  val sqlite   = "3.53.2.0"
+  val config   = "1.4.9"
   // NOTE: HikariCP 7.x is available but is a 2-major jump (5->6->7) with a higher
   // JDK baseline; held for separate review.
   val hikariCP   = "5.1.0"
@@ -62,10 +65,13 @@ object Versions {
   // cats-effect and fs2 versions above.
   val http4s = "0.23.30"
 
-  // Tapir, for the unpublished reference app in modules/examples-http (#1459) only. 1.11.20 is the last release
-  // built on the cats-effect, fs2 and http4s versions above (1.11.21 needs cats-effect 3.6); its Swagger UI bundle
-  // brings tapir-openapi-docs, sttp-apispec's YAML writer (circe, circe-yaml) and the swagger-ui webjar.
+  // Tapir (Apache 2.0), for the unpublished reference app in modules/examples-http (#1459) and for llm4s-tapir
+  // (#2299), whose tapir-core needs none of these. 1.11.20 is the last release built on the cats-effect, fs2 and
+  // http4s versions above (1.11.21 needs cats-effect 3.6); its Swagger UI bundle brings tapir-openapi-docs,
+  // sttp-apispec's YAML writer (circe, circe-yaml) and the swagger-ui webjar.
   val tapir = "1.11.20"
+  // sttp client 3 (Apache 2.0), for llm4s-tapir: the version tapir-sttp-client 1.11.20 is built on.
+  val sttpClient3 = "3.10.3"
 
   // ZIO
   val zio = "2.1.16"
@@ -81,6 +87,12 @@ object Versions {
   // resolve it. Never Akka: its licence is not Apache-2.0.
   val pekko = "1.7.1"
 
+  // Play Framework 3 (Apache-2.0), for the unpublished reference app in modules/examples-http (#2339) only. 3.0.12 is
+  // the latest stable release (3.1 is still a milestone); it is built with Scala 3.3 LTS on Pekko 1.0.3 and Pekko HTTP
+  // 1.0.1. The module pins every Pekko artifact Play brings to `pekko` above (Pekko refuses mixed versions at startup),
+  // which Pekko's binary compatibility within 1.x allows.
+  val play = "3.0.12"
+
   // Other JSON libraries, test-only: `docs/guide/json-libraries.md` shows how to use them with llm4s and
   // `JsonLibrariesGuideSpec` (llm4s-samples, unpublished) runs those recipes. No published module depends on them.
   val circe    = "0.14.17"
@@ -89,6 +101,12 @@ object Versions {
   // jsoniter-scala (MIT), built with Scala 3.3 LTS. Compile scope in the unpublished samples only, for
   // `org.llm4s.samples.json.JsoniterStructuredOutputExample` (#2295).
   val jsoniterScala = "2.42.2"
+
+  // fs2-kafka (Apache-2.0), for docs/guide/kafka.md (#2297): compile scope in the unpublished samples and test scope
+  // in modules/it only. 3.7.0 is the last release built on the cats-effect and fs2 versions above (3.8.0 needs
+  // cats-effect 3.6). kafka-clients (Apache-2.0) is pinned to 3.9.1 over the 3.9.0 it brings, for CVE-2025-27817.
+  val fs2Kafka     = "3.7.0"
+  val kafkaClients = "3.9.1"
 
   // AWS SDK
   val awsSdk        = "2.46.14"
@@ -140,14 +158,16 @@ object Deps {
   val junitJupiterApi = "org.junit.jupiter" % "junit-jupiter-api" % Versions.junitJupiter
   val fansi           = "com.lihaoyi"      %% "fansi"             % Versions.fansi
   // llm4s-reactor (#1492): the Flux adapter over the Java facade's Flow.Publisher, and StepVerifier for its specs
-  val reactorCore = "io.projectreactor"      % "reactor-core"    % Versions.reactor
-  val reactorTest = "io.projectreactor"      % "reactor-test"    % Versions.reactor
-  val ox          = "com.softwaremill.ox"   %% "core"            % Versions.ox
-  val postgres    = "org.postgresql"         % "postgresql"      % Versions.postgres
-  val sqlite      = "org.xerial"             % "sqlite-jdbc"     % Versions.sqlite
-  val config      = "com.typesafe"           % "config"          % Versions.config
-  val hikariCP    = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
-  val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
+  val reactorCore = "io.projectreactor" % "reactor-core" % Versions.reactor
+  val reactorTest = "io.projectreactor" % "reactor-test" % Versions.reactor
+  // llm4s-schema-iron (#2294): JSON Schema constraints derived from Iron refinement types
+  val iron       = "io.github.iltotore"    %% "iron"            % Versions.iron
+  val ox         = "com.softwaremill.ox"   %% "core"            % Versions.ox
+  val postgres   = "org.postgresql"         % "postgresql"      % Versions.postgres
+  val sqlite     = "org.xerial"             % "sqlite-jdbc"     % Versions.sqlite
+  val config     = "com.typesafe"           % "config"          % Versions.config
+  val hikariCP   = "com.zaxxer"             % "HikariCP"        % Versions.hikariCP
+  val pureConfig = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
   val openaiJava    = "com.openai"         % "openai-java"    % Versions.openaiJava
   val azureIdentity = "com.azure"          % "azure-identity" % Versions.azureIdentity
@@ -180,8 +200,31 @@ object Deps {
   val tapirHttp4sServer    = "com.softwaremill.sttp.tapir" %% "tapir-http4s-server"     % Versions.tapir
   val tapirSwaggerUiBundle = "com.softwaremill.sttp.tapir" %% "tapir-swagger-ui-bundle" % Versions.tapir
 
+  // llm4s-tapir (#2299): an endpoint's inputs, schemas and codecs, and sttp client 3 to call it. The stub server
+  // runs endpoints in-process, for its specs and the sample only.
+  val tapirCore           = "com.softwaremill.sttp.tapir"   %% "tapir-core"             % Versions.tapir
+  val tapirSttpStubServer = "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server" % Versions.tapir
+  val sttpClient3         = "com.softwaremill.sttp.client3" %% "core"                   % Versions.sttpClient3
+
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
+
+  // Play Framework (unpublished modules/examples-http only; see Versions). Guice wiring and the Pekko HTTP server,
+  // without the sbt plugin: the app routes with SIRD and starts its server itself. `play-test` is Test only.
+  val playGuice           = "org.playframework" %% "play-guice"             % Versions.play
+  val playPekkoHttpServer = "org.playframework" %% "play-pekko-http-server" % Versions.play
+  val playTest            = "org.playframework" %% "play-test"              % Versions.play
+  // The Pekko artifacts Play depends on beyond `pekko-stream`, pinned to `Versions.pekko` in modules/examples-http.
+  val pekkoAlignedWithPlay: Seq[ModuleID] =
+    Seq(
+      "pekko-actor",
+      "pekko-actor-typed",
+      "pekko-slf4j",
+      "pekko-serialization-jackson",
+      "pekko-protobuf-v3",
+      "pekko-stream"
+    )
+      .map(name => "org.apache.pekko" %% name % Versions.pekko)
 
   // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
   // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
@@ -193,6 +236,10 @@ object Deps {
     "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core" % Versions.jsoniterScala
   val jsoniterScalaMacros =
     "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % Versions.jsoniterScala
+
+  // Kafka, unpublished samples and modules/it only (see Versions)
+  val fs2Kafka     = "com.github.fd4s" %% "fs2-kafka"     % Versions.fs2Kafka
+  val kafkaClients = "org.apache.kafka" % "kafka-clients" % Versions.kafkaClients
 
   // Test frameworks (unpublished samples' Test scope only; see Versions)
   val munit             = "org.scalameta"       %% "munit"             % Versions.munit

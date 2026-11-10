@@ -352,6 +352,7 @@ lazy val llm4s = (project in file("."))
     perplexity,
     providerTestkit,
     schemaDerivation,
+    schemaIron,
     prompt,
     testkit,
     capabilities,
@@ -369,6 +370,7 @@ lazy val llm4s = (project in file("."))
     springBootStarterBoot4,
     samples,
     doctor,
+    repl,
     configPolicy,
     workspaceShared,
     workspaceRunner,
@@ -380,6 +382,7 @@ lazy val llm4s = (project in file("."))
     traceOpentelemetry,
     agent,
     agentTools,
+    llm4sTapir,
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
@@ -1448,8 +1451,29 @@ lazy val schemaDerivation = (project in file("modules/schema-derivation"))
     // code runs inside the compiler, where scoverage cannot see all of it; `CompileErrorsSpec` and the golden
     // specs exercise it when they compile.
     coverageFloor(95),
+    // `DerivedToolsSpec` (#2326) reads the Scaladoc of a core method from its TASTy, which the compiler only does
+    // when asked; the guide tells users of `Tools.derive` to add the same flag.
+    Test / scalacOptions += "-Xread-docs",
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
+  )
+
+// `llm4s-schema-iron` (#2294): `SchemaOf` and a uPickle `ReadWriter` for Iron refinement types (`Int :| Positive`),
+// so a derived schema carries the refinement's bounds and a reply that breaks them fails to decode. A module of its
+// own so that Iron (Apache-2.0) is not forced on every user of llm4s-schema-derivation; core gains no dependency.
+// `llm4s-testkit` is test-only: the structured-output specs script their model with `ScriptedLLMClient`.
+lazy val schemaIron = (project in file("modules/schema-iron"))
+  .dependsOn(schemaDerivation, core % "test->test", testkit % Test)
+  .settings(
+    name := "llm4s-schema-iron",
+    commonSettings,
+    // Measured 96.00% statement and 89.04% branch coverage (`sbt coverage schemaIron/test schemaIron/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The constraint walk is a macro,
+    // which runs inside the compiler where scoverage cannot see it; `IronCompileErrorsSpec` exercises it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies += Deps.iron
   )
 
 // `llm4s-prompt` (#2325): the `prompt"..."` and `system"..."` interpolators, which render each value through a
@@ -1698,10 +1722,11 @@ lazy val deployService = (project in file("modules/deploy-service"))
   .settings(DeployServiceDocker.settings)
 
 // Reference apps that serve an llm4s agent over HTTP, `POST /chat` and `POST /chat/stream` (#1459): http4s over
-// `llm4s-effect`, ZIO HTTP over `llm4s-zio`, and Tapir endpoints served by tapir-http4s-server on the http4s app's
-// Ember server. One module for all three: they share the protocol, the error mapping and the settings, and their
-// dependencies do not conflict (ZIO HTTP's Netty is on no other classpath here, its zio is `llm4s-zio`'s, and Tapir
-// 1.11.20 is built on the same cats-effect, fs2 and http4s). Its own module, not part of `samples`, so the HTTP
+// `llm4s-effect`, ZIO HTTP over `llm4s-zio`, Tapir endpoints served by tapir-http4s-server on the http4s app's
+// Ember server, and Play 3 over `llm4s-pekko` (#2339). One module for all four: they share the protocol, the error
+// mapping and the settings, and their dependencies do not conflict (ZIO HTTP's Netty is on no other classpath here,
+// its zio is `llm4s-zio`'s, Tapir 1.11.20 is built on the same cats-effect, fs2 and http4s, and Play runs on
+// `llm4s-pekko`'s Pekko, pinned below). Its own module, not part of `samples`, so the HTTP
 // stacks stay off the examples' classpath. Unpublished: it is what a user copies, so it depends on the library as a user's
 // service would, and it is in neither the published artifacts nor the `docs` Scaladoc aggregate.
 lazy val examplesHttp = (project in file("modules/examples-http"))
@@ -1710,6 +1735,7 @@ lazy val examplesHttp = (project in file("modules/examples-http"))
     agent,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     // `--fake` serves a scripted client, so the app runs with no model and no key.
     testkit,
     ollama,
@@ -1733,9 +1759,15 @@ lazy val examplesHttp = (project in file("modules/examples-http"))
       Deps.tapirHttp4sServer,
       Deps.tapirSwaggerUiBundle,
       Deps.zioHttp,
+      Deps.playGuice,
+      Deps.playPekkoHttpServer,
       Deps.http4sEmberClient % Test,
+      Deps.playTest          % Test,
       Deps.scalatest         % Test
     ),
+    // Play 3.0 is built on Pekko 1.0; `llm4s-pekko` brings 1.7. Pekko refuses to start with mixed versions, so every
+    // Pekko artifact Play brings is pinned to `llm4s-pekko`'s.
+    dependencyOverrides ++= Deps.pekkoAlignedWithPlay,
     appLogging,
     publish / skip := true,
     // The Tapir app's documentation types: `derives Schema` expands there to Tapir's derivation code, hundreds of
@@ -1782,6 +1814,8 @@ lazy val samples = (project in file("modules//samples"))
     observabilityPrometheus,
     agent,
     agentTools,
+    // The tapir sample (#2299) and docs/guide/tapir-tools.md's compiled snippets.
+    llm4sTapir,
     agentCheckpointSqlite,
     // The exit examples (design 4.38): semantic memory, and the coding agent's workspace backends. Test scope:
     // the workspace client's `FakeWorkspace`, and agent-testkit's `ManualClock` for the claims a stopped run leaves.
@@ -1803,7 +1837,14 @@ lazy val samples = (project in file("modules//samples"))
     vectorstoreElasticsearch % Test,
     vectorstoreRedis         % Test,
     // Test scope: docs/reference/doctor.md's `Doctor.run` snippet is compiled (#2283).
-    doctor % Test
+    doctor % Test,
+    // Test scope: docs/guide/reference-architecture.md's gateway policy is compiled and checked against the
+    // enterprise overlay's application.conf (#2315), whose gateway section is driven against provider-testkit's
+    // local server.
+    configPolicy    % Test,
+    providerTestkit % Test,
+    // Test scope: docs/getting-started/repl.md's snippets are compiled (#2342).
+    repl % Test
   )
   .settings(
     name := "llm4s-samples",
@@ -1824,6 +1865,10 @@ lazy val samples = (project in file("modules//samples"))
       // `org.llm4s.samples.json.JsoniterStructuredOutputExample` uses the same bridge.
       Deps.jsoniterScalaCore,
       Deps.jsoniterScalaMacros,
+      // docs/guide/kafka.md (#2297). Compile scope: the runnable pipeline `org.llm4s.samples.kafka` is built on it,
+      // and modules/it runs that pipeline against a broker.
+      Deps.fs2Kafka,
+      Deps.kafkaClients,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
@@ -1832,7 +1877,10 @@ lazy val samples = (project in file("modules//samples"))
       Deps.munitCatsEffect   % Test,
       Deps.weaverCats        % Test,
       Deps.zioTestSamples    % Test,
-      Deps.zioTestSbtSamples % Test
+      Deps.zioTestSbtSamples % Test,
+      // The tapir sample (#2299), `org.llm4s.samples.tapir.TapirEndpointToolsExample`: its endpoints run on tapir's
+      // in-process stub server, so it needs no network. Compile scope, like the sample.
+      Deps.tapirSttpStubServer
     ),
     testFrameworks ++= Seq(
       new TestFramework("munit.Framework"),
@@ -1919,6 +1967,27 @@ lazy val doctor = (project in file("modules/doctor"))
     // DoctorCli.main calls sys.exit with the report's exit code.
     run / fork  := true,
     Test / fork := true
+  )
+
+// `llm4s-repl` (#2342): one-import helpers for the Scala CLI REPL, Metals worksheets and scripts (`ask`, `extract`,
+// `chat()`, `history`, `lastUsage`) over a `Session` context parameter. Experimental, and never a dependency of another
+// module: it prints to the console and keeps the conversation in memory, so it is not for production code. It depends
+// on core, `schemaDerivation` (`extract` is `completeStructuredOf`) and `testkit` (`Session.offline` is a
+// `ScriptedLLMClient`, so a worksheet runs with no key or network). `scripts/check-repl-scripts.sh` runs
+// `examples/repl/` against it with Scala CLI in CI.
+lazy val repl = (project in file("modules/repl"))
+  .dependsOn(core, schemaDerivation, testkit)
+  .settings(
+    name := "llm4s-repl",
+    commonSettings,
+    // Measured 96.06% statement and 93.33% branch coverage (`sbt coverage repl/test repl/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
@@ -2209,6 +2278,30 @@ lazy val agentTools = (project in file("modules/agent-tools"))
     )
   )
 
+// `llm4s-tapir` (#2299) turns tapir endpoints into tools: each tool's parameter schema is derived from its endpoint's
+// inputs, and a call decodes the model's arguments with the endpoint's codecs and sends them with sttp client 3. Like
+// `llm4s-agent-tools` it depends on core's tool API only, not on the agent runtime; its end-to-end spec runs an agent,
+// so the agent and the testkit are test dependencies. tapir-core and sttp's model and shared libraries reach no
+// other published module. Experimental.
+lazy val llm4sTapir = (project in file("modules/tapir"))
+  .dependsOn(core, agent % Test, testkit % Test)
+  .settings(
+    name := "llm4s-tapir",
+    commonSettings,
+    coverageFloor(90), // measured 90.97% statements (84.62% branches), 2026-11-06
+    Test / fork                     := true,
+    Test / parallelExecution        := false,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.tapirCore,
+      Deps.sttpClient3,
+      Deps.ujson,
+      Deps.tapirSttpStubServer % Test,
+      Deps.scalatest           % Test
+    )
+  )
+
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core, knowledgegraph)
   .settings(
@@ -2305,6 +2398,13 @@ lazy val it = (project in file("modules/it"))
     // ContainerisedWorkspaceTest runs against whatever `workspaceRunner/Docker/publishLocal`
     // produced; take the tag from the build so the test and the image cannot drift apart.
     Test / envVars += "LLM4S_WORKSPACE_IMAGE" -> s"llm4s/workspace-runner:${(workspaceRunner / Docker / version).value}",
+    // KafkaTicketPipelineSpec (#2297) runs the Kafka pipeline of docs/guide/kafka.md against a broker. Its two sources are
+    // compiled into this project's tests instead of depending on `samples`, whose resources (its application.conf, and
+    // termflow's reference.conf) would change the configuration every other suite here loads.
+    Test / unmanagedSources ++= {
+      val dir = (samples / baseDirectory).value / "src" / "main" / "scala" / "org" / "llm4s" / "samples" / "kafka"
+      Seq(dir / "Tickets.scala", dir / "TicketPipeline.scala")
+    },
     itTierCheck := ItTiers.check(
       (Test / definedTests).value.map(_.name),
       (Test / fullClasspath).value.map(_.data),
@@ -2314,7 +2414,9 @@ lazy val it = (project in file("modules/it"))
     // noticed rather than by quietly running nothing.
     Test / test := (Test / test).dependsOn(itTierCheck).value,
     libraryDependencies ++= Seq(
-      Deps.scalatest % Test
+      Deps.scalatest    % Test,
+      Deps.fs2Kafka     % Test,
+      Deps.kafkaClients % Test
     )
   )
 
@@ -2361,10 +2463,12 @@ lazy val docs = (project in file("modules/docs"))
     perplexity,
     providerTestkit,
     schemaDerivation,
+    schemaIron,
     prompt,
     testkit,
     capabilities,
     doctor,
+    repl,
     workspaceShared,
     workspaceClient,
     observability,
@@ -2377,6 +2481,7 @@ lazy val docs = (project in file("modules/docs"))
     agentCheckpointPostgres,
     agentMemory,
     agentTools,
+    llm4sTapir,
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
@@ -2422,10 +2527,12 @@ lazy val docs = (project in file("modules/docs"))
         (perplexity / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
+        (schemaIron / Compile / sources).value ++
         (prompt / Compile / sources).value ++
         (testkit / Compile / sources).value ++
         (capabilities / Compile / sources).value ++
         (doctor / Compile / sources).value ++
+        (repl / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
@@ -2438,6 +2545,7 @@ lazy val docs = (project in file("modules/docs"))
         (agentCheckpointPostgres / Compile / sources).value ++
         (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
+        (llm4sTapir / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++

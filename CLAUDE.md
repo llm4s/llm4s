@@ -102,6 +102,7 @@ llm4s/
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
+│   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
 │   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
 │   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
@@ -110,6 +111,7 @@ llm4s/
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── tapir/                 # llm4s-tapir: tapir endpoints as tools, schemas derived from the endpoints (published)
 │   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── agent-checkpoint-sqlite/ # SqliteCheckpointer: the first durable Checkpointer, one SQLite file (published)
 │   ├── agent-checkpoint-postgres/ # PostgresCheckpointer: threads shared across machines, the database's clock (published)
@@ -129,6 +131,7 @@ llm4s/
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── doctor/                # llm4s-doctor: DoctorCli setup checker, run on the application's own classpath (published)
+│   ├── repl/                  # llm4s-repl: ask, extract, chat() helpers for the REPL, worksheets and scripts (published, experimental)
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)

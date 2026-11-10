@@ -144,6 +144,8 @@ docker run --rm -p 9201:9200 -e discovery.type=single-node -e DISABLE_SECURITY_P
 # Start Redis (with the Redis Query Engine) and Valkey (with valkey-search):
 docker run --rm -p 6379:6379 redis/redis-stack-server:7.4.0-v8
 docker run --rm -p 6380:6379 valkey/valkey-bundle:9.0.6
+# Start a single-node Kafka broker (KRaft, no ZooKeeper):
+docker run --rm -p 9092:9092 apache/kafka:3.9.1
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
 export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
@@ -153,6 +155,7 @@ export QDRANT_TEST_URL=http://localhost:6333
 export ELASTICSEARCH_TEST_URL=http://localhost:9200
 export OPENSEARCH_TEST_URL=http://localhost:9201
 export REDIS_TEST_URL=redis://localhost:6379 VALKEY_TEST_URL=redis://localhost:6380
+export KAFKA_TEST_BOOTSTRAP=localhost:9092
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
 
 sbt testIntegration
@@ -227,6 +230,7 @@ sbt testMcpReference
 - Elasticsearch via `ELASTICSEARCH_TEST_URL` and, for a secured cluster, `ELASTICSEARCH_TEST_API_KEY`
 - OpenSearch via `OPENSEARCH_TEST_URL` and, for a secured cluster, `OPENSEARCH_TEST_USERNAME` and `OPENSEARCH_TEST_PASSWORD`
 - Redis (Redis Query Engine) via `REDIS_TEST_URL` and Valkey (`valkey-search`) via `VALKEY_TEST_URL`, as `redis://host:port`
+- Kafka via `KAFKA_TEST_BOOTSTRAP`, as `host:port` (the pipeline of `docs/guide/kafka.md`)
 - The MCP reference server (`@modelcontextprotocol/server-everything`, Streamable HTTP, pinned with its dependency tree in `mcp-reference-server/`) via `MCP_SERVER_URL`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled

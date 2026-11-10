@@ -116,7 +116,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   // ---- Tool parameters
 
-  object Tools {
+  object ToolParameters {
     import org.llm4s.schema.*
     import org.llm4s.toolapi.{ ToolBuilder, ToolFunction }
     import org.llm4s.types.Result
@@ -200,6 +200,55 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       }
   }
 
+  // ---- Tools from methods
+
+  object ToolsFromMethods {
+    import org.llm4s.error.ValidationError
+    import org.llm4s.schema.*
+    import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+    import org.llm4s.types.Result
+    import upickle.default.ReadWriter
+
+    case class Order(id: String, totalCents: Long) derives ReadWriter
+    case class Cancellation(orderId: String, refunded: Boolean) derives ReadWriter
+
+    trait CustomerService {
+
+      /**
+       * Orders placed by a customer, newest first.
+       *
+       * @param customerId the customer's id, for example C-1001
+       * @param limit      at most this many orders
+       */
+      def findOrders(customerId: String, limit: Option[Int]): Result[List[Order]]
+
+      /** Cancel an order that has not shipped yet. */
+      @toolName("cancel")
+      def cancelOrder(
+        @description("The order's id, for example O-17") orderId: String,
+        reason: String
+      ): Either[String, Cancellation]
+
+      @notATool
+      def poolSize: Int
+    }
+
+    def supportTools(service: CustomerService): Result[ToolRegistry] =
+      Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+
+    def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
+      Tool.fromMethod(service.cancelOrder)
+
+    object Live extends CustomerService {
+      def findOrders(customerId: String, limit: Option[Int]): Result[List[Order]] =
+        if (customerId == "C-1001") Right(List(Order("O-17", 4200), Order("O-12", 999)).take(limit.getOrElse(10)))
+        else Left(ValidationError.invalid("customerId", s"no customer $customerId"))
+      def cancelOrder(orderId: String, reason: String): Either[String, Cancellation] =
+        if (orderId == "O-12") Left("O-12 has already shipped") else Right(Cancellation(orderId, refunded = true))
+      def poolSize: Int = 4
+    }
+  }
+
   // ---- An agent's answer
 
   object Agents {
@@ -252,7 +301,15 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
       .find(dir => Files.exists(dir.resolve("docs/guide/derived-schemas.md")))
       .getOrElse(fail("docs/guide/derived-schemas.md was not found in this directory or above it"))
 
-  private val guide = Files.readString(root.resolve("docs/guide/derived-schemas.md"))
+  // The guide without its "Iron refinements" section, whose code needs Iron: `IronGuideSpec` in llm4s-schema-iron
+  // compiles and checks that section the same way.
+  private val guide = {
+    val full  = Files.readString(root.resolve("docs/guide/derived-schemas.md"))
+    val start = full.indexOf("\n## Iron refinements\n")
+    val end   = full.indexOf("\n## ", start + 1)
+    if (start < 0 || end < 0) fail("docs/guide/derived-schemas.md has no \"Iron refinements\" section before another")
+    full.substring(0, start) + full.substring(end)
+  }
   private val thisSource =
     Files.readString(
       root.resolve("modules/schema-derivation/src/test/scala/org/llm4s/schema/guide/DerivedSchemasGuideSpec.scala")
@@ -277,7 +334,7 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 12
+    scalaBlocks should have size 13
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -339,8 +396,10 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
   }
 
   "The tool of the guide" should "send the derived schema as its parameters, and read a call with it" in {
-    val tool = Tools.weatherTool.fold(e => fail(e.toString), identity)
-    tool.toOpenAITool()("function")("parameters") shouldBe org.llm4s.schema.SchemaOf[Tools.WeatherQuery].toJsonSchema()
+    val tool = ToolParameters.weatherTool.fold(e => fail(e.toString), identity)
+    tool.toOpenAITool()("function")("parameters") shouldBe org.llm4s.schema
+      .SchemaOf[ToolParameters.WeatherQuery]
+      .toJsonSchema()
     val parameters = tool.toOpenAITool()("function")("parameters")
     parameters("required") shouldBe ujson.Arr("city", "unit")
     parameters("properties")("unit")("enum") shouldBe ujson.Arr("Celsius", "Fahrenheit", ujson.Null)
@@ -425,6 +484,28 @@ class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
     call("c-2", 500) shouldBe error("this customer cannot be charged")
     call("c-9", 500) shouldBe error(NotFoundError("no customer c-9", "customer").formatted)
     charged should have size 1
+  }
+
+  "The tools from methods of the guide" should "be named, described and called as the guide's table says" in {
+    import ToolsFromMethods.*
+    import org.llm4s.toolapi.{ ToolCallError, ToolCallRequest }
+    val registry = supportTools(Live).fold(e => fail(e.formatted), identity)
+    registry.tools.map(_.name) shouldBe Seq("cancel", "find_orders")
+    val find = registry.tools.find(_.name == "find_orders").get
+    find.description shouldBe "Orders placed by a customer, newest first."
+    find.schema.toJsonSchema(false)("properties")("limit")("description").str shouldBe "at most this many orders"
+    find.schema.toJsonSchema(false)("required") shouldBe ujson.Arr("customerId")
+    registry.execute(ToolCallRequest("find_orders", ujson.Obj("customerId" -> "C-1001", "limit" -> 1))) shouldBe
+      Right(ujson.Arr(ujson.Obj("id" -> "O-17", "totalCents" -> 4200)))
+    registry.execute(ToolCallRequest("cancel", ujson.Obj("orderId" -> "O-12", "reason" -> "late"))) shouldBe
+      Left(ToolCallError.HandlerError("cancel", "O-12 has already shipped"))
+    registry.execute(ToolCallRequest("find_orders", ujson.Obj("customerId" -> "C-9"))).isLeft shouldBe true
+
+    val cancel = cancelTool(Live).fold(e => fail(e.formatted), identity)
+    cancel.schema.toJsonSchema(true)("properties")("orderId")("description").str shouldBe
+      "The order's id, for example O-17"
+    cancel.execute(ujson.Obj("orderId" -> "O-17", "reason" -> "late")) shouldBe
+      Right(ujson.Obj("orderId" -> "O-17", "refunded" -> true))
   }
 
   "A recursion through a hand-written given" should "fail on first use with the message the guide quotes, not hang" in {

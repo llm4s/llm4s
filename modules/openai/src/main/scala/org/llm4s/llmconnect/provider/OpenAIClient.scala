@@ -1297,11 +1297,18 @@ private[provider] object OpenAIClientTransport {
     /** The credential to give the SDK builder. */
     def credential: com.openai.credential.Credential = azureKey
 
-    private def refresh(): Unit = synchronized {
-      val key = CachingAccessTokenProvider
-        .guarded(keys.current())
-        .fold(error => throw new IdentityTokenException(error), _.asKey)
-      if (azureKey.apiKey() != key) azureKey.update(key): Unit
+    // Not `synchronized`: `keys` may fetch from a secret store, and a caller waiting behind that fetch must stay
+    // interruptible, with no virtual thread's carrier pinned. An interrupt reaches the caller as a `CancelledError`.
+    private val lock = new java.util.concurrent.locks.ReentrantLock()
+
+    private def refresh(): Unit = {
+      lock.lockInterruptibly()
+      Using.resource((() => lock.unlock()): AutoCloseable) { _ =>
+        val key = CachingAccessTokenProvider
+          .guarded(keys.current())
+          .fold(error => throw new IdentityTokenException(error), _.asKey)
+        if (azureKey.apiKey() != key) azureKey.update(key): Unit
+      }
     }
 
     def refreshing(underlying: OpenAIClientTransport): OpenAIClientTransport =

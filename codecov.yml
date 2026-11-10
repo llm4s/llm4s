@@ -146,6 +146,10 @@ flags:
     paths:
       - modules/schema-derivation/src/main/scala
     carryforward: true
+  schema-iron:
+    paths:
+      - modules/schema-iron/src/main/scala
+    carryforward: true
   prompt:
     paths:
       - modules/prompt/src/main/scala
@@ -161,6 +165,10 @@ flags:
   doctor:
     paths:
       - modules/doctor/src/main/scala
+    carryforward: true
+  repl:
+    paths:
+      - modules/repl/src/main/scala
     carryforward: true
   knowledgegraph-neo4j:
     paths:
@@ -181,6 +189,10 @@ flags:
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala
+    carryforward: true
+  tapir:
+    paths:
+      - modules/tapir/src/main/scala
     carryforward: true
   agent:
     paths:

@@ -1,0 +1,64 @@
+{%- comment -%}
+  Schema.org structured data (JSON-LD) for search engines and browsing assistants (#2316), rendered by
+  head_custom.html. Keep every claim here the same as the page text: no ratings, no download counts.
+
+  - The home page is the project: a SoftwareSourceCode whose version is the latest published release.
+  - /foundation/ is the LLM4S Foundation: an Organization whose sameAs is `social.links` in _config.yml.
+  - A documentation page with a `parent` gets a BreadcrumbList built from `parent` and `grand_parent`, the same
+    hierarchy as its navigation.
+
+  The first two replace jekyll-seo-tag's generic block (a WebSite headed "Home", a WebPage), which would describe the
+  same page differently: docs/_plugins/structured_data.rb drops that block from a page carrying a script marked
+  data-replaces-seo-tag. Other pages keep jekyll-seo-tag's block; a breadcrumb is a separate entity beside it.
+  scripts/check-site-share-cards.sh checks the built result.
+{%- endcomment -%}
+{%- comment -%} The Foundation's own fields, without braces: the author and publisher of the project, and the Organization. {%- endcomment -%}
+{%- capture llm4s_org -%}
+"@type":"Organization","@id":{{ "/foundation/#organization" | absolute_url | jsonify }},"name":"LLM4S Foundation","url":{{ "/foundation/" | absolute_url | jsonify }}
+{%- endcapture -%}
+{%- if page.url == "/" %}
+<script type="application/ld+json" data-replaces-seo-tag>
+{"@context":"https://schema.org","@type":"SoftwareSourceCode","name":"LLM4S","alternateName":"Large Language Models for Scala",
+"description":{{ page.description | default: site.description | jsonify }},
+"url":{{ "/" | absolute_url | jsonify }},
+"codeRepository":{{ site.data.project.repo_url | jsonify }},
+"programmingLanguage":{"@type":"ComputerLanguage","name":"Scala"},
+"runtimePlatform":"Java 21",
+"license":"https://github.com/llm4s/llm4s/blob/main/LICENSE",
+"version":{{ site.data.project.latest_release | jsonify }},
+"image":{{ page.image.path | absolute_url | jsonify }},
+"author":{ {{ llm4s_org }} },
+"publisher":{ {{ llm4s_org }} }}
+</script>
+{%- elsif page.url == "/foundation/" %}
+<script type="application/ld+json" data-replaces-seo-tag>
+{"@context":"https://schema.org",{{ llm4s_org }},
+"logo":{{ site.logo | absolute_url | jsonify }},
+"sameAs":{{ site.social.links | jsonify }}}
+</script>
+{%- elsif page.parent %}
+{%- assign llm4s_found = false -%}
+{%- if page.grand_parent -%}
+  {%- assign llm4s_top = site.pages | where: "title", page.grand_parent | where_exp: "p", "p.parent == nil" | first -%}
+  {%- assign llm4s_up = site.pages | where: "title", page.parent | where: "parent", page.grand_parent | first -%}
+  {%- if llm4s_top and llm4s_up -%}{%- assign llm4s_found = true -%}{%- endif -%}
+{%- else -%}
+  {%- assign llm4s_top = nil -%}
+  {%- assign llm4s_up = site.pages | where: "title", page.parent | where_exp: "p", "p.parent == nil" | first -%}
+  {%- if llm4s_up -%}{%- assign llm4s_found = true -%}{%- endif -%}
+{%- endif -%}
+{%- comment -%} A crumb whose page cannot be found would have no URL, which makes the list invalid: emit none. {%- endcomment -%}
+{%- if llm4s_found %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
+{"@type":"ListItem","position":1,"name":"Home","item":{{ "/" | absolute_url | jsonify }}},
+{%- assign llm4s_pos = 2 -%}
+{%- if llm4s_top %}
+{"@type":"ListItem","position":{{ llm4s_pos }},"name":{{ llm4s_top.title | jsonify }},"item":{{ llm4s_top.url | absolute_url | jsonify }}},
+{%- assign llm4s_pos = llm4s_pos | plus: 1 -%}
+{%- endif %}
+{"@type":"ListItem","position":{{ llm4s_pos }},"name":{{ llm4s_up.title | jsonify }},"item":{{ llm4s_up.url | absolute_url | jsonify }}},
+{"@type":"ListItem","position":{{ llm4s_pos | plus: 1 }},"name":{{ page.title | jsonify }},"item":{{ page.url | absolute_url | jsonify }}}]}
+</script>
+{%- endif %}
+{%- endif %}

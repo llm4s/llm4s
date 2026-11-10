@@ -209,7 +209,8 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     Class.forName("org.llm4s.javaapi.JGuardrails"),
     classOf[JOutputGuardrail],
     classOf[JGuardrail],
-    classOf[JContextWindow]
+    classOf[JContextWindow],
+    classOf[AiServiceBuilder[?]]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -430,6 +431,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       "createAgent(JLlmClient,ToolRegistry,boolean)",
       "wrapAgent(Agent)",
       "agentBuilder(String,JLlmClient)",
+      "aiService(Class)",
       "openAi()",
       "anthropic()",
       "gemini()",
@@ -598,6 +600,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "org.llm4s.javaapi.ClientBuilds",        // what the client builders' build() does with their settings
     "org.llm4s.javaapi.FacadeAsync",         // the futures of the *Async methods and their executors (#2276)
     "org.llm4s.javaapi.AgentBuilds",         // what JAgentBuilder keeps and what its build() does with it (#2476)
+    "org.llm4s.javaapi.AiServices",          // an AI service's method plans and its proxy handler (#2277)
     "org.llm4s.javaapi.ProviderModules"      // whether an optional provider module is on the classpath (#1496)
   )
 

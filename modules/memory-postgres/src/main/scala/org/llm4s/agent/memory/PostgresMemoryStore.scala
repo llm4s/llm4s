@@ -84,7 +84,7 @@ final class PostgresMemoryStore private[memory] (
       ProcessingError(
         "postgres-memory-store",
         s"Failed to replace memories: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(e)
+        cause = Some(PostgresMemoryStore.writeCause(e))
       )
     )
 
@@ -192,7 +192,7 @@ final class PostgresMemoryStore private[memory] (
         ProcessingError(
           "postgres-memory-store",
           s"Failed to apply memory write: ${PostgresMemoryStore.writeFailure(e)}",
-          cause = Some(e)
+          cause = Some(PostgresMemoryStore.writeCause(e))
         )
       )
       .flatten
@@ -252,7 +252,7 @@ final class PostgresMemoryStore private[memory] (
       ProcessingError(
         "postgres-memory-store",
         s"Failed to store memory: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(e)
+        cause = Some(PostgresMemoryStore.writeCause(e))
       )
     )
 
@@ -270,7 +270,7 @@ final class PostgresMemoryStore private[memory] (
       ProcessingError(
         "postgres-memory-store",
         s"Failed to store memories: ${PostgresMemoryStore.writeFailure(e)}",
-        cause = Some(e)
+        cause = Some(PostgresMemoryStore.writeCause(e))
       )
     )
 
@@ -719,10 +719,14 @@ object PostgresMemoryStore {
    * writes were batched.
    */
   private[memory] def writeFailure(e: Throwable): String =
-    Redaction.scrubKnown(e match {
-      case batch: BatchUpdateException if batch.getNextException != null => batch.getNextException.getMessage
-      case other                                                         => other.getMessage
-    })
+    Redaction.scrubKnown(writeCause(e).getMessage)
+
+  /** The exception a failed write reports: a batch's chained server error, as its own message holds the bound rows. */
+  private[memory] def writeCause(e: Throwable): Throwable =
+    e match {
+      case batch: BatchUpdateException if batch.getNextException != null => batch.getNextException
+      case other                                                         => other
+    }
 
   /**
    * At most 55 characters, so every name the store derives from it - `<table>_applied`, `<table>_fences` and the

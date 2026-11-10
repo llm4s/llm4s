@@ -5,6 +5,7 @@
 #
 #   deploy/scripts/deploy.sh deploy <dev|staging|prod>
 #   deploy/scripts/deploy.sh check        # render every overlay and verify the result; needs no cluster
+#   deploy/scripts/deploy.sh validate     # render every overlay and validate it with kubeconform; needs no cluster
 #
 # Environment:
 #   IMAGE             registry/name:tag to deploy. Required. The tag must be immutable (the workflow uses the
@@ -14,6 +15,7 @@
 #   REPLICAS          overrides the overlay's replica count. Optional.
 #   ROLLOUT_TIMEOUT   how long to wait for the rollout. Default: 180s.
 #   KUSTOMIZE         the command that renders a directory. Default: kubectl kustomize.
+#   KUBECONFORM       the kubeconform binary, for `validate`. Default: kubeconform.
 #
 # Exit code 0 = deployed and healthy (or, for `check`, every overlay renders as expected).
 set -euo pipefail
@@ -22,6 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOYMENT="llm4s-deploy-service"
 BASE_IMAGE_NAME="llm4s/deploy-service"   # the placeholder image in deploy/base/deployment.yaml
 KUSTOMIZE="${KUSTOMIZE:-kubectl kustomize}"
+KUBECONFORM="${KUBECONFORM:-kubeconform}"
 ROLLOUT_TIMEOUT="${ROLLOUT_TIMEOUT:-180s}"
 NAMESPACE_PREFIX="${NAMESPACE_PREFIX:-llm4s}"
 REPLICAS="${REPLICAS:-}"
@@ -40,7 +43,7 @@ cleanup() {
   rm -rf "$ROOT/deploy/rendered"
 }
 
-usage() { sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 validate_environment() {
   case "$1" in
@@ -122,6 +125,7 @@ check() {
     echo "ok  $env"
   done
   check_postgres
+  check_enterprise
 }
 
 # The Postgres overlay (design 4.60) is applied by hand, not by the pipeline: three replicas on one database, its
@@ -140,6 +144,56 @@ check_postgres() {
   grep -q "kind: PodDisruptionBudget" <<<"$out" || die "postgres: no PodDisruptionBudget"
   grep -q "runAsNonRoot: true" <<<"$out" || die "postgres: the pod is not marked runAsNonRoot"
   echo "ok  postgres"
+}
+
+# The enterprise overlay (docs/guide/reference-architecture.md) is applied by hand: the app behind a LiteLLM gateway,
+# its gateway key a rotating file from an ExternalSecret, and NetworkPolicies that let only the gateway leave.
+check_enterprise() {
+  local out
+  # shellcheck disable=SC2086  # KUSTOMIZE is a command with arguments
+  out="$($KUSTOMIZE "$ROOT/deploy/overlays/enterprise")"
+  grep -q "namespace: llm4s-enterprise" <<<"$out" || die "enterprise: the namespace is not llm4s-enterprise"
+  grep -q "name: litellm" <<<"$out" || die "enterprise: no gateway"
+  grep -Eq "image: ghcr.io/berriai/litellm:main-v[0-9.]+-stable$" <<<"$out" || die "enterprise: the gateway image is not a pinned release"
+  grep -q "http://litellm:4000/v1" <<<"$out" || die "enterprise: the app's section does not point at the gateway"
+  grep -q "apiKeyFile" <<<"$out" || die "enterprise: the app's gateway key is not read from a file"
+  grep -q -- "-Dconfig.file=/etc/llm4s/application.conf" <<<"$out" || die "enterprise: the app does not load the mounted application.conf"
+  grep -Eq "name: llm4s-app-config-[a-z0-9]+$" <<<"$out" || die "enterprise: the app's config is not the generated ConfigMap"
+  grep -q "secretName: llm4s-gateway-key" <<<"$out" || die "enterprise: the gateway key is not mounted from its Secret"
+  ! grep -q "subPath" <<<"$out" || die "enterprise: a subPath mount is never updated, so a rotated key would not arrive"
+  [ "$(grep -c "^kind: ExternalSecret$" <<<"$out")" -eq 2 ] || die "enterprise: expected two ExternalSecrets"
+  [ "$(grep -c "^kind: NetworkPolicy$" <<<"$out")" -eq 2 ] || die "enterprise: expected two NetworkPolicies"
+  ! grep -q "^kind: Secret$" <<<"$out" || die "enterprise: a Secret is inlined in the overlay"
+  grep -q "runAsNonRoot: true" <<<"$out" || die "enterprise: the app pod is not marked runAsNonRoot"
+  grep -q "path: /ready" <<<"$out" || die "enterprise: the readiness probe is not the worker's /ready"
+  echo "ok  enterprise"
+}
+
+# Validates every overlay against the Kubernetes API schemas, and the ExternalSecrets against the External Secrets
+# Operator's, with kubeconform in strict mode (an unknown field fails). The CRD schemas come from a pinned commit of
+# the datreeio CRDs catalog.
+validate() {
+  local image="example.invalid/llm4s/deploy-service:0000000000000000000000000000000000000000"
+  local crds="https://raw.githubusercontent.com/datreeio/CRDs-catalog/c86448cbf1a840ca62d119259864863897c8748a"
+  local env out
+  command -v "$KUBECONFORM" >/dev/null 2>&1 || die "kubeconform was not found (KUBECONFORM=$KUBECONFORM)"
+  trap cleanup EXIT
+  for env in dev staging prod postgres enterprise; do
+    case "$env" in
+      dev | staging | prod) out="$(render "$env" "$image" "${NAMESPACE_PREFIX}-$env" "")" ;;
+      # shellcheck disable=SC2086  # KUSTOMIZE is a command with arguments
+      *) out="$($KUSTOMIZE "$ROOT/deploy/overlays/$env")" ;;
+    esac
+    MANIFESTS_FILE="$(mktemp)"
+    printf '%s\n' "$out" >"$MANIFESTS_FILE"
+    "$KUBECONFORM" -strict -summary -kubernetes-version 1.31.0 \
+      -schema-location default \
+      -schema-location "$crds/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" "$MANIFESTS_FILE" ||
+      die "$env: the rendered manifests are not valid"
+    rm -f "$MANIFESTS_FILE"
+    MANIFESTS_FILE=""
+    echo "ok  $env (kubeconform)"
+  done
 }
 
 deploy() {
@@ -191,5 +245,6 @@ deploy() {
 case "${1:-}" in
   deploy) [ $# -eq 2 ] || usage; deploy "$2" ;;
   check) [ $# -eq 1 ] || usage; check ;;
+  validate) [ $# -eq 1 ] || usage; validate ;;
   *) usage ;;
 esac

@@ -719,6 +719,16 @@ JSON, file access, HTTP, shell, and the Brave, DuckDuckGo and Exa search tools -
 tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unchanged. See the
 [migration note](../reference/migration#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 
+### For tapir endpoints as tools
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-tapir" % llm4sVersion // same version as llm4s-core
+```
+
+`EndpointTools` turns tapir endpoints into tools, each schema derived from its endpoint's inputs, called through
+sttp client 3. It depends on `tapir-core` 1.11, not on the agent runtime (Experimental). See
+[Tapir Endpoints as Tools](../guide/tapir-tools).
+
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
 ```scala
@@ -762,10 +772,14 @@ and `llm4s-knowledgegraph` and brings the Neo4j driver.
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+libraryDependencies += "org.llm4s" %% "llm4s-schema-iron"       % llm4sVersion  // bounds from Iron refinement types
 ```
 
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+`llm4s-schema-iron` (experimental) adds the bounds of [Iron](https://github.com/Iltotore/iron) refinement types, such
+as `Int :| Interval.Closed[1, 5]`, to the derived schema and refuses a reply that breaks them; it brings Iron. See
+[Iron refinements](../guide/derived-schemas#iron-refinements).
 
 ### Typed prompts
 
@@ -810,6 +824,17 @@ libraryDependencies += "org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test
 `DoctorCli` checks your JDK, `application.conf`, default provider, provider module, API key and, with `--local` or
 `--live`, the model server, and says what to fix: `sbt "Test/runMain org.llm4s.doctor.DoctorCli"`. It depends on
 `llm4s-core` only. See [Doctor](../reference/doctor) for Maven, Gradle and Coursier.
+
+### Trying llm4s in the REPL
+
+```scala
+// same version as llm4s-core; for the REPL, worksheets and scripts, not for production code
+libraryDependencies += "org.llm4s" %% "llm4s-repl" % llm4sVersion
+```
+
+`ask`, `extract`, `chat()`, `history` and `lastUsage` behind one `import org.llm4s.repl.*`, with an offline session
+that needs no API key. It is experimental, and depends on `llm4s-core`, `llm4s-schema-derivation` and
+`llm4s-testkit`. See [Try llm4s in the REPL](repl).
 
 ### For provider authors (testing a provider module)
 
