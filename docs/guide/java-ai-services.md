@@ -4,7 +4,7 @@ title: Java AI services
 description: "Declare an annotated Java interface and let llm4s-java-api implement it: prompt templates, typed answers, tools, memory, async and streaming."
 search_title: "Declarative AI services for Java with LLM4S"
 parent: User Guide
-nav_order: 50
+nav_order: 51
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
 cites_open_issues: [1474, 2277]
 ---
