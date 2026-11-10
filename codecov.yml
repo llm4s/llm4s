@@ -194,6 +194,10 @@ flags:
     paths:
       - modules/tapir/src/main/scala
     carryforward: true
+  sttp:
+    paths:
+      - modules/sttp/src/main/scala
+    carryforward: true
   agent:
     paths:
       - modules/agent/src/main/scala

@@ -72,6 +72,8 @@ object Versions {
   val tapir = "1.11.20"
   // sttp client 3 (Apache 2.0), for llm4s-tapir: the version tapir-sttp-client 1.11.20 is built on.
   val sttpClient3 = "3.10.3"
+  // sttp client 4 (Apache 2.0), for llm4s-sttp (#2341): an Llm4sHttpClient over a caller's synchronous backend.
+  val sttpClient4 = "4.0.27"
 
   // ZIO
   val zio = "2.1.16"
@@ -205,6 +207,9 @@ object Deps {
   val tapirCore           = "com.softwaremill.sttp.tapir"   %% "tapir-core"             % Versions.tapir
   val tapirSttpStubServer = "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server" % Versions.tapir
   val sttpClient3         = "com.softwaremill.sttp.client3" %% "core"                   % Versions.sttpClient3
+
+  // llm4s-sttp (#2341): the provider clients' transport over an sttp 4 synchronous backend.
+  val sttpClient4 = "com.softwaremill.sttp.client4" %% "core" % Versions.sttpClient4
 
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp

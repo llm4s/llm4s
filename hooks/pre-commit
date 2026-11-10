@@ -134,6 +134,7 @@ map_file_to_project() {
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
     modules/tapir/*)                      echo "llm4sTapir" ;;
+    modules/sttp/*)                       echo "llm4sSttp" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
@@ -298,6 +299,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE llm4sTapir
+      set_add DOWNSTREAM_COMPILE llm4sSttp
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
@@ -404,6 +406,7 @@ propagate_downstream() {
       ;;
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE llm4sSttp
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE samples
@@ -545,6 +548,9 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     llm4sTapir)
+      set_add DOWNSTREAM_COMPILE samples
+      ;;
+    llm4sSttp)
       set_add DOWNSTREAM_COMPILE samples
       ;;
     testkit)

@@ -729,6 +729,16 @@ libraryDependencies += "org.llm4s" %% "llm4s-tapir" % llm4sVersion // same versi
 sttp client 3. It depends on `tapir-core` 1.11, not on the agent runtime (Experimental). See
 [Tapir Endpoints as Tools](../guide/tapir-tools).
 
+### For your own sttp backend as the HTTP transport
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-sttp" % llm4sVersion // same version as llm4s-core
+```
+
+`SttpLlm4sHttpClient` sends the SDK-free provider clients' requests through an sttp 4 synchronous backend you
+already have: its pool, proxy, logging, tracing, or a stub in tests. It depends on sttp client 4's `core` only
+(Experimental). See [Your HTTP Client](../guide/http-transport).
+
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
 ```scala
