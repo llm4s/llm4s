@@ -2744,6 +2744,126 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     )
   )
 
+// ---- comparative benchmarks (#2288) ----
+// llm4s, LangChain4j and Spring AI on the same scenarios, against one local mock OpenAI-compatible server (no API key,
+// no network). LangChain4j and Spring AI are dependencies of these projects only, and none of them is in the root
+// aggregate: `sbt test`, publishing and every published-module check (`frozenDependencyCheck`, `licenseCheck`) never
+// see them. One project per library, so each library's cold start and footprint are measured on its own classpath.
+// `sbt "benchmarksComparative/comparativeBenchmarks"` runs everything into target/comparative;
+// docs/reference/comparative-benchmarks.md has the method. Not measured for coverage: benchmark code, never tested.
+lazy val comparativeColdStart = taskKey[File](
+  "Time a fresh JVM's first chat call and count the jars, per compared library: target/comparative/coldstart.json"
+)
+lazy val comparativeColdStartRuns = settingKey[Int]("Fresh JVMs per library in comparativeColdStart")
+lazy val comparativeBenchmarks = inputKey[Unit](
+  "Cold start, the JMH scenarios (extra arguments go to JMH) and the results tables, into target/comparative"
+)
+
+// The Java projects carry no Scala library, so it is not counted in LangChain4j's or Spring AI's footprint.
+lazy val comparativeJavaSettings: Seq[Def.Setting[_]] = Seq(
+  publish / skip   := true,
+  crossPaths       := false,
+  autoScalaLibrary := false,
+  // `-parameters`: Spring AI and LangChain4j read tool parameter names by reflection.
+  javacOptions ++= Seq("--release", javaRelease, "-parameters"),
+  // No Scala sources; set for scripts/check-doc-support.sh, which checks every project's bytecode level.
+  scalacOptions ++= Seq("-java-output-version", javaRelease)
+) ++ coverageDisabled
+
+lazy val benchmarksComparativeHarness = (project in file("modules/benchmarks-comparative/harness"))
+  .settings(name := "benchmarks-comparative-harness", comparativeJavaSettings)
+
+lazy val benchmarksComparativeLlm4s = (project in file("modules/benchmarks-comparative/llm4s"))
+  .dependsOn(benchmarksComparativeHarness, openaiCompatible, agent)
+  .settings(
+    name := "benchmarks-comparative-llm4s",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled
+  )
+
+lazy val benchmarksComparativeLangchain4j = (project in file("modules/benchmarks-comparative/langchain4j"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-langchain4j",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.langchain4j, Deps.langchain4jOpenAi)
+  )
+
+lazy val benchmarksComparativeSpringAi = (project in file("modules/benchmarks-comparative/spring-ai"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-spring-ai",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.springAiOpenAi, Deps.springAiClientChat)
+  )
+
+lazy val benchmarksComparative = (project in file("modules/benchmarks-comparative/jmh"))
+  .dependsOn(
+    benchmarksComparativeHarness,
+    benchmarksComparativeLlm4s,
+    benchmarksComparativeLangchain4j,
+    benchmarksComparativeSpringAi
+  )
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name := "benchmarks-comparative",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled,
+    appLogging,
+    comparativeColdStartRuns := 10,
+    comparativeColdStart := {
+      val java       = javaHome.value.getOrElse(file(sys.props("java.home"))) / "bin" / "java"
+      val harnessJar = (benchmarksComparativeHarness / Compile / packageBin).value
+      def library(name: String, version: String, mainClass: String, cp: Classpath, own: File) = {
+        val jars = cp.map(_.data)
+        // The footprint is the library and what it pulls in: not the harness, not the adapter's own few classes.
+        ComparativeColdStart.Library(name, version, mainClass, jars, jars.filterNot(j => j == harnessJar || j == own))
+      }
+      ComparativeColdStart.run(
+        java,
+        Seq(harnessJar),
+        Seq(
+          library(
+            "llm4s",
+            (ThisBuild / version).value,
+            "org.llm4s.benchcmp.llm4s.Llm4sColdStart",
+            (benchmarksComparativeLlm4s / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLlm4s / Compile / packageBin).value
+          ),
+          library(
+            "langchain4j",
+            Versions.langchain4j,
+            "org.llm4s.benchcmp.langchain4j.LangChain4jColdStart",
+            (benchmarksComparativeLangchain4j / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLangchain4j / Compile / packageBin).value
+          ),
+          library(
+            "spring-ai",
+            Versions.springAi,
+            "org.llm4s.benchcmp.springai.SpringAiColdStart",
+            (benchmarksComparativeSpringAi / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeSpringAi / Compile / packageBin).value
+          )
+        ),
+        comparativeColdStartRuns.value,
+        (ThisBuild / baseDirectory).value / "target" / "comparative" / "coldstart.json",
+        streams.value.log
+      )
+    },
+    comparativeBenchmarks := Def.inputTaskDyn {
+      val extra   = Def.spaceDelimited("<jmh arguments>").parsed
+      val out     = (ThisBuild / baseDirectory).value / "target" / "comparative"
+      val jmhArgs = Seq("-prof", "gc", "-rf", "json", "-rff", (out / "jmh.json").getAbsolutePath) ++ extra
+      Def.sequential(
+        comparativeColdStart,
+        (Jmh / run).toTask(jmhArgs.mkString(" ", " ", "")),
+        (Compile / runMain).toTask(s" org.llm4s.benchcmp.Report ${out.getAbsolutePath}")
+      )
+    }.evaluated
+  )
+
 lazy val gradleDemo = (project in file("modules/gradle-demo"))
   .dependsOn(core)
   .settings(

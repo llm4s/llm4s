@@ -630,6 +630,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** comparative benchmarks (unpublished, outside the aggregate): llm4s, LangChain4j and Spring AI against a local mock
+  OpenAI-compatible server, `sbt "benchmarksComparative/comparativeBenchmarks"` and a manual/per-release workflow [#2288](https://github.com/llm4s/llm4s/issues/2288); [Comparative Benchmarks](docs/reference/comparative-benchmarks.md).
 - **Added** Scalafix migration rules (`modules/scalafix-rules`, not yet published): `Llm4sMigrate_0_5` rewrites `.copy`
   to `with*` setters, millisecond fields to `FiniteDuration`, `isRecoverable`, moved config loaders and message
   extractors, and lints removed APIs; tested with scalafix-testkit against 0.4.1 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).

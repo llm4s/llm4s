@@ -141,9 +141,21 @@ object Versions {
   // release by default, and CI's "Spring Boot 4.x" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
   val springBoot4Baseline = "4.0.8"
   val springBoot4         = sys.props.getOrElse("llm4s.springBoot4Version", springBoot4Baseline)
+
+  // The libraries the comparative benchmarks measure llm4s against (#2288, modules/benchmarks-comparative). Pinned, and
+  // printed with the results. Only the unpublished comparative projects depend on them, and those are not in the root
+  // aggregate.
+  val langchain4j = "1.23.0"
+  val springAi    = "2.0.2"
 }
 
 object Deps {
+
+  // Comparative benchmarks only (#2288): never a dependency of a published module.
+  val langchain4j        = "dev.langchain4j"        % "langchain4j"           % Versions.langchain4j
+  val langchain4jOpenAi  = "dev.langchain4j"        % "langchain4j-open-ai"   % Versions.langchain4j
+  val springAiOpenAi     = "org.springframework.ai" % "spring-ai-openai"      % Versions.springAi
+  val springAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAi
 
   val cats                    = "org.typelevel"           %% "cats-core"       % Versions.cats
   val upickle                 = "com.lihaoyi"             %% "upickle"         % Versions.upickle
