@@ -2582,8 +2582,10 @@ lazy val javaApi = (project in file("modules/java-api"))
     // floor is the measured value rounded down to the nearest 5.
     coverageFloor(100),
     // JavaGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
-    // process-wide. Run the suites one at a time, so another suite's snippets and stream threads cannot print into it.
+    // process-wide. Run the suites one at a time, so another suite's snippets and stream threads cannot print into it,
+    // and in a JVM of their own, so another module's unforked tests (an http4s server's log line) cannot either.
     Test / parallelExecution := false,
+    Test / fork              := true,
     libraryDependencies ++= Seq(
       Deps.scalatest       % Test,
       Deps.junitJupiterApi % Test
@@ -2604,8 +2606,10 @@ lazy val javaRag = (project in file("modules/java-rag"))
     // value rounded down to the nearest 5.
     coverageFloor(100),
     // JavaRagGuideSpec checks what the guide's snippets print by redirecting System.out and System.err, which are
-    // process-wide. Run the suites one at a time, so another suite's output cannot print into it, as java-api does.
+    // process-wide. Run the suites one at a time, in a JVM of their own, so no other suite's output can print into
+    // it, as java-api does.
     Test / parallelExecution        := false,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
