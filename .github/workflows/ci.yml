@@ -1252,8 +1252,11 @@ jobs:
           echo "$RUNNER_TEMP/mcp-venv/bin" >> "$GITHUB_PATH"
 
       # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
+      # Ubuntu's `sbt test` runs the unforked suites (samples, java-api, ...) inside the sbt JVM, and outgrew
+      # .sbtopts' 2 GB heap (OutOfMemoryError in the launcher from 00a4d3e8 on). The flag comes after .sbtopts'
+      # -J-Xmx2g, so it wins; local runs keep 2 GB.
       - name: Run tests
-        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || 'test' }}
+        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || '-J-Xmx4g test' }}
       
       - name: Upload test reports
         if: failure()
