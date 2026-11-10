@@ -202,6 +202,31 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
     ContextPruning.defaultTokenCounter(asked) shouldBe ContextPruning.defaultTokenCounter(asked)
   }
 
+  it should "count a message with an inline document, document included" in {
+    val bytes = org.llm4s.media.MediaSource.Inline(IArray.fill[Byte](64 * 1024)(1))
+    val pdf   = ContentPart.document(bytes, org.llm4s.media.MediaType.Pdf).value
+    val asked = ToolMessage(Vector(ContentPart.Text("report"), pdf), "c1")
+    ContextPruning.defaultTokenCounter(asked) should be > ContextPruning.defaultTokenCounter(
+      ToolMessage("report", "c1")
+    )
+    ContextPruning.defaultTokenCounter(asked) shouldBe ContextPruning.defaultTokenCounter(asked)
+  }
+
+  "ContextPruning.tokenizerFrom" should "fall back to no tokenizer, so words are counted, when cl100k_base fails to load" in {
+    ContextPruning.tokenizerFrom(Left(org.llm4s.error.TokenizerError.notAvailable("cl100k_base"))) shouldBe None
+    val loaded = org.llm4s.context.ConversationTokenCounter.openAI().value
+    ContextPruning.tokenizerFrom(Right(loaded)) shouldBe Some(loaded)
+  }
+
+  "ContextPruning.countWith" should "count words times 1.3 when no tokenizer loaded" in {
+    val tenWords = UserMessage("one two three four five six seven eight nine ten")
+    ContextPruning.countWith(None)(tenWords) shouldBe 13
+    ContextPruning.wordEstimate(tenWords) shouldBe 13
+    ContextPruning.countWith(None)(
+      ToolMessage("""{"a":1,"b":2}""", "c1")
+    ) shouldBe 1 // one "word": why cl100k is the default
+  }
+
   it should "count a tool result containing special-token names instead of failing" in {
     val page = "a page about LLMs: <|endoftext|> ends a document, <|fim_prefix|> starts a fill-in"
     ContextPruning.defaultTokenCounter(ToolMessage(page, "c1")) should be > 10
