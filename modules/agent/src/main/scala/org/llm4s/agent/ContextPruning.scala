@@ -78,13 +78,63 @@ private[agent] object ContextPruning {
     }
   }
 
+  /** The `cl100k_base` counter from core, made once; `None` only if jtokkit cannot load it. */
+  private lazy val tokenizerCounter: Option[org.llm4s.context.ConversationTokenCounter] =
+    org.llm4s.context.ConversationTokenCounter.openAI() match {
+      case Right(counter) => Some(counter)
+      case Left(error) =>
+        org.slf4j.LoggerFactory
+          .getLogger(getClass)
+          .warn(s"cl100k_base tokenizer unavailable, pruning counts words instead: ${error.message}")
+        None
+    }
+
   /**
-   * Default token counter (rough estimate: words * 1.3), over everything a provider is sent for
-   * the message: an assistant message's tool calls and thinking count as well as its content, since
-   * a short answer can carry long arguments or thousands of reasoning tokens.
-   * For more accurate counting, integrate with the org.llm4s.context.tokens module.
+   * Default token counter: `ConversationTokenCounter`'s `cl100k_base` count of everything a provider
+   * is sent for the message (content, tool calls and their arguments, thinking, media parts, and
+   * the message framing). A word count undercounts text without spaces, such as a minified JSON
+   * tool result or a base64 blob, which it read as a single word, so `maxTokens` let it through.
+   * `cl100k_base` is an approximation for non-OpenAI models; pass your own counter to
+   * `ContextWindowMiddleware` for an exact one. Falls back to [[wordEstimate]] if jtokkit's
+   * registry has no `cl100k_base` (it ships with jtokkit, so this is a guard, not a path in use).
    */
-  private[agent] def defaultTokenCounter(message: Message): Int = {
+  private[agent] def defaultTokenCounter(message: Message): Int =
+    tokenizerCounter.fold(wordEstimate(message)) { counter =>
+      if (hasInlineBytes(message)) counter.countMessage(message)
+      else
+        Option(counted.get(message)) match {
+          case Some(n) => n.intValue
+          case None =>
+            val n = counter.countMessage(message)
+            counted.put(message, Integer.valueOf(n))
+            n
+        }
+    }
+
+  /**
+   * Counts already made, by message. Every model call prunes the whole history, so without this each call encodes
+   * every earlier message again. Equal messages count the same, and an entry goes when its message is no longer
+   * referenced. A message with inline media bytes is not cached: its hash reads every byte, while its count reads only
+   * their length.
+   */
+  private val counted: java.util.Map[Message, Integer] =
+    java.util.Collections.synchronizedMap(new java.util.WeakHashMap[Message, Integer]())
+
+  private def hasInlineBytes(message: Message): Boolean = {
+    def anyInline(parts: Vector[ContentPart]): Boolean = parts.exists {
+      case i: ContentPart.Image    => i.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
+      case d: ContentPart.Document => d.source.isInstanceOf[org.llm4s.media.MediaSource.Inline]
+      case _                       => false
+    }
+    message match {
+      case u: UserMessage                         => anyInline(u.parts)
+      case t: ToolMessage                         => anyInline(t.parts)
+      case _: SystemMessage | _: AssistantMessage => false // no parts; a new message type must be added here
+    }
+  }
+
+  /** Words times 1.3: the fallback when no tokenizer is available. */
+  private[agent] def wordEstimate(message: Message): Int = {
     def words(text: String): Int = text.split("\\s+").length
     message match {
       case a: AssistantMessage =>

@@ -58,8 +58,10 @@ object Tokenizer {
       val encoder = encoderOptional.get()
       // noinspection ConvertExpressionToSAM
       Some(new StringTokenizer {
+        // `encodeOrdinary`: text is data, so a special-token name in it (`<|endoftext|>`) is ordinary text.
+        // `encode` throws on one, which failed every count of a message quoting it.
         override def encode(text: String): List[Token] =
-          encoder.encode(text).toArray.map(tokenId => Token(tokenId)).toList
+          encoder.encodeOrdinary(text).toArray.map(tokenId => Token(tokenId)).toList
       })
     } else None
   }
