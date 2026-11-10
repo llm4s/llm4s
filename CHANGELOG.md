@@ -330,7 +330,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
-  streaming, from Java types only [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
+  streaming, and a step limit, checkpointer and tracer (`maxSteps`, `checkpointer`, `tracing`, #2279) [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
 - **Added** declarative AI services to `llm4s-java-api` (experimental): `Llm4s.aiService(MyService.class)` implements an
   interface annotated `@SystemMessage`/`@UserMessage`/`@V`/`@MemoryId` (`org.llm4s.javaapi.services`), with typed returns, memory and tools, checked at `build()` [#2277](https://github.com/llm4s/llm4s/issues/2277); see [Java AI services](docs/guide/java-ai-services.md).
 - **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
@@ -387,7 +387,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
   fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
 - **Added** an agent to `llm4s-spring-boot-starter`: `llm4sTools` collects the `@Tool` methods of the application's beans
-  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
+  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` (with `max-steps`, a replaceable `llm4sCheckpointer`),
+  plus `llm4sEmbeddingClient` (`llm4s.embeddings.*`), `llm4sTracing` (`llm4s.tracing.*`) and `Flux`/`SseEmitter` streaming
+  templates [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
 
 ### Tools
 

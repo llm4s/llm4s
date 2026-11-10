@@ -2497,7 +2497,7 @@ lazy val docs = (project in file("modules/docs"))
     commonSettings,
     publish / skip := true,
     // Provided-scope in spring-boot-starter, so not on the classpath it exports.
-    libraryDependencies ++= Seq(Deps.springBootActuator, Deps.springBoot4HealthApi),
+    libraryDependencies ++= Seq(Deps.springBootActuator, Deps.springBoot4HealthApi, Deps.springWebmvc),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
@@ -2651,9 +2651,11 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
   // `azureIdentity` for an Azure section with `authentication = entra-id` read from properties (#2274).
   // `openai`, `anthropic` and `ollama` are optional, as in java-api (#1496): the flat `llm4s.provider` keys build
   // their configs, but the application declares the provider module it uses. `gemini` is a test dependency: the
-  // specs configure a Gemini section.
+  // specs configure a Gemini section. `reactor` is optional, and Spring MVC provided, as Actuator: the streaming
+  // templates are registered only when the application has them (#2279).
   .dependsOn(
     javaApi,
+    reactor                 % "optional",
     openai                  % "optional",
     anthropic               % "optional",
     ollama                  % "optional",
@@ -2683,8 +2685,9 @@ lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
       // Spring Boot 4's HealthIndicator, for LlmBoot4HealthIndicator; Boot 4 applications have it (#1467).
       Deps.springBoot4HealthApi % Provided,
       // @RestController and friends, for the Java migration guide's controller in src/test/web (#2282).
-      Deps.springWebAnnotations % Test
-    ),
+      Deps.springWebAnnotations % Test,
+      Deps.springWebmvc         % Provided
+    ) ++ Deps.springBootWeb.map(_ % Test),
     // The specs name the health and metrics types Spring Boot 4 moved through BootLine; this is its Boot 3 one.
     // src/test/web holds the Java migration guide's controller and its spec, which need spring-web: only this project
     // compiles it, since springBootStarterBoot4 recompiles src/test/scala and src/test/java on a classpath without it.
@@ -2702,6 +2705,7 @@ lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/
   .dependsOn(
     springBootStarter,
     observabilityMicrometer,
+    reactor         % Test,
     core            % "test->test",
     openai          % Test,
     anthropic       % Test,
@@ -2717,7 +2721,7 @@ lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/
     publish / skip := true,
     // Coverage of the starter is measured on its own specs (springBootStarter's floor); these run the same specs.
     coverageDisabled,
-    libraryDependencies ++= Seq(Deps.scalatest % Test) ++ Deps.springBoot4.map(_ % Test),
+    libraryDependencies ++= Seq(Deps.scalatest % Test) ++ (Deps.springBoot4 ++ Deps.springBoot4Web).map(_ % Test),
     Test / unmanagedSourceDirectories ++= {
       val starterTest = (springBootStarter / Test / sourceDirectory).value
       Seq(starterTest / "scala", starterTest / "java")

@@ -1,0 +1,2 @@
+# The starter's specs' tracing backend, mode `spring-recording`: what llm4s.tracing.* properties configure (#2279).
+org.llm4s.spring.RecordingTracingBackend
