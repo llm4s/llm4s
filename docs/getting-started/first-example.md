@@ -649,7 +649,7 @@ Great job! You've written your first LLM4S programs. Now explore:
 
 ## Learning Resources
 
-- **[Basic Examples](/examples/basic)** - More beginner-friendly examples
+- **[Basic Examples](/examples/#basic-examples)** - More beginner-friendly examples
 - **[User Guide](/guide/)** - Comprehensive feature guide
 - **[API Reference](/api/)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share ideas
