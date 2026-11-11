@@ -1027,7 +1027,7 @@ End-to-end context management pipeline with compaction and squeezing.
 sbt "samples/runMain org.llm4s.samples.context.ContextPipelineExample"
 ```
 
-[View all context examples →](context)
+[View all context examples →](#context-management)
 
 ---
 
@@ -1050,7 +1050,7 @@ sbt "samples/runMain org.llm4s.samples.embeddingsupport.EmbeddingExample"
 - Result visualization
 - Chunking and preprocessing
 
-[View all embedding examples →](embeddings)
+[View all embedding examples →](#embeddings)
 
 ---
 
@@ -1229,7 +1229,7 @@ sbt "samples/runMain org.llm4s.samples.mcp.MCPToolExample"
 - Protocol handling (stdio, HTTP, SSE)
 - Tool execution
 
-[View all MCP examples →](mcp)
+[View all MCP examples →](#mcp-examples)
 
 ---
 
@@ -1465,7 +1465,7 @@ All examples are in the [samples directory](https://github.com/llm4s/llm4s/tree/
 ## Next Steps
 
 - **[User Guide](../guide/basic-usage)** - Learn concepts in depth
-- **[API Reference](/api/llm-client)** - Detailed API documentation
+- **[API Reference](/api/)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share projects
 
 ---
