@@ -568,6 +568,18 @@ libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
 The Perplexity Agent API chat provider (`provider = "perplexity"`): answers grounded in web search, with
 citations. It brings no dependency beyond `llm4s-core`. See [Perplexity](../guide/providers#perplexity).
 
+### For a local model in the JVM (Jlama)
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-jlama" % llm4sVersion
+run / fork := true
+run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-preview")
+```
+
+A model run inside your JVM by [Jlama](https://github.com/tjake/Jlama) (`provider = "jlama"`): no API key and no
+model server. It brings `jlama-core` and its dependencies. See
+[First answer, no key, no server](local-jlama).
+
 ### For Java, Spring Boot, cats-effect and ZIO
 
 ```scala

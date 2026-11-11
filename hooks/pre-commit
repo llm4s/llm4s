@@ -121,6 +121,7 @@ map_file_to_project() {
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/perplexity/*)       echo "perplexity" ;;
+    modules/providers/jlama/*)            echo "jlama" ;;
     modules/providers/jina/*)             echo "jina" ;;
     modules/providers/jev/*)              echo "jev" ;;
     modules/providers/cohere/*)           echo "cohere" ;;
@@ -278,6 +279,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE perplexity
+      set_add DOWNSTREAM_COMPILE jlama
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
@@ -435,6 +437,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    jlama)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     voyage)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -570,6 +578,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE perplexity
+      set_add DOWNSTREAM_COMPILE jlama
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere

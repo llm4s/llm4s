@@ -38,6 +38,8 @@ object Versions {
   val jsoup         = "1.22.2"
   val jna           = "5.19.1"
   val vosk          = "0.3.45"
+  // Apache-2.0. Only llm4s-jlama (#2284): the pure-Java inference engine on the JDK Vector API.
+  val jlama = "0.8.4"
 
   // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask = "0.10.2"
@@ -264,6 +266,9 @@ object Deps {
   val awsS3             = "software.amazon.awssdk" % "s3"             % Versions.awsSdk
   val awsSts            = "software.amazon.awssdk" % "sts"            % Versions.awsSdk
   val awsBedrockRuntime = "software.amazon.awssdk" % "bedrockruntime" % Versions.awsSdk
+
+  // Jlama: in-process inference for llm4s-jlama (#2284)
+  val jlamaCore = "com.github.tjake" % "jlama-core" % Versions.jlama
 
   val opentelemetryApi          = "io.opentelemetry" % "opentelemetry-api"           % Versions.opentelemetry
   val opentelemetrySdk          = "io.opentelemetry" % "opentelemetry-sdk"           % Versions.opentelemetry

@@ -60,6 +60,8 @@ object PomDescriptions {
       "Client for TypeSafe's Jev decision model for LLM4S: typed yes/no, choice and score answers to questions about a state.",
     "llm4s-jina" ->
       "Jina AI embedding provider for LLM4S.",
+    "llm4s-jlama" ->
+      "In-process local model provider for LLM4S on Jlama: a first answer with no API key and no model server.",
     "llm4s-knowledgegraph" ->
       "Knowledge graph model, storage, query and LLM-based extraction for LLM4S.",
     "llm4s-knowledgegraph-neo4j" ->
