@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
-import org.llm4s.error.{ AuthenticationError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, ServiceError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.{
@@ -45,7 +45,9 @@ import scala.util.{ Try, Using }
  *    two-minute timeout ([[OpenAICompatibleClient.RequestTimeout]]);
  *  - `streamComplete`: the same with `"stream": true`, read as server-sent
  *    events until `[DONE]`, each delta fanned out to one chunk per tool call,
- *    with a five-minute timeout ([[OpenAICompatibleClient.StreamTimeout]]);
+ *    with a five-minute timeout ([[OpenAICompatibleClient.StreamTimeout]]). A stream
+ *    that ends without a `finish_reason` or `[DONE]`, or carries an `error` event, is
+ *    a `Left`: what was delivered is not a finished reply;
  *  - request building: role mapping, sampling parameters, tools and
  *    `response_format`;
  *  - one provider exchange recorded per call, success or failure; and the
@@ -55,13 +57,16 @@ import scala.util.{ Try, Using }
  * @param dialect         how this provider departs from the standard format.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ * @param suppliedHttpClient the HTTP client to send requests through, which the caller keeps owning (#2341);
+ *                        by default one built from `settings.network`, closed with this client.
  */
 @Stable
 class OpenAICompatibleClient(
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  suppliedHttpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
@@ -92,8 +97,9 @@ class OpenAICompatibleClient(
   // before the previous one is released. The provider may be the caller's own code, so it is registered here.
   private val bearers = new TokenGenerations
 
-  // Scoped to the provider package so specs can substitute one
-  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
+  // The supplied client, or one routed by the settings' proxy and TLS settings; scoped to the provider package so
+  // specs can substitute one
+  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
   private val endpoint                                = s"${settings.baseUrl}/chat/completions"
 
@@ -192,7 +198,12 @@ class OpenAICompatibleClient(
         .map(HttpFailures.streamReadError(_, endpoint, streamTimeout))
         .flatten
 
-  /** Reads an SSE body to `[DONE]` or end of stream; the caller closes it. */
+  /**
+   * Reads an SSE body to `[DONE]` or end of stream; the caller closes it. A `Right` means the model
+   * finished: the stream said so with a `finish_reason` or `[DONE]` (a server may send only one), and
+   * reported no `error` event. Reading stops at an `error` event. Chunks delivered before either
+   * failure stay delivered.
+   */
   private def readStream(
     body: InputStream,
     rawStream: StringBuilder,
@@ -205,13 +216,17 @@ class OpenAICompatibleClient(
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     var usage       = Option.empty[TokenUsage]
     var servedModel = Option.empty[String]
-    Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+    var ended       = false
+    var failure     = Option.empty[LLMError]
+    Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
+          if (event.data.contains("[DONE]")) ended = true
           event.data.filter(_ != "[DONE]").foreach { data =>
             val json = readReply(data)
+            failure = streamedError(json)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
@@ -219,17 +234,26 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            parseStreamingChunks(json, toolCalls).foreach { chunk =>
-              accumulator.addChunk(chunk)
-              onChunk(chunk)
-            }
+            if (failure.isEmpty)
+              parseStreamingChunks(json, toolCalls).foreach { chunk =>
+                chunk.finishReason.filter(_.nonEmpty).foreach { reason =>
+                  ended = true
+                  if (reason == "error")
+                    failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
+                }
+                accumulator.addChunk(chunk)
+                onChunk(chunk)
+              }
           }
         }
     }
     // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
     val opaqueThinking = dialect.decodeThinkingDetails(details.result())
-    accumulator.toCompletion.map { c =>
+    val unfinished = Option.when(!ended)(
+      NetworkError("stream ended without a finish_reason or [DONE]; the reply is incomplete", None, endpoint)
+    )
+    failure.orElse(unfinished).toLeft(()).flatMap(_ => accumulator.toCompletion).map { c =>
       val finalUsage = usage.orElse(c.usage)
       val message =
         if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
@@ -251,6 +275,31 @@ class OpenAICompatibleClient(
   private def readReply(text: String): ujson.Value =
     if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
     else ujson.read(text)
+
+  /**
+   * The failure an event reports in an `error` field, which a server sends once the 200 status is
+   * already out. The field is an object with a `message` or a plain string; an empty one, which some
+   * proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
+   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by
+   * the token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a
+   * bad gateway.
+   */
+  private def streamedError(json: ujson.Value): Option[LLMError] =
+    json.objOpt
+      .flatMap(_.get("error"))
+      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
+      .flatMap { error =>
+        val message =
+          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
+        val status = error.objOpt.toSeq
+          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
+          .flatMap(_.numOpt)
+          .map(_.toInt)
+          .find(code => code >= 400 && code <= 599)
+          .getOrElse(502)
+        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
+        HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption
+      }
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -635,7 +684,8 @@ class OpenAICompatibleClient(
 
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
-  override protected def releaseResources(): Unit = httpClient.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(suppliedHttpClient, httpClient)
 }
 
 object OpenAICompatibleClient {
@@ -905,7 +955,8 @@ object OpenAICompatibleClient {
   def apply(
     config: OpenAICompatibleConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[OpenAICompatibleClient] =
     // A config built with `apply` or the `with*` setters skipped `fromValues`; its rules are applied here too.
     OpenAICompatibleConfig
@@ -916,7 +967,8 @@ object OpenAICompatibleClient {
             settings(valid),
             OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage),
             metrics,
-            exchangeLogging
+            exchangeLogging,
+            httpClient
           )
         ).toResult
       )

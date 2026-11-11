@@ -9,9 +9,11 @@ import cats.effect.kernel.Outcome
 import cats.effect.unsafe.implicits.global
 import cats.syntax.parallel.*
 import org.llm4s.agent.testkit.Fixtures
+import org.llm4s.effect.contract.StreamingBridgeContract
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -66,6 +68,20 @@ class LLMClientIOConcurrencySpec extends AnyFlatSpec with TestTimeLimit with Mat
   }
 
   // ---- early termination ----------------------------------------------------------------------
+
+  it should "hold the provider to the bounded buffer when the consumer stops early" in {
+    // 2 taken, 64 in the queue and one pull of at most 64. Without a limit on that pull it drains the queue for as long
+    // as the provider keeps it non-empty, and take(2) sees nothing until the provider has run through most of its chunks.
+    val worst = (1 to 300).map { _ =>
+      val counting = new StreamingBridgeContract.Counting(
+        ScriptedLLMClient.sequence(Reply.text("x" * 5000)).withChunkSize(1)
+      )
+      run(LLMClientIO[IO](counting).streamComplete(StreamingBridgeContract.conversation).take(2).compile.drain)
+      counting.ended.await(Safety.toSeconds, TimeUnit.SECONDS) shouldBe true
+      counting.emitted.get()
+    }.max
+    worst should be <= 200
+  }
 
   it should "interrupt the producer exactly once and release its thread on early take" in {
     val parks = new ParksAfterFirst

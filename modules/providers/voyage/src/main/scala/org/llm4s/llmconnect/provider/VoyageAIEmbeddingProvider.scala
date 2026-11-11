@@ -104,20 +104,28 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
           val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
           logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
-          val headers = Map(
-            "Authorization" -> s"Bearer ${cfg.apiKey.reveal}",
+          // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+          def headers(key: String) = Map(
+            "Authorization" -> s"Bearer $key",
             "Content-Type"  -> "application/json"
           )
 
           // A cancellation is not a failed request: it passes through, as the contract in
           // docs/design/typed-agent-runtime-design.md section 4.4 requires.
           val respEither: Result[Llm4sHttpResponse] =
-            httpClient.post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(120.seconds)).left.map {
-              // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
-              case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
-              case err =>
-                EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
-            }
+            cfg
+              .currentApiKey()
+              .flatMap(key =>
+                httpClient
+                  .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(120.seconds))
+                  .left
+                  .map {
+                    // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+                    case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
+                    case err =>
+                      EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
+                  }
+              )
 
           respEither.flatMap { response =>
             response.statusCode match {

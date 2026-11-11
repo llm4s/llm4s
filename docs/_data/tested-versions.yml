@@ -29,10 +29,22 @@ stacks:
     artifact: "llm4s-pekko"
     versions: ["1.7.1"]
     note: ""
+  - name: "Ox"
+    artifact: "llm4s-ox"
+    versions: ["1.0.9"]
+    note: ""
   - name: "Project Reactor"
     artifact: "llm4s-reactor"
     versions: ["3.8.8"]
     note: ""
+  - name: "Tapir"
+    artifact: "llm4s-tapir"
+    versions: ["1.11.20"]
+    note: "With sttp client 3.10.3."
+  - name: "Iron"
+    artifact: "llm4s-schema-iron"
+    versions: ["3.3.2"]
+    note: "Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the 3.7.1 compiler cannot read."
   - name: "Kotlin"
     artifact: "llm4s-kotlin-api"
     versions: ["2.0.21"]
@@ -53,6 +65,10 @@ stacks:
     artifact: "modules/examples-http (unpublished)"
     versions: ["3.2.0"]
     note: ""
+  - name: "Play Framework"
+    artifact: "modules/examples-http (unpublished)"
+    versions: ["3.0.12"]
+    note: "Play's Pekko artifacts pinned to llm4s-pekko's 1.7.1."
   - name: "Micrometer"
     artifact: "llm4s-observability-micrometer"
     versions: ["1.17.1"]
@@ -77,6 +93,14 @@ stacks:
     artifact: "docs/guide/json-libraries.md (tested recipe)"
     versions: ["1.0.0"]
     note: "Pinned: later releases are built with a newer Scala 3 whose TASTy the 3.7.1 compiler cannot read."
+  - name: "jsoniter-scala"
+    artifact: "docs/guide/json-libraries.md (tested recipe)"
+    versions: ["2.42.2"]
+    note: ""
+  - name: "fs2-kafka"
+    artifact: "docs/guide/kafka.md (tested pipeline)"
+    versions: ["3.7.0"]
+    note: ""
   - name: "OpenAI Java SDK"
     artifact: "llm4s-openai"
     versions: ["4.69.3"]

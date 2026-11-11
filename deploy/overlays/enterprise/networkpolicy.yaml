@@ -1,0 +1,86 @@
+# Egress: the app talks to the gateway and to DNS, nothing else; only the gateway leaves the cluster.
+#
+# A NetworkPolicy matches addresses and ports, never host names, so the gateway's rule allows HTTPS to public
+# addresses. To allow only the provider's host names, send the gateway's traffic through an egress proxy that checks
+# them, or use a CNI with FQDN policies (Cilium, Calico Enterprise). Add a rule for each other destination the app
+# has: a self-hosted Langfuse or OTLP collector, a database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: llm4s-app-egress
+  labels:
+    app.kubernetes.io/part-of: llm4s
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: llm4s-deploy-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm
+  labels:
+    app.kubernetes.io/part-of: llm4s
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only the app reaches the gateway.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: llm4s-deploy-service
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # HTTPS to the providers: public addresses only, so the gateway cannot reach anything inside the network.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

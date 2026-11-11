@@ -3,8 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ZaiConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -13,6 +14,10 @@ import org.llm4s.types.Result
 /** Registration for the Z.ai GLM API. */
 @Stable
 object ZaiProvider extends ProviderDescriptor:
+
+  /** Sends its requests through `LlmClientOptions.httpClient` when one is supplied (#2341). */
+  override def features: ProviderFeatures = ProviderFeatures.default.withCustomHttpClient(true)
+
   val id: ProviderId = ProviderId("zai")
 
   val configSpec: ProviderConfigSpec =
@@ -32,4 +37,6 @@ object ZaiProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[ZaiConfig](id, config)
-      .flatMap(ZaiClient(_, options.metrics, options.exchangeLogging))
+      .flatMap(
+        ZaiClient(_, options.metrics, options.exchangeLogging, Llm4sHttpClient.suppliedOrFromConfig(options.httpClient))
+      )

@@ -36,6 +36,8 @@ object PomDescriptions {
       "Microsoft Entra ID for LLM4S's Azure OpenAI provider: keyless DefaultAzureCredential or any TokenCredential.",
     "llm4s-bedrock" ->
       "AWS Bedrock chat provider for LLM4S, using the Converse and ConverseStream APIs.",
+    "llm4s-capabilities" ->
+      "Capability-typed LLM4S clients: check a model's capabilities once, and passing a client not checked for one fails to compile.",
     "llm4s-cohere" ->
       "Cohere embedding provider for LLM4S.",
     "llm4s-core" ->
@@ -84,18 +86,30 @@ object PomDescriptions {
       "OpenAI, Azure OpenAI and Requesty chat providers and OpenAI embeddings for LLM4S.",
     "llm4s-openai-compatible" ->
       "Chat client for OpenAI-compatible APIs in LLM4S: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any generic endpoint.",
+    "llm4s-ox" ->
+      "Direct-style LLM4S on JDK 21 virtual threads with Ox: streamed completions as a Flow, fan-out, races and retries.",
     "llm4s-pekko" ->
       "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
+    "llm4s-perplexity" ->
+      "Perplexity Agent API chat provider for LLM4S: web search with citations.",
+    "llm4s-prompt" ->
+      "Compile-time checked prompt interpolators for LLM4S, with typed rendering and fenced untrusted input.",
     "llm4s-provider-testkit" ->
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->
       "Retrieval-augmented generation for LLM4S: vector stores, chunking, reranking, evaluation and extraction.",
+    "llm4s-repl" ->
+      "One-import helpers for trying LLM4S in the Scala CLI REPL, Metals worksheets and scripts: ask, extract, chat and pretty-printed history and usage.",
     "llm4s-schema-derivation" ->
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
+    "llm4s-schema-iron" ->
+      "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
+    "llm4s-tapir" ->
+      "Tapir endpoints as LLM4S tools: each tool's parameter schema derived from its endpoint, called through sttp.",
     "llm4s-testkit" ->
       "Scriptable fake LLM client and recorded calls for testing applications built with LLM4S.",
     "llm4s-vectorstore-elasticsearch" ->

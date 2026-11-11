@@ -162,6 +162,7 @@ the value.
 | `openrouter` | `OPENROUTER_API_KEY` | `llm4s-openai-compatible` |
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
 | `xai` | `XAI_API_KEY` | `llm4s-openai-compatible` |
+| `perplexity` | `PERPLEXITY_API_KEY` | `llm4s-perplexity` |
 | `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 | `jina` | `JINA_API_KEY` | `llm4s-jina` |
@@ -218,12 +219,35 @@ restarting the application. The INFO line names the file, never the key.
 A section sets `apiKeyFile` or `apiKey` (or `auth`), never two of them, and with `apiKeyFile` the
 vendor's shared key is not used. Every built-in provider that takes an API key re-reads the file per
 request as above: `openai`, `requesty`, `azure` (its `api-key` header), `anthropic`, `gemini`,
-`openai-compatible`, `openrouter`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, and `watsonx`, which
+`openai-compatible`, `openrouter`, `deepseek`, `zai`, `mistral`, `cohere`, `xai`, `perplexity`, and `watsonx`, which
 exchanges a rotated key for a new IAM token at the next request. A provider from another module whose
 config cannot take an `ApiKeyProvider` reads the file once, when the section is loaded, and logs that
 it does. A provider that takes no API key (`ollama`, `bedrock`, `vertexai`) refuses `apiKeyFile` with a
 `ConfigurationError`. On a POSIX file system, a key file readable by its group or by others is
 logged once as a WARN naming the path; mount it with mode `0400`.
+
+`apiKeyFile` is accepted wherever `apiKey` is: in an embeddings block (`llm4s.embeddings.<id>`), in
+the reranker's block (`llm4s.rerank.cohere`) and in the vendor's shared credentials
+(`llm4s.credentials.<id>`), which every client of the vendor falls back to. The precedence is the
+same as for `apiKey`: the client's own key or key file, then the shared key or key file, then an
+error naming both. So one mounted file can serve a vendor's chat sections, its embeddings and the
+reranker:
+
+```hocon
+llm4s {
+  credentials.openai.apiKeyFile = "/var/run/secrets/llm4s/openai-api-key"   # every OpenAI client
+  embeddings.voyage.apiKeyFile  = "/var/run/secrets/llm4s/voyage-api-key"   # Voyage embeddings only
+  rerank.cohere.apiKeyFile      = "/var/run/secrets/llm4s/cohere-api-key"   # the Cohere reranker only
+}
+```
+
+The embedding providers (`openai`, `voyage`, `jina`, `cohere`, `ollama`) and the Cohere reranker
+re-read the file per request, as the chat clients above do; a chat section that falls back to a
+shared `apiKeyFile` is treated as if it set that file itself. A block or credentials entry that sets
+both `apiKey` and `apiKeyFile` is refused - a provider module's `reference.conf` binds
+`llm4s.credentials.<id>.apiKey` to the vendor's variable, so with a shared `apiKeyFile`, leave that
+variable unset. The safety rules are the same: the path is logged, never the key; a file over 64 KiB
+is refused; a group- or world-readable file is logged as a WARN.
 
 A key your code fetches - from Vault's API, AWS Secrets Manager or GCP Secret Manager - comes from an
 `ApiKeyProvider`, which the client asks for the key on every request. `current()` is on the request
@@ -422,6 +446,7 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 |---|---|---|---|
 | `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
 | `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
+| `perplexity` | 5 minutes | 10 minutes | the wait for the response to begin |
 | `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
 | `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
@@ -564,6 +589,36 @@ What is not covered:
 - **Bedrock's credential lookups** (instance metadata, STS) use the AWS SDK's own clients and are not routed through
   `llm4s.http`; the AWS SDK reads `HTTPS_PROXY` for those itself.
 - **Clients you build yourself** with `Llm4sHttpClient.create()` keep the JVM's defaults; pass the settings as above.
+
+### Your own HTTP client
+
+A service that already has a tuned HTTP stack - connection pool, proxy, request logging, tracing - can hand it to the
+provider clients instead: implement `org.llm4s.http.Llm4sHttpClient` over it and pass it with
+`LlmClientOptions.withHttpClient` ([#2341](https://github.com/llm4s/llm4s/issues/2341)).
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.{ LLMConnect, LlmClientOptions }
+import org.llm4s.model.ModelRegistryService
+
+val http: Llm4sHttpClient = Llm4sHttpClient.create() // or your own implementation of the trait
+
+val client = for {
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client <- LLMConnect.getClient(providerConfig, LlmClientOptions.default.withHttpClient(http))
+} yield client
+```
+
+- **You own it.** Closing the LLM client does not close a supplied HTTP client; close it when your application stops.
+- **The section's `llm4s.http` proxy and TLS settings do not apply to it**: configure them on your own stack.
+- **SDK-free providers use it**: `ollama`, `gemini`, `vertexai`, `watsonx`, `openai-compatible` and its dialects
+  (`deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `xai`). Providers built on a vendor SDK (`openai`, `azure`,
+  `requesty`, `anthropic`, `bedrock`) keep the SDK's transport and ignore it. A descriptor's
+  `features.customHttpClient` says which: it is `false` unless the provider opts in, so a third-party provider that
+  predates the option does not claim it. Embedding providers do not take one yet.
 
 ---
 
@@ -1128,6 +1183,7 @@ also set in `application.conf` or with `-D`.
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
+| `PERPLEXITY_API_KEY` | `llm4s.credentials.perplexity.apiKey` | `llm4s-perplexity` |
 | `TYPESAFE_API_KEY` | `llm4s.credentials.typesafe.apiKey` (the Jev decision client) | `llm4s-jev` |
 | `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` | `llm4s.jev.baseUrl`, `llm4s.jev.model` | `llm4s-jev` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |

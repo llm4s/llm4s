@@ -22,11 +22,26 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [the context types](#context-types-are-growth-safe-2380),
 [the tool schemas and tool-call types](#tool-schemas-and-tool-call-types-are-growth-safe-2381),
 [two `ToolCallError` and `ToolParameterError` cases](#toolcallerror-and-toolparametererror-cases-2382),
-[the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383)
+[the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383),
+[`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
+
+## A supplied HTTP client is the caller's to close (#2341)
+
+`LlmClientOptions.withHttpClient` hands the SDK-free provider clients (`ollama`, `gemini`, `vertexai`, `watsonx`,
+`openai-compatible` and its dialects) an `Llm4sHttpClient` to send their requests through. A client supplied this
+way, or to the `httpClient` constructor parameter of `OllamaClient`, `GeminiClient`, `VertexAIClient`,
+`WatsonXClient` or an `OpenAICompatibleClient`, is no longer closed when the LLM client is closed: the caller owns
+it. Close it yourself when your application stops. A client the provider builds itself is still closed with it.
+
+`LlmClientOptions` gains `httpClient: Option[Llm4sHttpClient]` and `ProviderFeatures` gains `customHttpClient`,
+`false` by default (and for `openai`, `azure`, `requesty`, `anthropic` and `bedrock`, whose SDKs keep their own
+transport). A provider of your own that sends its requests through `options.httpClient` opts in with
+`ProviderFeatures.default.withCustomHttpClient(true)`. Their `apply` overloads without the new field remain; a
+pattern match on either type's extractor binds one more field.
 
 ## Credentials are Secret (#1932)
 
@@ -271,6 +286,12 @@ for
 yield (files, ExecuteTool(sandbox))
 ```
 
+## Direct style with Ox: `llm4s-ox` (#2332)
+
+Nothing changes for existing code: `llm4s-ox` is a new, Experimental module over `llm4s-core` and Ox. To stream a reply
+as an Ox `Flow`, fan out, race providers or retry with Ox, add `"org.llm4s" %% "llm4s-ox"` and
+`import org.llm4s.ox.*`; see [Direct style and Ox](../guide/direct-style).
+
 ## The doctor is `llm4s-doctor` (#2283)
 
 The doctor moved from the unpublished `llm4s-config-policy` to the published `llm4s-doctor`, package `org.llm4s.doctor`
@@ -282,6 +303,13 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
   `DoctorPorts` are internal.
 - Without `--classpath`, the "Provider module" step reports the module as found "on this classpath": the doctor's
   classpath is now the one it is launched on, not one with every built-in provider module.
+
+## `llm4s-repl`, a new module (#2342)
+
+Nothing to change: `llm4s-repl` is a new, experimental module, and no other module depends on it. To try llm4s from the
+Scala CLI REPL, a Metals worksheet or a script, add it (with a provider module) and `import org.llm4s.repl.*`; see
+[Try llm4s in the REPL](../getting-started/repl). Keep it out of production code: it prints to the console and keeps
+the conversation in memory.
 
 ## `llm4s-java-api` and the Spring Boot starter no longer bring the provider modules (#1496)
 
@@ -521,6 +549,23 @@ as `provider: Option[ProviderId]`, stored as the plain id, so events stored befo
 `EmbeddingClient` takes `providerId` as its fourth parameter, before the `ModelRegistryService`: Java and Kotlin
 callers of the constructor pass `Option.empty()` there.
 
+### Only remote calls are `CLIENT` spans (#2531)
+
+`llm4s-observability-otel` gives an event the `CLIENT` span kind only when it records a request to a remote service:
+a completion, an embedding or image generation call, an agent's model call, or the failure of one of them (an
+`ErrorOccurred` with an `operation`). Every other event, and any event added later, is `INTERNAL`, OpenTelemetry's
+default ([#2531](https://github.com/llm4s/llm4s/issues/2531)). A dashboard or query that selects `CLIENT` spans no
+longer sees:
+
+| Span | Was | Now |
+|---|---|---|
+| `Error` (an `ErrorOccurred` with no operation) | `CLIENT` | `INTERNAL` |
+| `ToolExecuted`'s `execute_tool <tool>` | `CLIENT` | `INTERNAL`, as an agent's `execute_tool` span already was |
+| `CostRecorded`, `CacheHit`, `CacheMiss`, `RAGOperationCompleted` | `CLIENT` | `INTERNAL` |
+| a `CustomEvent` with no `span` | `CLIENT` | `INTERNAL`, as a placed one already was |
+
+No API changes.
+
 ### `ServiceError` extractor and `isRecoverableStatus` (#2266)
 
 `ServiceError`'s extractor binds all five fields, `retryAfter` last
@@ -748,6 +793,23 @@ The seven `AssistantError` cases - `IOError`, `EOFError`, `DisplayError`, `Sessi
 - **Java and Kotlin**: call the companion's `apply` instead of the constructor, and chain the setters.
 - Pattern matching (`case AssistantError.FileError(message, path, operation, cause)`), the fields, `context` and
   `formatted` are unchanged.
+
+### `RerankProviderConfig` is growth-safe (#2478)
+
+`RerankProviderConfig` (`org.llm4s.reranker`, `llm4s-rag`) gains `apiKeyProvider`, the key a reranker asks for per
+request (a rotated `apiKeyFile`), and follows the growth-prone pattern
+([#2478](https://github.com/llm4s/llm4s/issues/2478)): its constructor and `copy` are private.
+
+- **Construction is unchanged**: `RerankProviderConfig(baseUrl, apiKey, model)`, positional or named, still compiles.
+  `new RerankProviderConfig(...)` does not; drop the `new`.
+- **Replace `.copy` with a setter**: `withBaseUrl`, `withApiKey`, `withModel` and `withApiKeyProvider` (the provider or
+  an `Option`).
+
+  ```scala
+  val other = config.withModel("rerank-v3.5")   // was config.copy(model = "rerank-v3.5")
+  ```
+
+- Pattern matching and the fields are unchanged; pattern matching now binds four fields.
 
 ### Provider SPI, caching, streaming and exchange-sink types are growth-safe (#2379)
 

@@ -44,6 +44,7 @@ CI, so this table does not repeat it:
 | **xAI** | `xai` | Cloud | Grok models | Easy |
 | **Ollama** | `ollama` | Local | Open models on your machine, no API key | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
+| **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
 | **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
 | **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
@@ -458,6 +459,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Azure OpenAI | `endpoint` (required), `apiVersion`, `authentication`, `clientId` |
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
+| Perplexity | `webSearch`, `contextWindow`, `reserveCompletion` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
 key that is neither built-in nor declared by the section's provider is ignored with a warning
@@ -480,7 +482,9 @@ unchanged.
 > `WatsonXClient`'s Scaladoc): the token-limit field, the encoding of tool-call arguments, the finish reasons
 > and the stream's usage chunk are all shown there. IBM's
 > [tool-calling guide](https://www.ibm.com/docs/SSYOK8/wsj/analyze-data/fm-api-chat-tools.html) shows the
-> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. That proves IBM's clients send them, not that the
+> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. `WatsonXChatOverHttpSpec` runs the client through the real HTTP stack against
+> a local server: tool calls whole and streamed, structured messages with no role-marker prompt, and the error
+> mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
 > which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has
@@ -556,6 +560,52 @@ Behaviour to know about:
   the other variables in the example are just `${?VAR}` substitutions you write in your own config.
 
 ---
+
+## Perplexity
+
+`llm4s-perplexity` calls Perplexity's [Agent API](https://docs.perplexity.ai/docs/agent-api/quickstart)
+(`POST https://api.perplexity.ai/v1/agent`), which replaced Sonar Chat Completions: Perplexity
+[ended Sonar's support](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview) on 27 September
+2026. The Agent API speaks the OpenAI Responses format, so it has its own client rather than the generic
+`openai-compatible` one. Adding the dependency registers the `perplexity` provider.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.perplexity-main {
+  provider = "perplexity"
+  model    = "perplexity/sonar"     # any Agent API model: perplexity/sonar, openai/gpt-5.6-sol, anthropic/claude-sonnet-5-5, ...
+  # apiKey defaults to PERPLEXITY_API_KEY (llm4s.credentials.perplexity.apiKey)
+  # webSearch = false               # default true
+}
+```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `model` | yes | An Agent API model id, `provider/model` ([the list](https://docs.perplexity.ai/docs/agent-api/models)) |
+| `apiKey` | no | Default `PERPLEXITY_API_KEY` |
+| `webSearch` | no | Offer the model Perplexity's `web_search` tool on every request; default `true`. Each search is billed |
+| `contextWindow` | no | The model's window in tokens; default the model registry's entry for the model's vendor, else 128000 |
+| `reserveCompletion` | no | Tokens held back for the reply; default 4096 |
+
+- **Citations.** `Completion.citations` holds the `url_citation` annotations on the answer, then each web
+  search result (its URL, title and snippet as `citedText`). The answer's `[web:N]` markers point at those
+  results. Both `complete` and a stream carry them.
+- **Usage and cost.** Cached and reasoning tokens are read from the usage details, and the cost Perplexity
+  reports for the request (`usage.cost.total_cost`, USD, searches included) is `Completion.estimatedCost`.
+- **Tools.** Your tools are sent as `function` tools beside `web_search`, and a reply's `function_call` items
+  become `ToolCall`s. A call's `thought_signature`, which some models attach, is kept and sent back with it.
+- **Request mapping.** System messages become `instructions`. `ReasoningEffort` is sent as `reasoning.effort`
+  (`None` as `minimal`). A `ResponseFormat.JsonSchema` is sent as `response_format`; plain
+  `ResponseFormat.Json` is refused, since the Agent API takes only a schema. An `anthropic/` model with no
+  `maxTokens` is sent `reserveCompletion` as `max_output_tokens`, which the Agent API requires for those models.
+  Penalties have no counterpart and are not sent. Only text content is sent.
+- **Not supported yet:** effort levels (`effort`), profiles, model fallback chains, the other built-in tools
+  (`fetch_url`, `finance_search`, ...), background runs and `previous_response_id`.
+- No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
+  the service with `PERPLEXITY_API_KEY`.
 
 ## Azure OpenAI
 
@@ -923,7 +973,7 @@ model: tool calling on a local server usually needs a server flag, as the recipe
 
 **Streamed token usage.** A streaming request asks for usage with
 `"stream_options": {"include_usage": true}`, which is how OpenAI - and servers that follow it,
-such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
+such as vLLM, Ollama's `/v1` and Perplexity's Orchestrator - are told to report it; usage is read from
 whichever event carries it, including a final event with empty `choices`. An endpoint that
 rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
 off with `streamUsage = false` in the section (it takes `true` or `false`, and HOCON's
@@ -1071,44 +1121,25 @@ nim-cloud {
 
 #### Perplexity
 
-{: .warning }
-> Perplexity has replaced **Sonar Chat Completions** with its Agent API, and states that Sonar
-> "will be supported until September 27, 2026". The Agent API uses the OpenAI **Responses**
-> format (`/v1/responses`), which the generic provider does not speak. Check Sonar's status
-> before relying on the section below.
+For Perplexity's search-grounded answers use the [`perplexity` provider](#perplexity): its Agent API speaks the
+OpenAI Responses format, which this provider does not. Sonar Chat Completions, which this provider could reach,
+lost Perplexity's support on 27 September 2026.
 
-Sonar, while it runs:
+Perplexity's **Orchestrator API** (formerly the Router API) speaks Chat Completions and serves open-weight
+models, without the Agent API's web search. It is in private preview (access by request to Perplexity), and
+publishes no context windows, so set `contextWindow` for the model you pick:
 
 ```hocon
-perplexity-sonar {
+perplexity-orchestrator {
   provider = "openai-compatible"
-  baseUrl = "https://api.perplexity.ai"    # no /v1: requests go to /chat/completions
-  model = "sonar-pro"
+  baseUrl = "https://api.perplexity.ai/orchestrator/v1"   # the old /router/v1 still works
+  model = "perplexity/kimi-k3"
   apiKey = ${?PERPLEXITY_API_KEY}
 }
 ```
 
-- The context window, 200000 for `sonar-pro`, comes from the model registry.
-- **Citations and search results are not surfaced.** Sonar returns them in top-level
-  `citations` and `search_results` fields, and `Completion` has no field for them, so you get
-  the answer text - with its `[1]`-style markers - and not the sources they point to.
-- Sonar's tool-calling support is undocumented; do not rely on it.
-
-Perplexity's **Router API** speaks Chat Completions and serves open-weight models, without
-Sonar's web search. It is in private preview (access by request to Perplexity), and publishes
-no context windows, so set `contextWindow` for the model you pick:
-
-```hocon
-perplexity-router {
-  provider = "openai-compatible"
-  baseUrl = "https://api.perplexity.ai/router/v1"
-  model = "perplexity/glm-5.3-flash"
-  apiKey = ${?PERPLEXITY_API_KEY}
-}
-```
-
-The Router reports token usage on a stream only when asked with `stream_options`, which the
-generic provider sends, so streamed completions carry usage.
+The Orchestrator reports token usage on a stream only when asked with `stream_options`, which the generic
+provider sends, so streamed completions carry usage.
 
 #### OrcaRouter
 
@@ -1176,7 +1207,7 @@ lmstudio {
 #### llama.cpp (`llama-server`)
 
 ```bash
-llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384
+llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384 --port 8080
 ```
 
 ```hocon
@@ -1189,8 +1220,9 @@ llama-cpp {
 }
 ```
 
-- `llama-server` listens on `127.0.0.1:8080` by default. Without `--alias` the model id is the
-  model file's path; `--alias` gives it a stable name.
+- `llama-server` listens on `127.0.0.1`, on port 9931 by default in current builds; the command
+  above pins 8080 with `--port`. Without `--alias` the model id is the model file's path; `--alias`
+  gives it a stable name.
 - Tool calling uses the Jinja chat template (`--jinja`, on by default), and some models need a
   `--chat-template-file` override to get a tool-capable template.
 
@@ -1382,11 +1414,9 @@ The sources for the values above:
   [Llama 3.3 70B Instruct](https://docs.api.nvidia.com/nim/reference/meta-llama-3_3-70b-instruct),
   [self-hosted quickstart](https://docs.nvidia.com/nim/large-language-models/latest/get-started/quickstart.html),
   [self-hosted API reference](https://docs.nvidia.com/nim/large-language-models/latest/reference/api-reference.html)
-- Perplexity: [Sonar OpenAI compatibility](https://docs.perplexity.ai/docs/sonar/openai-compatibility),
-  [Sonar Pro](https://docs.perplexity.ai/docs/sonar/models/sonar-pro),
-  [migrating from Sonar](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview),
-  [Router API](https://docs.perplexity.ai/docs/router/quickstart),
-  [Router models](https://docs.perplexity.ai/docs/router/models)
+- Perplexity: [migrating from Sonar](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview),
+  [Orchestrator API](https://docs.perplexity.ai/docs/router/quickstart),
+  [Orchestrator models](https://docs.perplexity.ai/docs/router/models)
 - OrcaRouter: [quickstart](https://docs.orcarouter.ai/getting-started/quickstart),
   [reasoning](https://docs.orcarouter.ai/advanced/reasoning)
 - vLLM: [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/),
@@ -1862,6 +1892,7 @@ provider's call). `hasSpan` says whether both are present.
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
 | Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
 | Anthropic | With `webSearch = true` in the section (see [Web search](#web-search)): one citation per source a text block cites - for a `web_search_result_location` its `url`, `title` and `cited_text`, for a `search_result_location` its `source` as `url`. Document citations (`char_location`, `page_location`, `content_block_location`) name a document, not a URL, and are skipped. No indices: Anthropic attaches a citation to a text block, not to a position in it. Read from `complete` and from a stream (`citations_delta`). |
+| Perplexity | The `url_citation` annotations on the answer, then each `web_search` result (`url`, `title`, the `snippet` as `citedText`) not already cited; see [Perplexity](#perplexity). Read from `complete` and from a stream. |
 | Ollama, Bedrock, watsonx | Empty. |
 
 Things to know:
@@ -1874,7 +1905,6 @@ Things to know:
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
   cannot parse at all as no citations; the OpenAI-compatible client keeps the entries it can read.
-- **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
 - The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
   provider was called while writing this.
 

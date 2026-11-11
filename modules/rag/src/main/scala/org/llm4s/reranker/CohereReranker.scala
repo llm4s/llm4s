@@ -43,18 +43,21 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
     logger.debug(s"[CohereReranker] POST $url model=${config.model} docs=${request.documents.size} topN=$topN")
 
-    val headers = Map("Authorization" -> s"Bearer ${config.apiKey.reveal}", "Content-Type" -> "application/json")
+    // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+    def headers(key: String) = Map("Authorization" -> s"Bearer $key", "Content-Type" -> "application/json")
 
     // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
     // A cancellation passes through as it is (design section 4.4); any other failure is a RerankError.
     val respEither: Result[org.llm4s.http.HttpResponse] =
-      httpClient
-        .post(url, headers, payload.render(), timeout = 2.minutes)
-        .left
-        .map {
-          case cancelled: CancelledError => cancelled
-          case e => RerankError(code = None, message = s"HTTP request failed: ${e.message}", provider = "cohere")
-        }
+      config.currentApiKey().flatMap { key =>
+        httpClient
+          .post(url, headers(key.reveal), payload.render(), timeout = 2.minutes)
+          .left
+          .map {
+            case cancelled: CancelledError => cancelled
+            case e => RerankError(code = None, message = s"HTTP request failed: ${e.message}", provider = "cohere")
+          }
+      }
 
     respEither.flatMap { response =>
       response.statusCode match {

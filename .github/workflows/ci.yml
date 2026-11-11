@@ -124,6 +124,13 @@ jobs:
       - name: Check docs nav_order is unique within each parent
         run: scripts/check-doc-nav-order.sh
 
+      # Fails when docs/_data/support.yml (the Support Policy's table of release lines) lacks CHANGELOG.md's newest
+      # release, or is malformed. The release workflow runs the same check against the tag before publishing (#2289).
+      - name: Check the support table lists the latest release
+        run: |
+          scripts/test-check-support-table.sh
+          scripts/check-support-table.sh
+
       # Every docs page has its own search title and meta description, not the site-wide one: jekyll-seo-tag falls back
       # to it, so a page without one looks like every other page in a search result. This reads the front matter; the
       # built site is checked again in pages.yml before a deploy (#2314).
@@ -131,6 +138,11 @@ jobs:
         run: |
           scripts/test-check-doc-seo.sh
           scripts/check-doc-seo.sh
+
+      # The share-card and structured-data check that pages.yml runs on the built site (#2316), on fixture sites: a page
+      # without og:image or a large card, invalid JSON-LD or a stale SoftwareSourceCode version must fail it.
+      - name: Test the share-card and structured-data check
+        run: scripts/test-check-site-share-cards.sh
 
       # llms.txt, llms-full.txt and llm4s-rules.md are built from the docs when the site is deployed (pages.yml). This
       # builds them the same way and fails on a missing file, a dead link or an unmarked unchecked Scala block (#2287).
@@ -148,6 +160,11 @@ jobs:
       # reaches a shell. It needs jq and ruby, both on the runner.
       - name: Test the release docs-deploy dispatcher
         run: scripts/test-dispatch-docs-deploy.sh
+
+      # The News post drafter (#2319): drafts the 0.5.1 post from the CHANGELOG and checks its front matter, dependency
+      # line and links, and that the release workflow's --check only warns.
+      - name: Test the release post drafter
+        run: scripts/test-new-release-post.sh
 
       # The sitemap generator and check that pages.yml runs after the Jekyll build (#2318), on a fake built site.
       - name: Test the sitemap scripts
@@ -248,6 +265,11 @@ jobs:
         run: |
           scripts/test-check-mill-quickstart.sh
           scripts/check-mill-quickstart.sh
+
+      # The Flink guide's Scala snippets are excerpts of modules/samples/flink, which pins latest_release (#2298);
+      # flink-sample.yml runs the sample's MiniCluster test.
+      - name: Check the Flink guide's snippets are the sample's
+        run: scripts/check-flink-guide-snippets.sh
 
       # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
       # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
@@ -366,6 +388,22 @@ jobs:
       - name: Check the deployment manifests render
         run: deploy/scripts/deploy.sh check
 
+      # Every overlay, the enterprise one's ExternalSecrets and NetworkPolicies included (#2315), validated against
+      # the Kubernetes and External Secrets Operator schemas: an unknown field or a wrong type fails here, not at
+      # `kubectl apply`. The binary is checked against the release's own checksums.
+      - name: Validate the deployment manifests with kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+        run: |
+          dir="$RUNNER_TEMP/kubeconform"
+          mkdir -p "$dir"
+          base="https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION"
+          curl -fsSL --retry 3 -o "$dir/kubeconform-linux-amd64.tar.gz" "$base/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$dir/CHECKSUMS" "$base/CHECKSUMS"
+          (cd "$dir" && sha256sum --check --ignore-missing --strict CHECKSUMS)
+          tar -xzf "$dir/kubeconform-linux-amd64.tar.gz" -C "$dir" kubeconform
+          KUBECONFORM="$dir/kubeconform" deploy/scripts/deploy.sh validate
+
       - name: Check the deploy-service image definition
         run: |
           sbt --client deployService/Docker/stage
@@ -437,18 +475,18 @@ jobs:
         # Balanced by the per-module times of the single job (#1935's run): about 5 minutes of sbt each.
         include:
           - leg: core
-            modules: [core, memory, memoryPostgres, schemaDerivation, testkit, doctor, observabilityMicrometer,
-                      agentTools, traceOpentelemetry, gradleDemo]
+            modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
+                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      perplexity, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
-                      llm4sPekko]
+                      llm4sPekko, llm4sOx]
 
     # rag's and memory-postgres's pgvector suites need it. A service cannot be given to some legs only; on the
     # others it costs a few seconds of start-up.
@@ -540,6 +578,39 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload schema-iron coverage to Codecov
+        if: contains(matrix.modules, 'schemaIron')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/schema-iron/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: schema-iron
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload prompt coverage to Codecov
+        if: contains(matrix.modules, 'prompt')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/prompt/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: prompt
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload capabilities coverage to Codecov
+        if: contains(matrix.modules, 'capabilities')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/capabilities/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: capabilities
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload testkit coverage to Codecov
         if: contains(matrix.modules, 'testkit')
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -562,6 +633,17 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload repl coverage to Codecov
+        if: contains(matrix.modules, 'repl')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/repl/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: repl
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload observability-micrometer coverage to Codecov
         if: contains(matrix.modules, 'observabilityMicrometer')
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -580,6 +662,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-tools/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-tools
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload tapir coverage to Codecov
+        if: contains(matrix.modules, 'llm4sTapir')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/tapir/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: tapir
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -850,6 +943,17 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload perplexity coverage to Codecov
+        if: contains(matrix.modules, 'perplexity')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/perplexity/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: perplexity
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload provider-testkit coverage to Codecov
         if: contains(matrix.modules, 'providerTestkit')
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -1016,6 +1120,17 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload llm4s-ox coverage to Codecov
+        if: contains(matrix.modules, 'llm4sOx')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-ox/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-ox
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       # The data and report of each module this leg reported on, for the `Code Coverage` job's aggregate report. On a
       # fresh runner only those modules have a scoverage-report. A dependency's data (compiled and measured here too)
       # is left out: its statement ids differ from one compile to the next, so it must not overwrite the owning leg's.
@@ -1126,10 +1241,22 @@ jobs:
           cache: 'sbt'
       
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
-      
+
+      # The MCP Python SDK, pinned, for samples' PythonToolBridgeExampleSpec (#2333): it starts sentiment_tool.py with
+      # the `python3` first on the PATH, so the venv goes there. Without it the spec is cancelled, not run.
+      - name: Install the MCP Python SDK for the Python sidecar sample
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/mcp-venv"
+          "$RUNNER_TEMP/mcp-venv/bin/pip" install --quiet -r modules/samples/src/main/python/requirements.txt
+          echo "$RUNNER_TEMP/mcp-venv/bin" >> "$GITHUB_PATH"
+
       # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
+      # Ubuntu's `sbt test` runs the unforked suites (samples, java-api, ...) inside the sbt JVM, and outgrew
+      # .sbtopts' 2 GB heap (OutOfMemoryError in the launcher from 00a4d3e8 on). The flag comes after .sbtopts'
+      # -J-Xmx2g, so it wins; local runs keep 2 GB.
       - name: Run tests
-        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || 'test' }}
+        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || '-J-Xmx4g test' }}
       
       - name: Upload test reports
         if: failure()
@@ -1262,6 +1389,17 @@ jobs:
           - 7687:7687
           - 7474:7474
 
+      # KafkaTicketPipelineSpec (#2297): a single-node broker in KRaft mode, advertised on localhost:9092.
+      kafka:
+        image: apache/kafka:3.9.1
+        options: >-
+          --health-cmd "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+          --health-interval 5s
+          --health-timeout 10s
+          --health-retries 30
+        ports:
+          - 9092:9092
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1321,6 +1459,7 @@ jobs:
           OPENSEARCH_TEST_URL: http://localhost:9201
           REDIS_TEST_URL: redis://localhost:6379
           VALKEY_TEST_URL: redis://localhost:6380
+          KAFKA_TEST_BOOTSTRAP: localhost:9092
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
@@ -1534,6 +1673,13 @@ jobs:
           REQUIRE_MAVEN: '1'
           REQUIRE_GRADLE: '1'
         run: scripts/check-doctor-launch.sh 0.1.0-SNAPSHOT
+
+      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
+
+      # examples/repl's Scala CLI script and Metals worksheet, run with `scala-cli run` against the llm4s-repl just
+      # published and Session.offline, so with no API key (#2342).
+      - name: Run the llm4s-repl script and worksheet with Scala CLI
+        run: scripts/check-repl-scripts.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()
@@ -1971,6 +2117,10 @@ jobs:
           WATSONX_MODEL: ${{ secrets.WATSONX_MODEL }}
           # JevSmokeSpec (llm4s-jev): a TypeSafe API key, billed at a few hundred input tokens per test.
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          # PerplexitySmokeSpec (llm4s-perplexity): a Perplexity API key; billed per web search as well as per token.
+          # PERPLEXITY_MODEL is optional; unset, the suite uses perplexity/sonar.
+          PERPLEXITY_API_KEY: ${{ secrets.PERPLEXITY_API_KEY }}
+          PERPLEXITY_MODEL: ${{ secrets.PERPLEXITY_MODEL }}
           # Smoke suites added for #1213. With LLM4S_IT_STRICT=true each required one that is
           # missing from the repository secrets makes its suite FAIL (not skip).
           # AzureSmokeSpec: the resource key, its endpoint (https://<resource>.openai.azure.com) and a

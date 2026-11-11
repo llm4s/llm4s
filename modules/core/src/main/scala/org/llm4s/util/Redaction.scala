@@ -1651,7 +1651,10 @@ private[llm4s] object Redaction {
           if (input.charAt(after) == '\'' || input.charAt(after) == '"') input.substring(after, after + 1)
           else if (quoteEscapeEnd(input, at) >= 0) input.substring(after, after + 5)
           else ""
-        if (quote.nonEmpty) {
+        if (quote.length == 1 && closesEnclosingString(input, at)) {
+          // The quote closes the string the pair sits in (#1800): the value is empty.
+          searchFrom = after + 1
+        } else if (quote.nonEmpty) {
           val (end, next) = close(after + quote.length, after - at, quote)
           if (end > after + quote.length && !isProseAssertion(key, input, after + quote.length, end))
             found += (after + quote.length -> end)
@@ -3232,6 +3235,9 @@ private[llm4s] object Redaction {
         loop(matcher.end, copiedTo)
       } else if (pair && !isSensitiveKey(matcher.group(2)) && afterEscapedEquals(input, matcher.end(2)) >= 0) {
         loop(afterEscapedEquals(input, matcher.end(2)), copiedTo)
+      } else if (pair && closesEnclosingString(input, matcher.end - 1)) {
+        // The quote after `key=` closes the string the pair sits in (#1800): the value is empty.
+        loop(matcher.end, copiedTo)
       } else {
         val valueStart = matcher.end
         val valueEnd   = valueEndOf(enclosing.exists(_.enclosingAt(matcher.start(1)) == '"'), valueStart)
@@ -3795,6 +3801,12 @@ private[llm4s] object Redaction {
         // A key that is not sensitive and whose `=` is an escape: the text after the escape is read for pairs, as the
         // text the escape stands for would be (see `afterEscapedEquals`).
         loop(matcher.end, copiedTo)
+      } else if (
+        isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0 &&
+        closesEnclosingString(input, matcher.end)
+      ) {
+        // The escaped quote closes the string the pair sits in (#1800): the value is empty.
+        loop(afterBackslashes(input, matcher.end) + 1, copiedTo)
       } else if (isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
         // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
         // its content is replaced, and the escaped quotes around it are kept (#1684).
@@ -3869,6 +3881,67 @@ private[llm4s] object Redaction {
     val run = afterBackslashes(input, at)
     if (run == at || run >= input.length || (input.charAt(run) != '"' && input.charAt(run) != '\'')) 0
     else escapeDepth(run - at)
+  }
+
+  /**
+   * Whether the quote at the end of the run of backslashes at `quoteAt` (none for a bare quote) right after a `key=`
+   * closes the string the pair sits in, rather than opening the pair's value (#1800): `{"q":"a=1&token=","n":"x"}`,
+   * and the same JSON inside a string, `{"o":"{\"a\":\"password=\",\"b\":1}"}`. It does where, past whitespace, it is
+   * followed by `,` and a key written in the same quote behind as many backslashes (`\"b\":`), or by a run of `}` and
+   * `]` (and whitespace) that ends the input, or is followed by such a `,` and key or by the same quote behind fewer
+   * backslashes, which closes the string around it. Read as a value, the quote took that `,` or
+   * those brackets, up to the next quote, and the document no longer parsed; the value is empty instead. The text it
+   * gives up is only whitespace, `,` and brackets, so no credential is read in the clear that was redacted before.
+   * Reads whitespace, brackets and at most one key, so a bounded number of characters per pair.
+   */
+  private def closesEnclosingString(input: String, quoteAt: Int): Boolean = {
+    val length = input.length
+    val q      = afterBackslashes(input, quoteAt)
+    val run    = q - quoteAt
+    def skipSpace(at: Int): Int = {
+      var i = at
+      while (i < length && Character.isWhitespace(input.charAt(i))) i += 1
+      i
+    }
+    def isKeyChar(c: Char): Boolean =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+    // `run` backslashes and `quote` at `at`: the index after the quote, or -1.
+    def quoteAfter(at: Int, quote: Char): Int = {
+      val end = afterBackslashes(input, at)
+      if (end - at == run && end < length && input.charAt(end) == quote) end + 1 else -1
+    }
+    // A key in the same quote behind as many backslashes, then `:`.
+    def keyAt(at: Int, quote: Char): Boolean = {
+      val open = quoteAfter(at, quote)
+      open >= 0 && open < length && input.charAt(open).isLetter && input.charAt(open) < 128 && {
+        var j = open + 1
+        while (j < length && j <= open + MaxKeyLength && isKeyChar(input.charAt(j))) j += 1
+        val close = quoteAfter(j, quote)
+        close >= 0 && {
+          val colon = skipSpace(close)
+          colon < length && input.charAt(colon) == ':'
+        }
+      }
+    }
+    // The same quote behind fewer backslashes, an escape less deep: the end of a string around this one.
+    def closesOuterAt(at: Int, quote: Char): Boolean = {
+      val end = afterBackslashes(input, at)
+      end - at < run && ((end - at + 1) & (end - at)) == 0 && end < length && input.charAt(end) == quote
+    }
+    q < length && (input.charAt(q) == '"' || input.charAt(q) == '\'') && ((run + 1) & run) == 0 && {
+      val quote = input.charAt(q)
+      val i     = skipSpace(q + 1)
+      i < length && (input.charAt(i) match {
+        case ',' => keyAt(skipSpace(i + 1), quote)
+        case '}' | ']' =>
+          var j = i
+          while (j < length && ("}]".indexOf(input.charAt(j).toInt) >= 0 || Character.isWhitespace(input.charAt(j))))
+            j += 1
+          j == length || closesOuterAt(j, quote) ||
+          (input.charAt(j) == ',' && keyAt(skipSpace(j + 1), quote))
+        case _ => false
+      })
+    }
   }
 
   /**

@@ -3,6 +3,8 @@ package org.llm4s.llmconnect
 import org.scalatest.EitherValues
 import java.time.Instant
 
+import org.llm4s.http.{ HttpNetworkSettings, Llm4sHttpClient }
+import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.scalatest.funsuite.AnyFunSuite
@@ -108,6 +110,54 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
 
     adjusted shouldBe LlmClientOptions(metrics = metrics, exchangeLogging = logging)
     adjusted.withExchangeLogging(ProviderExchangeLogging.Disabled) shouldBe LlmClientOptions(metrics = metrics)
+  }
+
+  test("LlmClientOptions.default supplies no HTTP client, so each provider builds its own (#2341)") {
+    LlmClientOptions.default.httpClient shouldBe None
+    LlmClientOptions(MetricsCollector.noop, ProviderExchangeLogging.Disabled).httpClient shouldBe None
+  }
+
+  test("withHttpClient sets, replaces and clears the supplied HTTP client") {
+    val first  = Llm4sHttpClient.create()
+    val second = Llm4sHttpClient.create()
+
+    val options = LlmClientOptions.default.withHttpClient(first)
+    options.httpClient.map(_ eq first) shouldBe Some(true)
+    options.withHttpClient(Some(second)).httpClient.map(_ eq second) shouldBe Some(true)
+    options.withHttpClient(None) shouldBe LlmClientOptions.default
+    LlmClientOptions(httpClient = Some(first)) shouldBe options
+  }
+
+  test("a provider closes only the HTTP client it built itself, never a supplied one") {
+    var closed = 0
+    val supplied = new Llm4sHttpClient {
+      def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: FiniteDuration) =
+        ???
+      def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)           = ???
+      def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) = ???
+      def postMultipart(
+        url: String,
+        headers: Map[String, String],
+        parts: Seq[org.llm4s.http.MultipartPart],
+        timeout: FiniteDuration
+      ) = ???
+      def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)        = ???
+      def delete(url: String, headers: Map[String, String], timeout: FiniteDuration)                   = ???
+      def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration)    = ???
+      def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) = ???
+      override def close(): Unit                                                                       = closed += 1
+    }
+
+    val chosen = Llm4sHttpClient.suppliedOrFromConfig(Some(supplied))
+    (chosen should be).theSameInstanceAs(supplied)
+    (Llm4sHttpClient.resolve(chosen, HttpNetworkSettings.default) should be).theSameInstanceAs(supplied)
+    Llm4sHttpClient.closeIfOwned(chosen, supplied)
+    closed shouldBe 0
+
+    val fromConfig = Llm4sHttpClient.suppliedOrFromConfig(None)
+    (fromConfig should be).theSameInstanceAs(Llm4sHttpClient.FromConfig)
+    Llm4sHttpClient.closeIfOwned(fromConfig, supplied)
+    closed shouldBe 1
   }
 
   test("LlmClientOptions keeps its constructor and copy private") {

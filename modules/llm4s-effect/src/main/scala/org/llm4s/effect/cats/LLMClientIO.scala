@@ -119,9 +119,10 @@ object LLMClientIO {
               }
 
           // `concurrently` cancels the producer (interrupting the blocking thread) when the
-          // consumer stops early, fails, or is cancelled.
+          // consumer stops early, fails, or is cancelled. The limit bounds each pull: without one it keeps taking while
+          // the provider keeps offering, each take freeing a slot, so the queue would not hold the provider back.
           Stream
-            .fromQueueNoneTerminated(queue)
+            .fromQueueNoneTerminated(queue, StreamBufferSize)
             .flatMap {
               case Right(chunk) => Stream.emit(chunk)
               case Left(t)      => Stream.raiseError[F](t)
