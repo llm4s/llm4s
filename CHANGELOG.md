@@ -273,7 +273,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Completion.adjustments`: each requested option a provider or model could not honour, as an
   `@Stable` `RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`) naming a `@Stable` `RequestOption`, also on
-  `TransformationResult`; logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
+  `TransformationResult`, and on each agent call's `ModelCallCompleted` (an event stored before reads with none);
+  logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
   Bedrock, Ollama and the standard OpenAI-compatible dialect (Mistral, Cohere, DeepSeek, generic) report a requested
   `reasoning` they do not send as `Dropped`, and OpenAI reports the `temperature`, `top_p` and penalties set away
   from their defaults that a reasoning model's request leaves out, and xAI the penalties it leaves out of one, where
