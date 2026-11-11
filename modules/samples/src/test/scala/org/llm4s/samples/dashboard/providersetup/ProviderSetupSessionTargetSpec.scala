@@ -184,8 +184,7 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with Eith
         defaultProviderName = ProviderName("anthropic-main"),
         providerConfigs = Map.empty,
         providerErrors = Map.empty,
-        defaultProvider =
-          OpenAIConfig.fromValues("gpt-4o-mini", Secret("test-key"), None, "https://api.openai.com/v1").value,
+        defaultProvider = OpenAIConfig.fromValues("gpt-4o-mini", Secret("test-key"), "https://api.openai.com/v1").value,
         discoveredModels = Map.empty,
         exchangeLogging = ProviderExchangeLogging.Disabled
       ),

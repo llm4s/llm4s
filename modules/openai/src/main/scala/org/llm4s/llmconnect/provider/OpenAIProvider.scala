@@ -66,8 +66,8 @@ object OpenAIProvider extends ProviderDescriptor:
         .fromValues(
           section.model.asString,
           apiKey,
-          section.extra(OpenAIConfig.OrganizationKey),
           baseUrl,
+          section.extra(OpenAIConfig.OrganizationKey),
           workloadIdentity = workloadIdentity
         )
         .left

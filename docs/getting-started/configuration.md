@@ -693,6 +693,10 @@ such as a `${VAR}` substitution with no value.
 `Llm4sConfig.from` and `Llm4sSettings` are `@Experimental`: their shape may still change before
 1.0.
 
+To skip HOCON altogether - values from ciris, zio-config or your own code - see
+[Configuration in Code](configuration-in-code): each provider's `fromValues` and
+`ModelRegistryService.default()`.
+
 ---
 
 ## Running the samples

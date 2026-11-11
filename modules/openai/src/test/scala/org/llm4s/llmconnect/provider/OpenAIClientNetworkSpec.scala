@@ -30,7 +30,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
   private val BaseUrl = "http://api.openai.test/v1"
 
   private def openAI(baseUrl: String, network: HttpNetworkSettings): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).value.withNetwork(network)
+    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value.withNetwork(network)
 
   private def via(proxy: HttpProxy) = HttpNetworkSettings(proxy = Some(proxy.withNonProxyHosts(Nil)))
 
@@ -78,7 +78,7 @@ final class OpenAIClientNetworkSpec extends AnyFlatSpec with Matchers with Eithe
   "OpenAIClient for Azure with a proxy" should "send the completion through it" in {
     Using.resource(RecordingProxy.start(body = LocalProviderTestServer.openAICompletion("azure", "gpt-4o"))) { proxy =>
       val config = AzureConfig
-        .fromValues("gpt-4o", "http://my-resource.openai.test", Secret("azure-key"), "2025-01-01-preview")
+        .fromValues("gpt-4o", Secret("azure-key"), "http://my-resource.openai.test", "2025-01-01-preview")
         .value
         .withNetwork(via(HttpProxy("127.0.0.1", proxy.port)))
       val client = OpenAIClient(config).value

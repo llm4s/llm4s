@@ -25,9 +25,41 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383),
 [`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
+[`OpenAIConfig.fromValues` and `AzureConfig.fromValues` take model, key, then base URL](#provider-fromvalues-take-model-key-then-base-url-2340);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
+
+## Provider fromValues take model, key, then base URL (#2340)
+
+Every provider config's `fromValues` now takes its common parameters in one order - model, then API key, then base
+URL - with whatever is optional after what is required
+([Configuration in code](../getting-started/configuration-in-code)). Two did not:
+
+- `OpenAIConfig.fromValues(model, apiKey, organization, baseUrl)` is
+  `OpenAIConfig.fromValues(model, apiKey, baseUrl, organization = None)`. Drop a `None` organization, or move it
+  after the base URL:
+
+  ```scala
+  // Before
+  OpenAIConfig.fromValues("gpt-4o", apiKey, None, OpenAIConfig.DEFAULT_BASE_URL)
+  OpenAIConfig.fromValues("gpt-4o", apiKey, Some("org-1"), baseUrl, Some(ProviderId("requesty")))
+  // After
+  OpenAIConfig.fromValues("gpt-4o", apiKey, OpenAIConfig.DEFAULT_BASE_URL)
+  OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl, Some("org-1"), Some(ProviderId("requesty")))
+  ```
+
+- `AzureConfig.fromValues(deployment, endpoint, apiKey, apiVersion)` is
+  `AzureConfig.fromValues(deployment, apiKey, endpoint, apiVersion = AzureConfig.DEFAULT_API_VERSION)`, and
+  `AzureConfig.fromTokenProvider(deployment, endpoint, tokenProvider, apiVersion)` is
+  `AzureConfig.fromTokenProvider(deployment, tokenProvider, endpoint, apiVersion = AzureConfig.DEFAULT_API_VERSION)`.
+
+The types differ (`Secret` against `String`, `Option[String]` against `String`), so a call in the old order no longer
+compiles rather than misbehaving; calls with named arguments are unchanged.
+
+Also new, and not breaking: a `given ModelRegistryService` now supplies the `ContextWindowResolver` that `fromValues`
+takes, so `ModelRegistryService.default()` - the bundled catalogue, with no configuration file - is all a
+values-only setup needs. A `ContextWindowResolver` given explicitly still wins.
 
 ## A supplied HTTP client is the caller's to close (#2341)
 
@@ -3618,12 +3650,12 @@ non-empty"`) with the field in `missingKeys`.
 
 ```scala
 // Before
-val config: OpenAIConfig = OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl)
+val config: OpenAIConfig = OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl)
 val client = LLMConnect.getClient(config)
 
 // After
 val client: Result[LLMClient] =
-  OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl).flatMap(LLMConnect.getClient(_))
+  OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl).flatMap(LLMConnect.getClient(_))
 ```
 
 A `ProviderDescriptor.buildConfig` that returned `fromValues` from a `for`'s `yield`, or
