@@ -11,7 +11,7 @@ nav_order: 9
 - **Status:** Proposed
 - **Author(s):** @Somay-kousis
 - **Tracking issue:** [#2613](https://github.com/llm4s/llm4s/issues/2613)
-- **Pull request:** #NNNN
+- **Pull request:** [#2614](https://github.com/llm4s/llm4s/pull/2614)
 
 ## Summary
 
