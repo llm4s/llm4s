@@ -6,8 +6,8 @@ import org.scalatest.matchers.should.Matchers
 class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   private val tol = 1e-6
-  private val a2 = Array(1f, 2f)
-  private val a3 = Array(1f, 2f, 3f)
+  private val a2  = Array(1f, 2f)
+  private val a3  = Array(1f, 2f, 3f)
 
   "VectorOps.dotProduct" should "compute 1*4 + 2*5 + 3*6 = 32" in {
     VectorOps.dotProduct(Array(1f, 2f, 3f), Array(4f, 5f, 6f)) shouldBe 32.0 +- tol
@@ -58,7 +58,7 @@ class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
     r(0).toDouble shouldBe 0.6 +- tol
     r(1).toDouble shouldBe 0.8 +- tol
   }
-    "VectorOps.topKBySimilarity" should "return every candidate, best first, when k is larger than the candidates" in {
+  "VectorOps.topKBySimilarity" should "return every candidate, best first, when k is larger than the candidates" in {
     val query = Array(1f, 0f)
     val candidates = Seq(
       (Array(0f, 1f), "far"),
@@ -75,7 +75,7 @@ class VectorOpsEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return an empty Seq when k is 0" in {
-    val query = Array(1f, 0f)
+    val query      = Array(1f, 0f)
     val candidates = Seq((Array(1f, 0f), "a"), (Array(0f, 1f), "b"))
 
     VectorOps.topKBySimilarity(query, candidates, 0) shouldBe empty
