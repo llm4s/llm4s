@@ -61,9 +61,6 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
       val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
       p.evaluate(base.copy(model = Some("GPT-4O-MINI")), "prod").isInstanceOf[PolicyFail] shouldBe true
     }
-  }
-
-  describe("PolicyBuilder.allowedModels") {
     it("should pass when model is in allowed list") {
       val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
       p.evaluate(base, "prod") shouldBe PolicyPass("allowed-models")

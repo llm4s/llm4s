@@ -16,8 +16,7 @@ import scala.concurrent.duration.*
  *  - Localhost and loopback addresses are blocked
  *
  * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed.
- * @param blockedDomains List of domains that are always blocked. A leading "www." on an entry
- *                       is ignored when matching, exactly like on the allowlist.
+ * @param blockedDomains List of domains that are always blocked.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
  *                        result's `truncated` is `true`.
@@ -60,8 +59,7 @@ case class HttpConfig(
   /**
    * Check if a domain is allowed based on blocklist/allowlist configuration.
    *
-   * This method performs hostname-based checks only. A leading "www." is ignored on the requested
-   * domain and on both lists, so a blocklist entry written as "www.example.com" blocks example.com too:
+   * This method performs hostname-based checks only:
    * 1. Hostname-based blocklist check
    * 2. Allowlist check (if configured)
    *
@@ -73,7 +71,7 @@ case class HttpConfig(
 
     // Check blocked domains first
     val isBlocked = blockedDomains.exists { blocked =>
-      val b = blocked.toLowerCase(Locale.ROOT).stripPrefix("www.")
+      val b = blocked.toLowerCase(Locale.ROOT)
       normalizedDomain == b || normalizedDomain.endsWith(s".$b")
     }
 

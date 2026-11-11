@@ -237,6 +237,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mistyped `--env` no longer passes a CI gate [#2261](https://github.com/llm4s/llm4s/issues/2261).
 - **Added** `apiKeyFile` (every provider that takes a key) and `ApiKeyProvider`: OpenAI, Requesty, Anthropic, OpenRouter
   and generic OpenAI-compatible re-read a rotated key per request, without a restart; testkit `assertHonoursApiKeyProvider` [#2313](https://github.com/llm4s/llm4s/issues/2313).
+- **Fixed** `allowedProviders` compares provider names case-insensitively. Provider and model allowlists now report when the configured value is unset [#2504](https://github.com/llm4s/llm4s/issues/2504).
 
 ### Providers
 
