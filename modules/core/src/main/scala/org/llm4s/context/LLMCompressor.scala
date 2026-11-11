@@ -84,7 +84,7 @@ object LLMCompressor {
     logger.info(s"Starting LLM digest squeeze with cap: $capTokens tokens")
 
     // Find [HISTORY_SUMMARY] messages first
-    val (digestMessages, otherMessages) = messages.partition(isHistoryDigestMessage)
+    val (digestMessages, otherMessages) = messages.partition(HistorySummaryMarker.isDigest)
 
     if (digestMessages.isEmpty) {
       logger.debug("No [HISTORY_SUMMARY] messages found for digest compression")
@@ -108,12 +108,6 @@ object LLMCompressor {
     } yield finalMessages
   }
 
-  // a digest is a system message HistoryCompressor wrote; any other message is never replaced, whatever its text
-  private def isHistoryDigestMessage(message: Message): Boolean = message match {
-    case s: SystemMessage => s.content.contains("[HISTORY_SUMMARY]")
-    case _                => false
-  }
-
   private def compressDigestMessages(
     digestMessages: Seq[Message],
     llmClient: LLMClient
@@ -130,7 +124,7 @@ object LLMCompressor {
     digestMessage: Message,
     llmClient: LLMClient
   ): Result[Message] = {
-    val digestContent = extractDigestContent(digestMessage.content)
+    val digestContent = HistorySummaryMarker.unwrap(digestMessage.content)
 
     val compressionConversation = Conversation(
       Seq(
@@ -149,7 +143,7 @@ object LLMCompressor {
         ContextError.llmCompressionFailed("digest", s"LLM call failed: ${error.message}")
       }
       .map { completion =>
-        val compressedDigest = s"[HISTORY_SUMMARY]\n${completion.message.content}"
+        val compressedDigest = HistorySummaryMarker.wrap(completion.message.content)
         digestMessage match {
           case _: SystemMessage => SystemMessage(compressedDigest)
           case _: UserMessage   => UserMessage(compressedDigest)
@@ -157,11 +151,5 @@ object LLMCompressor {
         }
       }
   }
-
-  private def extractDigestContent(messageContent: String): String =
-    messageContent.split("\n", 2) match {
-      case Array(header, content) if header.contains("[HISTORY_SUMMARY]") => content
-      case _                                                              => messageContent
-    }
 
 }
