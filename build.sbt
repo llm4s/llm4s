@@ -1549,9 +1549,11 @@ lazy val testkit = (project in file("modules/testkit"))
 // `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.requireCapabilities[Vision & Tools](provider,
 // model)` checks the model's `ModelMetadata` once, at the application's edge, and returns a `Capable[Vision & Tools]`;
 // operations that need a capability take a `Capable[...]` of it, so passing a client not checked for it is a compile
-// error. Depends on core only; `llm4s-testkit` scripts the client in its specs.
+// error. `model"openai/gpt-4o"` is typed at compile time from core's bundled model data. Depends on core, and on
+// `llm4s-schema-derivation` as an optional dependency, needed only by `completeStructuredOf`; `llm4s-testkit` scripts
+// the client in its specs.
 lazy val capabilities = (project in file("modules/capabilities"))
-  .dependsOn(core, testkit % Test)
+  .dependsOn(core, schemaDerivation % "optional", testkit % Test)
   .settings(
     name := "llm4s-capabilities",
     commonSettings,
@@ -1842,6 +1844,8 @@ lazy val samples = (project in file("modules//samples"))
     schemaDerivation,
     // `org.llm4s.samples.prompt.TypedPromptExample` (#2325), and docs/guide/prompts.md's snippets
     prompt,
+    // `org.llm4s.samples.capability.CapabilityTypedClientExample` (#2331)
+    capabilities,
     rag,
     knowledgegraph,
     memory,

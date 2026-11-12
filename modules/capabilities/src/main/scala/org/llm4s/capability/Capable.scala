@@ -66,6 +66,24 @@ object Capable {
       capable.client.complete(Conversation(Seq(UserMessage(Vector(image, ContentPart.Text(question))))), options)
   }
 
+  extension (capable: Capable[StructuredOutput]) {
+
+    /**
+     * `completeStructuredOf` of `llm4s-schema-derivation`, on the client of a `Capable[StructuredOutput]`: the
+     * reply's schema is derived from `A` and the reply is read into it. `llm4s-schema-derivation` is an optional
+     * dependency of this module: add it to call this method; nothing else needs it.
+     *
+     * @param conversation the conversation to send
+     * @param options      completion options, as for `completeStructuredOf`
+     * @tparam A the type to extract; needs a `SchemaOf` (`derives SchemaOf`) and a uPickle reader
+     */
+    def completeStructuredOf[A](
+      conversation: Conversation,
+      options: CompletionOptions = CompletionOptions()
+    )(using schemaOf: org.llm4s.schema.SchemaOf[A], reader: upickle.default.Reader[A]): Result[A] =
+      org.llm4s.schema.completeStructuredOf(capable.client)[A](conversation, options)
+  }
+
   extension (capable: Capable[Tools]) {
 
     /** `client.complete` with `tools` offered to the model, added to any tools `options` already has. */
@@ -99,4 +117,16 @@ extension (client: LLMClient) {
           Left(ValidationError("capabilities", missing.map(name => s"$provider/$model does not support $name")))
       }
     }
+
+  /**
+   * [[requireCapabilities]] for a model named with `model"provider/model"`:
+   * `client.requireCapabilities(model"openai/gpt-4o")`. The literal's type is the compile-time view, from the
+   * bundled model data; this checks the model again, at run time, against the registry in scope, which is the
+   * authoritative one. Pass a smaller set to check only that: `client.requireCapabilities[Vision](ref)`.
+   */
+  def requireCapabilities[C](ref: ModelRef[C])(using
+    registry: ModelRegistryService,
+    check: CapabilityCheck[C]
+  ): Result[Capable[C]] =
+    client.requireCapabilities[C](ref.provider, ref.model)
 }
