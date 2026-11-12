@@ -143,6 +143,13 @@
       "defaultValue": false
     },
     {
+      "name": "llm4s.agent.max-steps",
+      "type": "java.lang.Integer",
+      "sourceType": "org.llm4s.spring.AgentProperties",
+      "description": "The most model calls and tool rounds one llm4sAgent turn may take before it ends STEP_LIMIT_REACHED; at least 1.",
+      "defaultValue": 50
+    },
+    {
       "name": "llm4s.providers.provider",
       "type": "java.lang.String",
       "description": "The name of the llm4s.providers.<name> section the starter uses. Each section sets provider (a provider id such as gemini, azure, bedrock or openai-compatible), model and, as the provider needs, api-key, base-url and the provider's own keys."
@@ -156,6 +163,26 @@
       "name": "llm4s.credentials",
       "type": "java.util.Map<java.lang.String,java.lang.String>",
       "description": "Shared vendor keys, llm4s.credentials.<provider>.api-key, used by a section that sets no api-key of its own."
+    },
+    {
+      "name": "llm4s.embeddings.model",
+      "type": "java.lang.String",
+      "description": "The embedding model of the llm4sEmbeddingClient bean, provider/model (for example openai/text-embedding-3-small); the bean is registered only when this is set. Mirrors llm4s.embeddings.model of the HOCON configuration."
+    },
+    {
+      "name": "llm4s.embeddings",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "description": "Embedding provider blocks, llm4s.embeddings.<provider id>.<key>: api-key and base-url, read as the HOCON block of that name. A provider whose block sets no api-key uses llm4s.credentials.<provider id>.api-key or its vendor's variable."
+    },
+    {
+      "name": "llm4s.tracing.mode",
+      "type": "java.lang.String",
+      "description": "The tracing backend of the llm4sTracing bean, which the llm4sAgent reports to: console, none, or the mode of a TracingBackend on the classpath (langfuse, opentelemetry). The bean is registered only when this is set."
+    },
+    {
+      "name": "llm4s.tracing",
+      "type": "java.util.Map<java.lang.String,java.lang.String>",
+      "description": "The selected backend's settings, llm4s.tracing.<mode>.<key> (for example llm4s.tracing.opentelemetry.endpoint), read as the HOCON block of that name; header names under headers are kept as written."
     },
     {
       "name": "llm4s.http.proxy.url",
