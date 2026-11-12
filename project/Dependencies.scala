@@ -322,6 +322,19 @@ object Deps {
   // The release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
   val springWebAnnotations =
     ("org.springframework" % "spring-web" % Versions.springFrameworkBaseline).excludeAll(ExclusionRule("*", "*"))
+  // Spring MVC's SseEmitter, for the starter's SseLLM4STemplate (#2279): provided, as an MVC application has it. The
+  // release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
+  val springWebmvc = "org.springframework" % "spring-webmvc" % Versions.springFrameworkBaseline
+  // Spring MVC (with a servlet container) and WebFlux as an application gets them, for the starter's streaming specs.
+  val springBootWeb: Seq[ModuleID] =
+    Seq("spring-boot-starter-web", "spring-boot-starter-webflux").map(n =>
+      "org.springframework.boot" % n % Versions.springBoot
+    )
+  // The same on Spring Boot 4, which renamed the MVC starter.
+  val springBoot4Web: Seq[ModuleID] =
+    Seq("spring-boot-starter-webmvc", "spring-boot-starter-webflux").map(n =>
+      "org.springframework.boot" % n % Versions.springBoot4
+    )
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",
