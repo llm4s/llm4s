@@ -391,6 +391,7 @@ lazy val llm4s = (project in file("."))
     agent,
     agentTools,
     llm4sTapir,
+    llm4sSttp,
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
@@ -1874,6 +1875,8 @@ lazy val samples = (project in file("modules//samples"))
     agentTools,
     // The tapir sample (#2299) and docs/guide/tapir-tools.md's compiled snippets.
     llm4sTapir,
+    // docs/guide/http-transport.md's compiled snippets (#2341).
+    llm4sSttp,
     agentCheckpointSqlite,
     // The exit examples (design 4.38): semantic memory, and the coding agent's workspace backends. Test scope:
     // the workspace client's `FakeWorkspace`, and agent-testkit's `ManualClock` for the claims a stopped run leaves.
@@ -2364,6 +2367,26 @@ lazy val llm4sTapir = (project in file("modules/tapir"))
     )
   )
 
+// `llm4s-sttp` (#2341): `SttpLlm4sHttpClient`, the provider clients' `Llm4sHttpClient` over a caller's sttp 4
+// synchronous backend, so a service hands llm4s the backend (pool, proxy, logging, tracing, stub) it already has. It
+// depends on core and sttp client 4's core only. The transport contract runs against it and the default JDK client;
+// the guide spec drives the generic openai-compatible provider through a stub backend, so that is a test dependency.
+// Experimental.
+lazy val llm4sSttp = (project in file("modules/sttp"))
+  .dependsOn(core % "compile->compile;test->test", openaiCompatible % Test)
+  .settings(
+    name := "llm4s-sttp",
+    commonSettings,
+    coverageFloor(95), // measured 100% statements (100% branches), 2026-11-11
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.sttpClient4,
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core, knowledgegraph)
   .settings(
@@ -2549,6 +2572,7 @@ lazy val docs = (project in file("modules/docs"))
     agentMemory,
     agentTools,
     llm4sTapir,
+    llm4sSttp,
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
@@ -2615,6 +2639,7 @@ lazy val docs = (project in file("modules/docs"))
         (agentMemory / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (llm4sTapir / Compile / sources).value ++
+        (llm4sSttp / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++

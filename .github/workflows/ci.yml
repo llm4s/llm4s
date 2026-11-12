@@ -502,8 +502,8 @@ jobs:
         include:
           - leg: core
             modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
-                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo,
-                      secretsVault]
+                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, llm4sSttp, traceOpentelemetry,
+                      gradleDemo, secretsVault]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -700,6 +700,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/tapir/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: tapir
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload sttp coverage to Codecov
+        if: contains(matrix.modules, 'llm4sSttp')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/sttp/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: sttp
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
