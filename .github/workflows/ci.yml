@@ -476,7 +476,8 @@ jobs:
         include:
           - leg: core
             modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
-                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
+                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo,
+                      secretsVault]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -917,6 +918,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jev
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload secrets-vault coverage to Codecov
+        if: contains(matrix.modules, 'secretsVault')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-vault
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1389,6 +1401,14 @@ jobs:
           - 7687:7687
           - 7474:7474
 
+      # VaultApiKeyProviderIntegrationSpec (#2479): Vault in dev mode, KV v2 mounted at secret/, a known root token.
+      vault:
+        image: hashicorp/vault:1.18
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: llm4s-it-root-token
+        ports:
+          - 8200:8200
+
       # KafkaTicketPipelineSpec (#2297): a single-node broker in KRaft mode, advertised on localhost:9092.
       kafka:
         image: apache/kafka:3.9.1
@@ -1414,7 +1434,7 @@ jobs:
       # Postgres, Redis and Valkey are covered by the service health checks above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
       # and fail the job if they never come up, rather than letting the suites skip.
-      - name: Wait for Qdrant, Neo4j, Elasticsearch and OpenSearch
+      - name: Wait for Qdrant, Neo4j, Elasticsearch, OpenSearch and Vault
         run: |
           wait_for() {
             for _ in $(seq 1 60); do
@@ -1428,6 +1448,7 @@ jobs:
           wait_for Neo4j http://localhost:7474
           wait_for Elasticsearch "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
           wait_for OpenSearch "http://localhost:9201/_cluster/health?wait_for_status=yellow&timeout=5s"
+          wait_for Vault http://localhost:8200/v1/sys/health
 
       # The suites run with coverage instrumentation on the modules whose code only they reach against real services
       # (#2349): the pgvector, Qdrant and permission-index stores in rag, the Elasticsearch/OpenSearch and
@@ -1441,7 +1462,7 @@ jobs:
       # scripts/check-coverage-legs.sh checks this list against the upload steps below.
       - name: Run containerised integration tests
         env:
-          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres
+          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres secretsVault
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
@@ -1463,6 +1484,8 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
+          VAULT_TEST_ADDR: http://localhost:8200
+          VAULT_TEST_TOKEN: llm4s-it-root-token
         run: |
           settings=()
           reports=()
@@ -1532,6 +1555,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-checkpoint-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload secrets-vault integration coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-vault
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

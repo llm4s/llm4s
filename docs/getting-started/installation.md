@@ -458,6 +458,19 @@ It brings Azure's `azure-identity` (MIT, with `azure-core`, MSAL4J, Netty and Re
 it is not part of `llm4s-openai`. See
 [Enterprise authentication](../guide/providers#azure-openai-with-microsoft-entra-id).
 
+### For API keys read from HashiCorp Vault
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-secrets-vault" % llm4sVersion
+```
+
+`VaultApiKeyProvider` ([#2479](https://github.com/llm4s/llm4s/issues/2479)) reads a provider's API key from
+Vault's KV secrets engine, caches it and reads it again every refresh interval, for a deployment that cannot run
+Vault Agent or a CSI driver to write the key to an `apiKeyFile`. It talks to Vault's HTTP API with llm4s's own
+HTTP client, so it brings no Vault SDK. See
+[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 ```scala

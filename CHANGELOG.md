@@ -263,6 +263,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cohere reranker re-read a rotated key per request, without a restart. `apiKeyFile` is accepted in chat sections, embeddings blocks,
   `llm4s.rerank.cohere` and `llm4s.credentials.<id>`; testkit `assertHonoursApiKeyProvider` and `assertEmbeddingHonoursApiKeyProvider`
   [#2313](https://github.com/llm4s/llm4s/issues/2313), [#2477](https://github.com/llm4s/llm4s/issues/2477), [#2478](https://github.com/llm4s/llm4s/issues/2478).
+- **Added** `llm4s-secrets-vault` (experimental): `VaultApiKeyProvider` reads a provider's API key from HashiCorp Vault's KV engine
+  over its HTTP API (no SDK), cached and read again every refresh interval [#2479](https://github.com/llm4s/llm4s/issues/2479).
 
 ### Providers
 
