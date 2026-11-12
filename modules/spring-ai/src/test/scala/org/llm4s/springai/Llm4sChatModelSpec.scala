@@ -307,6 +307,24 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 0
   }
 
+  it should "end the Flux with the error when the llm4s client throws instead of returning a Left" in {
+    val throwing = new LLMClient {
+      override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        Left(ValidationError("x", "unused"))
+      override def streamComplete(
+        c: Conversation,
+        o: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = throw new IllegalStateException("client bug")
+      override def getContextWindow(): Int     = 1000
+      override def getReserveCompletion(): Int = 100
+    }
+    val error = intercept[IllegalStateException](
+      new Llm4sChatModel(throwing).stream(new Prompt("hi")).blockLast(java.time.Duration.ofSeconds(30))
+    )
+    error.getMessage shouldBe "client bug"
+  }
+
   it should "interrupt the llm4s call when the subscriber cancels" in {
     val interrupted = new CountDownLatch(1)
     val blocking = new LLMClient {

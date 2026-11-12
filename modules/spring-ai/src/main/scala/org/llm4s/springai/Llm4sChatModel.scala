@@ -10,6 +10,7 @@ import org.springframework.ai.model.tool.ToolCallingChatOptions
 import reactor.core.publisher.Flux
 
 import java.util.Objects
+import scala.util.{ Failure, Success, Try }
 
 /**
  * An llm4s [[org.llm4s.llmconnect.LLMClient LLMClient]] as a Spring AI `ChatModel` and `StreamingChatModel` (#2278), so
@@ -53,16 +54,20 @@ final class Llm4sChatModel(client: LLMClient) extends ChatModel with StreamingCh
       case Right((conversation, options)) =>
         Flux.create[ChatResponse] { sink =>
           val worker = Thread.ofVirtual().unstarted { () =>
-            client.streamComplete(
-              conversation,
-              options,
-              chunk =>
-                chunk.content.filter(_.nonEmpty).foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
+            // A client that throws rather than returning a Left must still end the Flux, or its subscriber waits forever.
+            Try(
+              client.streamComplete(
+                conversation,
+                options,
+                chunk =>
+                  chunk.content.filter(_.nonEmpty).foreach(text => sink.next(SpringAiMapping.textChunk(chunk.id, text)))
+              )
             ) match {
-              case Right(completion) =>
+              case Success(Right(completion)) =>
                 sink.next(SpringAiMapping.lastChunk(completion))
                 sink.complete()
-              case Left(error) => sink.error(SpringAiMapping.failure(error))
+              case Success(Left(error)) => sink.error(SpringAiMapping.failure(error))
+              case Failure(thrown)      => sink.error(thrown)
             }
           }
           // Registered before the call starts, so a subscriber that cancels at once still interrupts it.
