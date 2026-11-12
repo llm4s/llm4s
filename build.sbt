@@ -1976,7 +1976,8 @@ lazy val doctor = (project in file("modules/doctor"))
 // `ScriptedLLMClient`, so a worksheet runs with no key or network). `scripts/check-repl-scripts.sh` runs
 // `examples/repl/` against it with Scala CLI in CI.
 lazy val repl = (project in file("modules/repl"))
-  .dependsOn(core, schemaDerivation, testkit)
+  // llm4s-ollama is test-only: `Session.ollama` builds its section from config and needs the module only at run time.
+  .dependsOn(core, schemaDerivation, testkit, ollama % Test)
   .settings(
     name := "llm4s-repl",
     commonSettings,
