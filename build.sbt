@@ -1426,6 +1426,8 @@ lazy val jlama = (project in file("modules/providers/jlama"))
     libraryDependencies ++= Seq(
       // findbugs annotations (LGPL-2.1, via jinjava) are compile-time only: no class of them is loaded at runtime.
       Deps.jlamaCore.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaJinjava.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaGuava,
       Deps.scalatest % Test
     )
   )

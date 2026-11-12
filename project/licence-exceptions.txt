@@ -8,3 +8,4 @@
 org.json:json | LicenseRef-Public-Domain | JSON-java (via Jedis, llm4s-vectorstore-redis) is dedicated to the public domain since release 20231013 (its LICENSE file and POM say "Public Domain"); earlier releases carry the JSON licence, which the policy denies, so never pin one
 com.hubspot.jinjava:jinjava | Apache-2.0 | Jinjava (via jlama-core, llm4s-jlama; Jlama renders models' chat templates with it) is Apache-2.0 by its repository's LICENSE (github.com/HubSpot/jinjava); its POM declares none
 com.google.re2j:re2j | BSD-3-Clause | RE2/J (via jinjava, llm4s-jlama) carries the Go licence, which is the BSD-3-Clause text (github.com/google/re2j LICENSE); its POM names it "Go License"
+com.hubspot.immutables:immutables-exceptions | Apache-2.0 | HubSpot Immutables' exceptions (via jinjava 2.7.7, llm4s-jlama) are Apache-2.0 by the repository's LICENSE (github.com/HubSpot/immutables); its POM declares none

@@ -40,6 +40,9 @@ object Versions {
   val vosk          = "0.3.45"
   // Apache-2.0. Only llm4s-jlama (#2284): the pure-Java inference engine on the JDK Vector API.
   val jlama = "0.8.4"
+  // Patched versions of jlama-core's transitive jinjava and guava; see Deps.jlamaJinjava.
+  val jlamaJinjava = "2.7.7"
+  val jlamaGuava   = "33.8.0-jre"
 
   // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask = "0.10.2"
@@ -269,6 +272,11 @@ object Deps {
 
   // Jlama: in-process inference for llm4s-jlama (#2284)
   val jlamaCore = "com.github.tjake" % "jlama-core" % Versions.jlama
+  // jlama-core 0.8.4 pins jinjava 2.7.2 (sandbox bypasses GHSA-gjx9-j8f8-7j74, GHSA-m49c-g9wr-hv6v; its YAML support
+  // brings snakeyaml 1.33, GHSA-mjmj-j48q-9wg2) and guava 32.0.1 (GHSA-xxph-c9ww-hj94). Declared directly so the fixed
+  // versions are in llm4s-jlama's POM, not only in this build.
+  val jlamaJinjava = "com.hubspot.jinjava" % "jinjava" % Versions.jlamaJinjava
+  val jlamaGuava   = "com.google.guava"    % "guava"   % Versions.jlamaGuava
 
   val opentelemetryApi          = "io.opentelemetry" % "opentelemetry-api"           % Versions.opentelemetry
   val opentelemetrySdk          = "io.opentelemetry" % "opentelemetry-sdk"           % Versions.opentelemetry
