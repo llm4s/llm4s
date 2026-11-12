@@ -15,8 +15,8 @@ import scala.concurrent.duration.*
  *  - Cloud metadata endpoints are blocked (169.254.169.254)
  *  - Localhost and loopback addresses are blocked
  *
- * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed. A leading `www.` is ignored.
- * @param blockedDomains List of domains that are always blocked. A leading `www.` is ignored.
+ * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed. A leading `www.` and trailing dots are ignored.
+ * @param blockedDomains List of domains that are always blocked. A leading `www.` and trailing dots are ignored, so `example.com.` is blocked with `example.com`.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
  *                        result's `truncated` is `true`.
@@ -60,18 +60,18 @@ case class HttpConfig(
    * Check if a domain is allowed based on blocklist/allowlist configuration.
    *
    * This method performs hostname-based checks only:
-   * 1. Hostname-based blocklist check, ignoring a leading `www.` in both the domain and configured entries
+   * 1. Hostname-based blocklist check, ignoring case, trailing dots and a leading `www.` in both the domain and configured entries
    * 2. Allowlist check (if configured)
    *
    * Note: IP-based SSRF protection (DNS resolution + IP range validation) is performed
    * at request time by the HTTP tool to avoid expensive DNS lookups during validation.
    */
   def isDomainAllowed(domain: String): Boolean = {
-    val normalizedDomain = domain.toLowerCase(Locale.ROOT).stripPrefix("www.")
+    val normalizedDomain = HttpConfig.normalizeHost(domain)
 
     // Check blocked domains first
     val isBlocked = blockedDomains.exists { blocked =>
-      val b = blocked.toLowerCase(Locale.ROOT).stripPrefix("www.")
+      val b = HttpConfig.normalizeHost(blocked)
       normalizedDomain == b || normalizedDomain.endsWith(s".$b")
     }
 
@@ -81,7 +81,7 @@ case class HttpConfig(
       allowedDomains match {
         case Some(allowed) =>
           allowed.exists { a =>
-            val normalizedAllowed = a.toLowerCase(Locale.ROOT).stripPrefix("www.")
+            val normalizedAllowed = HttpConfig.normalizeHost(a)
             normalizedDomain == normalizedAllowed || normalizedDomain.endsWith(s".$normalizedAllowed")
           }
         case None => true
@@ -147,6 +147,17 @@ object HttpConfig {
    */
   val DefaultRedirectSafeHeaders: Seq[String] =
     Seq("Accept", "Accept-Language", "Accept-Encoding", "User-Agent", "Content-Type")
+
+  /**
+   * The form a host and a configured domain are compared in: lower case, without trailing dots and without a leading
+   * `www.`. A trailing dot names the same host (the DNS root), so `example.com.` matches what `example.com` matches.
+   */
+  private def normalizeHost(host: String): String = {
+    val lower = host.toLowerCase(Locale.ROOT)
+    var end   = lower.length
+    while (end > 0 && lower.charAt(end - 1) == '.') end -= 1
+    lower.substring(0, end).stripPrefix("www.")
+  }
 
   /**
    * Default blocked domains (hostnames).
