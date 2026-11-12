@@ -238,6 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Fixed** `ContextWindowMiddleware` and `SummarizationMiddleware` count tokens with `cl100k_base` by default, not words x 1.3,
+  which counted minified JSON as ~1 token; core's tokenizer reads special-token names as text [#2587](https://github.com/llm4s/llm4s/issues/2587).
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).

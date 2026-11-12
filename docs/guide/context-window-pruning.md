@@ -481,9 +481,11 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
    maxTokens = Some(70_000)
    ```
 
-3. **Use token limits without a tokenizer** - Falls back to word count estimation
+3. **Treat the default count as exact for every model** - The default counter is `cl100k_base`, an approximation
+   for non-OpenAI models; pass your model's counter for an exact one
    ```scala
-   // Integrate ConversationTokenCounter for accuracy
+   val counter = ConversationTokenCounter.forModel("gpt-4o").fold(e => sys.error(e.message), identity)
+   new ContextWindowMiddleware(config, counter.countMessage)
    ```
 
 4. **Hard-code window sizes** - Use AdaptiveWindowing instead
@@ -520,8 +522,8 @@ class LogSentMessages(logger: Logger) extends AgentMiddleware {
 
 ### Log pruning performance
 
-`ContextWindowMiddleware` takes an optional token counter (`new ContextWindowMiddleware(config, tokenCounter)`),
-and `AgentResult.usage` reports the tokens the provider actually billed across the thread, which is
+`ContextWindowMiddleware` takes an optional token counter (`new ContextWindowMiddleware(config, tokenCounter)`;
+the default counts with `cl100k_base`), and `AgentResult.usage` reports the tokens the provider actually billed across the thread, which is
 the number to compare with and without pruning:
 
 ```scala
