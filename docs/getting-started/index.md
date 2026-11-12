@@ -88,6 +88,9 @@ Before starting, you should have:
 - **Quick Start**: ~5 minutes (with starter kit)
 - **Full Tutorial**: ~30 minutes
 
+When you have made a first call, [Build a support assistant](../tutorials/support-assistant/) takes one application
+from a first call to typed answers, tools and an agent, a part at a time, with exercises a test suite checks.
+
 ## Need Help?
 
 If you get stuck:
