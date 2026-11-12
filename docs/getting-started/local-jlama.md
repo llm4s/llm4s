@@ -2,7 +2,7 @@
 layout: page
 title: First Answer, No Key, No Server
 description: "A first LLM answer from Scala in five minutes with no API key and no model server: llm4s-jlama runs a small open model inside your JVM."
-search_title: "Run an LLM inside the JVM from Scala with no API key: llm4s-jlama"
+search_title: "llm4s-jlama: run an LLM inside the JVM, no API key"
 parent: Getting Started
 nav_order: 17
 ---
