@@ -33,6 +33,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Helidon](helidon)** - Helidon SE 4: the client built from `application.yaml`, blocking and streamed routes on virtual threads, a health check and tests with `FakeLlmClient`
 - **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
+- **[Jupyter Notebooks](notebooks)** - Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks (completion, streaming, structured output, a typed tool, RAG) and configuration inside a notebook
 - **[Testing with the Testkit](testing-with-the-testkit)** - Script an `LLMClient` in your tests: canned replies, tool calls, injected errors, recorded requests
 - **[Typed Prompts](prompts)** - `prompt"..."` and `system"..."`: values rendered by a type class checked at compile time, and untrusted input fenced
 - **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like

@@ -275,7 +275,7 @@ to say which tier does run it.
 | `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main`, PRs that change the workspace, and manual `workflow_dispatch` with `tier=workspace` |
 | `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` with `tier=mcp-reference` (a container started in a CI step) |
-| `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
+| `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` and manual `workflow_dispatch` with `tier=ollama` (the `ollama/ollama` image as a service container) |
 | `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` with `tier=cloud-smoke` |
 
 ```scala

@@ -2,12 +2,15 @@ package org.llm4s.repl
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.error.LLMError
+import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Message }
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+import org.llm4s.types.ProviderModelTypes.{ BaseUrl, ModelName, ProviderId, ProviderName }
 import org.llm4s.types.Result
 
 import java.io.{ BufferedReader, PrintStream }
@@ -125,6 +128,30 @@ object Session {
   /** A session on the named section `llm4s.providers.<name>` of `application.conf`. */
   def named(name: String): Session = fromProvider(name, Llm4sConfig.provider(name))
 
+  /**
+   * A session on a local Ollama server at its default address, `http://localhost:11434`, with no `application.conf`
+   * section to write. It needs `llm4s-ollama` on the classpath (`//> using dep org.llm4s::llm4s-ollama:<version>`);
+   * without it, the session's [[Session.failure]] says the provider is not registered.
+   *
+   * {{{
+   * given Session = Session.ollama("llama3")    // after `ollama pull llama3`
+   * }}}
+   */
+  def ollama(model: String): Session = ollama(model, None)
+
+  /** A session on the Ollama server at `baseUrl`, for example `http://gpu-box:11434`. */
+  def ollama(model: String, baseUrl: String): Session = ollama(model, Some(baseUrl))
+
+  private[repl] def ollama(model: String, baseUrl: Option[String])(using ProviderRegistry): Session = {
+    val name    = ProviderName("repl-ollama")
+    val section = NamedProviderConfig(ProviderId("ollama"), ModelName(model), baseUrl.map(BaseUrl(_)), apiKey = None)
+    val (errors, configs) = Llm4sConfig.providerConfigs(Map(name -> section))
+    val config = configs
+      .get(name)
+      .toRight(errors.getOrElse(name, ConfigurationError(s"Could not build an Ollama provider for '$model'")))
+    fromProvider("ollama", config)
+  }
+
   /** A session on a client built elsewhere. */
   def of(client: LLMClient): Session = connect("client", Right(client))
 
@@ -148,7 +175,7 @@ object Session {
   /** A session on a scripted client, for replies that depend on the conversation. */
   def offline(client: ScriptedLLMClient): Session = connect("offline", Right(client))
 
-  private def fromProvider(label: String, config: Result[ProviderConfig]): Session =
+  private def fromProvider(label: String, config: Result[ProviderConfig])(using ProviderRegistry): Session =
     config match {
       case Left(error) => connect(label, Left(error))
       case Right(loaded) =>

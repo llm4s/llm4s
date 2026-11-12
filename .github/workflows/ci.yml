@@ -18,7 +18,7 @@ on:
       tier:
         description: 'On-demand tier(s) to run besides the PR jobs'
         type: choice
-        options: [all, workspace, mcp-reference, cloud-smoke, none]
+        options: [all, workspace, mcp-reference, ollama, cloud-smoke, none]
         default: all
   workflow_call:
 
@@ -170,6 +170,14 @@ jobs:
       - name: Test the sitemap scripts
         run: scripts/test-check-site-sitemaps.sh
 
+      # Guides and Scaladoc cross-linked (#2291): the api.html link check and the Scaladoc cross-link check, which the
+      # ScalaDoc job runs on the real output, against a fake Scaladoc; the unified search index and its 20 queries,
+      # which pages.yml runs on the built site, against a fake site searched with just-the-docs's lunr (from npm).
+      - name: Test the Scaladoc cross-link and site search scripts
+        run: |
+          scripts/test-check-api-links.sh
+          scripts/test-check-site-search.sh
+
       # A merge queue on main waits for each required check to report on its merge group (#1638). Fails if CI, DCO or
       # the secret scan loses its merge_group trigger, if a required job or anything it needs would be skipped there,
       # or if a step reads github.event.pull_request without a pull_request gate. Needs ruby, on the runner.
@@ -265,6 +273,13 @@ jobs:
         run: |
           scripts/test-check-mill-quickstart.sh
           scripts/check-mill-quickstart.sh
+
+      # The Almond notebooks (modules/samples/notebooks, #2296) pin latest_release and are committed without outputs;
+      # notebooks.yml executes them in the Almond kernel.
+      - name: Check the notebooks pin the latest release and carry no outputs
+        run: |
+          scripts/test-check-notebooks.sh
+          scripts/check-notebooks.sh
 
       # The Flink guide's Scala snippets are excerpts of modules/samples/flink, which pins latest_release (#2298);
       # flink-sample.yml runs the sample's MiniCluster test.
@@ -443,6 +458,17 @@ jobs:
           sbt doc docs/doc 2>&1 | tee scaladoc.log
           scripts/check-scaladoc-warnings.sh scaladoc.log
 
+      # The aggregate Scaladoc's cross-links (#2291): source links at the revision the build chose (the release tag on a
+      # tagged commit, as sbt-dynver sees it, else `main`), links to JDK and Scala library types, a root page linking
+      # the guides; and every `{% include api.html t="..." %}` in the guides names a page it generated, so a moved or
+      # renamed type fails here rather than 404ing on the site.
+      - name: Check the Scaladoc's cross-links and the guides' API links
+        run: |
+          API_DIR=$(ls -d modules/docs/target/scala-3*/api)
+          REV=$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo main)
+          scripts/check-scaladoc-crosslinks.sh "$API_DIR" "$REV"
+          scripts/check-api-links.sh "$API_DIR"
+
   # Code coverage, measured on one configuration (ubuntu) to avoid duplication, in four legs that run in parallel.
   #
   # `<module>/coverageReport` is what enforces each module's floor (build.sbt: coverageFloor(n)); the aggregate
@@ -476,13 +502,14 @@ jobs:
         include:
           - leg: core
             modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
-                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo]
+                      doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, traceOpentelemetry, gradleDemo,
+                      secretsVault]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      perplexity, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      perplexity, jlama, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
@@ -921,6 +948,17 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload secrets-vault coverage to Codecov
+        if: contains(matrix.modules, 'secretsVault')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-vault
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload cohere coverage to Codecov
         if: contains(matrix.modules, 'cohere')
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -950,6 +988,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/perplexity/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: perplexity
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload jlama coverage to Codecov
+        if: contains(matrix.modules, 'jlama')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jlama/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jlama
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1389,6 +1438,14 @@ jobs:
           - 7687:7687
           - 7474:7474
 
+      # VaultApiKeyProviderIntegrationSpec (#2479): Vault in dev mode, KV v2 mounted at secret/, a known root token.
+      vault:
+        image: hashicorp/vault:1.18
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: llm4s-it-root-token
+        ports:
+          - 8200:8200
+
       # KafkaTicketPipelineSpec (#2297): a single-node broker in KRaft mode, advertised on localhost:9092.
       kafka:
         image: apache/kafka:3.9.1
@@ -1414,7 +1471,7 @@ jobs:
       # Postgres, Redis and Valkey are covered by the service health checks above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
       # and fail the job if they never come up, rather than letting the suites skip.
-      - name: Wait for Qdrant, Neo4j, Elasticsearch and OpenSearch
+      - name: Wait for Qdrant, Neo4j, Elasticsearch, OpenSearch and Vault
         run: |
           wait_for() {
             for _ in $(seq 1 60); do
@@ -1428,6 +1485,7 @@ jobs:
           wait_for Neo4j http://localhost:7474
           wait_for Elasticsearch "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
           wait_for OpenSearch "http://localhost:9201/_cluster/health?wait_for_status=yellow&timeout=5s"
+          wait_for Vault http://localhost:8200/v1/sys/health
 
       # The suites run with coverage instrumentation on the modules whose code only they reach against real services
       # (#2349): the pgvector, Qdrant and permission-index stores in rag, the Elasticsearch/OpenSearch and
@@ -1441,7 +1499,7 @@ jobs:
       # scripts/check-coverage-legs.sh checks this list against the upload steps below.
       - name: Run containerised integration tests
         env:
-          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres
+          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres secretsVault
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
@@ -1463,6 +1521,8 @@ jobs:
           NEO4J_URI: bolt://localhost:7687
           NEO4J_USER: neo4j
           NEO4J_PASSWORD: llm4stest
+          VAULT_TEST_ADDR: http://localhost:8200
+          VAULT_TEST_TOKEN: llm4s-it-root-token
         run: |
           settings=()
           reports=()
@@ -1532,6 +1592,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent-checkpoint-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent-checkpoint-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload secrets-vault integration coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-vault
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1864,7 +1934,7 @@ jobs:
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
-  # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  # local LLM. Runs on pushes to main, and by `workflow_dispatch` with tier=ollama, to avoid slowing down PR builds.
   #
   # Carries a pgvector service as well as Ollama, because the RAG pipeline suite needs both:
   # real embeddings are the whole point of it, and pgvector is where the hybrid-search half
@@ -1874,11 +1944,26 @@ jobs:
     name: Ollama Integration
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'ollama'))
     permissions:
       contents: read
 
     services:
+      # The official image, pinned by digest rather than installed with `curl ... | sh`, which Scorecard's
+      # Pinned-Dependencies check flags (#2306). Dependabot does not watch service images: bump the tag
+      # comment and the digest together.
+      ollama:
+        image: ollama/ollama@sha256:0e59999e0e8f9fd4e704bd788a89b7e4cad399367fb1365f8c102ac662288761 # 0.40.15
+        options: >-
+          --health-cmd "ollama list"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 11434:11434
+
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -1903,32 +1988,30 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Start Ollama server
+      - name: Wait for the Ollama server
         run: |
-          ollama serve &
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:11434/api/tags > /dev/null 2>&1; then
               echo "Ollama server is ready"
-              break
+              exit 0
             fi
             echo "Waiting for Ollama server... ($i/30)"
             sleep 1
           done
+          echo "Ollama server did not start" >&2
+          exit 1
 
       # Two models: one to answer with, one to embed with. RAGPipelineOllamaIntegrationSpec
       # is the only suite in the repo that exercises retrieval against a real embedding
       # model, so leaving nomic-embed-text out would make it fail rather than skip here.
       - name: Pull test models
         run: |
-          ollama pull qwen2.5:0.5b
-          ollama pull nomic-embed-text
+          docker exec ${{ job.services.ollama.id }} ollama pull qwen2.5:0.5b
+          docker exec ${{ job.services.ollama.id }} ollama pull nomic-embed-text
 
       - name: Run Ollama integration tests
         env:
-          # This job installs Ollama, pulls the models and runs pgvector, so "not available"
+          # This job runs Ollama, pulls the models and runs pgvector, so "not available"
           # here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
