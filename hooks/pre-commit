@@ -598,6 +598,7 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+      ;;
     repl)
       set_add DOWNSTREAM_COMPILE samples
       ;;
