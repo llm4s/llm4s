@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Comparative Benchmarks
-description: "A reproducible harness that measures the runtime cost of llm4s, LangChain4j and Spring AI against one local mock OpenAI-compatible server: per-call overhead, streaming, a tool loop, 200 concurrent calls, cold start and jar footprint."
+description: "A reproducible harness comparing llm4s, LangChain4j and Spring AI against one local mock server: call overhead, streaming, tool loops, concurrency, cold start."
 parent: Reference
 nav_order: 28
 ---
