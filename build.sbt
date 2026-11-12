@@ -2626,7 +2626,40 @@ lazy val docs = (project in file("modules/docs"))
         (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
-    Compile / discoveredMainClasses := Seq.empty
+    Compile / discoveredMainClasses := Seq.empty,
+    // Cross-links (#2291): a source link on every member, to the release tag (`main` for a snapshot); links out to
+    // the JDK, Scala, cats, cats-effect, upickle and ZIO types in signatures; and a root page linking to the guides.
+    // scripts/check-scaladoc-crosslinks.sh checks the generated HTML in CI's ScalaDoc job and before a deploy.
+    Compile / doc / scalacOptions ++= {
+      val root     = (ThisBuild / baseDirectory).value
+      val revision = if (isSnapshot.value) "main" else s"v${version.value}"
+      // Matched against the classpath entry a symbol comes from, first match wins, so the JDK's (a `jrt:` module
+      // path, not a jar) comes last.
+      val external = Seq(
+        ".*/cats-effect[^/]*\\.jar.*::scaladoc2::https://typelevel.org/cats-effect/api/3.x/",
+        ".*/cats-(core|kernel)[^/]*\\.jar.*::scaladoc2::https://typelevel.org/cats/api/",
+        s".*/upickle_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/upickle_3/${Versions.upickle}/",
+        s".*/upickle-core_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/upickle-core_3/${Versions.upickle}/",
+        s".*/ujson_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/ujson_3/${Versions.upickle}/",
+        s".*/zio_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/dev.zio/zio_3/${Versions.zio}/",
+        s".*/zio-streams_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/dev.zio/zio-streams_3/${Versions.zio}/",
+        ".*/scala3?-library[^/]*\\.jar.*::scaladoc3::https://scala-lang.org/api/3.x/",
+        ".*java\\.base.*::javadoc::https://docs.oracle.com/en/java/javase/21/docs/api/java.base/"
+      )
+      Seq(
+        "-project-version",
+        version.value,
+        "-project-logo",
+        (root / "docs" / "image_assets" / "llm4s_logo.png").getPath,
+        "-social-links:github::https://github.com/llm4s/llm4s",
+        "-doc-root-content",
+        (baseDirectory.value / "rootdoc.md").getPath,
+        "-sourceroot",
+        root.getPath,
+        s"-source-links:github://llm4s/llm4s/$revision",
+        external.mkString("-external-mappings:", ",", "")
+      )
+    }
   )
 
 // The provider modules are optional dependencies (#1496): the facade compiles its typed client builders against them,
