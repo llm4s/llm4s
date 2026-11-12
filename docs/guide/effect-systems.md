@@ -127,11 +127,14 @@ def zioProgram(client: LLMClient, timeout: FiniteDuration): UIO[String] = {
 `LLMException`. A `Future` cannot be cancelled, so the agent turn runs as a stream (`agent.stream`) rather than as
 `agent.run`: `completionTimeout` then fails the stream, and cancelling it interrupts the provider call.
 `llm.agent(...)` returns a plain `Result`, since building an agent does no I/O.
+A `Source` from `llm4s-pekko` starts its call when it is materialized, and `concatLazy` materializes both sources
+at once (it only delays pulling the second), so `Source.lazySource` keeps the agent turn from starting before the
+reply has ended.
 
 ```scala
 import java.util.concurrent.TimeoutException
 import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.scaladsl.Sink
+import org.apache.pekko.stream.scaladsl.{ Sink, Source }
 import org.llm4s.agent.graph.ThreadId
 import org.llm4s.pekko.{ AgentStreamItem, LLMClientPekko, LLMException }
 import scala.concurrent.Future
@@ -147,7 +150,7 @@ def pekkoProgram(client: LLMClient, timeout: FiniteDuration)(using system: Actor
         case AgentStreamItem.Done(result) => result.answer.getOrElse("")
       }
       reply
-        .concatLazy(answer)
+        .concatLazy(Source.lazySource(() => answer))
         .completionTimeout(timeout)
         .runWith(Sink.seq)
         .map(_.mkString(" | "))

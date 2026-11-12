@@ -60,6 +60,8 @@ object PomDescriptions {
       "Client for TypeSafe's Jev decision model for LLM4S: typed yes/no, choice and score answers to questions about a state.",
     "llm4s-jina" ->
       "Jina AI embedding provider for LLM4S.",
+    "llm4s-jlama" ->
+      "In-process local model provider for LLM4S on Jlama: a first answer with no API key and no model server.",
     "llm4s-knowledgegraph" ->
       "Knowledge graph model, storage, query and LLM-based extraction for LLM4S.",
     "llm4s-knowledgegraph-neo4j" ->
@@ -104,6 +106,8 @@ object PomDescriptions {
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
     "llm4s-schema-iron" ->
       "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
+    "llm4s-secrets-vault" ->
+      "HashiCorp Vault API key provider for LLM4S: a provider's API key read from Vault's KV secrets engine and refreshed on an interval.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->
