@@ -620,6 +620,9 @@ val client = for {
   `features.customHttpClient` says which: it is `false` unless the provider opts in, so a third-party provider that
   predates the option does not claim it. Embedding providers do not take one yet.
 
+To use an sttp 4 backend you already have, `llm4s-sttp`'s `SttpLlm4sHttpClient(backend)` is the implementation; see
+[Your HTTP Client](../guide/http-transport), which also shows a provider call tested against sttp's stub backend.
+
 ---
 
 ## Switching providers

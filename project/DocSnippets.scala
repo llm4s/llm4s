@@ -44,6 +44,7 @@ object DocSnippets {
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/for-python-developers.md",
+    "guide/http-transport.md",
     "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
@@ -57,7 +58,10 @@ object DocSnippets {
     "scala-ai/agents.md",
     "scala-ai/llm-framework.md",
     "scala-ai/providers.md",
-    "scala-ai/rag.md"
+    "scala-ai/rag.md",
+    "tutorials/support-assistant/part-1-first-call.md",
+    "tutorials/support-assistant/part-2-typed-answers.md",
+    "tutorials/support-assistant/part-3-tools.md"
   )
 
   val packageName = "org.llm4s.docsnippets"

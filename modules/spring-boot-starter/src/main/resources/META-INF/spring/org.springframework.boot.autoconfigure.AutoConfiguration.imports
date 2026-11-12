@@ -2,3 +2,5 @@ org.llm4s.spring.Llm4sAutoConfiguration
 org.llm4s.spring.LlmActuatorAutoConfiguration
 org.llm4s.spring.LlmBoot4ActuatorAutoConfiguration
 org.llm4s.spring.LlmMetricsAutoConfiguration
+org.llm4s.spring.Llm4sReactiveAutoConfiguration
+org.llm4s.spring.Llm4sSseAutoConfiguration

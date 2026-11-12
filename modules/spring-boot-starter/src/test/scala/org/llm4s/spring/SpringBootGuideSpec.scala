@@ -85,7 +85,16 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
   private def squash(text: String): String = StarterGuideDocs.squash(text)
 
   private lazy val javaSources: String =
-    Seq("SummaryService", "OtherProviderConfig", "SpringGuideSnippets", "WeatherTools", "AssistantService")
+    Seq(
+      "SummaryService",
+      "OtherProviderConfig",
+      "SpringGuideSnippets",
+      "WeatherTools",
+      "AssistantService",
+      "SearchIndexer",
+      "ChatStreamController",
+      "ChatSseController"
+    )
       .map(name =>
         squash(
           StarterGuideDocs.read(GuideFile, s"modules/spring-boot-starter/src/test/java/org/llm4s/spring/$name.java")
@@ -98,7 +107,9 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       AutoConfigurations.of(
         classOf[Llm4sAutoConfiguration],
         classOf[ActuatorAutoConfiguration],
-        classOf[LlmMetricsAutoConfiguration]
+        classOf[LlmMetricsAutoConfiguration],
+        classOf[Llm4sReactiveAutoConfiguration],
+        classOf[Llm4sSseAutoConfiguration]
       )
     )
     // The MeterRegistry an Actuator application has, so the guide's `llm4sMetricsCollector` row is checked too.
@@ -178,7 +189,9 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
     }
 
     "be the only flat properties block, and no block keeps a comment on a value line, which a .properties file would read as part of the value" in {
-      blocksIn("properties").filterNot(_.contains("llm4s.providers.")).size shouldBe 1
+      blocksIn("properties")
+        .filterNot(b => Seq("llm4s.providers.", "llm4s.embeddings.", "llm4s.tracing.").exists(b.contains))
+        .size shouldBe 1
       blocksIn("properties").foreach(
         _.linesIterator.filterNot(_.trim.startsWith("#")).foreach(_ should not include "#")
       )
@@ -202,11 +215,22 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
         "llm4sTemplate",
         "llm4sTools",
         "llm4sAgent",
+        "llm4sCheckpointer",
+        "llm4sEmbeddingClient",
+        "llm4sTracing",
+        "llm4sReactiveTemplate",
+        "llm4sSseTemplate",
         "llmHealthIndicator",
         "llm4sMetricsCollector"
       )
 
-      val pairs = propertyPairs(blocksIn("properties").head) :+ "OPENAI_API_KEY=sk-from-env"
+      // The embedding client and the tracer are registered only when their properties are set.
+      val pairs = propertyPairs(blocksIn("properties").head) ++ Seq(
+        "OPENAI_API_KEY=sk-from-env",
+        "llm4s.embeddings.model=fixtureembedding/fixture-embed-small",
+        "llm4s.embeddings.fixtureembedding.api-key=k",
+        "llm4s.tracing.mode=none"
+      )
       runner
         .withPropertyValues(pairs: _*)
         .run(ctx => names.foreach(name => withClue(name)(ctx.containsBean(name) shouldBe true)))
@@ -436,6 +460,56 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
           ctx.getStartupFailure shouldBe null
           ctx.getBean(classOf[AssistantService]).ask("Weather in Paris?") shouldBe "tool said: Sunny in Paris"
         }
+    }
+  }
+
+  "The embeddings section of the guide" should {
+    val block = blocksIn("properties").find(_.contains("llm4s.embeddings.")).getOrElse(fail("no embeddings block"))
+
+    "configure the llm4sEmbeddingClient bean" in {
+      runner
+        .withUserConfiguration(classOf[RecordingClientConfig])
+        .withPropertyValues(propertyPairs(block) :+ "OPENAI_API_KEY=sk-from-env"*)
+        .run { ctx =>
+          ctx.getStartupFailure shouldBe null
+          ctx.getBean(classOf[org.llm4s.javaapi.JEmbeddingClient]).model shouldBe "text-embedding-3-small"
+        }
+    }
+
+    "have its service embed each passage" in {
+      runner
+        .withUserConfiguration(classOf[RecordingClientConfig], classOf[SearchIndexer])
+        .withPropertyValues(
+          "llm4s.embeddings.model=fixtureembedding/fixture-embed-small",
+          "llm4s.embeddings.fixtureembedding.api-key=k"
+        )
+        .run { ctx =>
+          ctx.getStartupFailure shouldBe null
+          ctx.getBean(classOf[SearchIndexer]).vectors(java.util.List.of("a", "b")).size shouldBe 2
+        }
+    }
+  }
+
+  "The tracing section of the guide" should {
+    val block = blocksIn("properties").find(_.contains("llm4s.tracing.")).getOrElse(fail("no tracing block"))
+
+    "hand the backend its block, and name the module to add when the backend is missing" in {
+      val recorded = propertyPairs(block).map(_.replace("opentelemetry", RecordingTracingBackend.Mode))
+      runner.withUserConfiguration(classOf[RecordingClientConfig]).withPropertyValues(recorded*).run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        val extras = ctx.getBean(classOf[org.llm4s.trace.Tracing]).asInstanceOf[RecordingTracing].extras
+        extras("endpoint") shouldBe "http://localhost:4317"
+        extras("serviceName") shouldBe "orders-service"
+      }
+      runner.withUserConfiguration(classOf[RecordingClientConfig]).withPropertyValues(propertyPairs(block)*).run {
+        ctx =>
+          ctx.getStartupFailure should not be null
+          Iterator
+            .iterate[Throwable](ctx.getStartupFailure)(_.getCause)
+            .takeWhile(_ != null)
+            .map(e => String.valueOf(e.getMessage))
+            .mkString("\n") should include("llm4s-observability-otel")
+      }
     }
   }
 

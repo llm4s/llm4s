@@ -153,6 +153,14 @@ getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not 
 guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not Scala source
 guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not Scala source
+guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
 getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
+tutorials/support-assistant/part-1-first-call.md | f191562fc0 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
+tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
+tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
+tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
+tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
+tutorials/support-assistant/part-3-tools.md | 41049c3fc7 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
 guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
