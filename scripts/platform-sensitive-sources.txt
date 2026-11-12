@@ -30,6 +30,8 @@ modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/VertexAIAuthProvider
 modules/knowledgegraph/src/main/scala/org/llm4s/knowledgegraph/storage/JsonGraphStore.scala        knowledgegraph:org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec
 modules/mcp/src/main/scala/org/llm4s/mcp/MCPTransport.scala                                        mcp:org.llm4s.mcp.StdioTransportConcurrencySpec
 modules/openai-compatible/src/main/scala/org/llm4s/llmconnect/config/OpenAIWorkloadIdentity.scala  openaiCompatible:org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec
+modules/providers/jlama/src/main/scala/org/llm4s/llmconnect/config/JlamaConfig.scala               jlama:org.llm4s.llmconnect.provider.JlamaConfigSpec
+modules/providers/jlama/src/main/scala/org/llm4s/llmconnect/provider/JlamaProvider.scala           jlama:org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec
 modules/samples/                                                                                   none: unpublished examples, run by hand; the library code they call is tested in its own module
 modules/workspace/workspaceSamples/                                                                none: unpublished examples, run by hand; the workspace runner and client they drive run whole on Windows
 modules/benchmarks-comparative/                                                                    none: unpublished benchmark harness, run by hand on Linux CI or a release tag; it ships nothing to users

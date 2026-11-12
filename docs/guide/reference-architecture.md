@@ -113,6 +113,15 @@ To keep the example self-contained it authenticates the app with its master key.
 tenant its own LiteLLM virtual key, with its own budget and rate limits; virtual keys need LiteLLM's database. The
 app's side does not change: the virtual key goes in the same file.
 
+CI drives this path through a real LiteLLM container on every pull request
+([`LiteLLMGatewaySpec`](https://github.com/llm4s/llm4s/blob/main/modules/it/src/test/scala/org/llm4s/config/LiteLLMGatewaySpec.scala)).
+A client loaded from the overlay's `application.conf` calls LiteLLM, which routes to a fake upstream. The suite checks
+that the upstream gets the vendor key and not the app's gateway key, gets the mapped model name and the tenant
+headers, and that streaming works. It also checks that LiteLLM refuses an unknown key before any request reaches
+the upstream. LiteLLM passes `x-*` headers on to the vendor only with `forward_client_headers_to_llm_api: true`
+under `general_settings`, as in the suite's
+[config](https://github.com/llm4s/llm4s/blob/main/modules/it/src/test/resources/litellm/gateway-it.yaml).
+
 ### Without a gateway: private endpoints
 
 Where no gateway is mandated, the app can call a cloud provider over a private network path instead. Azure OpenAI

@@ -128,6 +128,9 @@ flags:
   jev:
     paths:
       - modules/providers/jev/src/main/scala
+  secrets-vault:
+    paths:
+      - modules/secrets-vault/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala
@@ -138,6 +141,10 @@ flags:
   perplexity:
     paths:
       - modules/providers/perplexity/src/main/scala
+    carryforward: true
+  jlama:
+    paths:
+      - modules/providers/jlama/src/main/scala
     carryforward: true
   provider-testkit:
     paths:
@@ -194,6 +201,10 @@ flags:
   tapir:
     paths:
       - modules/tapir/src/main/scala
+    carryforward: true
+  sttp:
+    paths:
+      - modules/sttp/src/main/scala
     carryforward: true
   agent:
     paths:

@@ -69,9 +69,10 @@ class ContainerisedWorkspace(
   private val heartbeatExecutor = new AtomicReference[ScheduledExecutorService]()
 
   // WebSocket client and response handling
-  private val wsClient          = new AtomicReference[WebSocketClient]()
-  private val pendingResponses  = new ConcurrentHashMap[String, CompletableFuture[WorkspaceAgentResponse]]()
-  private val streamingHandlers = new ConcurrentHashMap[String, StreamingOutputMessage => Unit]()
+  private val wsClient         = new AtomicReference[WebSocketClient]()
+  private val pendingResponses = new ConcurrentHashMap[String, CompletableFuture[WorkspaceAgentResponse]]()
+  // by command id, from executeCommandWithStreaming's send until its response; never removed by a stream's own end
+  private[workspace] val streamingHandlers = new ConcurrentHashMap[String, StreamingOutputMessage => Unit]()
 
   /**
    * Custom WebSocket client that handles workspace agent protocol
@@ -156,13 +157,21 @@ class ContainerisedWorkspace(
         logger.warn(s"Received response for unknown command ID: ${response.commandId}")
     }
 
-  private def handleStreamingOutput(commandId: String, outputType: String, content: String, isComplete: Boolean): Unit =
+  /**
+   * Passes a chunk to its command's handler. Each of stdout and stderr ends with its own `isComplete` message, in
+   * either order, so neither may remove the handler: `executeCommandWithStreaming` removes it once the response is in.
+   */
+  private[workspace] def handleStreamingOutput(
+    commandId: String,
+    outputType: String,
+    content: String,
+    isComplete: Boolean
+  ): Unit =
     Option(streamingHandlers.get(commandId)) match {
       case Some(handler) =>
         Try(handler(StreamingOutputMessage(commandId, outputType, content, isComplete))).failed.foreach { ex =>
           logger.error(s"Error in streaming handler for command $commandId: ${ex.getMessage}", ex)
         }
-        if (isComplete) streamingHandlers.remove(commandId)
       case None =>
         logger.debug(s"No streaming handler registered for command $commandId")
     }

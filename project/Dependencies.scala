@@ -38,6 +38,11 @@ object Versions {
   val jsoup         = "1.22.2"
   val jna           = "5.19.1"
   val vosk          = "0.3.45"
+  // Apache-2.0. Only llm4s-jlama (#2284): the pure-Java inference engine on the JDK Vector API.
+  val jlama = "0.8.4"
+  // Patched versions of jlama-core's transitive jinjava and guava; see Deps.jlamaJinjava.
+  val jlamaJinjava = "2.7.7"
+  val jlamaGuava   = "33.8.0-jre"
 
   // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask = "0.10.2"
@@ -72,6 +77,8 @@ object Versions {
   val tapir = "1.11.20"
   // sttp client 3 (Apache 2.0), for llm4s-tapir: the version tapir-sttp-client 1.11.20 is built on.
   val sttpClient3 = "3.10.3"
+  // sttp client 4 (Apache 2.0), for llm4s-sttp (#2341): an Llm4sHttpClient over a caller's synchronous backend.
+  val sttpClient4 = "4.0.27"
 
   // ZIO
   val zio = "2.1.16"
@@ -218,6 +225,9 @@ object Deps {
   val tapirSttpStubServer = "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server" % Versions.tapir
   val sttpClient3         = "com.softwaremill.sttp.client3" %% "core"                   % Versions.sttpClient3
 
+  // llm4s-sttp (#2341): the provider clients' transport over an sttp 4 synchronous backend.
+  val sttpClient4 = "com.softwaremill.sttp.client4" %% "core" % Versions.sttpClient4
+
   // ZIO HTTP (unpublished modules/examples-http only; see Versions)
   val zioHttp = "dev.zio" %% "zio-http" % Versions.zioHttp
 
@@ -277,6 +287,14 @@ object Deps {
   val awsSts            = "software.amazon.awssdk" % "sts"            % Versions.awsSdk
   val awsBedrockRuntime = "software.amazon.awssdk" % "bedrockruntime" % Versions.awsSdk
 
+  // Jlama: in-process inference for llm4s-jlama (#2284)
+  val jlamaCore = "com.github.tjake" % "jlama-core" % Versions.jlama
+  // jlama-core 0.8.4 pins jinjava 2.7.2 (sandbox bypasses GHSA-gjx9-j8f8-7j74, GHSA-m49c-g9wr-hv6v; its YAML support
+  // brings snakeyaml 1.33, GHSA-mjmj-j48q-9wg2) and guava 32.0.1 (GHSA-xxph-c9ww-hj94). Declared directly so the fixed
+  // versions are in llm4s-jlama's POM, not only in this build.
+  val jlamaJinjava = "com.hubspot.jinjava" % "jinjava" % Versions.jlamaJinjava
+  val jlamaGuava   = "com.google.guava"    % "guava"   % Versions.jlamaGuava
+
   val opentelemetryApi          = "io.opentelemetry" % "opentelemetry-api"           % Versions.opentelemetry
   val opentelemetrySdk          = "io.opentelemetry" % "opentelemetry-sdk"           % Versions.opentelemetry
   val opentelemetryExporterOtlp = "io.opentelemetry" % "opentelemetry-exporter-otlp" % Versions.opentelemetry
@@ -316,6 +334,19 @@ object Deps {
   // The release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
   val springWebAnnotations =
     ("org.springframework" % "spring-web" % Versions.springFrameworkBaseline).excludeAll(ExclusionRule("*", "*"))
+  // Spring MVC's SseEmitter, for the starter's SseLLM4STemplate (#2279): provided, as an MVC application has it. The
+  // release is the Spring Framework that Spring Boot `springBootBaseline` manages. Apache-2.0.
+  val springWebmvc = "org.springframework" % "spring-webmvc" % Versions.springFrameworkBaseline
+  // Spring MVC (with a servlet container) and WebFlux as an application gets them, for the starter's streaming specs.
+  val springBootWeb: Seq[ModuleID] =
+    Seq("spring-boot-starter-web", "spring-boot-starter-webflux").map(n =>
+      "org.springframework.boot" % n % Versions.springBoot
+    )
+  // The same on Spring Boot 4, which renamed the MVC starter.
+  val springBoot4Web: Seq[ModuleID] =
+    Seq("spring-boot-starter-webmvc", "spring-boot-starter-webflux").map(n =>
+      "org.springframework.boot" % n % Versions.springBoot4
+    )
   // What a Spring Boot 4 application with spring-boot-starter-actuator has, for springBootStarterBoot4's specs.
   val springBoot4: Seq[ModuleID] = Seq(
     "spring-boot-autoconfigure",

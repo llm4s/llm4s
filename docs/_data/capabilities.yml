@@ -107,6 +107,21 @@ providers:
     vision_input: "not declared"
     reasoning_effort: "not declared"
     stream_usage: "not declared"
+  - id: "jlama"
+    aliases: []
+    chat: true
+    chat_artifact: "llm4s-jlama"
+    chat_module: "org.llm4s.llmconnect.provider.Llm4sJlamaModule"
+    streaming: true
+    tool_calling: false
+    chat_api_key: "not required"
+    chat_workload_identity: false
+    embeddings: false
+    cloud_smoke: []
+    structured_output: "not declared"
+    vision_input: "not declared"
+    reasoning_effort: "not declared"
+    stream_usage: "not declared"
   - id: "mistral"
     aliases: []
     chat: true
