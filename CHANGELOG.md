@@ -428,6 +428,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
 - **Added** `llm4s-tapir` (Experimental): `EndpointTools.registry` turns tapir endpoints into tools whose schemas derive
   from the endpoints' inputs, called through sttp [#2299](https://github.com/llm4s/llm4s/issues/2299); [guide](docs/guide/tapir-tools.md).
+- **Fixed** `ContainerisedWorkspace.executeCommandWithStreaming` could drop all of a command's streamed stdout: the
+  first stream to end (often the empty stderr) unregistered the handler; it now stays until the response arrives.
 
 ### MCP
 
