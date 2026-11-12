@@ -7,7 +7,8 @@ import org.llm4s.javaapi.LlmResult;
 
 /**
  * The {@code llm4s} node of {@code application.yaml}, and the client it describes. Each key can also be set as a
- * system property ({@code -Dllm4s.model=...}) or an environment variable ({@code LLM4S_MODEL}).
+ * system property ({@code -Dllm4s.model=...}) or an environment variable ({@code LLM4S_MODEL}; Helidon reads
+ * {@code _DASH_} as {@code -}, so {@code base-url} is {@code LLM4S_BASE_DASH_URL}).
  *
  * @param provider which client to build: {@code ollama} or {@code openai-compatible}
  * @param model    the model name, as the provider spells it

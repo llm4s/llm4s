@@ -89,8 +89,10 @@ llm4s:
 ```
 
 A record reads the node and builds the client with the [Java API's builders](java#configure-in-code). Each key can
-also come from a system property (`-Dllm4s.model=...`) or an environment variable (`LLM4S_MODEL`, `LLM4S_BASE_URL`,
-`LLM4S_API_KEY`), so a key never has to be in the file. llm4s itself does not read `application.yaml`.
+also come from an environment variable, so a key never has to be in the file. Helidon reads `_` in a variable's name
+as `.` and `_DASH_` as `-`: `LLM4S_MODEL`, `LLM4S_BASE_DASH_URL` and `LLM4S_API_DASH_KEY` (`LLM4S_BASE_URL` would be
+`llm4s.base.url`, which the record never reads). A system property (`-Dllm4s.model=...`) works too, on the
+application's own JVM: `gradle run` does not forward `-D` options. llm4s itself does not read `application.yaml`.
 
 ```java
 public record Llm4sSettings(String provider, String model, String baseUrl, String apiKey) {
