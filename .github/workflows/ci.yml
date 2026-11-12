@@ -483,7 +483,7 @@ jobs:
                       observability, observabilityPrometheus]
           - leg: providers
             modules: [ollama, gemini, anthropic, openai, openaiCompatible, voyage, bedrock, jina, jev, cohere, watsonx,
-                      perplexity, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
+                      perplexity, jlama, azureIdentity, providerTestkit, javaApi, javaRag, reactor, springBootStarter, deployService,
                       examplesHttp]
           - leg: agent
             modules: [agent, agentTestkit, agentCheckpointSqlite, agentCheckpointPostgres, agentMemory, llm4sEffect, llm4sZio,
@@ -962,6 +962,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/perplexity/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: perplexity
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload jlama coverage to Codecov
+        if: contains(matrix.modules, 'jlama')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jlama/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jlama
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

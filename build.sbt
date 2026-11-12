@@ -103,6 +103,12 @@ addCommandAlias(
 )
 addCommandAlias("compileAll", ";compile")
 addCommandAlias("chatTuiDemo", "samples/runMain org.llm4s.samples.chat.tui.ChatTuiMain")
+// The local Jlama sample (#2284) in a forked JVM, which `samples / run / javaOptions` gives the flags Jlama's Vector API
+// needs. The other samples run in sbt's own JVM, so the fork is set for this run only.
+addCommandAlias(
+  "localJlamaDemo",
+  "; set samples / run / fork := true; samples/runMain org.llm4s.samples.basic.LocalJlamaExample"
+)
 addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
@@ -351,6 +357,7 @@ lazy val llm4s = (project in file("."))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     providerTestkit,
     schemaDerivation,
     schemaIron,
@@ -1401,6 +1408,31 @@ lazy val perplexity = (project in file("modules/providers/perplexity"))
     )
   )
 
+// `llm4s-jlama` (#2284): a local model run inside the JVM by Jlama, a pure-Java inference engine, so a first answer
+// needs no API key and no model server. Jlama's only llm4s dependency is core. Its unit tests stub the engine and
+// never download a model; the nightly `jlama-nightly.yml` workflow runs `LocalJlamaExample` against a real 1B model.
+
+lazy val jlama = (project in file("modules/providers/jlama"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jlama",
+    commonSettings,
+    // Measured 87.34% statement coverage (`sbt coverage jlama/test jlama/coverageReport`). Floor is the measured
+    // value rounded down to the nearest 5. Never lower it. The engine over a real model (`JlamaEngine.Loaded`) is
+    // run only by the nightly sample, not counted here.
+    coverageFloor(85),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // findbugs annotations (LGPL-2.1, via jinjava) are compile-time only: no class of them is loaded at runtime.
+      Deps.jlamaCore.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaJinjava.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaGuava,
+      Deps.scalatest % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -1830,6 +1862,7 @@ lazy val samples = (project in file("modules//samples"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1871,6 +1904,8 @@ lazy val samples = (project in file("modules//samples"))
     name := "llm4s-samples",
     commonSettings,
     publish / skip := true,
+    // The flags Jlama needs (#2284). They apply only to a forked run: `sbt localJlamaDemo` forks for LocalJlamaExample.
+    run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-preview"),
     // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
@@ -1949,7 +1984,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     openaiCompatible,
     bedrock,
     watsonx,
-    perplexity
+    perplexity,
+    jlama
   )
   .settings(
     name := "llm4s-config-policy",
@@ -2379,6 +2415,7 @@ lazy val it = (project in file("modules/it"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -2486,6 +2523,7 @@ lazy val docs = (project in file("modules/docs"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     providerTestkit,
     schemaDerivation,
     schemaIron,
@@ -2551,6 +2589,7 @@ lazy val docs = (project in file("modules/docs"))
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (perplexity / Compile / sources).value ++
+        (jlama / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (schemaIron / Compile / sources).value ++

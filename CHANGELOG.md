@@ -290,6 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing [#1023](https://github.com/llm4s/llm4s/issues/1023).
 - **Added** `llm4s-perplexity` (Beta): `provider = "perplexity"` on Perplexity's Agent API (`/v1/agent`, which replaced
   Sonar Chat Completions), with `web_search`, its sources on `Completion.citations`, tool calls and streaming [#1026](https://github.com/llm4s/llm4s/issues/1026).
+- **Added** `llm4s-jlama` (Experimental): `provider = "jlama"` runs a small model inside the JVM with Jlama, so a first
+  answer needs no API key and no model server; `complete` and streaming, no tools ([quick start](docs/getting-started/local-jlama.md)) [#2284](https://github.com/llm4s/llm4s/issues/2284).
 - **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
   `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
