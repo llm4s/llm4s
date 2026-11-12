@@ -266,6 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** cost for reasoning models counting thinking tokens once: OpenAI-format usage counts them inside
+  `completion_tokens`, Gemini and xAI apart, and `TokenUsage.totalOutputTokens` now handles both [#2564](https://github.com/llm4s/llm4s/pull/2564).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
