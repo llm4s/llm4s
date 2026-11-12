@@ -32,3 +32,4 @@ modules/mcp/src/main/scala/org/llm4s/mcp/MCPTransport.scala                     
 modules/openai-compatible/src/main/scala/org/llm4s/llmconnect/config/OpenAIWorkloadIdentity.scala  openaiCompatible:org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec
 modules/samples/                                                                                   none: unpublished examples, run by hand; the library code they call is tested in its own module
 modules/workspace/workspaceSamples/                                                                none: unpublished examples, run by hand; the workspace runner and client they drive run whole on Windows
+modules/benchmarks-comparative/                                                                    none: unpublished benchmark harness, run by hand on Linux CI or a release tag; it ships nothing to users
