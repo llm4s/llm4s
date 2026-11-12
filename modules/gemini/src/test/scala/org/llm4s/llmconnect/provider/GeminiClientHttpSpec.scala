@@ -49,6 +49,16 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
        | "usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":5,"thoughtsTokenCount":40,
        | "cachedContentTokenCount":64,"totalTokenCount":145}}""".stripMargin
 
+  // the shape real gemini-3.5-flash returned (2026-11-05) when thinking spent the whole maxOutputTokens: the
+  // candidate's content has a role and no `parts`. The model stopped, so it is an empty answer, not an error,
+  // and the thinking tokens it was billed for are still reported.
+  private val noPartsMaxTokensBody =
+    """|{"candidates":[{"content":{"role":"model"},"finishReason":"MAX_TOKENS","index":0}],
+       | "usageMetadata":{"promptTokenCount":8,"totalTokenCount":539,"thoughtsTokenCount":531}}""".stripMargin
+
+  private val noPartsUsage =
+    TokenUsage(promptTokens = 8, completionTokens = 0, totalTokens = 539, thinkingTokens = Some(531))
+
   // ============================================================
   // complete() tests
   // ============================================================
@@ -91,6 +101,20 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "return an empty answer with its usage when thinking spent the whole token budget (no parts)" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(noPartsMaxTokensBody)))
+
+    val completion = mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions()) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.message.contentOpt shouldBe None
+    completion.toolCalls shouldBe empty
+    completion.usage shouldBe Some(noPartsUsage)
   }
 
   it should "parse a tool call response" in {
@@ -420,6 +444,26 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "end with the MAX_TOKENS finish reason and the usage when the last chunk has no parts" in {
+    // the same reply as complete's, streamed: the chunk's finish reason must still reach onChunk
+    val sseData =
+      "data: " + ujson.read(noPartsMaxTokensBody).render() + "\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val completion = mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.usage shouldBe Some(noPartsUsage)
+    chunks.flatMap(_.finishReason) shouldBe List("MAX_TOKENS")
+    chunks.flatMap(_.content) shouldBe empty
   }
 
   it should "record provider exchanges for streaming responses when logging is enabled" in {
