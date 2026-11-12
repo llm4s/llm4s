@@ -70,6 +70,7 @@ object CompatibilityMatrix {
       Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
       Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
+      Stack("sttp client 4", "llm4s-sttp", Seq(Versions.sttpClient4), "Any synchronous backend."),
       Stack(
         "Iron",
         "llm4s-schema-iron",

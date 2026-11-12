@@ -96,6 +96,7 @@ map_file_to_project() {
     modules/workspace/workspaceClient/*)  echo "workspaceClient" ;;
     modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
     modules/spring-boot-starter/*)        echo "springBootStarter" ;;
+    modules/secrets-vault/*)              echo "secretsVault" ;;
     modules/deploy-service/*)             echo "deployService" ;;
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
@@ -122,6 +123,7 @@ map_file_to_project() {
     modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/perplexity/*)       echo "perplexity" ;;
+    modules/providers/jlama/*)            echo "jlama" ;;
     modules/providers/jina/*)             echo "jina" ;;
     modules/providers/jev/*)              echo "jev" ;;
     modules/providers/cohere/*)           echo "cohere" ;;
@@ -135,6 +137,7 @@ map_file_to_project() {
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
     modules/tapir/*)                      echo "llm4sTapir" ;;
+    modules/sttp/*)                       echo "llm4sSttp" ;;
     modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/agent-checkpoint-sqlite/*)    echo "agentCheckpointSqlite" ;;
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
@@ -283,11 +286,13 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE perplexity
+      set_add DOWNSTREAM_COMPILE jlama
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE azureIdentity
+      set_add DOWNSTREAM_COMPILE secretsVault
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
@@ -303,6 +308,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agentMemory
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE llm4sTapir
+      set_add DOWNSTREAM_COMPILE llm4sSttp
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
@@ -413,6 +419,7 @@ propagate_downstream() {
       ;;
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE llm4sSttp
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE samples
@@ -445,6 +452,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    jlama)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     voyage)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -463,6 +476,9 @@ propagate_downstream() {
       ;;
     jev)
       set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    secretsVault)
       set_add DOWNSTREAM_COMPILE it
       ;;
     cohere)
@@ -559,6 +575,9 @@ propagate_downstream() {
     llm4sTapir)
       set_add DOWNSTREAM_COMPILE samples
       ;;
+    llm4sSttp)
+      set_add DOWNSTREAM_COMPILE samples
+      ;;
     testkit)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE llm4sEffect
@@ -582,6 +601,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE perplexity
+      set_add DOWNSTREAM_COMPILE jlama
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE jev
       set_add DOWNSTREAM_COMPILE cohere
@@ -611,6 +631,7 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+      ;;
     repl)
       set_add DOWNSTREAM_COMPILE samples
       ;;

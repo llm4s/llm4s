@@ -45,6 +45,10 @@ stacks:
     artifact: "llm4s-tapir"
     versions: ["1.11.20"]
     note: "With sttp client 3.10.3."
+  - name: "sttp client 4"
+    artifact: "llm4s-sttp"
+    versions: ["4.0.27"]
+    note: "Any synchronous backend."
   - name: "Iron"
     artifact: "llm4s-schema-iron"
     versions: ["3.3.2"]

@@ -29,6 +29,9 @@ To run the recipes with no local setup at all, open a GitHub Codespace from the
 CI runs every recipe against its scripted client on every pull request, and checks that the program on each page is
 the source file, so what you read compiles and works.
 
+A recipe solves one problem on one page. For one application built a part at a time, with exercises, follow the
+[support-assistant tutorial](../tutorials/support-assistant/).
+
 ## The recipes
 
 | Recipe | What it shows |
