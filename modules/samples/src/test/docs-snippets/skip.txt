@@ -84,6 +84,7 @@ guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 getting-started/installation.md | acebca2c40 | skip | sbt build definition, not Scala source
 getting-started/installation.md | f178be64a2 | skip | sbt build definition, not Scala source
 getting-started/installation.md | ec5eaa078c | skip | sbt build definition, not Scala source
+getting-started/installation.md | 49823275db | skip | sbt build definition, not Scala source
 guide/vector-store.md | 82d7940cc0 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 1ec60e6ed3 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 0c5a836dc4 | with | import org.llm4s.vectorstore.elasticsearch._
@@ -154,3 +155,5 @@ getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not 
 guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not Scala source
 guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
+getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source

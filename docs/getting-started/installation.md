@@ -458,6 +458,19 @@ It brings Azure's `azure-identity` (MIT, with `azure-core`, MSAL4J, Netty and Re
 it is not part of `llm4s-openai`. See
 [Enterprise authentication](../guide/providers#azure-openai-with-microsoft-entra-id).
 
+### For API keys read from HashiCorp Vault
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-secrets-vault" % llm4sVersion
+```
+
+`VaultApiKeyProvider` ([#2479](https://github.com/llm4s/llm4s/issues/2479)) reads a provider's API key from
+Vault's KV secrets engine, caches it and reads it again every refresh interval, for a deployment that cannot run
+Vault Agent or a CSI driver to write the key to an `apiKeyFile`. It talks to Vault's HTTP API with llm4s's own
+HTTP client, so it brings no Vault SDK. See
+[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 ```scala
@@ -567,6 +580,18 @@ libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
 
 The Perplexity Agent API chat provider (`provider = "perplexity"`): answers grounded in web search, with
 citations. It brings no dependency beyond `llm4s-core`. See [Perplexity](../guide/providers#perplexity).
+
+### For a local model in the JVM (Jlama)
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-jlama" % llm4sVersion
+run / fork := true
+run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-preview")
+```
+
+A model run inside your JVM by [Jlama](https://github.com/tjake/Jlama) (`provider = "jlama"`): no API key and no
+model server. It brings `jlama-core` and its dependencies. See
+[First answer, no key, no server](local-jlama).
 
 ### For Java, Spring Boot, cats-effect and ZIO
 
@@ -810,8 +835,9 @@ libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
 ```
 
 `client.requireCapabilities[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
-client not checked for one fails to compile. It is experimental, and depends on `llm4s-core` only. See
-[Capability-Typed Clients](../guide/capabilities).
+client not checked for one fails to compile; `model"openai/gpt-4o"` is typed from the bundled model data at compile
+time. It is experimental, and depends on `llm4s-core`; its `completeStructuredOf` also needs `llm4s-schema-derivation`
+(optional). See [Capability-Typed Clients](../guide/capabilities).
 
 ### Testing your own code (the testkit)
 

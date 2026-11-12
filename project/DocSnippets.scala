@@ -31,6 +31,7 @@ object DocSnippets {
     "getting-started/configuration.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
+    "getting-started/local-jlama.md",
     "getting-started/next-steps.md",
     "getting-started/ollama-quickstart.md",
     "getting-started/repl.md",
