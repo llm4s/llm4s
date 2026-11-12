@@ -69,7 +69,7 @@ Each item must be done before `T − 7 days`, or the post that needs it waits.
 |--------|-------|-----------------------|
 | A release post per release on llm4s.org, and an Atom feed | [#2319](https://github.com/llm4s/llm4s/issues/2319) | Done; `scripts/new-release-post.sh` drafts the 1.0 post from the CHANGELOG |
 | Share cards and structured data, so links preview well | [#2316](https://github.com/llm4s/llm4s/issues/2316) | Done |
-| A README that works as a landing page | [#2322](https://github.com/llm4s/llm4s/issues/2322) | Done |
+| A README that works as a landing page | [#2322](https://github.com/llm4s/llm4s/issues/2322) | Not done: the landing-page README (#2411) was reverted by #2424 and the README is frozen; the issue is closed without it |
 | A no-key way to try LLM4S | [#2286](https://github.com/llm4s/llm4s/issues/2286) | The dev container and [Playground]({{ '/getting-started/playground' | relative_url }}) page are in; CI runs the page's commands in it |
 | A trademark and name-use policy the press kit can point to | [#2310](https://github.com/llm4s/llm4s/issues/2310) | Open |
 | The press kit | #2323 | [Page]({{ '/press/' | relative_url }}) is up with descriptions and fact sheet; SVG logos, wordmark, screenshots and clip still to make |

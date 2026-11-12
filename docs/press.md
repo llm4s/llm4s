@@ -54,7 +54,7 @@ they are, use the PNG above and ask [the contact below](#contact) for a larger s
 > Context Protocol client and server; and tracing through Langfuse and OpenTelemetry. Failures come back as typed
 > values instead of exceptions.
 >
-> LLM4S is MIT-licensed and developed in public on GitHub since April 2025. It is community-led, maintained by a small
+> LLM4S is MIT-licensed and developed in public on GitHub since January 2025. It is community-led, maintained by a small
 > core team and stewarded by the LLM4S Foundation, which is funded through Open Collective.
 
 ## Fact sheet
