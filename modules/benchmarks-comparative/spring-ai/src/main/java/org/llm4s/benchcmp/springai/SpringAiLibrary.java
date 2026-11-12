@@ -4,6 +4,8 @@ import org.llm4s.benchcmp.harness.ChatLibrary;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.support.ToolCallbacks;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 
@@ -25,7 +27,11 @@ public final class SpringAiLibrary implements ChatLibrary {
   }
 
   private final ChatClient client;
-  private final LookupTools tools = new LookupTools();
+  /**
+   * Resolved once, as LangChain4j's {@code AiServices} and the llm4s {@code Agent} build their tool specifications once:
+   * {@code .tools(pojo)} on each request would reflect over the class and generate its JSON schema on every call.
+   */
+  private final ToolCallback[] tools = ToolCallbacks.from(new LookupTools());
 
   public SpringAiLibrary(String baseUrl) {
     OpenAiChatModel model = OpenAiChatModel.builder()
@@ -67,6 +73,6 @@ public final class SpringAiLibrary implements ChatLibrary {
 
   @Override
   public String toolAgent(String prompt) {
-    return client.prompt(prompt).tools(tools).call().content();
+    return client.prompt(prompt).toolCallbacks(tools).call().content();
   }
 }

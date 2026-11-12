@@ -51,6 +51,11 @@ Each library is used the way its documentation shows, with its default HTTP clie
 | LangChain4j | 1.23.0 | [`LangChain4jLibrary.java`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/langchain4j/src/main/java/org/llm4s/benchcmp/langchain4j/LangChain4jLibrary.java), [`LangChain4jColdStart.java`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/langchain4j/src/main/java/org/llm4s/benchcmp/langchain4j/LangChain4jColdStart.java) | `OpenAiChatModel` and `OpenAiStreamingChatModel` (`langchain4j-open-ai`), and an `AiServices` assistant with a `@Tool` (`langchain4j`) |
 | Spring AI | 2.0.2 | [`SpringAiLibrary.java`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/spring-ai/src/main/java/org/llm4s/benchcmp/springai/SpringAiLibrary.java), [`SpringAiColdStart.java`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/spring-ai/src/main/java/org/llm4s/benchcmp/springai/SpringAiColdStart.java) | `OpenAiChatModel` built with its builder (`spring-ai-openai`) and a `ChatClient` with a `@Tool` (`spring-ai-client-chat`), without Spring Boot |
 
+Each library builds its tool definitions once, outside the measured call: Spring AI's `@Tool` object is resolved to
+`ToolCallback`s at construction, as LangChain4j's `AiServices` and the llm4s `Agent` do. The llm4s tool run also
+calls `agent.forget(threadId)` inside the measured call, since a completed thread stays in the agent's in-memory
+runtime until it is forgotten and a server would do the same.
+
 The versions are pinned in `project/Dependencies.scala` (`Versions.langchain4j`, `Versions.springAi`) and printed with
 every result. The benchmarks themselves are in
 [`ComparativeBenchmarks.scala`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/jmh/src/main/scala/org/llm4s/benchcmp/ComparativeBenchmarks.scala).
