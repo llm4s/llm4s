@@ -103,6 +103,12 @@ addCommandAlias(
 )
 addCommandAlias("compileAll", ";compile")
 addCommandAlias("chatTuiDemo", "samples/runMain org.llm4s.samples.chat.tui.ChatTuiMain")
+// The local Jlama sample (#2284) in a forked JVM, which `samples / run / javaOptions` gives the flags Jlama's Vector API
+// needs. The other samples run in sbt's own JVM, so the fork is set for this run only.
+addCommandAlias(
+  "localJlamaDemo",
+  "; set samples / run / fork := true; samples/runMain org.llm4s.samples.basic.LocalJlamaExample"
+)
 addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
@@ -342,6 +348,7 @@ lazy val llm4s = (project in file("."))
     anthropic,
     openai,
     azureIdentity,
+    secretsVault,
     openaiCompatible,
     voyage,
     bedrock,
@@ -350,6 +357,7 @@ lazy val llm4s = (project in file("."))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     providerTestkit,
     schemaDerivation,
     schemaIron,
@@ -1400,6 +1408,31 @@ lazy val perplexity = (project in file("modules/providers/perplexity"))
     )
   )
 
+// `llm4s-jlama` (#2284): a local model run inside the JVM by Jlama, a pure-Java inference engine, so a first answer
+// needs no API key and no model server. Jlama's only llm4s dependency is core. Its unit tests stub the engine and
+// never download a model; the nightly `jlama-nightly.yml` workflow runs `LocalJlamaExample` against a real 1B model.
+
+lazy val jlama = (project in file("modules/providers/jlama"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jlama",
+    commonSettings,
+    // Measured 87.34% statement coverage (`sbt coverage jlama/test jlama/coverageReport`). Floor is the measured
+    // value rounded down to the nearest 5. Never lower it. The engine over a real model (`JlamaEngine.Loaded`) is
+    // run only by the nightly sample, not counted here.
+    coverageFloor(85),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // findbugs annotations (LGPL-2.1, via jinjava) are compile-time only: no class of them is loaded at runtime.
+      Deps.jlamaCore.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaJinjava.exclude("com.google.code.findbugs", "annotations"),
+      Deps.jlamaGuava,
+      Deps.scalatest % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -1516,9 +1549,11 @@ lazy val testkit = (project in file("modules/testkit"))
 // `llm4s-capabilities` (#2331, experimental): capability-typed clients. `client.requireCapabilities[Vision & Tools](provider,
 // model)` checks the model's `ModelMetadata` once, at the application's edge, and returns a `Capable[Vision & Tools]`;
 // operations that need a capability take a `Capable[...]` of it, so passing a client not checked for it is a compile
-// error. Depends on core only; `llm4s-testkit` scripts the client in its specs.
+// error. `model"openai/gpt-4o"` is typed at compile time from core's bundled model data. Depends on core, and on
+// `llm4s-schema-derivation` as an optional dependency, needed only by `completeStructuredOf`; `llm4s-testkit` scripts
+// the client in its specs.
 lazy val capabilities = (project in file("modules/capabilities"))
-  .dependsOn(core, testkit % Test)
+  .dependsOn(core, schemaDerivation % "optional", testkit % Test)
   .settings(
     name := "llm4s-capabilities",
     commonSettings,
@@ -1587,6 +1622,26 @@ lazy val azureIdentity = (project in file("modules/providers/azure-identity"))
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.azureIdentity,
+      Deps.scalatest % Test
+    )
+  )
+
+// HashiCorp Vault (#2479): an `ApiKeyProvider` reading a provider's API key from Vault's KV secrets engine, cached
+// and read again every refresh interval. One `GET` over llm4s's own HTTP client, so no Vault SDK and no dependency
+// beyond core; `VaultApiKeyProviderSpec` in modules/it runs it against Vault in a container (@Docker).
+lazy val secretsVault = (project in file("modules/secrets-vault"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-secrets-vault",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage secretsVault/test secretsVault/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
       Deps.scalatest % Test
     )
   )
@@ -1789,6 +1844,8 @@ lazy val samples = (project in file("modules//samples"))
     schemaDerivation,
     // `org.llm4s.samples.prompt.TypedPromptExample` (#2325), and docs/guide/prompts.md's snippets
     prompt,
+    // `org.llm4s.samples.capability.CapabilityTypedClientExample` (#2331)
+    capabilities,
     rag,
     knowledgegraph,
     memory,
@@ -1809,6 +1866,7 @@ lazy val samples = (project in file("modules//samples"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1850,6 +1908,8 @@ lazy val samples = (project in file("modules//samples"))
     name := "llm4s-samples",
     commonSettings,
     publish / skip := true,
+    // The flags Jlama needs (#2284). They apply only to a forked run: `sbt localJlamaDemo` forks for LocalJlamaExample.
+    run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-preview"),
     // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
@@ -1928,7 +1988,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     openaiCompatible,
     bedrock,
     watsonx,
-    perplexity
+    perplexity,
+    jlama
   )
   .settings(
     name := "llm4s-config-policy",
@@ -1976,7 +2037,8 @@ lazy val doctor = (project in file("modules/doctor"))
 // `ScriptedLLMClient`, so a worksheet runs with no key or network). `scripts/check-repl-scripts.sh` runs
 // `examples/repl/` against it with Scala CLI in CI.
 lazy val repl = (project in file("modules/repl"))
-  .dependsOn(core, schemaDerivation, testkit)
+  // llm4s-ollama is test-only: `Session.ollama` builds its section from config and needs the module only at run time.
+  .dependsOn(core, schemaDerivation, testkit, ollama % Test)
   .settings(
     name := "llm4s-repl",
     commonSettings,
@@ -2357,6 +2419,7 @@ lazy val it = (project in file("modules/it"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -2374,7 +2437,9 @@ lazy val it = (project in file("modules/it"))
     // DeployServiceSmokeSpec (design 4.60): the example agent service, started as a JVM process on Postgres
     deployService % Test,
     // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
-    schemaDerivation % Test
+    schemaDerivation % Test,
+    // VaultApiKeyProviderSpec (#2479), a @Docker suite against Vault in dev mode
+    secretsVault % Test
   )
   .settings(
     name := "llm4s-it",
@@ -2453,6 +2518,7 @@ lazy val docs = (project in file("modules/docs"))
     anthropic,
     openai,
     azureIdentity,
+    secretsVault,
     openaiCompatible,
     voyage,
     bedrock,
@@ -2461,6 +2527,7 @@ lazy val docs = (project in file("modules/docs"))
     cohere,
     watsonx,
     perplexity,
+    jlama,
     providerTestkit,
     schemaDerivation,
     schemaIron,
@@ -2517,6 +2584,7 @@ lazy val docs = (project in file("modules/docs"))
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
         (azureIdentity / Compile / sources).value ++
+        (secretsVault / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
@@ -2525,6 +2593,7 @@ lazy val docs = (project in file("modules/docs"))
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (perplexity / Compile / sources).value ++
+        (jlama / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (schemaDerivation / Compile / sources).value ++
         (schemaIron / Compile / sources).value ++
@@ -2557,7 +2626,40 @@ lazy val docs = (project in file("modules/docs"))
         (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
-    Compile / discoveredMainClasses := Seq.empty
+    Compile / discoveredMainClasses := Seq.empty,
+    // Cross-links (#2291): a source link on every member, to the release tag (`main` for a snapshot); links out to
+    // the JDK, Scala, cats, cats-effect, upickle and ZIO types in signatures; and a root page linking to the guides.
+    // scripts/check-scaladoc-crosslinks.sh checks the generated HTML in CI's ScalaDoc job and before a deploy.
+    Compile / doc / scalacOptions ++= {
+      val root     = (ThisBuild / baseDirectory).value
+      val revision = if (isSnapshot.value) "main" else s"v${version.value}"
+      // Matched against the classpath entry a symbol comes from, first match wins, so the JDK's (a `jrt:` module
+      // path, not a jar) comes last.
+      val external = Seq(
+        ".*/cats-effect[^/]*\\.jar.*::scaladoc2::https://typelevel.org/cats-effect/api/3.x/",
+        ".*/cats-(core|kernel)[^/]*\\.jar.*::scaladoc2::https://typelevel.org/cats/api/",
+        s".*/upickle_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/upickle_3/${Versions.upickle}/",
+        s".*/upickle-core_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/upickle-core_3/${Versions.upickle}/",
+        s".*/ujson_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/com.lihaoyi/ujson_3/${Versions.upickle}/",
+        s".*/zio_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/dev.zio/zio_3/${Versions.zio}/",
+        s".*/zio-streams_3[^/]*\\.jar.*::scaladoc3::https://javadoc.io/doc/dev.zio/zio-streams_3/${Versions.zio}/",
+        ".*/scala3?-library[^/]*\\.jar.*::scaladoc3::https://scala-lang.org/api/3.x/",
+        ".*java\\.base.*::javadoc::https://docs.oracle.com/en/java/javase/21/docs/api/java.base/"
+      )
+      Seq(
+        "-project-version",
+        version.value,
+        "-project-logo",
+        (root / "docs" / "image_assets" / "llm4s_logo.png").getPath,
+        "-social-links:github::https://github.com/llm4s/llm4s",
+        "-doc-root-content",
+        (baseDirectory.value / "rootdoc.md").getPath,
+        "-sourceroot",
+        root.getPath,
+        s"-source-links:github://llm4s/llm4s/$revision",
+        external.mkString("-external-mappings:", ",", "")
+      )
+    }
   )
 
 // The provider modules are optional dependencies (#1496): the facade compiles its typed client builders against them,

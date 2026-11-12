@@ -16,7 +16,7 @@ Retry a provider with ReliableClient, and ask a second provider when the first s
 
 ## The problem
 
-Providers have outages and rate limits. `ReliableClient` wraps a client with retries, a circuit breaker and a
+Providers have outages and rate limits. {% include api.html t="org.llm4s.reliability.ReliableClient" %} wraps a client with retries, a circuit breaker and a
 deadline, so a brief failure is retried and a long one fails fast. When the first provider is still failing, the
 recipe asks a second. The demo simulates the outage: the primary always fails with a 503, and the fallback is the
 scripted client, or with `--live` your configured provider.

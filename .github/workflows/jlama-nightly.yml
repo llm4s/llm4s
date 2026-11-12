@@ -1,0 +1,51 @@
+name: Jlama local model (nightly)
+
+# Runs LocalJlamaExample (`sbt localJlamaDemo`, #2284) against a real model, tjake/Llama-3.2-1B-Instruct-JQ4, run
+# in-process by llm4s-jlama. The sample exits with status 1 when the answer is empty or the call fails. The pull-request
+# build runs only the module's offline specs (Llm4sJlamaModuleSpec and the rest stub the engine): the model is about
+# 0.7 GB, so it is downloaded here, once, and kept with actions/cache. A JDK update that breaks Jlama's use of the
+# incubating Vector API shows up here first.
+
+on:
+  schedule:
+    - cron: "23 3 * * *"  # 03:23 UTC every day
+  push:
+    branches: [main]
+    paths:
+      - modules/providers/jlama/**
+      - modules/samples/src/main/scala/org/llm4s/samples/basic/LocalJlamaExample.scala
+      - .github/workflows/jlama-nightly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-model:
+    name: LocalJlamaExample against Llama 3.2 1B (Q4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Restore the model
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/llm4s/jlama
+          key: jlama-tjake-Llama-3.2-1B-Instruct-JQ4-v1
+
+      - name: Run LocalJlamaExample
+        run: sbt localJlamaDemo
