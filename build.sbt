@@ -1416,10 +1416,10 @@ lazy val jlama = (project in file("modules/providers/jlama"))
   .settings(
     name := "llm4s-jlama",
     commonSettings,
-    // Measured 75.00% statement coverage (`sbt coverage jlama/test jlama/coverageReport`). Floor is the measured
-    // value rounded down to the nearest 5. Never lower it. `JlamaEngine.load` and the engine over a real model are
+    // Measured 87.34% statement coverage (`sbt coverage jlama/test jlama/coverageReport`). Floor is the measured
+    // value rounded down to the nearest 5. Never lower it. The engine over a real model (`JlamaEngine.Loaded`) is
     // run only by the nightly sample, not counted here.
-    coverageFloor(75),
+    coverageFloor(85),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
