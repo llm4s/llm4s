@@ -281,6 +281,9 @@ it never overwrites. Write whatever the release deserves once it exists.
   `modules/samples/flink/project.scala` with `docs/_data/project.yml` in the prepare commit (ci.yml's
   `scripts/check-flink-guide-snippets.sh` fails otherwise); the workflow runs the sample's MiniCluster test, and also
   runs weekly. Locally: `cd modules/samples/flink && scala-cli test .`.
+- Run the Almond notebooks: `gh workflow run notebooks.yml`. Bump the `org.llm4s::llm4s-*` versions in the
+  `//> using dep` cells of `modules/samples/notebooks/*.ipynb` with `docs/_data/project.yml` in the prepare commit
+  (ci.yml's `scripts/check-notebooks.sh` fails otherwise); the workflow executes both notebooks in the Almond kernel.
 
 - After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
   Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's

@@ -1,0 +1,74 @@
+name: Notebooks
+
+# Executes the Almond notebooks (modules/samples/notebooks, docs/guide/notebooks.md, #2296) top to bottom, headless,
+# in the Scala kernel a reader installs, against the llm4s release they pin. sbt never builds them, so without this a
+# notebook that no longer runs goes unnoticed until a reader opens it. The notebooks run offline: scripted clients and
+# a scripted embedder, no API key, and no network beyond Maven Central for their dependencies. Any cell error (a
+# compile error or a failed assert) fails the job. The offline part of the check (the notebooks pin
+# docs/_data/project.yml's latest_release and carry no outputs) runs in ci.yml's Quick Checks.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - modules/samples/notebooks/**
+      - scripts/check-notebooks.sh
+      - .github/workflows/notebooks.yml
+  pull_request:
+    paths:
+      - modules/samples/notebooks/**
+      - scripts/check-notebooks.sh
+      - .github/workflows/notebooks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Almond has no build for Scala 3.7.1, the version llm4s is built with; 3.7.3 is the newest 3.7 kernel and reads
+  # llm4s's TASTy. Keep these in step with docs/guide/notebooks.md.
+  ALMOND_VERSION: 0.14.5
+  ALMOND_SCALA_VERSION: 3.7.3
+
+jobs:
+  notebooks:
+    name: Execute the notebooks in Almond
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      # Keeps setup-java's JDK 21 (the kernel runs on `java` from the PATH); installs only `cs`.
+      - uses: coursier/setup-action@d5a17f9aaeb260f9ba336a5b582fb49f79c64ac4 # v3.1.0
+        with:
+          apps: ''
+
+      - name: Install Jupyter's notebook runner
+        run: |
+          python3 -m venv "$RUNNER_TEMP/jupyter"
+          "$RUNNER_TEMP/jupyter/bin/pip" install --quiet nbconvert==7.17.2 nbclient==0.11.0 jupyter_client==8.10.0
+          echo "$RUNNER_TEMP/jupyter/bin" >> "$GITHUB_PATH"
+
+      - name: Install the Almond kernel
+        run: |
+          cs launch --use-bootstrap "almond:$ALMOND_VERSION" --scala "$ALMOND_SCALA_VERSION" -- \
+            --install --id scala --display-name Scala --jupyter-path "$RUNNER_TEMP/jupyter/share/jupyter/kernels"
+          jupyter kernelspec list
+
+      - name: Check the notebooks pin the latest release and carry no outputs
+        run: scripts/check-notebooks.sh
+
+      - name: Execute the notebooks
+        run: |
+          jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=900 \
+            --output-dir "$RUNNER_TEMP/executed" modules/samples/notebooks/getting-started.ipynb modules/samples/notebooks/rag.ipynb

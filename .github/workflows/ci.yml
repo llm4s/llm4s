@@ -274,6 +274,13 @@ jobs:
           scripts/test-check-mill-quickstart.sh
           scripts/check-mill-quickstart.sh
 
+      # The Almond notebooks (modules/samples/notebooks, #2296) pin latest_release and are committed without outputs;
+      # notebooks.yml executes them in the Almond kernel.
+      - name: Check the notebooks pin the latest release and carry no outputs
+        run: |
+          scripts/test-check-notebooks.sh
+          scripts/check-notebooks.sh
+
       # The Flink guide's Scala snippets are excerpts of modules/samples/flink, which pins latest_release (#2298);
       # flink-sample.yml runs the sample's MiniCluster test.
       - name: Check the Flink guide's snippets are the sample's
