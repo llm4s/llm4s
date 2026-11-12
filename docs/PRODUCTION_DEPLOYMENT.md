@@ -297,6 +297,30 @@ volumes:
       secretName: llm4s-keys      # mounted at /var/run/secrets/llm4s, so apiKeyFile = ".../openai-api-key"
 ```
 
+**Read from Vault by llm4s.** Without a sidecar or CSI driver, `llm4s-secrets-vault`'s `VaultApiKeyProvider` reads
+the key from Vault's KV secrets engine (v2 by default, v1 with `withKvVersion`) over Vault's HTTP API - no Vault SDK -
+caches it, and reads it again every `refreshInterval` (5 minutes by default), so a key rotated in Vault is sent from
+the first request after the interval. Its errors (`AuthenticationError` for a refused token, `NotFoundError` for a
+missing secret, `ConfigurationError` for a missing or blank field) never hold the key or the Vault token.
+
+```scala
+import org.llm4s.llmconnect.auth.vault.{ VaultApiKeyProvider, VaultSettings }
+import org.llm4s.security.Secret
+import scala.concurrent.duration.*
+
+for
+  keys <- VaultApiKeyProvider(
+            VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey")
+              .withNamespace("admin")              // Vault Enterprise / HCP only
+              .withRefreshInterval(1.minute)
+          )
+  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  client <- LLMConnect.getClient(config)
+yield client
+```
+
+The Vault token is yours to obtain (Kubernetes or AppRole login); a token that expires needs a new provider.
+
 **Fetched by your code.** Without a file, implement `ApiKeyProvider` over your secret store's client
 (Vault's API, AWS Secrets Manager's `GetSecretValue`, ...) and set it with `withApiKeyProvider`; the client
 asks it for the key on every request. llm4s itself depends on no secret-manager SDK. A compiled example is
