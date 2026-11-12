@@ -99,7 +99,7 @@ object EffectSystemsGuide {
     // snippet: pekko
     import java.util.concurrent.TimeoutException
     import org.apache.pekko.actor.ActorSystem
-    import org.apache.pekko.stream.scaladsl.Sink
+    import org.apache.pekko.stream.scaladsl.{ Sink, Source }
     import org.llm4s.agent.graph.ThreadId
     import org.llm4s.pekko.{ AgentStreamItem, LLMClientPekko, LLMException }
     import scala.concurrent.Future
@@ -115,7 +115,7 @@ object EffectSystemsGuide {
             case AgentStreamItem.Done(result) => result.answer.getOrElse("")
           }
           reply
-            .concatLazy(answer)
+            .concatLazy(Source.lazySource(() => answer))
             .completionTimeout(timeout)
             .runWith(Sink.seq)
             .map(_.mkString(" | "))

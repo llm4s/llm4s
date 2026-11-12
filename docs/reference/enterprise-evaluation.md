@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310, 2315]
+cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310]
 ---
 
 # Enterprise Evaluation
@@ -119,7 +119,6 @@ closes, so this list is updated when the gap is.
 | Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
-| No integration test that drives a client through a real LiteLLM container for the [reference architecture](../guide/reference-architecture)'s gateway path | [#2315](https://github.com/llm4s/llm4s/issues/2315) |
 
 ---
 

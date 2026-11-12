@@ -1,0 +1,24 @@
+# Representative searches of the docs site and the page each should find (#2291): a type name finds its Scaladoc page,
+# a task finds its guide. scripts/check-site-search.cjs runs every line against the built site's search index (guides
+# plus Scaladoc, the one the search box loads) in pages.yml and fails when the page is not among the first three results.
+# Format: <query><TAB><expected page, as a site path; .html, a trailing index and an #anchor are ignored>
+LLMClient	/scaladoc/org/llm4s/llmconnect/LLMClient.html
+ReliableClient	/scaladoc/org/llm4s/reliability/ReliableClient.html
+CompletionOptions	/scaladoc/org/llm4s/llmconnect/model/CompletionOptions.html
+ToolRegistry	/scaladoc/org/llm4s/toolapi/ToolRegistry.html
+Llm4sConfig	/scaladoc/org/llm4s/config/Llm4sConfig$.html
+AgentResult	/scaladoc/org/llm4s/agent/AgentResult.html
+Conversation	/scaladoc/org/llm4s/llmconnect/model/Conversation.html
+ToolBuilder	/scaladoc/org/llm4s/toolapi/ToolBuilder.html
+StreamedChunk	/scaladoc/org/llm4s/llmconnect/model/StreamedChunk.html
+VectorStore	/scaladoc/org/llm4s/vectorstore/VectorStore.html
+GuardrailMiddleware	/scaladoc/org/llm4s/agent/graph/middleware/GuardrailMiddleware.html
+stream tokens	/examples/cookbook/streaming
+api key	/guide/providers
+tool calling	/getting-started/first-example
+postgres vector store	/guide/vector-store
+structured output	/guide/structured-output
+guardrails	/guide/agents/guardrails
+handoffs	/guide/agents/handoffs
+ollama	/getting-started/ollama-quickstart
+spring boot	/guide/spring-boot

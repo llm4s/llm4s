@@ -23,6 +23,7 @@ private[capability] object CapabilityMacros {
             "No capability set was given. Name the capabilities, for example " +
               "client.requireCapabilities[Vision & Tools](provider, model) or Capable.assume[Vision](client)."
           )
+        else if (other =:= TypeRepr.of[Any]) Nil // the set of a ModelRef whose model has none of the capabilities
         else if (symbol.fullName == s"$Package.$name" && order.contains(name)) List(name)
         else
           report.errorAndAbort(

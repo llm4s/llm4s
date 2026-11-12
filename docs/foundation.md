@@ -125,7 +125,7 @@ permalink: /foundation/
       <li class="lp-card lp-card--flat"><h3>Community</h3><p>Fund mentorship, documentation and developer events to grow the next generation of Scala AI engineers.</p></li>
     </ol>
     <div class="lp-callout lp-callout--cta">
-      <p><strong>Thank you for building the future of AI with us.</strong> Questions about supporting LLM4S? Email <a href="mailto:kannupriya@llm4s.org">kannupriya@llm4s.org</a>.</p>
+      <p><strong>Thank you for building the future of AI with us.</strong> Questions about supporting LLM4S? Email <a href="mailto:kannupriya@llm4s.org">kannupriya@llm4s.org</a>. Writing about LLM4S? The <a href="{{ '/press/' | relative_url }}">press kit</a> has the logo, descriptions and a fact sheet.</p>
       <p class="lp-actions"><a class="lp-btn lp-btn--primary" href="https://opencollective.com/llm4s">Support on Open Collective</a></p>
     </div>
   </div>
