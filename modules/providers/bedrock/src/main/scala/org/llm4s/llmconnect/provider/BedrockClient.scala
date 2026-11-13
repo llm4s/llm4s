@@ -269,7 +269,8 @@ class BedrockClient(
         dropUnsupported = true
       )
       .map { t =>
-        val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, t.options)
+        val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, t.options) ++
+          UnmappedOptions.promptCache(config.model, t.options)
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
 

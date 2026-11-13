@@ -544,7 +544,8 @@ final case class ModelPricing private (
   inputCostPerImage: Option[Double] = None,
   outputCostPerImage: Option[Double] = None,
   inputCostPerPixel: Option[Double] = None,
-  outputCostPerPixel: Option[Double] = None
+  outputCostPerPixel: Option[Double] = None,
+  cacheCreationInputTokenCostAbove1hr: Option[Double] = None
 ) {
 
   /** Sets the `inputCostPerToken` price. */
@@ -664,6 +665,14 @@ final case class ModelPricing private (
   def withOutputCostPerPixel(outputCostPerPixel: Option[Double]): ModelPricing =
     copy(outputCostPerPixel = outputCostPerPixel)
 
+  /** Sets the `cacheCreationInputTokenCostAbove1hr` price: a cache write with the 1-hour lifetime. */
+  def withCacheCreationInputTokenCostAbove1hr(cacheCreationInputTokenCostAbove1hr: Double): ModelPricing =
+    copy(cacheCreationInputTokenCostAbove1hr = Some(cacheCreationInputTokenCostAbove1hr))
+
+  /** Sets, or with `None` clears, the `cacheCreationInputTokenCostAbove1hr` price. */
+  def withCacheCreationInputTokenCostAbove1hr(cacheCreationInputTokenCostAbove1hr: Option[Double]): ModelPricing =
+    copy(cacheCreationInputTokenCostAbove1hr = cacheCreationInputTokenCostAbove1hr)
+
   /**
    * Estimate the cost of a completion given token counts.
    *
@@ -696,7 +705,8 @@ object ModelPricing {
     inputCostPerImage: Option[Double] = None,
     outputCostPerImage: Option[Double] = None,
     inputCostPerPixel: Option[Double] = None,
-    outputCostPerPixel: Option[Double] = None
+    outputCostPerPixel: Option[Double] = None,
+    cacheCreationInputTokenCostAbove1hr: Option[Double] = None
   ): ModelPricing =
     new ModelPricing(
       inputCostPerToken,
@@ -713,7 +723,8 @@ object ModelPricing {
       inputCostPerImage,
       outputCostPerImage,
       inputCostPerPixel,
-      outputCostPerPixel
+      outputCostPerPixel,
+      cacheCreationInputTokenCostAbove1hr
     )
 
   implicit val rw: ReadWriter[ModelPricing] = macroRW
@@ -739,7 +750,8 @@ object ModelPricing {
       inputCostPerImage = getDouble("input_cost_per_image"),
       outputCostPerImage = getDouble("output_cost_per_image"),
       inputCostPerPixel = getDouble("input_cost_per_pixel"),
-      outputCostPerPixel = getDouble("output_cost_per_pixel")
+      outputCostPerPixel = getDouble("output_cost_per_pixel"),
+      cacheCreationInputTokenCostAbove1hr = getDouble("cache_creation_input_token_cost_above_1hr")
     )
   }
 }
