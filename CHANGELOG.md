@@ -497,6 +497,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers from a local Ollama. Its `@QuarkusTest` runs against a stub Ollama server on a loopback port, and CI builds and
   tests it and checks that the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`)
   [#1468](https://github.com/llm4s/llm4s/issues/1468), [#2280](https://github.com/llm4s/llm4s/issues/2280).
+- **Added** Micronaut 4 and Helidon SE 4 guides ([micronaut](docs/guide/micronaut.md), [helidon](docs/guide/helidon.md))
+  with runnable Gradle samples, tested in CI with `FakeLlmClient` [#2281](https://github.com/llm4s/llm4s/issues/2281).
 - **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
   directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
   extractor used, character and line counts, metadata, a preview and any extraction error

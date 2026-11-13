@@ -29,6 +29,8 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Moving a Java app from LangChain4j or Spring AI](java-migration)** - Each LangChain4j and Spring AI concept in `llm4s-java-api` terms, with compiled before-and-after Java, provider configuration and the gaps
 - **[Java Reactor](java-reactor)** - Stream a reply as a Reactor `Flux<String>` with `llm4s-reactor`, for Spring WebFlux and other reactive pipelines
 - **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
+- **[Micronaut](micronaut)** - A `@Factory` bean for `JLlmClient` configured from `application.yml`, blocking and streamed endpoints, a health indicator and tests with `FakeLlmClient`
+- **[Helidon](helidon)** - Helidon SE 4: the client built from `application.yaml`, blocking and streamed routes on virtual threads, a health check and tests with `FakeLlmClient`
 - **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Jupyter Notebooks](notebooks)** - Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks (completion, streaming, structured output, a typed tool, RAG) and configuration inside a notebook
