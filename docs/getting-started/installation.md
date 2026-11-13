@@ -601,6 +601,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-java-rag"             % llm4sVersion  // Java facade for RAG (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-reactor"              % llm4sVersion  // Reactor Flux over the Java facade (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
+libraryDependencies += "org.llm4s" %% "llm4s-spring-ai"            % llm4sVersion  // Spring AI ChatModel / EmbeddingModel interop (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
 libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
@@ -615,7 +616,9 @@ see [Quarkus](../guide/quarkus)) and the base of the Spring starter, which adds 
 pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a separate artifact so that a Java
 facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-reactor` turns
 a streamed reply into a Reactor `Flux<String>` ([Java Reactor](../guide/java-reactor)), apart from the facade so that it
-does not bring `reactor-core` to an application without Reactor. `llm4s-effect`,
+does not bring `reactor-core` to an application without Reactor. `llm4s-spring-ai` exposes an llm4s client as a Spring
+AI `ChatModel` and `EmbeddingModel`, and a Spring AI `ChatModel` as an llm4s client; Spring AI 2.0.x is a provided
+dependency, which the application brings ([Using LLM4S with Spring AI](../guide/spring-ai)). `llm4s-effect`,
 `llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. `llm4s-ox` adds an
 Ox `Flow` of a streamed reply, bounded fan-out, races and retries to direct-style code ([Direct style](../guide/direct-style)).
 

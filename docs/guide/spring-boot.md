@@ -527,6 +527,8 @@ instead run with `llm4s.enabled=false`, so no client is built and no key is need
 
 - [Moving a Java app from LangChain4j or Spring AI](java-migration): Spring AI and LangChain4j starter properties and
   beans mapped to this starter, with a compiled controller.
+- [Using LLM4S with Spring AI](spring-ai): with `llm4s-spring-ai`, the starter's client is also a Spring AI `ChatModel`
+  bean, for an application that keeps its `ChatClient` code.
 - [Java](java): the client, conversations and failures the template is built on.
 - [Providers](providers) and [configuration](../getting-started/configuration): every provider, for the HOCON route.
 - The starter's own [README](https://github.com/llm4s/llm4s/blob/main/modules/spring-boot-starter/README.md).

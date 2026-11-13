@@ -110,6 +110,8 @@ object PomDescriptions {
       "HashiCorp Vault API key provider for LLM4S: a provider's API key read from Vault's KV secrets engine and refreshed on an interval.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
+    "llm4s-spring-ai" ->
+      "Spring AI interop for LLM4S: an LLM4S client as a Spring AI ChatModel and EmbeddingModel, and a Spring AI ChatModel as an LLM4S client.",
     "llm4s-spring-boot-starter" ->
       "Spring Boot auto-configuration for the LLM4S Java client.",
     "llm4s-sttp" ->

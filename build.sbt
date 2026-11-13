@@ -376,6 +376,7 @@ lazy val llm4s = (project in file("."))
     javaRag,
     springBootStarter,
     springBootStarterBoot4,
+    springAi,
     samples,
     doctor,
     repl,
@@ -1888,6 +1889,8 @@ lazy val samples = (project in file("modules//samples"))
     llm4sOx,
     // The Java RAG sample (#1491), `org.llm4s.samples.rag.JavaRagExample`.
     javaRag,
+    // The Spring AI interop sample (#2278), `org.llm4s.samples.springai.SpringAiInteropExample`.
+    springAi,
     // The guide `docs/guide/testing-with-the-testkit` is run by a spec in this module, and the exit examples'
     // acceptance suites script their model with it. Compile scope since #2295: the runnable
     // `org.llm4s.samples.json.JsoniterStructuredOutputExample` and (#2325)
@@ -1932,6 +1935,10 @@ lazy val samples = (project in file("modules//samples"))
       // and modules/it runs that pipeline against a broker.
       Deps.fs2Kafka,
       Deps.kafkaClients,
+      // The Spring AI interop sample (#2278): llm4s-spring-ai has Spring AI as a provided dependency, so the sample
+      // brings it, as an application does. Compile scope: the sample runs with no API key.
+      Deps.springAiModel,
+      Deps.springAiClientChat,
       // docs/guide/vector-store.md's "Sharing your application's connection pool" doobie snippet (#2300)
       Deps.doobieHikari % Test,
       // docs/guide/testing-with-the-testkit.md's MUnit, munit-cats-effect, weaver and ZIO Test examples (#2335), each
@@ -2581,14 +2588,20 @@ lazy val docs = (project in file("modules/docs"))
     javaApi,
     javaRag,
     reactor,
-    springBootStarter
+    springBootStarter,
+    springAi
   )
   .settings(
     name := "llm4s-docs",
     commonSettings,
     publish / skip := true,
-    // Provided-scope in spring-boot-starter, so not on the classpath it exports.
-    libraryDependencies ++= Seq(Deps.springBootActuator, Deps.springBoot4HealthApi, Deps.springWebmvc),
+    // Provided-scope in spring-boot-starter and spring-ai, so not on the classpath they export.
+    libraryDependencies ++= Seq(
+      Deps.springBootActuator,
+      Deps.springBoot4HealthApi,
+      Deps.springWebmvc,
+      Deps.springAiModel
+    ),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
@@ -2648,7 +2661,8 @@ lazy val docs = (project in file("modules/docs"))
         (javaApi / Compile / sources).value ++
         (javaRag / Compile / sources).value ++
         (reactor / Compile / sources).value ++
-        (springBootStarter / Compile / sources).value
+        (springBootStarter / Compile / sources).value ++
+        (springAi / Compile / sources).value
     },
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -2854,6 +2868,35 @@ lazy val springBootStarterBoot4 = (project in file("modules/spring-boot-starter/
       Seq(starterTest / "scala", starterTest / "java")
     },
     Test / unmanagedResourceDirectories += (springBootStarter / Test / resourceDirectory).value
+  )
+
+// Spring AI interop (#2278): an llm4s client as a Spring AI `ChatModel` and `EmbeddingModel`, a Spring AI `ChatModel` as
+// an llm4s `LLMClient`, and an auto-configuration that exposes the starter's client as a `ChatModel` bean. Spring AI is
+// `provided`: the application brings the Spring AI release it uses (2.0.x, so Spring Boot 4 / Spring Framework 7), and
+// no other module depends on this one. Experimental, as Spring AI's API still moves between minors.
+lazy val springAi = (project in file("modules/spring-ai"))
+  // core's test classes carry the `fixturechat` provider; the starter builds the client the auto-configuration adapts.
+  .dependsOn(
+    javaApi,
+    core              % "test->test",
+    testkit           % Test,
+    springBootStarter % Test
+  )
+  .settings(
+    name := "llm4s-spring-ai",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage springAi/test springAi/coverageReport`); floor is the measured
+    // value rounded down to the nearest 5.
+    coverageFloor(100),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.springAiModel            % Provided,
+      Deps.springBoot4AutoConfigure % Provided,
+      Deps.scalatest                % Test,
+      Deps.springAiClientChat       % Test,
+      Deps.reactorTest              % Test
+    ) ++ Deps.springBoot4.map(_ % Test)
   )
 
 lazy val benchmarks = (project in file("modules/benchmarks"))
