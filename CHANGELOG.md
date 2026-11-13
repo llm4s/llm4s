@@ -150,7 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Capabilities
 
 - **Added** `llm4s-capabilities` (Experimental): `client.requireCapabilities[Vision & Tools](provider, model)` checks the model's metadata once and
-  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
+  returns a `Capable[Vision & Tools]`, so passing a client not checked for vision to `describe` fails to compile; `model"openai/gpt-4o"` is typed from the bundled model data at compile time, and `completeStructuredOf` is gated on `StructuredOutput` ([guide](docs/guide/capabilities.md)) [#2331](https://github.com/llm4s/llm4s/issues/2331).
 
 ### Observability
 
@@ -266,6 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cohere reranker re-read a rotated key per request, without a restart. `apiKeyFile` is accepted in chat sections, embeddings blocks,
   `llm4s.rerank.cohere` and `llm4s.credentials.<id>`; testkit `assertHonoursApiKeyProvider` and `assertEmbeddingHonoursApiKeyProvider`
   [#2313](https://github.com/llm4s/llm4s/issues/2313), [#2477](https://github.com/llm4s/llm4s/issues/2477), [#2478](https://github.com/llm4s/llm4s/issues/2478).
+- **Added** `llm4s-secrets-vault` (experimental): `VaultApiKeyProvider` reads a provider's API key from HashiCorp Vault's KV engine
+  over its HTTP API (no SDK), cached and read again every refresh interval [#2479](https://github.com/llm4s/llm4s/issues/2479).
 
 ### Providers
 
@@ -281,7 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
-  `Llm4sHttpClient`, which you keep owning; `ProviderFeatures.customHttpClient` (opt-in, `false` by default) says which honour it [#2341](https://github.com/llm4s/llm4s/issues/2341).
+  `Llm4sHttpClient`, which you keep owning; `ProviderFeatures.customHttpClient` (opt-in, `false` by default) says which honour it; `llm4s-sttp` (Experimental) supplies one over an sttp 4 synchronous backend [#2341](https://github.com/llm4s/llm4s/issues/2341); [guide](docs/guide/http-transport.md).
 - **Fixed** signed image URLs with a query string or fragment retain their actual media type instead of falling back to
   JPEG [#2491](https://github.com/llm4s/llm4s/issues/2491).
 - **Added** keyless Microsoft Entra ID authentication for Azure OpenAI: `authentication = "entra-id"` with the new
@@ -300,6 +302,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listing [#1023](https://github.com/llm4s/llm4s/issues/1023).
 - **Added** `llm4s-perplexity` (Beta): `provider = "perplexity"` on Perplexity's Agent API (`/v1/agent`, which replaced
   Sonar Chat Completions), with `web_search`, its sources on `Completion.citations`, tool calls and streaming [#1026](https://github.com/llm4s/llm4s/issues/1026).
+- **Added** `llm4s-jlama` (Experimental): `provider = "jlama"` runs a small model inside the JVM with Jlama, so a first
+  answer needs no API key and no model server; `complete` and streaming, no tools ([quick start](docs/getting-started/local-jlama.md)) [#2284](https://github.com/llm4s/llm4s/issues/2284).
 - **Added** Google Search grounding for `gemini` and `vertexai` sections (`googleSearch = true`), and their
   `groundingMetadata` sources on `Completion.citations`, from `complete` and from a stream [#1216](https://github.com/llm4s/llm4s/issues/1216).
 - **Added** web search for `anthropic` sections (`webSearch = true`), and the sources the answer's text blocks cite
@@ -342,7 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
-  streaming, from Java types only [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
+  streaming, and a step limit, checkpointer and tracer (`maxSteps`, `checkpointer`, `tracing`, #2279) [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
 - **Added** declarative AI services to `llm4s-java-api` (experimental): `Llm4s.aiService(MyService.class)` implements an
   interface annotated `@SystemMessage`/`@UserMessage`/`@V`/`@MemoryId` (`org.llm4s.javaapi.services`), with typed returns, memory and tools, checked at `build()` [#2277](https://github.com/llm4s/llm4s/issues/2277); see [Java AI services](docs/guide/java-ai-services.md).
 - **Added** `CompletableFuture` variants to `llm4s-java-api`: `completeAsync`/`completionAsync` (structured output
@@ -370,6 +374,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `llm4s-reactor` (Experimental): `Streams.toFlux(client, query | conversation[, options])` returns a streamed
   reply as a Reactor `Flux<String>` over `JLlmClient.streamAsPublisher`, with backpressure, and cancellation that
   interrupts the provider call [#1492](https://github.com/llm4s/llm4s/issues/1492); see [Java Reactor](docs/guide/java-reactor.md).
+- **Added** `llm4s-spring-ai` (Experimental, Spring AI 2.0.x provided): `Llm4sChatModel` / `Llm4sEmbeddingModel` (an llm4s client as a Spring AI
+  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
@@ -399,7 +405,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user who calls only Ollama no longer receives the OpenAI and Anthropic SDKs, and a builder whose module is missing
   fails with a `CONFIGURATION` error naming it [#1496](https://github.com/llm4s/llm4s/issues/1496).
 - **Added** an agent to `llm4s-spring-boot-starter`: `llm4sTools` collects the `@Tool` methods of the application's beans
-  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
+  and `llm4sAgent` is a `JAgent` over them, set by `llm4s.agent.*` (with `max-steps`, a replaceable `llm4sCheckpointer`),
+  plus `llm4sEmbeddingClient` (`llm4s.embeddings.*`), `llm4sTracing` (`llm4s.tracing.*`) and `Flux`/`SseEmitter` streaming
+  templates [#2279](https://github.com/llm4s/llm4s/issues/2279); see the [Spring Boot guide](docs/guide/spring-boot.md#an-agent-with-tools).
 
 ### Tools
 
@@ -440,6 +448,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Promptable` checked at compile time (`derives Promptable`) and fence `Untrusted` input; `PromptTemplate` ([#2325](https://github.com/llm4s/llm4s/issues/2325), [guide](docs/guide/prompts.md)).
 - **Added** `llm4s-tapir` (Experimental): `EndpointTools.registry` turns tapir endpoints into tools whose schemas derive
   from the endpoints' inputs, called through sttp [#2299](https://github.com/llm4s/llm4s/issues/2299); [guide](docs/guide/tapir-tools.md).
+- **Fixed** `ContainerisedWorkspace.executeCommandWithStreaming` could drop all of a command's streamed stdout: the
+  first stream to end (often the empty stderr) unregistered the handler; it now stays until the response arrives.
 
 ### MCP
 
@@ -449,6 +459,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md), parts 1-3 (first call, typed
+  answers, tools and an agent), with exercises; `Part1Spec` to `Part3Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
   and the release workflow check; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
@@ -458,8 +470,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minor release, and the [AI coding assistants](docs/ai-assistants.md) page ([#2287](https://github.com/llm4s/llm4s/issues/2287)).
 - **Added** a split sitemap for llm4s.org (`sitemap.xml` for the guide, `scaladoc-sitemap.xml` for the API pages, both in
   `robots.txt`, checked in the Pages deploy), a custom 404 page, and `redirect_from` for a moved page ([#2318](https://github.com/llm4s/llm4s/issues/2318)).
+- **Added** guide/API cross-links: Scaladoc source links (release tag), links to JDK, Scala, cats, upickle and ZIO types and a
+  root page to the guides; guides link core types to the Scaladoc (`api.html`); one site search over both ([#2291](https://github.com/llm4s/llm4s/issues/2291)).
 - **Added** the [Mill quick start](docs/getting-started/mill.md) and its `build.mill` sample (`modules/samples/mill`), built
   and tested against Maven Central by `mill-quickstart.yml`, with an offline check that it pins `latest_release` ([#2293](https://github.com/llm4s/llm4s/issues/2293)).
+- **Added** two offline Almond notebooks (`modules/samples/notebooks`), executed by `notebooks.yml`, and the [Jupyter Notebooks](docs/guide/notebooks.md)
+  guide; an offline check keeps them on `latest_release` and free of outputs ([#2296](https://github.com/llm4s/llm4s/issues/2296)).
 - **Added** [Using LLM4S from Scala 2.13](docs/getting-started/scala-2-13.md) (call-only, via the TASTy reader), with
   `llm4s-java-api` workarounds; a CI workflow runs the 2.13 probes against the build and fails on any outcome change ([#2301](https://github.com/llm4s/llm4s/issues/2301)).
 - **Added** the [compatibility matrix](docs/reference/compatibility-matrix.md): provider capabilities and tested
@@ -495,6 +511,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
   suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
   [#1468](https://github.com/llm4s/llm4s/issues/1468).
+- **Added** Micronaut 4 and Helidon SE 4 guides ([micronaut](docs/guide/micronaut.md), [helidon](docs/guide/helidon.md))
+  with runnable Gradle samples, tested in CI with `FakeLlmClient` [#2281](https://github.com/llm4s/llm4s/issues/2281).
 - **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
   directory (or generated .txt/.md/.html/.docx/.pdf samples) and prints each file's detected MIME and `MediaType`, the
   extractor used, character and line counts, metadata, a preview and any extraction error
@@ -543,10 +561,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 - **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
+- **Added** [Coming from Python](docs/guide/for-python-developers.md): OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to
+  Scala 3 + LLM4S, one Scala concept per section, run by `PythonDevelopersGuideSpec` [#2344](https://github.com/llm4s/llm4s/issues/2344).
 - **Added** [Replacing a Python sidecar](docs/guide/replacing-a-python-sidecar.md): vLLM, TGI and llama.cpp models as `openai-compatible` sections, and a Python
   function as an agent tool over MCP stdio, with the CI-run sample `PythonToolBridgeExample` [#2333](https://github.com/llm4s/llm4s/issues/2333).
 - **Added** the [Enterprise Reference Architecture](docs/guide/reference-architecture.md) (AI gateway, secret injection, egress, failover, spend) with a tested
-  `deploy/overlays/enterprise` (LiteLLM, NetworkPolicy, ExternalSecret) validated by `kubeconform`; stale *Production Deployment* sections corrected [#2315](https://github.com/llm4s/llm4s/issues/2315).
+  `deploy/overlays/enterprise` (LiteLLM, NetworkPolicy, ExternalSecret) validated by `kubeconform`, its gateway path driven through a real LiteLLM container in `modules/it`; stale *Production Deployment* sections corrected [#2315](https://github.com/llm4s/llm4s/issues/2315).
 - **Added** a [Scala AI](docs/scala-ai/index.md) section: five short pages (Scala LLM framework and LangChain, agents, RAG, Java and
   Kotlin, providers) whose code `ScalaAiPagesSpec` compiles and runs offline; the provider list renders `capabilities.yml` [#2320](https://github.com/llm4s/llm4s/issues/2320).
 - **Added** a News section on llm4s.org (`/news/`, posts for 0.5.0 and 0.5.1) with an Atom feed, per-tag feeds and
@@ -559,6 +579,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Organization` and `BreadcrumbList` JSON-LD, and `scripts/check-site-share-cards.sh` in the Pages deploy [#2316](https://github.com/llm4s/llm4s/issues/2316).
 - **Added** [Using LLM4S from Apache Flink](docs/guide/flink.md): a Flink 2.x job in Scala 3 with `AsyncDataStream`, dead letters
   as a side output, and a sample (`modules/samples/flink`) tested on Flink's MiniCluster by `flink-sample.yml` [#2298](https://github.com/llm4s/llm4s/issues/2298).
+- **Added** a [press kit](docs/press.md) on llm4s.org (`/press/`: logo, 50- and 150-word descriptions, fact sheet,
+  contact), linked from the footer and `/foundation/`, and the [1.0 launch plan](docs/community/launch-1.0.md) for JVM channels beyond Scala [#2323](https://github.com/llm4s/llm4s/issues/2323).
 - **Added** a dev container and [Codespaces playground](docs/getting-started/playground.md): JDK 21, sbt, Scala CLI, Metals and a local Ollama model,
   no API key; the `devcontainer.yml` workflow builds it and runs the page's five commands inside it [#2286](https://github.com/llm4s/llm4s/issues/2286).
 
@@ -615,8 +637,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Changed** (security) the file tools' default `blockedPaths` is per platform, `FileConfig.DefaultBlockedPaths`:
   Linux, macOS and Windows system locations and the credential stores under the user's home; blocked entries match
   regardless of case [#1408](https://github.com/llm4s/llm4s/issues/1408); [migration](docs/reference/migration.md#the-file-tools-default-blockedpaths-covers-each-platform-1408).
-- **Added** an OpenSSF Scorecard workflow and README badge; every workflow is read-only at the top level and pins its
-  actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
+- **Added** an OpenSSF Scorecard workflow, badge and baseline score on the security page; every workflow is read-only at
+  the top level and pins its actions by commit SHA, enforced by `scripts/check-workflow-security.sh` [#2306](https://github.com/llm4s/llm4s/issues/2306); [security](docs/reference/security.md).
 - **Fixed** (security) on POSIX the workspace runner refuses a `sort` operand after `--` that starts with `-t`
   (`sort -- -tNAME`): uutils coreutils (Ubuntu 25.10 and later) rewrites it on its unreleased main branch into
   `--field-separator=NAME` and opens a file of that name, which was never path-checked. Write `./-tNAME` instead.
@@ -704,7 +726,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks the targets and docs agree [#1493](https://github.com/llm4s/llm4s/issues/1493); [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support).
 - **Added** `llm4s-doctor`: the doctor, published and run from your own project (`sbt "Test/runMain org.llm4s.doctor.DoctorCli"`,
   `cs launch`, Maven, Gradle) or code (`Doctor.run`) [#2283](https://github.com/llm4s/llm4s/issues/2283); [Doctor](docs/reference/doctor.md#running-it), [migration](docs/reference/migration.md#the-doctor-is-llm4s-doctor-2283).
-- **Added** `llm4s-repl` (experimental): `ask`, `extract`, `chat()`, `history` and `lastUsage` behind one import for the REPL, worksheets and scripts, with an offline `Session` that needs no key
+- **Added** `llm4s-repl` (experimental): `ask`, `extract`, `chat()`, `history` and `lastUsage` behind one import for the REPL, worksheets and scripts, with an offline `Session` that needs no key and `Session.ollama(model)` for a local server
   [#2342](https://github.com/llm4s/llm4s/issues/2342); [Try llm4s in the REPL](docs/getting-started/repl.md), [migration](docs/reference/migration.md#llm4s-repl-a-new-module-2342).
 
 ## [0.5.1] - 2026-10-15

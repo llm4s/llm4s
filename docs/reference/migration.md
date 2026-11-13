@@ -305,6 +305,13 @@ In a checkout of this repository `sbt "configPolicy/runMain org.llm4s.configpoli
 - Without `--classpath`, the "Provider module" step reports the module as found "on this classpath": the doctor's
   classpath is now the one it is launched on, not one with every built-in provider module.
 
+## `llm4s-secrets-vault`, a new module (#2479)
+
+Nothing to change: `llm4s-secrets-vault` is a new, experimental module over `llm4s-core` alone, and no other module
+depends on it. To read a provider's API key from HashiCorp Vault without Vault Agent or a CSI driver, add it and set
+`VaultApiKeyProvider(VaultSettings(...))` with `withApiKeyProvider`; see
+[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile` is unchanged.
+
 ## `llm4s-repl`, a new module (#2342)
 
 Nothing to change: `llm4s-repl` is a new, experimental module, and no other module depends on it. To try llm4s from the
