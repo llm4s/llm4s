@@ -84,6 +84,15 @@ The vendored LiteLLM file is a verbatim upstream copy, refreshed periodically. U
 
 To keep the vendored snapshot a clean, refreshable copy, llm4s layers a small curated corrections file on top of it: `modules/core/src/main/resources/modeldata/llm4s_model_overrides.json`. Entries there take precedence over the snapshot and survive future refreshes. The overlay is applied **only** when loading the embedded default resource — explicit file/URL/resource sources are loaded verbatim with no overlay. A missing or unparseable overrides file is non-fatal: the base snapshot is used as-is.
 
+An override entry replaces the snapshot's entry of the same id whole, so a correction can drop a key the snapshot should not have. An entry with `"llm4s_patch": true` instead sets only the keys it lists and keeps the rest of the snapshot's entry, prices included, so a flag litellm does not carry can be added without freezing the entry against future refreshes. A patch for an id the snapshot does not have is skipped with a warning. This is how `supports_budget_thinking: false` (`ModelCapabilities.supportsBudgetThinking`) marks the models that reject a manual thinking budget ([RFC 0008](rfcs/0008-generation-controls.md)):
+
+```json
+"claude-opus-4-7": {
+    "llm4s_patch": true,
+    "supports_budget_thinking": false
+}
+```
+
 ## Usage Examples
 
 ### Basic Model Lookup

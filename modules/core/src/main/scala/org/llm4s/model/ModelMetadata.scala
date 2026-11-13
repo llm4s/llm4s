@@ -1,6 +1,7 @@
 package org.llm4s.model
 
 import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.model.ReasoningEffort
 import org.llm4s.types.Result
 import org.llm4s.error.ValidationError
 import upickle.default._
@@ -249,6 +250,17 @@ object ModelMode {
  * @param supportedRegions List of supported deployment regions
  * @param disallowedParams Set of parameter names that are not supported by this model
  * @param temperatureConstraint Temperature constraint: None = any, Some((min, max)) = restricted range
+ * @param supportsAdaptiveThinking Whether the model takes adaptive thinking, where it decides how much to think
+ *   (litellm `supports_adaptive_thinking`)
+ * @param supportsOutputConfig Whether the model takes an effort level in `output_config` (litellm
+ *   `supports_output_config`)
+ * @param supportedReasoningEfforts The [[org.llm4s.llmconnect.model.ReasoningEffort]] levels the model accepts; see
+ *   [[ModelCapabilities.fromJson]] for how they are read
+ * @param supportsThinkingOff Whether the model accepts a request to not think (litellm
+ *   `supports_none_reasoning_effort`)
+ * @param supportsBudgetThinking Whether the model accepts a manual thinking budget. `Some(false)` for a model that
+ *   rejects one; litellm has no key for this, so it is set only in `llm4s_model_overrides.json`
+ *   (`supports_budget_thinking`), and `None` means unknown
  */
 @Stable
 final case class ModelCapabilities private (
@@ -269,7 +281,12 @@ final case class ModelCapabilities private (
   supportsNativeStreaming: Option[Boolean] = None,
   supportedRegions: Option[List[String]] = None,
   disallowedParams: Option[Set[String]] = None,
-  temperatureConstraint: Option[(Double, Double)] = None
+  temperatureConstraint: Option[(Double, Double)] = None,
+  supportsAdaptiveThinking: Option[Boolean] = None,
+  supportsOutputConfig: Option[Boolean] = None,
+  supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
+  supportsThinkingOff: Option[Boolean] = None,
+  supportsBudgetThinking: Option[Boolean] = None
 ) {
   def withSupportsFunctionCalling(supportsFunctionCalling: Boolean): ModelCapabilities =
     copy(supportsFunctionCalling = Some(supportsFunctionCalling))
@@ -341,6 +358,26 @@ final case class ModelCapabilities private (
     copy(temperatureConstraint = Some(temperatureConstraint))
   def withTemperatureConstraint(temperatureConstraint: Option[(Double, Double)]): ModelCapabilities =
     copy(temperatureConstraint = temperatureConstraint)
+  def withSupportsAdaptiveThinking(supportsAdaptiveThinking: Boolean): ModelCapabilities =
+    copy(supportsAdaptiveThinking = Some(supportsAdaptiveThinking))
+  def withSupportsAdaptiveThinking(supportsAdaptiveThinking: Option[Boolean]): ModelCapabilities =
+    copy(supportsAdaptiveThinking = supportsAdaptiveThinking)
+  def withSupportsOutputConfig(supportsOutputConfig: Boolean): ModelCapabilities =
+    copy(supportsOutputConfig = Some(supportsOutputConfig))
+  def withSupportsOutputConfig(supportsOutputConfig: Option[Boolean]): ModelCapabilities =
+    copy(supportsOutputConfig = supportsOutputConfig)
+  def withSupportedReasoningEfforts(supportedReasoningEfforts: Set[ReasoningEffort]): ModelCapabilities =
+    copy(supportedReasoningEfforts = Some(supportedReasoningEfforts))
+  def withSupportedReasoningEfforts(supportedReasoningEfforts: Option[Set[ReasoningEffort]]): ModelCapabilities =
+    copy(supportedReasoningEfforts = supportedReasoningEfforts)
+  def withSupportsThinkingOff(supportsThinkingOff: Boolean): ModelCapabilities =
+    copy(supportsThinkingOff = Some(supportsThinkingOff))
+  def withSupportsThinkingOff(supportsThinkingOff: Option[Boolean]): ModelCapabilities =
+    copy(supportsThinkingOff = supportsThinkingOff)
+  def withSupportsBudgetThinking(supportsBudgetThinking: Boolean): ModelCapabilities =
+    copy(supportsBudgetThinking = Some(supportsBudgetThinking))
+  def withSupportsBudgetThinking(supportsBudgetThinking: Option[Boolean]): ModelCapabilities =
+    copy(supportsBudgetThinking = supportsBudgetThinking)
 }
 
 object ModelCapabilities {
@@ -364,7 +401,12 @@ object ModelCapabilities {
     supportsNativeStreaming: Option[Boolean] = None,
     supportedRegions: Option[List[String]] = None,
     disallowedParams: Option[Set[String]] = None,
-    temperatureConstraint: Option[(Double, Double)] = None
+    temperatureConstraint: Option[(Double, Double)] = None,
+    supportsAdaptiveThinking: Option[Boolean] = None,
+    supportsOutputConfig: Option[Boolean] = None,
+    supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
+    supportsThinkingOff: Option[Boolean] = None,
+    supportsBudgetThinking: Option[Boolean] = None
   ): ModelCapabilities =
     new ModelCapabilities(
       supportsFunctionCalling,
@@ -384,11 +426,24 @@ object ModelCapabilities {
       supportsNativeStreaming,
       supportedRegions,
       disallowedParams,
-      temperatureConstraint
+      temperatureConstraint,
+      supportsAdaptiveThinking,
+      supportsOutputConfig,
+      supportedReasoningEfforts,
+      supportsThinkingOff,
+      supportsBudgetThinking
     )
 
   implicit val rw: ReadWriter[ModelCapabilities] = macroRW
 
+  /**
+   * Reads a model's capabilities from its litellm metadata entry.
+   *
+   * `supportedReasoningEfforts` follows litellm's convention: a model with `supports_reasoning: true` accepts `low`,
+   * `medium` and `high` unless its entry says `supports_<level>_reasoning_effort: false`. It is `None` when
+   * `supports_reasoning` is absent, and empty when it is `false`. The `minimal`, `xhigh` and `max` keys are read once
+   * [[org.llm4s.llmconnect.model.ReasoningEffort]] has those levels (RFC 0008, PR 4).
+   */
   def fromJson(data: ujson.Value): ModelCapabilities = {
     val obj = data.obj
 
@@ -435,9 +490,30 @@ object ModelCapabilities {
       supportsNativeStreaming = getBool("supports_native_streaming"),
       supportedRegions = getStringList("supported_regions"),
       disallowedParams = getStringSet("disallowed_params"),
-      temperatureConstraint = getDoubleRange("temperature_constraint")
+      temperatureConstraint = getDoubleRange("temperature_constraint"),
+      supportsAdaptiveThinking = getBool("supports_adaptive_thinking"),
+      supportsOutputConfig = getBool("supports_output_config"),
+      supportedReasoningEfforts = reasoningEfforts(getBool("supports_reasoning"), getBool),
+      supportsThinkingOff = getBool("supports_none_reasoning_effort"),
+      supportsBudgetThinking = getBool("supports_budget_thinking")
     )
   }
+
+  /** The levels litellm implies for a reasoning model, less any its entry turns off. */
+  private val impliedReasoningEfforts: List[ReasoningEffort] =
+    List(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
+
+  private def reasoningEfforts(
+    supportsReasoning: Option[Boolean],
+    getBool: String => Option[Boolean]
+  ): Option[Set[ReasoningEffort]] =
+    supportsReasoning.map { reasons =>
+      if (!reasons) Set.empty
+      else
+        impliedReasoningEfforts
+          .filterNot(level => getBool(s"supports_${level.name}_reasoning_effort").contains(false))
+          .toSet
+    }
 }
 
 /**
