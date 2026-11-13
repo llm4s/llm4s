@@ -667,4 +667,16 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       case other                                 => fail(s"expected a NetworkError, got $other")
     }
   }
+
+  "VertexAIClient" should "send thinking as generationConfig.thinkingConfig, as the Gemini API client does" in {
+    var capturedBody = ""
+    val client       = captureBodyClient(capturedBody = _, testConfig.withModel("gemini-2.5-pro"))
+    val result = client.complete(
+      Conversation(Seq(UserMessage("Hi"))),
+      CompletionOptions().withThinking(Thinking.Adaptive)
+    )
+    result.isRight shouldBe true
+    ujson.read(capturedBody)("generationConfig")("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> -1)
+    result.toOption.get.adjustments shouldBe Nil
+  }
 }

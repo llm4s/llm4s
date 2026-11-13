@@ -67,7 +67,8 @@ this changes is one that failed before.
 | OpenRouter | as before: a budget for Claude models, `reasoning_effort` for OpenAI o-series | Claude models: `Budget(n)` → `thinking.budget_tokens`, `Off` → no thinking block; otherwise dropped |
 | Z.ai, xAI | by model family; see [Providers](providers.md) | `Off` → `thinking.type: disabled` or the lowest effort, as the model allows (reported where the model still thinks) |
 | Perplexity, watsonx | the Agent API's or chat API's levels, the nearest where one is missing | `Off` → the lowest effort; the others are not sent |
-| Gemini, Vertex AI, Bedrock, Ollama, other OpenAI-compatible | dropped | dropped |
+| Gemini, Vertex AI | Gemini 3 and later: `thinkingLevel`, the nearest the model has. Gemini 2.5 takes no level: dropped | Gemini 2.5: `thinkingBudget` (`Off` → 0, or 2.5 Pro's minimum, which cannot turn off; `Adaptive` → -1; `Budget(n)` fitted to the model's range). Gemini 3 and later: `Off` → the lowest level; `Adaptive` not needed; `Budget` dropped (deprecated there). Other models: dropped |
+| Bedrock, Ollama, other OpenAI-compatible | dropped | dropped |
 
 A provider's own mapping, and which models take which levels, is on its section of [Providers](providers.md). Which
 levels a model accepts comes from the bundled model metadata (`ModelCapabilities.supportedReasoningEfforts`,

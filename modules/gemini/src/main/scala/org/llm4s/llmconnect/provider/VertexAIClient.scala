@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.config.VertexAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -87,9 +87,12 @@ class VertexAIClient(
   // the references Vertex AI takes: Cloud Storage objects
   private val fileUri = GeminiParts.vertexFileUri
 
-  // what the transformer dropped, and a `reasoning` this client does not send (its `thinkingConfig` is not
-  // mapped yet), goes on every Completion; this warns once per model and option
+  // what the transformer dropped, and what `reasoning` and `thinking` were sent as (see GeminiThinking), goes
+  // on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
+  // the model's registry capabilities, looked up once: the registry is a static snapshot
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
 
   private def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
@@ -116,13 +119,13 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val adjustments  = transformed.adjustments ++ thinkingPlan.adjustments
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
-        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-        val requestText             = requestBody.render()
-        val url                     = modelUrl("generateContent")
+        val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
+        val requestText = requestBody.render()
+        val url         = modelUrl("generateContent")
 
         logger.debug(s"[VertexAI] Sending request to $url")
         logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
@@ -172,13 +175,13 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
-        val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val adjustments  = transformed.adjustments ++ thinkingPlan.adjustments
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
-        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-        val requestText             = requestBody.render()
-        val url                     = s"${modelUrl("streamGenerateContent")}?alt=sse"
+        val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
+        val requestText = requestBody.render()
+        val url         = s"${modelUrl("streamGenerateContent")}?alt=sse"
 
         logger.debug(s"[VertexAI] Starting stream to $url")
 
@@ -280,7 +283,11 @@ class VertexAIClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  private def buildRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Value = {
+  private def buildRequestBody(
+    conversation: Conversation,
+    options: CompletionOptions,
+    thinkingConfig: Option[ujson.Obj]
+  ): ujson.Value = {
     val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
     var systemInstr      = Option.empty[String]
     val toolCallIdToName = scala.collection.mutable.Map[String, String]()
@@ -351,6 +358,7 @@ class VertexAIClient(
 
     val generationConfig = ujson.Obj("temperature" -> options.temperature, "topP" -> options.topP)
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
+    thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 
     options.responseFormat.foreach {
       case ResponseFormat.Json =>

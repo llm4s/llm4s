@@ -388,6 +388,19 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
   }
 
+  it should "send thinking as generationConfig.thinkingConfig: a budget on 2.5, a level on 3 and later" in {
+    requestBody(testConfig.withModel("gemini-2.5-flash"), CompletionOptions().withThinking(Thinking.Off))(
+      "generationConfig"
+    )("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> 0)
+    requestBody(testConfig.withModel("gemini-3-pro-preview"), CompletionOptions().withReasoning(ReasoningEffort.High))(
+      "generationConfig"
+    )("thinkingConfig") shouldBe ujson.Obj("thinkingLevel" -> "HIGH")
+    requestBody(testConfig, CompletionOptions().withReasoning(ReasoningEffort.High))(
+      "generationConfig"
+    ).obj.keySet should
+      not contain "thinkingConfig"
+  }
+
   it should "report grounding sources from the stream as citations, however the chunks carry them" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +

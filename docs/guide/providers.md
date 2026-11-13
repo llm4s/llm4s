@@ -378,6 +378,21 @@ Great for cost-conscious projects and high-volume applications.
 - Very fast inference latency
 - Strong code generation capabilities
 
+### Thinking
+
+`CompletionOptions.thinking` and `reasoning` go in `generationConfig.thinkingConfig`, for `gemini` and `vertexai`
+alike, by model generation ([Cost controls](cost-controls.md#thinking-and-reasoning-effort)):
+
+| Model | `thinking` | `reasoning` |
+|---|---|---|
+| Gemini 2.5 Pro | `thinkingBudget`: `Off` → 128 (it cannot turn thinking off; reported), `Adaptive` → -1, `Budget(n)` fitted to 128-32,768 | dropped: no level |
+| Gemini 2.5 Flash, Flash-Lite | `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` fitted to 1-24,576 (Flash-Lite 512-24,576) | dropped: no level |
+| Gemini 3 and later | `Off` → the lowest `thinkingLevel` (reported), `Adaptive` not needed, `Budget` dropped | `thinkingLevel`: `MINIMAL` (Flash models), `LOW`, `MEDIUM`, `HIGH`, `XHIGH` (Gemini 4 Hydrogen); another level is sent as the nearest (reported) |
+| Gemini 2.0 and earlier, image, audio and speech models | dropped | dropped |
+
+A request never carries both `thinkingBudget` and `thinkingLevel`, which Gemini rejects. Whatever was not sent as
+asked is on `Completion.adjustments`.
+
 ---
 
 ### Google Search grounding

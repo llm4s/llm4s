@@ -292,7 +292,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
   4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
   each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
-  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); Gemini and Vertex AI send `thinkingConfig`: a
+  fitted `thinkingBudget` on Gemini 2.5 and the nearest `thinkingLevel` on Gemini 3 and later (the Gemini follow-up) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
