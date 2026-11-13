@@ -241,13 +241,15 @@ supportsBudgetThinking: Option[Boolean]                   // no litellm key; set
 ```
 
 The litellm metadata has no key for "rejects a manual budget", so `supportsBudgetThinking` comes only from
-`llm4s_model_overrides.json`, and `None` (unknown) keeps today's behaviour. Where the litellm metadata is missing or
+`llm4s_model_overrides.json`, and `None` (unknown) keeps today's behaviour. It is set there by patch entries
+(`"llm4s_patch": true`), which add the key and keep the rest of the litellm entry, so the flag does not freeze the
+entry's prices against a refresh. Where the litellm metadata is missing or
 wrong, the overrides file corrects it, and a provider's `RequestTransformer.adjusted` adds rules that follow from
 its model naming. No hard-coded model checks in core.
 
 **`ThinkingReplay`.** The replay fingerprint today covers the system messages, tools, `responseFormat` and the
 messages before the assistant turn. `thinking` joins it if a change of `thinking` makes a replayed signed block
-invalid for the provider (decision 4 below). PR 3 settles this against the Anthropic and Bedrock APIs and records
+invalid for the provider (decision 4 below). PR 4 settles this against the Anthropic and Bedrock APIs and records
 the result in `ThinkingReplay`'s Scaladoc. Adding `thinking` when it isn't needed would unseal blocks that could
 have been replayed.
 
@@ -379,7 +381,9 @@ Each PR has its own review:
    transformer's existing drops reported, and per-client, capped warn-once logging. No new options.
 2. **PR 2 (Part 1).** `AgentEvents.ModelCallCompleted.adjustments`, filled from each call's `Completion`.
 3. **PR 3 (Part 2).** `ModelCapabilities` reads the metadata keys above, plus `supportsBudgetThinking` from the
-   overrides file.
+   overrides file. `supportedReasoningEfforts` holds the levels `ReasoningEffort` has at that point (`low`, `medium`,
+   `high`, which litellm implies for a reasoning model unless a `supports_<level>_reasoning_effort` key says `false`);
+   PR 4 reads the `minimal`, `xhigh` and `max` keys when it adds those levels.
 4. **PR 4 (Part 2).** `Thinking` with `Thinking.budget` validation and per-provider fitting, the new
    `ReasoningEffort` levels, the budget-rejecting-model exception, and the removal of `budgetTokens` and
    `ReasoningEffort.None`, for Anthropic and OpenAI, with the `ThinkingReplay` check. Other providers report `Dropped`
