@@ -222,7 +222,7 @@ Mapping, each provider in its own module. Anything not listed is reported as `Dr
 | OpenAI / Azure | `reasoning_effort`; an unsupported level `Adjusted` to the nearest supported one | `Off` → the lowest supported effort (`Adjusted` unless it is `none`); `Budget` `Dropped` |
 | Z.ai | as #1691 | `Off` → `thinking.type: disabled` (or `low` on GLM-5.3, `Adjusted`) |
 | OpenRouter | as today | Anthropic models: `Budget(n)` → `thinking.budget_tokens: n`, as today; `Off` → no thinking block. Others `Dropped` |
-| Gemini / Vertex AI | `thinking_level` where supported | `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted) |
+| Gemini / Vertex AI | `thinking_level` where supported (Gemini 3 and later) | Gemini 2.5: `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted); 2.5 Pro cannot turn thinking off and gets its minimum. Gemini 3 and later deprecate `thinkingBudget` and reject it beside a level: `Off` → the lowest level, `Budget` `Dropped` (the Gemini follow-up) |
 | Bedrock, Ollama, watsonx, others | `Dropped` until mapped | `Dropped` until mapped (Ollama `think` in a follow-up) |
 
 Apart from the exception above, Anthropic's `output_config.effort` applies only when a caller sets one of the new
