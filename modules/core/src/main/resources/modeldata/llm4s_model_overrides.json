@@ -51,5 +51,121 @@
         "supports_tool_choice": true,
         "supports_vision": true,
         "tool_use_system_prompt_tokens": 159
+    },
+    "anthropic.claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "anthropic.claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "au.anthropic.claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "azure_ai/claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-opus-4-7-20260416": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "eu.anthropic.claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "global.anthropic.claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "jp.anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "openrouter/anthropic/claude-opus-4.7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "us.anthropic.claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-fable-5": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-fable-5@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-4-7": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-4-7@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-4-8": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
+    },
+    "vertex_ai/claude-opus-4-8@default": {
+        "llm4s_patch": true,
+        "supports_budget_thinking": false
     }
 }
