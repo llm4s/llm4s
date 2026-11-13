@@ -385,14 +385,15 @@ System.out.println(answer.get());
 ```
 
 The builder has `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`, `reasoning` (the Java enum
-`JReasoningEffort`: `NONE`, `LOW`, `MEDIUM` or `HIGH`) and `budgetTokens`, an explicit thinking budget that overrides
-the one the reasoning level implies. The providers that take a budget are Anthropic, and OpenRouter for Claude models:
-both raise a budget below `1024` to `1024` and keep it below the token limit, and a budget set with no reasoning level
-still turns thinking on. A setting you leave out keeps the library's default:
-temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning level or thinking budget. The built options
-have an accessor of the same name for each setting. `maxTokens()` and `budgetTokens()` return an `OptionalInt` and
-`reasoning()` an `Optional<JReasoningEffort>`, empty when unset. Their setters also take an `OptionalInt` or `Optional`,
-so an empty one clears the value.
+`JReasoningEffort`: `MINIMAL`, `LOW`, `MEDIUM`, `HIGH`, `XHIGH` or `MAX`, how hard to think) and `thinking` (a
+`JThinking`: `JThinking.off()`, `JThinking.adaptive()` or `JThinking.budget(n)`, whether to think and within what
+budget). `JThinking.budget` throws `IllegalArgumentException` for `n <= 0`; a provider fits a positive budget to its own
+range (Anthropic: at least `1024` and below the token limit) and reports that it did. An explicit `thinking` wins over
+`reasoning`; see [Cost controls](cost-controls.md#thinking-and-reasoning-effort) for what each provider sends. A setting
+you leave out keeps the library's default: temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning
+level or thinking mode. The built options have an accessor of the same name for each setting. `maxTokens()` returns an
+`OptionalInt`, `reasoning()` an `Optional<JReasoningEffort>` and `thinking()` an `Optional<JThinking>`, empty when unset.
+Their setters also take an `OptionalInt` or `Optional`, so an empty one clears the value.
 
 The builder is immutable like `ConversationBuilder`: each setter returns a new builder, and `options.toBuilder()` starts
 one from existing options. A value no provider accepts throws `IllegalArgumentException` at once: a negative or

@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -349,5 +350,127 @@ class ModelCapabilitiesSpec extends AnyFlatSpec with Matchers {
     meta.supports("FUNCTION_CALLING") shouldBe true
     meta.supports("Function_Calling") shouldBe true
     meta.supports("VISION") shouldBe false // not set in this meta
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // ModelCapabilities.fromJson – thinking and effort (RFC 0008)
+  // ─────────────────────────────────────────────────────────────
+
+  "ModelCapabilities.fromJson" should "read the thinking and effort flags as given" in {
+    val on = ModelCapabilities.fromJson(
+      ujson.Obj(
+        "supports_adaptive_thinking"     -> true,
+        "supports_output_config"         -> true,
+        "supports_none_reasoning_effort" -> true,
+        "supports_budget_thinking"       -> true
+      )
+    )
+    on.supportsAdaptiveThinking shouldBe Some(true)
+    on.supportsOutputConfig shouldBe Some(true)
+    on.supportsThinkingOff shouldBe Some(true)
+    on.supportsBudgetThinking shouldBe Some(true)
+
+    val off = ModelCapabilities.fromJson(
+      ujson.Obj(
+        "supports_adaptive_thinking"     -> false,
+        "supports_output_config"         -> false,
+        "supports_none_reasoning_effort" -> false,
+        "supports_budget_thinking"       -> false
+      )
+    )
+    off.supportsAdaptiveThinking shouldBe Some(false)
+    off.supportsOutputConfig shouldBe Some(false)
+    off.supportsThinkingOff shouldBe Some(false)
+    off.supportsBudgetThinking shouldBe Some(false)
+  }
+
+  it should "leave the thinking and effort flags unknown when the keys are absent or null" in {
+    val absent = ModelCapabilities.fromJson(ujson.Obj())
+    val nulls = ModelCapabilities.fromJson(
+      ujson.Obj(
+        "supports_adaptive_thinking"     -> ujson.Null,
+        "supports_output_config"         -> ujson.Null,
+        "supports_none_reasoning_effort" -> ujson.Null,
+        "supports_budget_thinking"       -> ujson.Null,
+        "supports_reasoning"             -> ujson.Null
+      )
+    )
+    for (caps <- List(absent, nulls)) {
+      caps.supportsAdaptiveThinking shouldBe None
+      caps.supportsOutputConfig shouldBe None
+      caps.supportsThinkingOff shouldBe None
+      caps.supportsBudgetThinking shouldBe None
+      caps.supportedReasoningEfforts shouldBe None
+    }
+  }
+
+  it should "give a reasoning model low, medium and high, the levels litellm implies" in {
+    ModelCapabilities
+      .fromJson(ujson.Obj("supports_reasoning" -> true))
+      .supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+  }
+
+  it should "leave out a level the entry turns off" in {
+    ModelCapabilities
+      .fromJson(ujson.Obj("supports_reasoning" -> true, "supports_low_reasoning_effort" -> false))
+      .supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Medium, ReasoningEffort.High))
+
+    ModelCapabilities
+      .fromJson(
+        ujson.Obj(
+          "supports_reasoning"               -> true,
+          "supports_medium_reasoning_effort" -> false,
+          "supports_high_reasoning_effort"   -> false
+        )
+      )
+      .supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Low))
+  }
+
+  it should "give a model that does not reason no levels" in {
+    ModelCapabilities
+      .fromJson(ujson.Obj("supports_reasoning" -> false, "supports_low_reasoning_effort" -> true))
+      .supportedReasoningEfforts shouldBe Some(Set.empty)
+  }
+
+  it should "not take the none level as a ReasoningEffort: it is supportsThinkingOff" in {
+    val caps = ModelCapabilities.fromJson(
+      ujson.Obj("supports_reasoning" -> true, "supports_none_reasoning_effort" -> true)
+    )
+    caps.supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+    caps.supportsThinkingOff shouldBe Some(true)
+  }
+
+  it should "add minimal, xhigh and max only when the entry says so" in {
+    ModelCapabilities
+      .fromJson(
+        ujson.Obj(
+          "supports_reasoning"                -> true,
+          "supports_minimal_reasoning_effort" -> true,
+          "supports_xhigh_reasoning_effort"   -> false,
+          "supports_max_reasoning_effort"     -> true
+        )
+      )
+      .supportedReasoningEfforts shouldBe Some(
+      Set(
+        ReasoningEffort.Minimal,
+        ReasoningEffort.Low,
+        ReasoningEffort.Medium,
+        ReasoningEffort.High,
+        ReasoningEffort.Max
+      )
+    )
+  }
+
+  it should "read the effort levels a real Claude Opus 4.7 entry carries" in {
+    val opus47 = ujson.Obj(
+      "supports_reasoning"              -> true,
+      "supports_adaptive_thinking"      -> true,
+      "supports_output_config"          -> true,
+      "supports_xhigh_reasoning_effort" -> true,
+      "supports_max_reasoning_effort"   -> true
+    )
+    ModelCapabilities.fromJson(opus47).supportedReasoningEfforts shouldBe Some(
+      Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High, ReasoningEffort.XHigh, ReasoningEffort.Max)
+    )
   }
 }
