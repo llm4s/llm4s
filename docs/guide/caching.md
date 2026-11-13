@@ -206,7 +206,7 @@ On each `complete(conversation, options)`:
 
 1. The cache builds a prompt from the **user and system messages** only, as lines of `role: content`, and embeds it with your `EmbeddingClient`. That is one embedding call, and the prompt text goes to your embedding provider.
 2. It compares that embedding with every stored one by cosine similarity. A stored entry is a candidate when its similarity is **at or above** `similarityThreshold`.
-3. A candidate is a hit when its `CompletionOptions` **match** the request's on every field that changes the answer (temperature, tools, `reasoning`, `thinking` and the rest; today that is every field) and it is **within the TTL**. If several qualify, the most similar wins. The fields are listed explicitly, so a setting that changes only how a provider handles the call, such as provider-side prompt caching ([RFC 0008](../rfcs/0008-generation-controls.md)), can be left out of the match instead of splitting one cached answer into two.
+3. A candidate is a hit when its `CompletionOptions` **match** the request's on every field that changes the answer (temperature, tools, `reasoning`, `thinking` and the rest; every field but `promptCache`) and it is **within the TTL**. If several qualify, the most similar wins. The fields are listed explicitly, so `promptCache`, provider-side prompt caching ([Cost controls](cost-controls.md#provider-side-prompt-caching)), is left out of the match instead of splitting one cached answer into two.
 4. On a hit the stored `Completion` is returned and the entry counts as recently used. It is the same object each time, so do not mutate it.
 5. On a miss the base client is called, a successful result is stored, and it is returned.
 

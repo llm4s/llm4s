@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIC
 import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
+  PromptCache,
   ReasoningEffort,
   RequestAdjustment,
   RequestOption,
@@ -356,6 +357,14 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       .value
       .adjustments should contain(
       RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "o3-mini does not accept reasoning_effort max")
+    )
+  }
+
+  "OpenAIClient's completion" should "report a prompt cache as not needed: OpenAI caches a repeated prefix on its own" in {
+    val client =
+      OpenAIClient.forTest("gpt-4o", transport(complete = _ => completionOf(okResponse)), openAI("gpt-4o"))
+    client.complete(hello, CompletionOptions().withPromptCache(PromptCache.default)).value.adjustments shouldBe List(
+      RequestAdjustment.NotNeeded(RequestOption.PromptCache, "OpenAI caches a repeated prompt prefix on its own")
     )
   }
 }

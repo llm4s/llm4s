@@ -80,6 +80,21 @@ private[llm4s] object UnmappedOptions {
       RequestAdjustment.Dropped(RequestOption.Thinking, s"a thinking setting is not sent to $model by this client")
     )
 
+  /** A `Dropped` for `promptCache` when the caller set it, from a client that sends no prompt-cache setting. */
+  def promptCache(model: String, options: CompletionOptions): List[RequestAdjustment] =
+    options.promptCache.toList.map(_ =>
+      RequestAdjustment.Dropped(
+        RequestOption.PromptCache,
+        s"a prompt cache is not requested from $model by this client"
+      )
+    )
+
+  /** A `NotNeeded` for `promptCache` when the caller set it, from a provider that caches prompts on its own. */
+  def promptCacheAutomatic(provider: String, options: CompletionOptions): List[RequestAdjustment] =
+    options.promptCache.toList.map(_ =>
+      RequestAdjustment.NotNeeded(RequestOption.PromptCache, s"$provider caches a repeated prompt prefix on its own")
+    )
+
   /** [[reasoning]] and [[thinking]]: the report of a client that maps neither. */
   def reasoningAndThinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
     reasoning(model, options) ++ thinking(model, options)

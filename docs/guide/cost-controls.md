@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Cost controls
-description: "Control how much an LLM thinks in LLM4S: Thinking (off, adaptive or a token budget) and ReasoningEffort, mapped per provider, with what was not sent reported on the completion."
+description: "Cut what LLM calls cost in LLM4S: Thinking and ReasoningEffort mapped per provider, provider-side prompt caching, and what was not sent reported on the completion."
 search_title: "Control thinking and reasoning effort in Scala"
 parent: User Guide
 nav_order: 60
@@ -91,3 +91,53 @@ client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.
 
 A caller that must not run with an option it did not get treats a `Dropped` as a failure. An empty list means
 nothing was reported, not that every option was sent: a few providers (Perplexity, watsonx) report nothing yet.
+
+---
+
+## Provider-side prompt caching
+
+A request that starts the same way as an earlier one (the same system prompt, the same tools, the same conversation
+so far) can have that start cached by the provider, so the next request reads it at a fraction of the input price
+and answers sooner. Ask for it with `promptCache`:
+
+```scala
+import org.llm4s.llmconnect.model._
+
+// the system prompt and the tools, for the provider's short lifetime (5 minutes on Anthropic)
+val cached = CompletionOptions().withPromptCache(PromptCache.default)
+
+// the conversation so far too, for the long lifetime (1 hour on Anthropic, at a higher write price)
+val all = CompletionOptions().withPromptCache(PromptCache(PromptCache.Scope.values.toSet, PromptCache.Ttl.Long))
+```
+
+This is not [`CachingLLMClient`](caching.md), which keeps whole answers on your side and returns one without calling
+the provider. A prompt cache calls the provider every time; it changes what the call costs, not what it returns, so
+`CachingLLMClient` ignores `promptCache` when it matches a cached answer.
+
+| | `promptCache` |
+|---|---|
+| Anthropic | `cache_control` breakpoints: the last system block (`System`), the last tool (`Tools`), and the conversation so far through the request's top-level `cache_control` (`Conversation`), all with the one TTL |
+| OpenAI, Azure, Gemini, Vertex AI | reported `NotNeeded`: they cache a repeated prefix on their own |
+| Bedrock, Ollama, OpenAI-compatible, others | reported `Dropped` (Bedrock's `cachePoint` is a follow-up) |
+
+**A prefix that is too short is not cached.** Anthropic caches nothing below the model's minimum cacheable length
+(from 512 to 4,096 tokens, by model) and returns no error. When a request asked for a prompt cache and the response
+neither read from nor wrote to it, the completion reports
+`Dropped(PromptCache, "nothing was cached: the prefix may be below the model's minimum cacheable length")`.
+
+**Cost.** `TokenUsage.cachedTokens` are the tokens read from the cache and `cacheCreationTokens` those written to it,
+of which `longCacheCreationTokens` were written with the long lifetime. `CostEstimator` prices each at the model's own
+rate: a read at the cache-read price, a write at the cache-write price, and a long write at the 1-hour write price.
+
+### Warm the cache before a fan-out
+
+A cache is written when a response starts. Requests sent at the same moment all find it empty, and each pays to write
+it. To send many requests that share a start (one document, many questions), send one first and wait for it, then send
+the rest, which read what the first one wrote:
+
+```scala
+val options = CompletionOptions().withPromptCache(PromptCache.default)
+
+val first = client.complete(withDocument(questions.head), options)          // writes the cache
+val rest  = questions.tail.map(q => client.complete(withDocument(q), options)) // read it; these may run in parallel
+```

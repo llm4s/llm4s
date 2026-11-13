@@ -117,7 +117,8 @@ class VertexAIClient(
       )
       .flatMap { transformed =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -173,7 +174,8 @@ class VertexAIClient(
       )
       .flatMap { transformed =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)

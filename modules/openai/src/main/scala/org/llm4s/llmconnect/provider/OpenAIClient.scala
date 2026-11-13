@@ -53,7 +53,7 @@ import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -200,7 +200,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
+      adjustments             = openAIAdjustments(options, transformed)
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -241,7 +241,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val adjustments = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
+        val adjustments             = openAIAdjustments(options, transformed)
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -488,6 +488,17 @@ class OpenAIClient private[provider] (
   /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
   private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
     OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+
+  /**
+   * Everything reported for a request: the sampling a reasoning model leaves out, what `reasoning` and `thinking`
+   * were sent as, and a `promptCache`, which OpenAI does not need asked for (RFC 0008).
+   */
+  private def openAIAdjustments(
+    requested: CompletionOptions,
+    transformed: TransformationResult
+  ): List[RequestAdjustment] =
+    withUnsentSampling(requested, transformed) ++ effortPlan(transformed.options).adjustments ++
+      UnmappedOptions.promptCacheAutomatic("OpenAI", transformed.options)
 
   /** The `reasoning_effort` to send for `options`, if any. */
   private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =

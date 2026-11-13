@@ -34,6 +34,7 @@ object CostEstimator {
    * the provided usage statistics. It handles:
    * - Standard prompt and completion tokens
    * - Thinking tokens (billed at completion token rate)
+   * - Prompt-cache reads and writes, a write with the 1-hour lifetime at its own price
    * - Missing pricing data (returns None)
    *
    * @param model The model identifier (e.g., "gpt-4o", "claude-3-7-sonnet-latest")
@@ -59,7 +60,12 @@ object CostEstimator {
 
       val cachedTokens        = usage.cachedTokens.getOrElse(0)
       val cacheCreationTokens = usage.cacheCreationTokens.getOrElse(0)
-      val hasCacheBreakdown   = usage.cachedTokens.isDefined || usage.cacheCreationTokens.isDefined
+      // a write with the 1-hour lifetime has its own price; without one, it is priced as a short write
+      val longWrites  = math.min(math.max(0, usage.longCacheCreationTokens.getOrElse(0)), cacheCreationTokens)
+      val shortWrites = cacheCreationTokens - longWrites
+      def writeCost(cacheCreate: Double): Double =
+        shortWrites * cacheCreate + longWrites * pricing.cacheCreationInputTokenCostAbove1hr.getOrElse(cacheCreate)
+      val hasCacheBreakdown = usage.cachedTokens.isDefined || usage.cacheCreationTokens.isDefined
 
       val normalInputTokens =
         math.max(
@@ -77,7 +83,7 @@ object CostEstimator {
                 inCost      <- pricing.inputCostPerToken
                 cacheRead   <- pricing.cacheReadInputTokenCost
                 cacheCreate <- pricing.cacheCreationInputTokenCost
-              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + (cacheCreationTokens * cacheCreate) + outputCost
+              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + writeCost(cacheCreate) + outputCost
 
             case (Some(_), None) =>
               for {
@@ -89,7 +95,7 @@ object CostEstimator {
               for {
                 inCost      <- pricing.inputCostPerToken
                 cacheCreate <- pricing.cacheCreationInputTokenCost
-              } yield (normalInputTokens * inCost) + (cacheCreationTokens * cacheCreate) + outputCost
+              } yield (normalInputTokens * inCost) + writeCost(cacheCreate) + outputCost
 
             case (None, None) =>
               pricing.estimateCost(normalInputTokens, 0).map(_ + outputCost)

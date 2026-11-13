@@ -132,7 +132,8 @@ class GeminiClient(
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
@@ -187,7 +188,8 @@ class GeminiClient(
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
         val adjustments =
-          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
         adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)

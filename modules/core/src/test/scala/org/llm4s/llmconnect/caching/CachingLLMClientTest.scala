@@ -203,6 +203,19 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     mockLLM.callCount shouldBe 3
   }
 
+  test("A request that differs only in promptCache hits the answer cached without it") {
+    val mockLLM   = new MockLLMClient()
+    val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))
+    val tracing   = new MockTracing()
+    val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, tracing, new MockClock())
+    val conv      = Conversation.userOnly("Hello").getOrElse(fail())
+
+    client.complete(conv, CompletionOptions())
+    client.complete(conv, CompletionOptions().withPromptCache(PromptCache.default))
+    mockLLM.callCount shouldBe 1
+    tracing.events.last shouldBe a[TraceEvent.CacheHit]
+  }
+
   test("TTL expiration logs TtlExpired") {
     val mockLLM   = new MockLLMClient()
     val mockEmbed = new MockEmbeddingClient(Map("Hello" -> Seq(1.0, 0.0, 0.0)))

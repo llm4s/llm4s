@@ -249,13 +249,16 @@ class AnthropicClient(
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
-        val adjustments = transformed.adjustments ++ thinkingPlan.adjustments
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
         adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty) {
-          transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
-        }
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
 
         // Add messages from conversation
@@ -275,7 +278,7 @@ class AnthropicClient(
           .flatMap(convertFromAnthropicResponse)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
-              .withAdjustments(adjustments)
+              .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
           )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
@@ -339,12 +342,16 @@ curl https://api.anthropic.com/v1/messages \
         val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
         applyThinking(paramsBuilder, thinkingPlan)
         applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
-        val adjustments = transformed.adjustments ++ thinkingPlan.adjustments
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
         adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty)
-          transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
@@ -527,7 +534,7 @@ curl https://api.anthropic.com/v1/messages \
               .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
               .withEstimatedCost(cost)
               .withCitations(citations.toList)
-              .withAdjustments(adjustments)
+              .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
           }
         )
 
@@ -593,7 +600,7 @@ curl https://api.anthropic.com/v1/messages \
     // Process messages in order
     messages.zipWithIndex.foreach {
       case (SystemMessage(content), _) =>
-        paramsBuilder.system(appendJsonInstruction(content, options))
+        setSystem(paramsBuilder, appendJsonInstruction(content, options), options)
         hasSystemMessage = true
 
       case (um: UserMessage, _) =>
@@ -661,8 +668,35 @@ curl https://api.anthropic.com/v1/messages \
     // well so structured-output requests keep the instruction when the caller supplied no system prompt
     if (!hasSystemMessage) {
       val base = "You are Claude, a helpful AI assistant."
-      paramsBuilder.system(appendJsonInstruction(base, options))
+      setSystem(paramsBuilder, appendJsonInstruction(base, options), options)
     }
+  }
+
+  /** Sets the system prompt, as one block with a `cache_control` breakpoint when `options` caches it. */
+  private def setSystem(paramsBuilder: MessageCreateParams.Builder, system: String, options: CompletionOptions): Unit =
+    AnthropicPromptCache.control(options, PromptCache.Scope.System) match {
+      case None => paramsBuilder.system(system)
+      case Some(control) =>
+        paramsBuilder.systemOfTextBlockParams(
+          List(TextBlockParam.builder().text(system).cacheControl(control).build()).asJava
+        )
+    }
+
+  /** Adds `options`' tools, the last with a `cache_control` breakpoint when `options` caches the tools. */
+  private def addTools(paramsBuilder: MessageCreateParams.Builder, options: CompletionOptions): Unit = {
+    val tools   = options.tools.map(convertToolToAnthropicTool)
+    val control = AnthropicPromptCache.control(options, PromptCache.Scope.Tools)
+    tools.zipWithIndex.foreach { (tool, index) =>
+      val last = index == tools.size - 1
+      paramsBuilder.addTool(control.filter(_ => last).fold(tool)(c => tool.toBuilder().cacheControl(c).build()))
+    }
+  }
+
+  /** The after-the-call report of a prompt cache that cached nothing, logged once like the rest. */
+  private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] = {
+    val report = AnthropicPromptCache.answered(options, usage)
+    adjustmentLog.record(config.model, report)
+    report
   }
 
   private[provider] def appendJsonInstruction(system: String, options: CompletionOptions): String =
@@ -769,7 +803,8 @@ curl https://api.anthropic.com/v1/messages \
         completionTokens = usage.outputTokens().toInt,
         totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
         cachedTokens = cachedTokens,
-        cacheCreationTokens = cacheCreationTokens
+        cacheCreationTokens = cacheCreationTokens,
+        longCacheCreationTokens = AnthropicClient.longCacheWrites(usage)
       )
 
       // Estimate cost using CostEstimator
@@ -1217,8 +1252,13 @@ object AnthropicClient {
       completionTokens = usage.outputTokens().toInt,
       totalTokens = 0,
       cachedTokens = optionalCount(usage.cacheReadInputTokens()),
-      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens())
+      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens()),
+      longCacheCreationTokens = longCacheWrites(usage)
     )
+
+  /** The prompt-cache writes with the 1-hour lifetime, billed at their own rate, when the usage breaks them out. */
+  private[provider] def longCacheWrites(usage: Usage): Option[Int] =
+    Try(usage.cacheCreation().toScala.map(_.ephemeral1hInputTokens().toInt)).toOption.flatten
 
   private def deltaUsage(usage: MessageDeltaUsage): TokenUsage =
     TokenUsage(

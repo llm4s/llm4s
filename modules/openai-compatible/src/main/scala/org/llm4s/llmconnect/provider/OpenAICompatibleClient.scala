@@ -19,7 +19,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.{ AdjustmentLog, ModelRegistryService }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -548,7 +548,8 @@ class OpenAICompatibleClient(
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
-    val adjustments = dialect.addReasoning(body, settings.model, options)
+    val adjustments =
+      dialect.addReasoning(body, settings.model, options) ++ UnmappedOptions.promptCache(settings.model, options)
     (body, adjustments)
   }
 
