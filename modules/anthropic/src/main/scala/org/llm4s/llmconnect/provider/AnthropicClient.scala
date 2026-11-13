@@ -45,7 +45,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
-import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
@@ -201,6 +201,9 @@ class AnthropicClient(
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
 
+  // what the transformer dropped goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -218,6 +221,7 @@ class AnthropicClient(
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
+        adjustmentLog.record(config.model, transformed.adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Create message parameters builder
@@ -263,6 +267,7 @@ class AnthropicClient(
           .flatMap(convertFromAnthropicResponse)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
+              .withAdjustments(transformed.adjustments)
           )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
@@ -311,6 +316,7 @@ curl https://api.anthropic.com/v1/messages \
       // a part Anthropic cannot take fails the request here, before anything is sent
       .flatMap(t => AnthropicClient.checkParts(providerName, t.messages).map(_ => t))
       .flatMap { transformed =>
+        adjustmentLog.record(config.model, transformed.adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
 
         // Build parameters
@@ -516,6 +522,7 @@ curl https://api.anthropic.com/v1/messages \
               .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
               .withEstimatedCost(cost)
               .withCitations(citations.toList)
+              .withAdjustments(transformed.adjustments)
           }
         )
 

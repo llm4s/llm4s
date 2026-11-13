@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -147,7 +147,7 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * endpoint; `false` is correct on both. A request that neither replays reasoning nor disables
    * thinking gets no `thinking` field.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = {
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
     options.reasoning.foreach { effort =>
       ZaiDialect.family(model) match {
         case ZaiDialect.Family.ForcedThinking =>
@@ -168,6 +168,8 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
       }
     }
     if (replaysReasoning(body)) mergeThinking(body, "clear_thinking", ujson.False)
+    // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
+    List.empty
   }
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)

@@ -26,7 +26,8 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
-[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311);
+[`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ## A supplied HTTP client is the caller's to close (#2341)
@@ -350,6 +351,16 @@ Kotlin API (`llm4s-kotlin-api`) depends on `llm4s-java-api`, so the same applies
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `OpenAICompatibleDialect.addReasoning` returns what it did not send (#2115)
+
+`addReasoning(body, model, options)` returns `List[RequestAdjustment]` instead of `Unit`
+([RFC 0008](../rfcs/0008-generation-controls)). The client puts the list on `Completion.adjustments`, so a caller learns
+that a requested reasoning effort was not sent instead of losing it silently. The standard implementation sends
+nothing and reports a set `CompletionOptions.reasoning` as `Dropped`. A dialect that overrides it returns
+`List.empty` when it sent what was asked, and a `RequestAdjustment` for each part it did not send
+([Writing a provider](../guide/writing-a-provider)). Recompile such a dialect: one compiled against an earlier llm4s
+keeps the old method, which the client no longer calls, so its reasoning fields would silently not be sent.
 
 ### One proxy and TLS setting for every provider client (#2273)
 

@@ -18,7 +18,13 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.media.{ DocumentMediaType, ImageMediaType, MediaSource, MediaType }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.model.{
+  AdjustmentLog,
+  ModelRegistryService,
+  RequestTransformer,
+  TransformationResult,
+  UnmappedOptions
+}
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -181,21 +187,31 @@ class BedrockClient(
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
 
+  // what the transformer dropped, and a `reasoning` this client does not send (no model-specific reasoning
+  // field is mapped yet), goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
-    transformed(conversation, options).flatMap { (conv, opts) =>
+    transformed(conversation, options).flatMap { (conv, opts, adjustments) =>
       val startedAt   = Instant.now()
       val requestJson = serializeRequestForLogging(conv, opts)
       buildConverseRequest(conv, opts).flatMap { request =>
+        adjustmentLog.record(
+          config.model,
+          adjustments
+        ) // once the request is built, so a failed build spends no warning
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
         outcome
           .flatMap { response =>
             parseConverseResponse(response).map { parsed =>
               // sealed thinking is bound to the request it answers, so it is replayed only while that holds
               val completion =
-                parsed.withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
+                parsed
+                  .withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
+                  .withAdjustments(adjustments)
               recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
               completion
             }
@@ -210,13 +226,21 @@ class BedrockClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    transformed(conversation, options).flatMap { (conv, opts) =>
+    transformed(conversation, options).flatMap { (conv, opts, adjustments) =>
       val startedAt   = Instant.now()
       val requestJson = serializeRequestForLogging(conv, opts)
       val raw         = new StringBuilder()
       buildConverseStreamRequest(conv, opts)
-        .flatMap(request => runStream(request, onChunk, raw))
-        .map(c => c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts)))
+        .flatMap { request =>
+          adjustmentLog.record(
+            config.model,
+            adjustments
+          ) // once the request is built, so a failed build spends no warning
+          runStream(request, onChunk, raw)
+        }
+        .map(c =>
+          c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts)).withAdjustments(adjustments)
+        )
         .tapRight(c => recordExchange(startedAt, requestJson, Some(raw.result()), Right(c)))
         .tapLeft(e => recordExchange(startedAt, requestJson, Option.when(raw.nonEmpty)(raw.result()), Left(e)))
     }
@@ -233,7 +257,7 @@ class BedrockClient(
   private def transformed(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[(Conversation, CompletionOptions)] =
+  ): Result[(Conversation, CompletionOptions, List[RequestAdjustment])] =
     TransformationResult
       .transform(
         config.model,
@@ -242,7 +266,10 @@ class BedrockClient(
         RequestTransformer.default(registryService),
         dropUnsupported = true
       )
-      .map(t => (conversation.withMessages(t.messages), t.options))
+      .map { t =>
+        val adjustments = t.adjustments ++ UnmappedOptions.reasoning(config.model, t.options)
+        (conversation.withMessages(t.messages), t.options, adjustments)
+      }
 
   // ---- streaming ----
 
