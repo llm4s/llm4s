@@ -53,7 +53,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # Smoke test: exercises CheckPolicies + dev policy against committed HOCON (no live Ollama).
       - name: Run policy check
@@ -112,7 +112,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
       # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
@@ -440,7 +440,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Generate ScalaDoc
         # `doc` covers each module on its own; `docs/doc` builds the single aggregate API tree
@@ -540,7 +540,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Run tests with coverage
         env:
@@ -1258,7 +1258,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Download the legs' coverage data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -1311,7 +1311,7 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: 'sbt'
       
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # The MCP Python SDK, pinned, for samples' PythonToolBridgeExampleSpec (#2333): it starts sentiment_tool.py with
       # the `python3` first on the PATH, so the venv goes there. Without it the spec is cancelled, not run.
@@ -1363,7 +1363,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Run performance tests
         run: sbt testPerformance
@@ -1488,7 +1488,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # LiteLLMGatewaySpec (#2315): the enterprise overlay's gateway, a LiteLLM proxy, routing to a fake upstream that
       # the suite runs on this runner at port 18089 (host.docker.internal from inside the container). Started here
@@ -1677,7 +1677,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # Resolving the baseline and the build's artifacts from Maven Central can hit a connection reset (seen once,
       # run 37316745524: "download error: Caught java.net.SocketException (Connection reset)"); the wrapper
@@ -1703,7 +1703,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Publish the library modules to local Maven
         # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
@@ -1818,7 +1818,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Test the starter against the latest Spring Boot 3.x
         run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
@@ -1842,7 +1842,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Test the starter against Spring Boot 4.0
         run: sbt springBootStarterBoot4/test
@@ -1868,7 +1868,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Check the guides' snippets are the samples'
         run: scripts/check-framework-guide-snippets.sh
@@ -1910,7 +1910,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Test llm4s-spring-ai against the latest Spring AI 2.0.x
         run: sbt -Dllm4s.springAiVersion=2.0.2 springAi/test
@@ -2055,7 +2055,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Wait for the Ollama server
         run: |
@@ -2144,7 +2144,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       - name: Build the workspace-runner image
         run: sbt workspaceRunner/Docker/publishLocal
@@ -2189,7 +2189,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # The official MCP reference server (#1006). Started in a step rather than as a service
       # container because a service cannot be given a command, and the server picks its
@@ -2248,7 +2248,7 @@ jobs:
           java-version: 21
           cache: 'sbt'
 
-      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+      - uses: sbt/setup-sbt@67d461eba2c4753196c230e02da850757ba4775e # v1.5.14
 
       # VertexAISmokeSpec authenticates with Application Default Credentials: a service-account
       # JSON key, held as the VERTEX_CREDENTIALS_JSON secret, written to a file for
