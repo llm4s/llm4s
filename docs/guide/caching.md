@@ -28,7 +28,7 @@ Both caches live in `llm4s-core`, package `org.llm4s.llmconnect.caching`. With t
 | | Embedding cache | Completion (semantic) cache |
 |---|---|---|
 | Class | `CachedEmbeddingClient` with an `EmbeddingCache`, by default `InMemoryEmbeddingCache` | `CachingLLMClient`, which wraps any `LLMClient` |
-| A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions`, and an entry no older than the TTL |
+| A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions` on every field that changes the answer, and an entry no older than the TTL |
 | Configured with | `InMemoryEmbeddingCache(maxSize = 10000, ttl = None)` | `CacheConfig.create(similarityThreshold, ttl, maxSize = 1000)` |
 | Eviction | least recently used, plus the optional TTL | least recently used, plus the TTL |
 | Seeing what happened | `cacheStats` | `TraceEvent.CacheHit` and `TraceEvent.CacheMiss` sent to your `Tracing` |
@@ -206,7 +206,7 @@ On each `complete(conversation, options)`:
 
 1. The cache builds a prompt from the **user and system messages** only, as lines of `role: content`, and embeds it with your `EmbeddingClient`. That is one embedding call, and the prompt text goes to your embedding provider.
 2. It compares that embedding with every stored one by cosine similarity. A stored entry is a candidate when its similarity is **at or above** `similarityThreshold`.
-3. A candidate is a hit when its `CompletionOptions` are **equal** to the request's (temperature, tools and the rest) and it is **within the TTL**. If several qualify, the most similar wins.
+3. A candidate is a hit when its `CompletionOptions` **match** the request's on every field that changes the answer (temperature, tools, `reasoning`, `thinking` and the rest; every field but `promptCache`) and it is **within the TTL**. If several qualify, the most similar wins. The fields are listed explicitly, so `promptCache`, provider-side prompt caching ([Cost controls](cost-controls.md#provider-side-prompt-caching)), is left out of the match instead of splitting one cached answer into two.
 4. On a hit the stored `Completion` is returned and the entry counts as recently used. It is the same object each time, so do not mutate it.
 5. On a miss the base client is called, a successful result is stored, and it is returned.
 

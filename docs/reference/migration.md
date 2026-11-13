@@ -26,7 +26,9 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
-[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311); and
+[`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311);
+[`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115);
+[`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
 ## A supplied HTTP client is the caller's to close (#2341)
@@ -347,9 +349,68 @@ Without the module, nothing fails at startup: a typed builder's `build()`, or th
 always did for modules outside the facade. With `llm4s-bom` imported, the provider module needs no version. The
 Kotlin API (`llm4s-kotlin-api`) depends on `llm4s-java-api`, so the same applies to it.
 
+## `budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking` (#2115)
+
+`CompletionOptions` separates *whether* a model thinks from *how hard*
+([RFC 0008](../rfcs/0008-generation-controls), [Cost controls](../guide/cost-controls)). `thinking: Option[Thinking]` is
+new: `Thinking.Off`, `Thinking.Adaptive` or `Thinking.budget(n)`. `ReasoningEffort` gains `Minimal`, `XHigh` and `Max`.
+Two things are removed, with no deprecation:
+
+| Removed | Use instead |
+|---|---|
+| `CompletionOptions.budgetTokens`, `withBudgetTokens(Int)`, `withBudgetTokens(Option[Int])`, the `budgetTokens` argument of `CompletionOptions(...)` | `thinking`: `Thinking.budget(n).map(options.withThinking)`, a `Result` because a budget of 0 or less is a `ValidationError` |
+| `ReasoningEffort.None` | `Thinking.Off` |
+| Java: `JCompletionOptions.Builder.budgetTokens`, `JCompletionOptions.budgetTokens()`, `JReasoningEffort.NONE` | `thinking(JThinking.budget(n))`, `thinking()`, `JThinking.off()` |
+| Kotlin: the `completionOptions { budgetTokens = n }` property | `thinking = JThinking.budget(n)` |
+
+```scala
+// Before
+CompletionOptions().withBudgetTokens(8000)
+CompletionOptions().withReasoning(ReasoningEffort.None)
+
+// After
+Thinking.budget(8000).map(CompletionOptions().withThinking)   // Result[CompletionOptions]
+CompletionOptions().withThinking(Thinking.Off)
+```
+
+```java
+// Before
+JCompletionOptions.builder().reasoning(JReasoningEffort.NONE).budgetTokens(8000).build();
+// After
+JCompletionOptions.builder().thinking(JThinking.budget(8000)).build();   // throws IllegalArgumentException for <= 0
+JCompletionOptions.builder().thinking(JThinking.off()).build();
+```
+
+What a migrated call sends:
+
+- **`budgetTokens(n)` → `Thinking.budget(n)`** sends the same budget. A budget that does not fit Anthropic's
+  `[1024, max_tokens)` is still fitted, and is now reported as `Adjusted` on `Completion.adjustments`.
+- **`ReasoningEffort.None` → `Thinking.Off`** sends what `None` sent on Z.ai (`thinking.type: disabled` or
+  `reasoning_effort: none`), xAI and watsonx (`low`, the least they allow) and Perplexity (`minimal`). On
+  **OpenAI** it differs: `None` sent no `reasoning_effort`, so the model used its default effort, while `Thinking.Off`
+  asks for the lowest effort the model accepts (`none` where the model can turn thinking off). To keep the model's
+  default, set neither. On **Anthropic**, `None` sent no thinking, and `Thinking.Off` sends `thinking: disabled`.
+- **`reasoning` alone** sends the same request as before, except to a model that rejects a manual budget (Claude
+  Opus 4.7 and later), which failed with a 400 and is now sent adaptive thinking at that effort.
+
+A stored or hand-written `"none"` no longer reads as a `ReasoningEffort`: the reader fails with
+`"none" is no longer a ReasoningEffort; use Thinking.Off`, and `ReasoningEffort.fromString("none")` returns `None`.
+An exhaustive `match` on `ReasoningEffort` (or a Java `switch`, a Kotlin `when`, on `JReasoningEffort`) needs cases
+for the three new levels.
+
 ## Smaller breaks since 0.4.1
 
 Changes too small for a section of their own. Each is listed under Breaking changes in the CHANGELOG.
+
+### `OpenAICompatibleDialect.addReasoning` returns what it did not send (#2115)
+
+`addReasoning(body, model, options)` returns `List[RequestAdjustment]` instead of `Unit`
+([RFC 0008](../rfcs/0008-generation-controls)). The client puts the list on `Completion.adjustments`, so a caller learns
+that a requested reasoning effort was not sent instead of losing it silently. The standard implementation sends
+nothing and reports a set `CompletionOptions.reasoning` as `Dropped`. A dialect that overrides it returns
+`List.empty` when it sent what was asked, and a `RequestAdjustment` for each part it did not send
+([Writing a provider](../guide/writing-a-provider)). Recompile such a dialect: one compiled against an earlier llm4s
+keeps the old method, which the client no longer calls, so its reasoning fields would silently not be sent.
 
 ### One proxy and TLS setting for every provider client (#2273)
 

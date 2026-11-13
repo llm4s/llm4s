@@ -19,17 +19,18 @@ import scala.collection.mutable
 @Stable
 final class StreamingAccumulator private () {
 
-  private val contentBuilder                   = new StringBuilder()
-  private val thinkingBuilder                  = new StringBuilder()
-  private val toolCalls                        = mutable.ArrayBuffer[ToolCall]()
-  private var messageId: Option[String]        = None
-  private var finishReason: Option[String]     = None
-  private var promptTokens: Int                = 0
-  private var completionTokens: Int            = 0
-  private var thinkingTokens: Int              = 0
-  private var cachedTokens: Option[Int]        = None
-  private var cacheCreationTokens: Option[Int] = None
-  private var reportedTotal: Option[Int]       = None
+  private val contentBuilder                       = new StringBuilder()
+  private val thinkingBuilder                      = new StringBuilder()
+  private val toolCalls                            = mutable.ArrayBuffer[ToolCall]()
+  private var messageId: Option[String]            = None
+  private var finishReason: Option[String]         = None
+  private var promptTokens: Int                    = 0
+  private var completionTokens: Int                = 0
+  private var thinkingTokens: Int                  = 0
+  private var cachedTokens: Option[Int]            = None
+  private var cacheCreationTokens: Option[Int]     = None
+  private var longCacheCreationTokens: Option[Int] = None
+  private var reportedTotal: Option[Int]           = None
 
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
@@ -155,7 +156,8 @@ final class StreamingAccumulator private () {
           totalTokens = reportedTotal.getOrElse(promptTokens + completionTokens + thinkingTokens),
           thinkingTokens = thinkingTokensOpt,
           cachedTokens = cachedTokens,
-          cacheCreationTokens = cacheCreationTokens
+          cacheCreationTokens = cacheCreationTokens,
+          longCacheCreationTokens = longCacheCreationTokens
         )
       )
     } else None
@@ -202,7 +204,7 @@ final class StreamingAccumulator private () {
    *
    * Call it once per usage report the stream carries. Each field follows the latest report that
    * states it: `promptTokens` and `completionTokens` when positive, the `Option` fields
-   * (`thinkingTokens`, `cachedTokens`, `cacheCreationTokens`) when defined, and `totalTokens`
+   * (`thinkingTokens`, `cachedTokens`, `cacheCreationTokens`, `longCacheCreationTokens`) when defined, and `totalTokens`
    * when positive. A field a report leaves at zero or `None` keeps its earlier value, so a
    * provider that splits its usage across events (input and cache counts first, output last)
    * can pass each part as it arrives. When no report states a total, the completion's total is
@@ -218,6 +220,7 @@ final class StreamingAccumulator private () {
     usage.thinkingTokens.foreach(t => thinkingTokens = t)
     usage.cachedTokens.foreach(c => cachedTokens = Some(c))
     usage.cacheCreationTokens.foreach(c => cacheCreationTokens = Some(c))
+    usage.longCacheCreationTokens.foreach(c => longCacheCreationTokens = Some(c))
     if (usage.totalTokens > 0) reportedTotal = Some(usage.totalTokens)
   }
 
@@ -236,6 +239,7 @@ final class StreamingAccumulator private () {
     thinkingTokens = 0
     cachedTokens = None
     cacheCreationTokens = None
+    longCacheCreationTokens = None
     reportedTotal = None
   }
 

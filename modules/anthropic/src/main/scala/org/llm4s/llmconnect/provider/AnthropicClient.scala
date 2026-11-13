@@ -22,10 +22,13 @@ import com.anthropic.models.messages.{
   MessageCreateParams,
   MessageDeltaUsage,
   MessageParam,
+  OutputConfig,
   RawMessageStreamEvent,
   RedactedThinkingBlockParam,
   TextBlockParam,
   ThinkingBlockParam,
+  ThinkingConfigAdaptive,
+  ThinkingConfigDisabled,
   ThinkingConfigEnabled,
   Tool,
   ToolResultBlockParam,
@@ -45,7 +48,13 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.auth.{ ApiKeyProvider, CachingAccessTokenProvider }
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
-import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
+import org.llm4s.model.{
+  AdjustmentLog,
+  ModelCapabilities,
+  ModelRegistryService,
+  RequestTransformer,
+  TransformationResult
+}
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
@@ -115,13 +124,16 @@ import scala.util.{ Failure, Success, Try, Using }
  *
  * == Extended thinking ==
  *
- * When `CompletionOptions.reasoning` is set, a `thinking` block is added
- * to the request. The response's `thinking` and `redacted_thinking` blocks -
- * streamed or not - become the returned message's
- * [[org.llm4s.llmconnect.model.AssistantMessage.thinking]], each thinking
- * block with its `signature`, so that a later request can send them back. The token budget is clamped to `[1024, maxTokens - 1]`
- * to satisfy the Anthropic API constraint; the effective budget may
- * therefore differ from what was requested.
+ * `CompletionOptions.thinking` and `reasoning` become the request's `thinking`
+ * (`disabled`, `adaptive` or a `budget_tokens` budget) and `output_config.effort`,
+ * according to the model's registry capabilities (see `AnthropicThinking`); what
+ * could not be sent as asked is reported on `Completion.adjustments`. A
+ * `reasoning`-only request sends the level's budget as it always has, except to a
+ * model that rejects a budget, which is sent adaptive thinking at that effort. A
+ * budget is fitted to `[1024, maxTokens - 1]`, the Anthropic API's range. The
+ * response's `thinking` and `redacted_thinking` blocks - streamed or not - become
+ * the returned message's [[org.llm4s.llmconnect.model.AssistantMessage.thinking]],
+ * each thinking block with its `signature`, so that a later request can send them back.
  *
  * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
  * the Anthropic API requires the field.
@@ -201,6 +213,9 @@ class AnthropicClient(
   // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
   private val replayOrigin = ReplayOrigin(providerName, config.model)
 
+  // what the transformer dropped goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -224,26 +239,26 @@ class AnthropicClient(
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified
         // max tokens is required by the api
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
-        // Add extended thinking configuration if requested
-        // Minimum budget is 1024 tokens, must be less than max_tokens
-        transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-          val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
-          paramsBuilder.thinking(
-            ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
-          )
-        }
+        // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
+        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        applyThinking(paramsBuilder, thinkingPlan)
+        applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
+        adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty) {
-          transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
-        }
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
 
         // Add messages from conversation
@@ -263,6 +278,7 @@ class AnthropicClient(
           .flatMap(convertFromAnthropicResponse)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
+              .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
           )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
@@ -317,23 +333,25 @@ curl https://api.anthropic.com/v1/messages \
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
-        // Add extended thinking configuration if requested
-        transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-          val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
-          paramsBuilder.thinking(
-            ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
-          )
-        }
+        // thinking and effort, from the model's capabilities (RFC 0008; see AnthropicThinking)
+        val thinkingPlan = AnthropicThinking.plan(config.model, transformed.options, maxTokens, capabilities)
+        applyThinking(paramsBuilder, thinkingPlan)
+        applySamplingParameters(paramsBuilder, transformed.options, thinkingPlan.thinks)
+        val adjustments =
+          transformed.adjustments ++ thinkingPlan.adjustments ++ AnthropicPromptCache.requested(transformed.options)
+        adjustmentLog.record(config.model, adjustments)
+        // the conversation so far, through the top-level breakpoint Anthropic places on the last block it can cache
+        AnthropicPromptCache
+          .control(transformed.options, PromptCache.Scope.Conversation)
+          .foreach(paramsBuilder.cacheControl)
 
         // Add tools if specified
-        if (transformed.options.tools.nonEmpty)
-          transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        addTools(paramsBuilder, transformed.options)
         addWebSearch(paramsBuilder)
         // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder, transformed.options)
@@ -516,6 +534,7 @@ curl https://api.anthropic.com/v1/messages \
               .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
               .withEstimatedCost(cost)
               .withCitations(citations.toList)
+              .withAdjustments(adjustments ++ answeredCache(transformed.options, c.usage))
           }
         )
 
@@ -530,19 +549,22 @@ curl https://api.anthropic.com/v1/messages \
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
 
-  /**
-   * Clamps an extended-thinking budget to the range `[1024, maxTokens - 1]`.
-   *
-   * The Anthropic API requires `budgetTokens >= 1024` and `budgetTokens < maxTokens`.
-   * Values outside this range are silently adjusted; callers should prefer
-   * supplying valid budgets rather than relying on clamping.
-   *
-   * @param budgetTokens requested thinking-token budget; may be any non-negative value
-   * @param maxTokens    effective `max_tokens` for the request; determines the upper bound
-   * @return the clamped budget in `[1024, maxTokens - 1]`
-   */
-  private[provider] def clampBudgetTokens(budgetTokens: Int, maxTokens: Int): Int =
-    math.max(1024, math.min(budgetTokens, maxTokens - 1))
+  /** This client's model's registry capabilities, looked up once: the registry is a static snapshot. */
+  private lazy val capabilities: Option[ModelCapabilities] =
+    registryService.lookup(config.model).toOption.map(_.capabilities)
+
+  /** Puts `plan`'s `thinking` and `output_config.effort` on the request. */
+  private def applyThinking(builder: MessageCreateParams.Builder, plan: AnthropicThinking.Plan): Unit = {
+    plan.thinking.foreach {
+      case AnthropicThinking.Mode.Disabled => builder.thinking(ThinkingConfigDisabled.builder().build())
+      case AnthropicThinking.Mode.Adaptive => builder.thinking(ThinkingConfigAdaptive.builder().build())
+      case AnthropicThinking.Mode.Enabled(budgetTokens) =>
+        builder.thinking(ThinkingConfigEnabled.builder().budgetTokens(budgetTokens.toLong).build())
+    }
+    plan.effort.foreach(effort =>
+      builder.outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.of(effort)).build())
+    )
+  }
 
   // Add messages from conversation to the parameters builder
   private[provider] def addMessagesToParams(
@@ -578,7 +600,7 @@ curl https://api.anthropic.com/v1/messages \
     // Process messages in order
     messages.zipWithIndex.foreach {
       case (SystemMessage(content), _) =>
-        paramsBuilder.system(appendJsonInstruction(content, options))
+        setSystem(paramsBuilder, appendJsonInstruction(content, options), options)
         hasSystemMessage = true
 
       case (um: UserMessage, _) =>
@@ -646,8 +668,35 @@ curl https://api.anthropic.com/v1/messages \
     // well so structured-output requests keep the instruction when the caller supplied no system prompt
     if (!hasSystemMessage) {
       val base = "You are Claude, a helpful AI assistant."
-      paramsBuilder.system(appendJsonInstruction(base, options))
+      setSystem(paramsBuilder, appendJsonInstruction(base, options), options)
     }
+  }
+
+  /** Sets the system prompt, as one block with a `cache_control` breakpoint when `options` caches it. */
+  private def setSystem(paramsBuilder: MessageCreateParams.Builder, system: String, options: CompletionOptions): Unit =
+    AnthropicPromptCache.control(options, PromptCache.Scope.System) match {
+      case None => paramsBuilder.system(system)
+      case Some(control) =>
+        paramsBuilder.systemOfTextBlockParams(
+          List(TextBlockParam.builder().text(system).cacheControl(control).build()).asJava
+        )
+    }
+
+  /** Adds `options`' tools, the last with a `cache_control` breakpoint when `options` caches the tools. */
+  private def addTools(paramsBuilder: MessageCreateParams.Builder, options: CompletionOptions): Unit = {
+    val tools   = options.tools.map(convertToolToAnthropicTool)
+    val control = AnthropicPromptCache.control(options, PromptCache.Scope.Tools)
+    tools.zipWithIndex.foreach { (tool, index) =>
+      val last = index == tools.size - 1
+      paramsBuilder.addTool(control.filter(_ => last).fold(tool)(c => tool.toBuilder().cacheControl(c).build()))
+    }
+  }
+
+  /** The after-the-call report of a prompt cache that cached nothing, logged once like the rest. */
+  private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] = {
+    val report = AnthropicPromptCache.answered(options, usage)
+    adjustmentLog.record(config.model, report)
+    report
   }
 
   private[provider] def appendJsonInstruction(system: String, options: CompletionOptions): String =
@@ -754,7 +803,8 @@ curl https://api.anthropic.com/v1/messages \
         completionTokens = usage.outputTokens().toInt,
         totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
         cachedTokens = cachedTokens,
-        cacheCreationTokens = cacheCreationTokens
+        cacheCreationTokens = cacheCreationTokens,
+        longCacheCreationTokens = AnthropicClient.longCacheWrites(usage)
       )
 
       // Estimate cost using CostEstimator
@@ -817,15 +867,16 @@ curl https://api.anthropic.com/v1/messages \
   // Anthropic rejects some requests that specify both temperature and top_p, so we prefer
   // temperature as the single sampling control for our default path.
   //
-  // Extended thinking accepts no temperature other than 1, so when a thinking budget is
-  // requested the parameter is omitted too (the API then uses its default, 1); otherwise
+  // Thinking accepts no temperature other than 1, so when the request thinks (a budget or
+  // adaptive) the parameter is omitted too (the API then uses its default, 1); otherwise
   // the default `CompletionOptions()` temperature of 0.7 would make every thinking request a 400.
   @scala.annotation.nowarn("cat=deprecation")
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
-    options: CompletionOptions
+    options: CompletionOptions,
+    thinks: Boolean
   ): Unit =
-    if (modelSupportsTemperature && options.effectiveBudgetTokens.isEmpty)
+    if (modelSupportsTemperature && !thinks)
       builder.temperature(options.temperature.doubleValue())
 
   /**
@@ -1201,8 +1252,13 @@ object AnthropicClient {
       completionTokens = usage.outputTokens().toInt,
       totalTokens = 0,
       cachedTokens = optionalCount(usage.cacheReadInputTokens()),
-      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens())
+      cacheCreationTokens = optionalCount(usage.cacheCreationInputTokens()),
+      longCacheCreationTokens = longCacheWrites(usage)
     )
+
+  /** The prompt-cache writes with the 1-hour lifetime, billed at their own rate, when the usage breaks them out. */
+  private[provider] def longCacheWrites(usage: Usage): Option[Int] =
+    Try(usage.cacheCreation().toScala.map(_.ephemeral1hInputTokens().toInt)).toOption.flatten
 
   private def deltaUsage(usage: MessageDeltaUsage): TokenUsage =
     TokenUsage(

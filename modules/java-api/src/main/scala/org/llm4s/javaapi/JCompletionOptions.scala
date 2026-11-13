@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, Thinking }
 
 import java.util.{ Objects, Optional, OptionalInt }
 
@@ -18,7 +18,7 @@ import java.util.{ Objects, Optional, OptionalInt }
  * }}}
  *
  * A setting left unset keeps core's default: temperature `0.7`, top-p `1.0`, no presence or frequency penalty,
- * and no token limit, reasoning level or thinking budget. A value that may be absent is read as an `Optional`
+ * and no token limit, reasoning level or thinking mode. A value that may be absent is read as an `Optional`
  * or `OptionalInt`, and set either directly or with one, so an empty `Optional` clears it. No Scala type appears
  * in a signature.
  *
@@ -47,11 +47,9 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
   def reasoning: Optional[JReasoningEffort] =
     underlying.reasoning.fold(Optional.empty[JReasoningEffort]())(e => Optional.of(JCompletionOptions.toJava(e)))
 
-  /**
-   * The explicit thinking-token budget, or empty to derive one from [[reasoning]]. Read by the providers that take a
-   * budget - Anthropic, and OpenRouter for Claude models - and set alone it turns thinking on with no reasoning level.
-   */
-  def budgetTokens: OptionalInt = JCompletionOptions.optionalInt(underlying.budgetTokens)
+  /** The thinking mode asked for, or empty to leave it to [[reasoning]] and the provider. */
+  def thinking: Optional[JThinking] =
+    underlying.thinking.fold(Optional.empty[JThinking]())(t => Optional.of(JCompletionOptions.toJava(t)))
 
   /** A builder that starts from these options. */
   def toBuilder: JCompletionOptions.Builder = new JCompletionOptions.Builder(FacadeToken.INSTANCE, underlying)
@@ -66,9 +64,8 @@ final class JCompletionOptions private (token: FacadeToken, private[javaapi] val
   override def toString: String =
     s"JCompletionOptions(temperature=$temperature, topP=$topP, maxTokens=${text(maxTokens)}, " +
       s"presencePenalty=$presencePenalty, frequencyPenalty=$frequencyPenalty, " +
-      s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, budgetTokens=${text(budgetTokens)})"
+      s"reasoning=${reasoning.map[String](_.name).orElse("unset")}, thinking=${thinking.map[String](_.toString).orElse("unset")})"
 
-  // "unset", not "none": `NONE` is a reasoning level, and an unset one must not print like it
   private def text(value: OptionalInt): String =
     if (value.isPresent) value.getAsInt.toString else "unset"
 }
@@ -123,14 +120,19 @@ object JCompletionOptions {
       )
 
     /**
-     * Sets an explicit thinking-token budget, overriding the one [[reasoning]] implies; at least `1`. Anthropic, and
-     * OpenRouter for Claude models, raise a budget below `1024` to `1024` and keep it below the token limit; set
-     * without [[reasoning]], it still turns thinking on.
+     * Sets how the model thinks: [[JThinking.off]], [[JThinking.adaptive]] or a [[JThinking.budget]]. An explicit
+     * thinking mode wins over [[reasoning]]; a provider that cannot send it as asked reports what it sent instead.
      */
-    def budgetTokens(value: Int): Builder = next(options.withBudgetTokens(positive(value, "budgetTokens")))
+    def thinking(value: JThinking): Builder =
+      next(options.withThinking(Objects.requireNonNull(value, "thinking must not be null").underlying))
 
-    /** Sets the value as the thinking-token budget, or clears it when it is empty. */
-    def budgetTokens(value: OptionalInt): Builder = next(options.withBudgetTokens(positive(value, "budgetTokens")))
+    /** Sets the value's thinking mode, or clears it when it is empty. */
+    def thinking(value: Optional[JThinking]): Builder =
+      next(
+        options.withThinking(
+          Option(Objects.requireNonNull(value, "thinking must not be null").orElse(null)).map(_.underlying)
+        )
+      )
 
     /** The options set so far. */
     def build(): JCompletionOptions = new JCompletionOptions(FacadeToken.INSTANCE, options)
@@ -153,16 +155,26 @@ object JCompletionOptions {
   private def optionalInt(value: Option[Int]): OptionalInt = value.fold(OptionalInt.empty())(OptionalInt.of)
 
   private def toCore(effort: JReasoningEffort): ReasoningEffort = effort match {
-    case JReasoningEffort.NONE   => ReasoningEffort.None
-    case JReasoningEffort.LOW    => ReasoningEffort.Low
-    case JReasoningEffort.MEDIUM => ReasoningEffort.Medium
-    case JReasoningEffort.HIGH   => ReasoningEffort.High
+    case JReasoningEffort.MINIMAL => ReasoningEffort.Minimal
+    case JReasoningEffort.LOW     => ReasoningEffort.Low
+    case JReasoningEffort.MEDIUM  => ReasoningEffort.Medium
+    case JReasoningEffort.HIGH    => ReasoningEffort.High
+    case JReasoningEffort.XHIGH   => ReasoningEffort.XHigh
+    case JReasoningEffort.MAX     => ReasoningEffort.Max
+  }
+
+  private def toJava(thinking: Thinking): JThinking = thinking match {
+    case Thinking.Off            => JThinking.off()
+    case Thinking.Adaptive       => JThinking.adaptive()
+    case Thinking.Budget(tokens) => JThinking.budget(tokens)
   }
 
   private def toJava(effort: ReasoningEffort): JReasoningEffort = effort match {
-    case ReasoningEffort.None   => JReasoningEffort.NONE
-    case ReasoningEffort.Low    => JReasoningEffort.LOW
-    case ReasoningEffort.Medium => JReasoningEffort.MEDIUM
-    case ReasoningEffort.High   => JReasoningEffort.HIGH
+    case ReasoningEffort.Minimal => JReasoningEffort.MINIMAL
+    case ReasoningEffort.Low     => JReasoningEffort.LOW
+    case ReasoningEffort.Medium  => JReasoningEffort.MEDIUM
+    case ReasoningEffort.High    => JReasoningEffort.HIGH
+    case ReasoningEffort.XHigh   => JReasoningEffort.XHIGH
+    case ReasoningEffort.Max     => JReasoningEffort.MAX
   }
 }

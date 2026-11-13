@@ -1,6 +1,7 @@
 package org.llm4s.model
 
 import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.model.ReasoningEffort
 import org.llm4s.types.Result
 import org.llm4s.error.ValidationError
 import upickle.default._
@@ -249,6 +250,17 @@ object ModelMode {
  * @param supportedRegions List of supported deployment regions
  * @param disallowedParams Set of parameter names that are not supported by this model
  * @param temperatureConstraint Temperature constraint: None = any, Some((min, max)) = restricted range
+ * @param supportsAdaptiveThinking Whether the model takes adaptive thinking, where it decides how much to think
+ *   (litellm `supports_adaptive_thinking`)
+ * @param supportsOutputConfig Whether the model takes an effort level in `output_config` (litellm
+ *   `supports_output_config`)
+ * @param supportedReasoningEfforts The [[org.llm4s.llmconnect.model.ReasoningEffort]] levels the model accepts; see
+ *   [[ModelCapabilities.fromJson]] for how they are read
+ * @param supportsThinkingOff Whether the model accepts a request to not think (litellm
+ *   `supports_none_reasoning_effort`)
+ * @param supportsBudgetThinking Whether the model accepts a manual thinking budget. `Some(false)` for a model that
+ *   rejects one; litellm has no key for this, so it is set only in `llm4s_model_overrides.json`
+ *   (`supports_budget_thinking`), and `None` means unknown
  */
 @Stable
 final case class ModelCapabilities private (
@@ -269,7 +281,12 @@ final case class ModelCapabilities private (
   supportsNativeStreaming: Option[Boolean] = None,
   supportedRegions: Option[List[String]] = None,
   disallowedParams: Option[Set[String]] = None,
-  temperatureConstraint: Option[(Double, Double)] = None
+  temperatureConstraint: Option[(Double, Double)] = None,
+  supportsAdaptiveThinking: Option[Boolean] = None,
+  supportsOutputConfig: Option[Boolean] = None,
+  supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
+  supportsThinkingOff: Option[Boolean] = None,
+  supportsBudgetThinking: Option[Boolean] = None
 ) {
   def withSupportsFunctionCalling(supportsFunctionCalling: Boolean): ModelCapabilities =
     copy(supportsFunctionCalling = Some(supportsFunctionCalling))
@@ -341,6 +358,26 @@ final case class ModelCapabilities private (
     copy(temperatureConstraint = Some(temperatureConstraint))
   def withTemperatureConstraint(temperatureConstraint: Option[(Double, Double)]): ModelCapabilities =
     copy(temperatureConstraint = temperatureConstraint)
+  def withSupportsAdaptiveThinking(supportsAdaptiveThinking: Boolean): ModelCapabilities =
+    copy(supportsAdaptiveThinking = Some(supportsAdaptiveThinking))
+  def withSupportsAdaptiveThinking(supportsAdaptiveThinking: Option[Boolean]): ModelCapabilities =
+    copy(supportsAdaptiveThinking = supportsAdaptiveThinking)
+  def withSupportsOutputConfig(supportsOutputConfig: Boolean): ModelCapabilities =
+    copy(supportsOutputConfig = Some(supportsOutputConfig))
+  def withSupportsOutputConfig(supportsOutputConfig: Option[Boolean]): ModelCapabilities =
+    copy(supportsOutputConfig = supportsOutputConfig)
+  def withSupportedReasoningEfforts(supportedReasoningEfforts: Set[ReasoningEffort]): ModelCapabilities =
+    copy(supportedReasoningEfforts = Some(supportedReasoningEfforts))
+  def withSupportedReasoningEfforts(supportedReasoningEfforts: Option[Set[ReasoningEffort]]): ModelCapabilities =
+    copy(supportedReasoningEfforts = supportedReasoningEfforts)
+  def withSupportsThinkingOff(supportsThinkingOff: Boolean): ModelCapabilities =
+    copy(supportsThinkingOff = Some(supportsThinkingOff))
+  def withSupportsThinkingOff(supportsThinkingOff: Option[Boolean]): ModelCapabilities =
+    copy(supportsThinkingOff = supportsThinkingOff)
+  def withSupportsBudgetThinking(supportsBudgetThinking: Boolean): ModelCapabilities =
+    copy(supportsBudgetThinking = Some(supportsBudgetThinking))
+  def withSupportsBudgetThinking(supportsBudgetThinking: Option[Boolean]): ModelCapabilities =
+    copy(supportsBudgetThinking = supportsBudgetThinking)
 }
 
 object ModelCapabilities {
@@ -364,7 +401,12 @@ object ModelCapabilities {
     supportsNativeStreaming: Option[Boolean] = None,
     supportedRegions: Option[List[String]] = None,
     disallowedParams: Option[Set[String]] = None,
-    temperatureConstraint: Option[(Double, Double)] = None
+    temperatureConstraint: Option[(Double, Double)] = None,
+    supportsAdaptiveThinking: Option[Boolean] = None,
+    supportsOutputConfig: Option[Boolean] = None,
+    supportedReasoningEfforts: Option[Set[ReasoningEffort]] = None,
+    supportsThinkingOff: Option[Boolean] = None,
+    supportsBudgetThinking: Option[Boolean] = None
   ): ModelCapabilities =
     new ModelCapabilities(
       supportsFunctionCalling,
@@ -384,11 +426,24 @@ object ModelCapabilities {
       supportsNativeStreaming,
       supportedRegions,
       disallowedParams,
-      temperatureConstraint
+      temperatureConstraint,
+      supportsAdaptiveThinking,
+      supportsOutputConfig,
+      supportedReasoningEfforts,
+      supportsThinkingOff,
+      supportsBudgetThinking
     )
 
   implicit val rw: ReadWriter[ModelCapabilities] = macroRW
 
+  /**
+   * Reads a model's capabilities from its litellm metadata entry.
+   *
+   * `supportedReasoningEfforts` follows litellm's convention: a model with `supports_reasoning: true` accepts `low`,
+   * `medium` and `high` unless its entry says `supports_<level>_reasoning_effort: false`, and accepts `minimal`,
+   * `xhigh` and `max` only when its entry says `supports_<level>_reasoning_effort: true`. It is `None` when
+   * `supports_reasoning` is absent, and empty when it is `false`. `none` is not a level: it is `supportsThinkingOff`.
+   */
   def fromJson(data: ujson.Value): ModelCapabilities = {
     val obj = data.obj
 
@@ -435,9 +490,35 @@ object ModelCapabilities {
       supportsNativeStreaming = getBool("supports_native_streaming"),
       supportedRegions = getStringList("supported_regions"),
       disallowedParams = getStringSet("disallowed_params"),
-      temperatureConstraint = getDoubleRange("temperature_constraint")
+      temperatureConstraint = getDoubleRange("temperature_constraint"),
+      supportsAdaptiveThinking = getBool("supports_adaptive_thinking"),
+      supportsOutputConfig = getBool("supports_output_config"),
+      supportedReasoningEfforts = reasoningEfforts(getBool("supports_reasoning"), getBool),
+      supportsThinkingOff = getBool("supports_none_reasoning_effort"),
+      supportsBudgetThinking = getBool("supports_budget_thinking")
     )
   }
+
+  /** The levels litellm implies for a reasoning model, less any its entry turns off. */
+  private val impliedReasoningEfforts: List[ReasoningEffort] =
+    List(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
+
+  /** The levels a reasoning model accepts only when its entry says so. */
+  private val optInReasoningEfforts: List[ReasoningEffort] =
+    List(ReasoningEffort.Minimal, ReasoningEffort.XHigh, ReasoningEffort.Max)
+
+  private def reasoningEfforts(
+    supportsReasoning: Option[Boolean],
+    getBool: String => Option[Boolean]
+  ): Option[Set[ReasoningEffort]] =
+    supportsReasoning.map { reasons =>
+      if (!reasons) Set.empty
+      else {
+        def flag(level: ReasoningEffort) = getBool(s"supports_${level.name}_reasoning_effort")
+        (impliedReasoningEfforts.filterNot(flag(_).contains(false)) ++
+          optInReasoningEfforts.filter(flag(_).contains(true))).toSet
+      }
+    }
 }
 
 /**
@@ -463,7 +544,8 @@ final case class ModelPricing private (
   inputCostPerImage: Option[Double] = None,
   outputCostPerImage: Option[Double] = None,
   inputCostPerPixel: Option[Double] = None,
-  outputCostPerPixel: Option[Double] = None
+  outputCostPerPixel: Option[Double] = None,
+  cacheCreationInputTokenCostAbove1hr: Option[Double] = None
 ) {
 
   /** Sets the `inputCostPerToken` price. */
@@ -583,6 +665,14 @@ final case class ModelPricing private (
   def withOutputCostPerPixel(outputCostPerPixel: Option[Double]): ModelPricing =
     copy(outputCostPerPixel = outputCostPerPixel)
 
+  /** Sets the `cacheCreationInputTokenCostAbove1hr` price: a cache write with the 1-hour lifetime. */
+  def withCacheCreationInputTokenCostAbove1hr(cacheCreationInputTokenCostAbove1hr: Double): ModelPricing =
+    copy(cacheCreationInputTokenCostAbove1hr = Some(cacheCreationInputTokenCostAbove1hr))
+
+  /** Sets, or with `None` clears, the `cacheCreationInputTokenCostAbove1hr` price. */
+  def withCacheCreationInputTokenCostAbove1hr(cacheCreationInputTokenCostAbove1hr: Option[Double]): ModelPricing =
+    copy(cacheCreationInputTokenCostAbove1hr = cacheCreationInputTokenCostAbove1hr)
+
   /**
    * Estimate the cost of a completion given token counts.
    *
@@ -615,7 +705,8 @@ object ModelPricing {
     inputCostPerImage: Option[Double] = None,
     outputCostPerImage: Option[Double] = None,
     inputCostPerPixel: Option[Double] = None,
-    outputCostPerPixel: Option[Double] = None
+    outputCostPerPixel: Option[Double] = None,
+    cacheCreationInputTokenCostAbove1hr: Option[Double] = None
   ): ModelPricing =
     new ModelPricing(
       inputCostPerToken,
@@ -632,7 +723,8 @@ object ModelPricing {
       inputCostPerImage,
       outputCostPerImage,
       inputCostPerPixel,
-      outputCostPerPixel
+      outputCostPerPixel,
+      cacheCreationInputTokenCostAbove1hr
     )
 
   implicit val rw: ReadWriter[ModelPricing] = macroRW
@@ -658,7 +750,8 @@ object ModelPricing {
       inputCostPerImage = getDouble("input_cost_per_image"),
       outputCostPerImage = getDouble("output_cost_per_image"),
       inputCostPerPixel = getDouble("input_cost_per_pixel"),
-      outputCostPerPixel = getDouble("output_cost_per_pixel")
+      outputCostPerPixel = getDouble("output_cost_per_pixel"),
+      cacheCreationInputTokenCostAbove1hr = getDouble("cache_creation_input_token_cost_above_1hr")
     )
   }
 }

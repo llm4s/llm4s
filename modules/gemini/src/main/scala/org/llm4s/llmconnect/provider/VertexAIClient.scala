@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.config.VertexAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.llm4s.util.BoundedJson
@@ -87,6 +87,10 @@ class VertexAIClient(
   // the references Vertex AI takes: Cloud Storage objects
   private val fileUri = GeminiParts.vertexFileUri
 
+  // what the transformer dropped, and a `reasoning` this client does not send (its `thinkingConfig` is not
+  // mapped yet), goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   private def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
     s"$base/projects/${config.projectId}/locations/${config.location}/publishers/google/models/${config.model}:$suffix"
@@ -112,6 +116,10 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -133,7 +141,7 @@ class VertexAIClient(
                   parseCompletionResponse(response.body).map(c =>
                     c.withMessage(
                       ThinkingReplay.bindOrigin(replayOrigin, c.message)
-                    )
+                    ).withAdjustments(adjustments)
                   )
                 else handleErrorResponse(response.statusCode, response.body, response.headers)
               }.toEither.left.map(e => e.toLLMError).flatten
@@ -165,6 +173,10 @@ class VertexAIClient(
           .map(_ => transformed)
       )
       .flatMap { transformed =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Vertex AI", transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -249,6 +261,7 @@ class VertexAIClient(
                       .withMessage(
                         ThinkingReplay.bindOrigin(replayOrigin, message)
                       )
+                      .withAdjustments(adjustments)
                     recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
                     completion
                   }

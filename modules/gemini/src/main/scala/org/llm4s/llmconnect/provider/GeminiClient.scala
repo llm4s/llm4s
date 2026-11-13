@@ -15,7 +15,7 @@ import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -106,6 +106,10 @@ class GeminiClient(
   // the references Gemini takes: web URLs and this provider's uploaded files
   private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
 
+  // what the transformer dropped, and a `reasoning` this client does not send (its `thinkingConfig` is not
+  // mapped yet), goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -127,6 +131,10 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -146,6 +154,7 @@ class GeminiClient(
               if (response.statusCode >= 200 && response.statusCode < 300)
                 parseCompletionResponse(response.body).map(c =>
                   c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
+                    .withAdjustments(adjustments)
                 )
               else handleErrorResponse(response.statusCode, response.body, response.headers)
             }.toEither.left
@@ -178,6 +187,10 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options) ++
+            UnmappedOptions.promptCacheAutomatic("Gemini", transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -257,6 +270,7 @@ class GeminiClient(
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
+                      .withAdjustments(adjustments)
                   }
                 )
 

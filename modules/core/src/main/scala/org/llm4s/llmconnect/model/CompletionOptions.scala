@@ -15,8 +15,10 @@ import org.llm4s.toolapi.ToolFunction
  * @param tools Optional sequence of tool function definitions that can be requested by the LLM during a completion.
  * @param reasoning Optional reasoning effort level for models that support extended thinking (o1/o3, Claude).
  *                  For non-reasoning models, this setting is silently ignored.
- * @param budgetTokens Optional explicit budget for thinking tokens (Anthropic Claude).
- *                     If set, overrides the default budget from reasoning effort level.
+ * @param thinking Optional thinking mode: off, adaptive, or a token budget (see [[Thinking]]). An explicit
+ *                 `thinking` wins over `reasoning`; see `withThinking`.
+ * @param promptCache Optional provider-side prompt cache (see [[PromptCache]]): changes what a call costs, not what it
+ *                    returns. Not [[org.llm4s.llmconnect.caching.CachingLLMClient]], which caches whole answers.
  * @param responseFormat Optional structured output format (e.g. JSON or JSON schema). Support is
  *                        provider- and model-dependent; see capability validation in RequestTransformer.
  *
@@ -29,9 +31,13 @@ import org.llm4s.toolapi.ToolFunction
  *   .withReasoning(ReasoningEffort.High)
  *   .copy(maxTokens = Some(4096))
  *
- * // For Anthropic, set explicit thinking budget
- * val anthropicOptions = CompletionOptions()
- *   .withBudgetTokens(16000)
+ * // Let the model decide how much to think, at low effort
+ * val adaptiveOptions = CompletionOptions()
+ *   .withThinking(Thinking.Adaptive)
+ *   .withReasoning(ReasoningEffort.Low)
+ *
+ * // Think within an explicit budget, fitted to the provider's range
+ * val budgetOptions = Thinking.budget(16000).map(CompletionOptions().withThinking)
  *
  * // Request JSON output (provider-dependent)
  * val jsonOptions = CompletionOptions().withResponseFormat(ResponseFormat.Json)
@@ -46,8 +52,9 @@ final case class CompletionOptions private (
   frequencyPenalty: Double,
   tools: Seq[ToolFunction[_, _]],
   reasoning: Option[ReasoningEffort],
-  budgetTokens: Option[Int],
-  responseFormat: Option[ResponseFormat]
+  thinking: Option[Thinking],
+  responseFormat: Option[ResponseFormat],
+  promptCache: Option[PromptCache]
 ) {
 
   /**
@@ -120,14 +127,30 @@ final case class CompletionOptions private (
   def withReasoning(reasoning: Option[ReasoningEffort]): CompletionOptions = copy(reasoning = reasoning)
 
   /**
-   * Sets or clears the explicit budget for thinking tokens (Anthropic Claude).
-   * If set, it overrides the default budget from the reasoning effort level.
+   * Sets or clears how the model thinks: [[Thinking.Off]], [[Thinking.Adaptive]] or a [[Thinking.Budget]].
    *
-   * @param budgetTokens the thinking token budget; `None` sets no explicit budget (the default), so the budget
-   *                     comes from the reasoning effort level, if any
-   * @return new CompletionOptions with budgetTokens set
+   * '''Precedence.''' An explicit `thinking` wins. Without one, `reasoning` decides as it always has: on a provider
+   * that thinks within a budget, a `reasoning`-only request sends the level's default budget. A contradictory pair,
+   * such as `thinking = Off` with `reasoning = High` on a provider with one control for both, is resolved by this
+   * rule and reported as an `Adjusted` on `Reasoning`.
+   *
+   * '''The exception.''' A model whose capabilities say it rejects a manual budget
+   * (`ModelCapabilities.supportsBudgetThinking = Some(false)`) is sent a `reasoning`-only request as adaptive
+   * thinking at that effort, instead of a budget it would refuse with a 400, reported as an `Adjusted` on
+   * `Reasoning`.
+   *
+   * @param thinking the thinking mode; `None` leaves it to `reasoning` and the provider (the default)
+   * @return new CompletionOptions with thinking set
    */
-  def withBudgetTokens(budgetTokens: Option[Int]): CompletionOptions = copy(budgetTokens = budgetTokens)
+  def withThinking(thinking: Option[Thinking]): CompletionOptions = copy(thinking = thinking)
+
+  /**
+   * Sets how the model thinks; see the `Option` overload for how it combines with `reasoning`.
+   *
+   * @param thinking the thinking mode
+   * @return new CompletionOptions with thinking set
+   */
+  def withThinking(thinking: Thinking): CompletionOptions = copy(thinking = Some(thinking))
 
   /**
    * Sets or clears the structured output format (e.g. JSON or JSON schema).
@@ -149,29 +172,44 @@ final case class CompletionOptions private (
     copy(reasoning = Some(effort))
 
   /**
-   * Enable reasoning with explicit token budget for thinking (Anthropic Claude).
-   *
-   * This overrides the default budget from the reasoning effort level.
-   *
-   * @param tokens the number of tokens to budget for thinking
-   * @return new CompletionOptions with budget tokens set
-   */
-  def withBudgetTokens(tokens: Int): CompletionOptions =
-    copy(budgetTokens = Some(tokens))
-
-  /**
-   * Check if reasoning is enabled.
+   * Check if reasoning is enabled: `reasoning` is set, or `thinking` is set and is not [[Thinking.Off]].
    */
   def hasReasoning: Boolean =
-    reasoning.exists(_ != ReasoningEffort.None) || budgetTokens.exists(_ > 0)
+    reasoning.isDefined || thinking.exists(_ != Thinking.Off)
 
   /**
-   * Get the effective budget tokens for Anthropic extended thinking.
+   * Get the effective budget tokens for budget-based thinking (Anthropic manual thinking).
    *
-   * Returns explicit budgetTokens if set, otherwise derives from reasoning effort.
+   * `thinking`'s [[Thinking.Budget]] if set; with no `thinking`, the default budget of `reasoning`, as before
+   * `thinking` existed; with `thinking` set to `Off` or `Adaptive`, none.
    */
   def effectiveBudgetTokens: Option[Int] =
-    budgetTokens.orElse(reasoning.map(ReasoningEffort.defaultBudgetTokens)).filter(_ > 0)
+    thinking match {
+      case Some(Thinking.Budget(tokens))                => Some(tokens)
+      case Some(Thinking.Off) | Some(Thinking.Adaptive) => None
+      case None                                         => reasoning.map(ReasoningEffort.defaultBudgetTokens)
+    }
+
+  /**
+   * Sets or clears a provider-side prompt cache: the provider keeps the start of the request, so a later request
+   * with the same start costs less and answers sooner. The answer is the same either way.
+   *
+   * Not [[org.llm4s.llmconnect.caching.CachingLLMClient]], which keeps whole answers on the client and skips the
+   * call. To fan out many requests that share a start, send one first and wait for it: requests sent together all
+   * miss a cache that is not yet written. See [[PromptCache]].
+   *
+   * @param promptCache what to cache and for how long; `None` asks for no prompt cache (the default)
+   * @return new CompletionOptions with promptCache set
+   */
+  def withPromptCache(promptCache: Option[PromptCache]): CompletionOptions = copy(promptCache = promptCache)
+
+  /**
+   * Asks for a provider-side prompt cache; see the `Option` overload.
+   *
+   * @param promptCache what to cache and for how long, such as `PromptCache.default`
+   * @return new CompletionOptions with promptCache set
+   */
+  def withPromptCache(promptCache: PromptCache): CompletionOptions = copy(promptCache = Some(promptCache))
 
   /**
    * Request structured output in the given format.
@@ -197,8 +235,9 @@ object CompletionOptions {
     frequencyPenalty: Double = 0.0,
     tools: Seq[ToolFunction[_, _]] = Seq.empty,
     reasoning: Option[ReasoningEffort] = None,
-    budgetTokens: Option[Int] = None,
-    responseFormat: Option[ResponseFormat] = None
+    thinking: Option[Thinking] = None,
+    responseFormat: Option[ResponseFormat] = None,
+    promptCache: Option[PromptCache] = None
   ): CompletionOptions =
     new CompletionOptions(
       temperature,
@@ -208,7 +247,8 @@ object CompletionOptions {
       frequencyPenalty,
       tools,
       reasoning,
-      budgetTokens,
-      responseFormat
+      thinking,
+      responseFormat,
+      promptCache
     )
 }
