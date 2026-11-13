@@ -103,29 +103,51 @@ object ModelRegistryService:
     parseMetadataJson(jsonContent).map(metadata => DefaultModelRegistryService(metadata))
 
   def fromResource(resourcePath: String): Result[ModelRegistryService] =
-    loadResource(resourcePath).flatMap(parseMetadataJson).map { base =>
-      val metadata =
+    loadResource(resourcePath).flatMap(readMetadataJson).flatMap { base =>
+      val merged =
         if resourcePath == ModelRegistryConfig.DefaultResourcePath then
           mergeOverrides(base, ModelRegistryConfig.DefaultOverridesResourcePath)
         else base
-      DefaultModelRegistryService(metadata)
+      parseMetadataEntries(merged).map(DefaultModelRegistryService(_))
     }
 
   /**
-   * Layers the curated llm4s corrections at `overridesResourcePath` over a base
-   * snapshot, with override entries taking precedence. The overlay is optional:
-   * if the resource is absent or unparseable the base snapshot is returned
-   * unchanged so a packaging slip can never make the registry unloadable.
+   * The key that marks an entry in the overrides file as a patch rather than a replacement.
+   *
+   * An override entry replaces the base entry of the same id whole, which is how a correction drops a key the base
+   * should not have. An entry with `"llm4s_patch": true` instead sets only the keys it lists on the base entry, so a
+   * flag litellm does not carry (such as `supports_budget_thinking`) can be added without copying, and freezing, the
+   * rest of the entry. A patch for an id the base does not have is skipped with a warning: a patch cannot make a model.
    */
-  private[model] def mergeOverrides(
-    base: Map[String, ModelMetadata],
-    overridesResourcePath: String
-  ): Map[String, ModelMetadata] =
-    loadResource(overridesResourcePath).flatMap(parseMetadataJson) match
-      case Right(overrides) => base ++ overrides
+  private[model] val PatchKey = "llm4s_patch"
+
+  /**
+   * Layers the curated llm4s corrections at `overridesResourcePath` over a base
+   * snapshot, with override entries taking precedence (see [[PatchKey]] for entries
+   * that patch rather than replace). The overlay is optional: if the resource is
+   * absent or unparseable the base snapshot is returned unchanged so a packaging
+   * slip can never make the registry unloadable.
+   */
+  private[model] def mergeOverrides(base: ujson.Obj, overridesResourcePath: String): ujson.Obj =
+    loadResource(overridesResourcePath).flatMap(readMetadataJson) match
+      case Right(overrides) => applyOverrides(base, overrides)
       case Left(error) =>
         logger.warn(s"Skipping embedded model metadata overrides: ${error.message}")
         base
+
+  private[model] def applyOverrides(base: ujson.Obj, overrides: ujson.Obj): ujson.Obj =
+    val merged = ujson.Obj.from(base.value)
+    overrides.value.foreach {
+      case (modelId, patch: ujson.Obj) if patch.value.get(PatchKey).contains(ujson.True) =>
+        merged.value.get(modelId) match
+          case Some(entry: ujson.Obj) =>
+            merged(modelId) = ujson.Obj.from(entry.value ++ patch.value.view.filterKeys(_ != PatchKey))
+          case _ =>
+            logger.warn(s"Skipping model metadata patch for $modelId: the base snapshot has no such model")
+      case (modelId, entry) =>
+        merged(modelId) = entry
+    }
+    merged
 
   def fromFile(filePath: String): Result[ModelRegistryService] =
     loadFile(filePath).flatMap(fromJsonString)
@@ -155,9 +177,16 @@ object ModelRegistryService:
       .map(e => ConfigurationError(s"Failed to load model metadata from $url: ${e.getMessage}"))
 
   private[model] def parseMetadataJson(content: String): Result[Map[String, ModelMetadata]] =
+    readMetadataJson(content).flatMap(parseMetadataEntries)
+
+  private def readMetadataJson(content: String): Result[ujson.Obj] =
+    Try(ujson.read(content).obj).toEither.left
+      .map(e => ConfigurationError(s"Failed to parse metadata JSON: ${e.getMessage}"))
+      .map(ujson.Obj.from(_))
+
+  private def parseMetadataEntries(json: ujson.Obj): Result[Map[String, ModelMetadata]] =
     Try {
-      val json         = ujson.read(content).obj
-      val modelEntries = json.view.filterKeys(_ != "sample_spec").toMap
+      val modelEntries = json.value.view.filterKeys(_ != "sample_spec").toMap
 
       modelEntries.flatMap { case (modelId, data) =>
         ModelMetadata.fromJson(modelId, data) match
