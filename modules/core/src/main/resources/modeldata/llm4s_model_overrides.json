@@ -54,7 +54,8 @@
     },
     "anthropic.claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "anthropic.claude-opus-4-7": {
         "llm4s_patch": true,
@@ -74,7 +75,8 @@
     },
     "azure_ai/claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "azure_ai/claude-opus-4-7": {
         "llm4s_patch": true,
@@ -86,7 +88,8 @@
     },
     "claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "claude-opus-4-7": {
         "llm4s_patch": true,
@@ -102,7 +105,8 @@
     },
     "eu.anthropic.claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "eu.anthropic.claude-opus-4-7": {
         "llm4s_patch": true,
@@ -114,7 +118,8 @@
     },
     "global.anthropic.claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "global.anthropic.claude-opus-4-7": {
         "llm4s_patch": true,
@@ -134,7 +139,8 @@
     },
     "us.anthropic.claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "us.anthropic.claude-opus-4-7": {
         "llm4s_patch": true,
@@ -146,11 +152,13 @@
     },
     "vertex_ai/claude-fable-5": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "vertex_ai/claude-fable-5@default": {
         "llm4s_patch": true,
-        "supports_budget_thinking": false
+        "supports_budget_thinking": false,
+        "supports_none_reasoning_effort": false
     },
     "vertex_ai/claude-opus-4-7": {
         "llm4s_patch": true,

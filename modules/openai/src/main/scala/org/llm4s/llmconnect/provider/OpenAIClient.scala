@@ -200,7 +200,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
-      adjustments             = withUnsentSampling(options, transformed)
+      adjustments             = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -241,7 +241,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
-        val adjustments             = withUnsentSampling(options, transformed)
+        val adjustments = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -470,23 +470,28 @@ class OpenAIClient private[provider] (
    */
   private lazy val reasoningSupport: OpenAIReasoning.Support = OpenAIReasoning.support(model, registryService)
 
+  /** This client's model's registry capabilities, decided once for the same reason as [[reasoningSupport]]. */
+  private lazy val reasoningCapabilities = OpenAIReasoning.capabilities(model, registryService)
+
   /**
-   * The `reasoning_effort` to send for `options`, if any.
-   *
-   * Sent for a reasoning model when a level other than `ReasoningEffort.None` is asked for, and
-   * never for a model known not to reason, which OpenAI would reject. On Azure, `model` is a
-   * deployment name, which may say nothing about the model behind it: a deployment the registry
-   * cannot resolve gets the parameter whenever reasoning is asked for, since asking is the only
-   * sign the caller has a reasoning model deployed.
+   * Whether `reasoning_effort` may be sent at all: never to a model known not to reason, which OpenAI would reject.
+   * On Azure, `model` is a deployment name, which may say nothing about the model behind it: a deployment the
+   * registry cannot resolve gets the parameter whenever it is asked for, since asking is the only sign the caller
+   * has a reasoning model deployed.
    */
+  private def sendsEffort: Boolean = reasoningSupport match {
+    case OpenAIReasoning.Support.Reasoning    => true
+    case OpenAIReasoning.Support.NonReasoning => false
+    case OpenAIReasoning.Support.Unknown      => config.isInstanceOf[AzureConfig]
+  }
+
+  /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
+  private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
+    OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+
+  /** The `reasoning_effort` to send for `options`, if any. */
   private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =
-    options.reasoning.flatMap(OpenAIReasoning.toSdk).filter { _ =>
-      reasoningSupport match {
-        case OpenAIReasoning.Support.Reasoning    => true
-        case OpenAIReasoning.Support.NonReasoning => false
-        case OpenAIReasoning.Support.Unknown      => config.isInstanceOf[AzureConfig]
-      }
-    }
+    effortPlan(options).effort
 
   /** Whether the request for `options` goes to a reasoning model: one the registry flags, or one sent an effort. */
   private def isReasoningRequest(options: CompletionOptions): Boolean =

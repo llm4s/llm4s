@@ -4,12 +4,18 @@ import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, ThinkingBlock }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  ReasoningEffort,
+  RequestAdjustment,
+  RequestOption,
+  Thinking,
+  ThinkingBlock
+}
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ EffortMapping, ModelRegistryService }
 import org.llm4s.types.{ Result, TryOps }
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -127,20 +133,24 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * which thinking is on by default and `reasoning_effort`, where accepted, defaults to `max`. The
    * mapping is monotonic and `High` is Z.ai's maximum, so it never reasons less than the default:
    *  - GLM-5.3 and its Flash variants always think, and reject `thinking.type: disabled`. They
-   *    accept `reasoning_effort` `low`, `high` or `max` only. `None` and `Low` send `low`, the least
-   *    they allow, which is Z.ai's own advice for a caller that disabled thinking; `Medium` sends
-   *    `high` and `High` sends `max`. Because `None` still thinks, and thinking tokens are still
-   *    billed, the first such request in the process logs a warning naming the model.
-   *  - GLM-5.2 accepts `none`, `low`, `medium`, `high` and `max` (`none` skips thinking). `None`,
-   *    `Low` and `Medium` send their own name and `High` sends `max`. Z.ai currently treats `low`
-   *    and `medium` as `high` on this model; the requested level is still sent, so a later change
-   *    on Z.ai's side takes effect without a change here.
+   *    accept `reasoning_effort` `low`, `high` or `max` only. `Minimal` and `Low` send `low`,
+   *    `Medium` sends `high`, and `High` and above send `max`. `Thinking.Off` sends `low`, the least
+   *    they allow, which is Z.ai's own advice for a caller that disabled thinking, reported
+   *    `Adjusted` because the model still thinks and its thinking tokens are still billed.
+   *  - GLM-5.2 accepts `none`, `low`, `medium`, `high` and `max` (`none` skips thinking).
+   *    `Thinking.Off` sends `none`; `Minimal` sends `low`, `Low` and `Medium` send their own name,
+   *    and `High` and above send `max`. Z.ai currently treats `low` and `medium` as `high` on this
+   *    model; the requested level is still sent, so a later change on Z.ai's side takes effect
+   *    without a change here.
    *  - GLM-5.1, GLM-5, GLM-4.7, GLM-4.6 and GLM-4.5 (with their variants) document no
-   *    `reasoning_effort`. `None` sends `thinking.type: disabled`; the other levels send nothing and
-   *    leave the model's default.
+   *    `reasoning_effort`. `Thinking.Off` sends `thinking.type: disabled`; a level sends nothing and
+   *    leaves the model's default.
    *  - Any other model is sent nothing: `thinking` is documented only for GLM-4.5 and later.
    *
-   * With `reasoning` unset nothing is sent for it, as before.
+   * A level is reported `Adjusted` only where llm4s's level has no Z.ai level of its own (`Minimal`,
+   * `XHigh`), not for the scale above, which is the mapping. `Thinking.Off` wins over a `reasoning`
+   * also set. `Thinking.Adaptive` is `NotNeeded` on a GLM model (thinking is on by default) and
+   * `Thinking.Budget` is `Dropped`. With neither set nothing is sent for them, as before.
    *
    * Preserved thinking is disabled by default on Z.ai's standard endpoint (`clear_thinking`
    * defaults to `true`, removing earlier turns' `reasoning_content`) and enabled on the Coding Plan
@@ -148,41 +158,60 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * thinking gets no `thinking` field.
    */
   override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    options.reasoning.foreach { effort =>
-      ZaiDialect.family(model) match {
-        case ZaiDialect.Family.ForcedThinking =>
-          if (effort == ReasoningEffort.None) warnThinkingNotDisabled(model)
-          body("reasoning_effort") = effort match {
-            case ReasoningEffort.None | ReasoningEffort.Low => "low"
-            case ReasoningEffort.Medium                     => "high"
-            case ReasoningEffort.High                       => "max"
+    val family = ZaiDialect.family(model)
+    val off    = options.thinking.contains(Thinking.Off)
+    // what llm4s's own level is called on Z.ai's scale, where it has one; Minimal and XHigh have none
+    def unscaled(effort: ReasoningEffort, sent: String) =
+      if (effort == ReasoningEffort.Minimal || effort == ReasoningEffort.XHigh) EffortMapping.level(model, effort, sent)
+      else Nil
+    val reasoningReport: List[RequestAdjustment] = family match {
+      case ZaiDialect.Family.ForcedThinking =>
+        if (off) {
+          body("reasoning_effort") = "low"
+          RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", s"$model always thinks") ::
+            EffortMapping.overriddenByOff(options, "low")
+        } else
+          options.reasoning.toList.flatMap { effort =>
+            val sent = effort match {
+              case ReasoningEffort.Minimal | ReasoningEffort.Low                      => "low"
+              case ReasoningEffort.Medium                                             => "high"
+              case ReasoningEffort.High | ReasoningEffort.XHigh | ReasoningEffort.Max => "max"
+            }
+            body("reasoning_effort") = sent
+            unscaled(effort, sent)
           }
-        case ZaiDialect.Family.Effort =>
-          body("reasoning_effort") = effort match {
-            case ReasoningEffort.High => "max"
-            case other                => other.name
+      case ZaiDialect.Family.Effort =>
+        if (off) {
+          body("reasoning_effort") = "none"
+          EffortMapping.overriddenByOff(options, "none")
+        } else
+          options.reasoning.toList.flatMap { effort =>
+            val sent = effort match {
+              case ReasoningEffort.Minimal                                            => "low"
+              case ReasoningEffort.Low | ReasoningEffort.Medium                       => effort.name
+              case ReasoningEffort.High | ReasoningEffort.XHigh | ReasoningEffort.Max => "max"
+            }
+            body("reasoning_effort") = sent
+            unscaled(effort, sent)
           }
-        case ZaiDialect.Family.Toggle =>
-          if (effort == ReasoningEffort.None) mergeThinking(body, "type", ujson.Str("disabled"))
-        case ZaiDialect.Family.Unknown => ()
-      }
+      case ZaiDialect.Family.Toggle =>
+        if (off) {
+          mergeThinking(body, "type", ujson.Str("disabled"))
+          EffortMapping.overriddenByOff(options, "thinking disabled")
+        } else Nil // a level this family is not sent is not reported yet: a follow-up under RFC 0008
+      case ZaiDialect.Family.Unknown => Nil
+    }
+    val thinkingReport = (options.thinking, family) match {
+      case (Some(Thinking.Off), f) if f != ZaiDialect.Family.Unknown => Nil
+      case (Some(Thinking.Adaptive), f) if f != ZaiDialect.Family.Unknown =>
+        List(RequestAdjustment.NotNeeded(RequestOption.Thinking, s"$model thinks by default"))
+      case (Some(_), _) =>
+        List(RequestAdjustment.Dropped(RequestOption.Thinking, s"Z.ai takes no such thinking setting for $model"))
+      case (None, _) => Nil
     }
     if (replaysReasoning(body)) mergeThinking(body, "clear_thinking", ujson.False)
-    // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
-    List.empty
+    reasoningReport ++ thinkingReport
   }
-
-  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-
-  /** Whether the GLM-5.3 `ReasoningEffort.None` warning has been logged in this process. */
-  private[provider] val warnedThinkingNotDisabled = new AtomicBoolean(false)
-
-  private def warnThinkingNotDisabled(model: String): Unit =
-    if (warnedThinkingNotDisabled.compareAndSet(false, true))
-      logger.warn(
-        s"Z.ai model $model cannot disable thinking: ReasoningEffort.None is sent as reasoning_effort=low, " +
-          "and thinking tokens are still generated and billed. Logged once per process."
-      )
 
   /** Sets one field of the request's `thinking` object, creating it if absent and keeping its other fields. */
   private def mergeThinking(body: ujson.Obj, field: String, value: ujson.Value): Unit = {

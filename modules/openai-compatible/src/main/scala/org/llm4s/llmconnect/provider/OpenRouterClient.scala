@@ -10,13 +10,15 @@ import org.llm4s.llmconnect.model.{
   ContentPart,
   ReasoningEffort,
   RequestAdjustment,
+  RequestOption,
+  Thinking,
   ThinkingBlock,
   ToolCall
 }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ EffortMapping, ModelRegistryService }
 import org.llm4s.types.{ Result, TryOps }
 
 import scala.util.Try
@@ -204,36 +206,62 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
 
   /**
    * Model type is detected by substring matching on the lower-cased model name.
-   * Anthropic models receive a `thinking` object; OpenAI o1/o3/o4 models receive
-   * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).
-   * An explicit thinking budget with no effort set also enables Anthropic thinking.
+   * Anthropic models receive a `thinking` object with a budget; OpenAI o1/o3/o4 models receive
+   * `reasoning_effort`; all others are left unchanged (reasoning silently ignored, as before).
+   *
+   * For an Anthropic model the budget is `Thinking.Budget`'s, fitted to `[1024, max_tokens)` and
+   * reported `Adjusted` when fitted; with no `thinking`, the default budget of `reasoning`, as before.
+   * `Thinking.Off` sends no thinking block and wins over a `reasoning` also set. `Thinking.Adaptive`
+   * is `Dropped` (this dialect sends Anthropic models a budget only) and the budget comes from
+   * `reasoning`. On any other model a `thinking` is `Dropped`.
    */
   override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
     val modelLower       = model.toLowerCase
     val isAnthropicModel = modelLower.contains("claude") || modelLower.contains("anthropic")
     val isOpenAIReasoningModel =
       modelLower.contains("o1") || modelLower.contains("o3") || modelLower.contains("o4")
+    val maxTokens = options.maxTokens.getOrElse(2048)
 
-    def anthropicThinking(budgetTokens: Int): ujson.Obj = {
-      val maxTokens = options.maxTokens.getOrElse(2048)
-      ujson.Obj("type" -> "enabled", "budget_tokens" -> math.max(1024, math.min(budgetTokens, maxTokens - 1)))
-    }
+    def fitted(budgetTokens: Int): Int = math.max(1024, math.min(budgetTokens, maxTokens - 1))
 
-    options.reasoning match {
-      case Some(effort) if effort != ReasoningEffort.None =>
-        if (isAnthropicModel)
-          body("thinking") = anthropicThinking(
-            options.effectiveBudgetTokens.getOrElse(ReasoningEffort.defaultBudgetTokens(effort))
+    if (isAnthropicModel) {
+      val fromReasoning = options.reasoning.map(ReasoningEffort.defaultBudgetTokens)
+      options.thinking match {
+        case Some(Thinking.Budget(tokens)) =>
+          val sent = fitted(tokens)
+          body("thinking") = ujson.Obj("type" -> "enabled", "budget_tokens" -> sent)
+          if (sent == tokens) Nil
+          else
+            List(
+              RequestAdjustment.Adjusted(
+                RequestOption.Thinking,
+                s"Budget($tokens)",
+                s"Budget($sent)",
+                s"Anthropic takes a budget of at least 1024 and below max_tokens ($maxTokens)"
+              )
+            )
+        case Some(Thinking.Off) => EffortMapping.overriddenByOff(options, "no thinking")
+        case other =>
+          fromReasoning.foreach(budget =>
+            body("thinking") = ujson.Obj("type" -> "enabled", "budget_tokens" -> fitted(budget))
           )
-        else if (isOpenAIReasoningModel) body("reasoning_effort") = effort.name
-      case Some(_) => ()
-      case None =>
-        options.budgetTokens.filter(_ > 0).foreach { budget =>
-          if (isAnthropicModel) body("thinking") = anthropicThinking(budget)
-        }
+          other.toList.map(_ =>
+            RequestAdjustment.Dropped(
+              RequestOption.Thinking,
+              "OpenRouter sends Anthropic models a thinking budget only"
+            )
+          )
+      }
+    } else {
+      if (isOpenAIReasoningModel) options.reasoning.foreach(effort => body("reasoning_effort") = effort.name)
+      // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
+      options.thinking.toList.map(_ =>
+        RequestAdjustment.Dropped(
+          RequestOption.Thinking,
+          s"OpenRouter sends a thinking setting to Anthropic models only"
+        )
+      )
     }
-    // a reasoning effort this dialect does not send for some models is not reported yet: a follow-up under RFC 0008
-    List.empty
   }
 
   override def thinking(obj: ujson.Value): Option[String] =

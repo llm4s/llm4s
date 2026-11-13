@@ -440,9 +440,9 @@ object ModelCapabilities {
    * Reads a model's capabilities from its litellm metadata entry.
    *
    * `supportedReasoningEfforts` follows litellm's convention: a model with `supports_reasoning: true` accepts `low`,
-   * `medium` and `high` unless its entry says `supports_<level>_reasoning_effort: false`. It is `None` when
-   * `supports_reasoning` is absent, and empty when it is `false`. The `minimal`, `xhigh` and `max` keys are read once
-   * [[org.llm4s.llmconnect.model.ReasoningEffort]] has those levels (RFC 0008, PR 4).
+   * `medium` and `high` unless its entry says `supports_<level>_reasoning_effort: false`, and accepts `minimal`,
+   * `xhigh` and `max` only when its entry says `supports_<level>_reasoning_effort: true`. It is `None` when
+   * `supports_reasoning` is absent, and empty when it is `false`. `none` is not a level: it is `supportsThinkingOff`.
    */
   def fromJson(data: ujson.Value): ModelCapabilities = {
     val obj = data.obj
@@ -503,16 +503,21 @@ object ModelCapabilities {
   private val impliedReasoningEfforts: List[ReasoningEffort] =
     List(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
 
+  /** The levels a reasoning model accepts only when its entry says so. */
+  private val optInReasoningEfforts: List[ReasoningEffort] =
+    List(ReasoningEffort.Minimal, ReasoningEffort.XHigh, ReasoningEffort.Max)
+
   private def reasoningEfforts(
     supportsReasoning: Option[Boolean],
     getBool: String => Option[Boolean]
   ): Option[Set[ReasoningEffort]] =
     supportsReasoning.map { reasons =>
       if (!reasons) Set.empty
-      else
-        impliedReasoningEfforts
-          .filterNot(level => getBool(s"supports_${level.name}_reasoning_effort").contains(false))
-          .toSet
+      else {
+        def flag(level: ReasoningEffort) = getBool(s"supports_${level.name}_reasoning_effort")
+        (impliedReasoningEfforts.filterNot(flag(_).contains(false)) ++
+          optInReasoningEfforts.filter(flag(_).contains(true))).toSet
+      }
     }
 }
 

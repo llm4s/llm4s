@@ -126,10 +126,10 @@ trait OpenAICompatibleDialect:
    * Adds provider-specific reasoning fields to a request body, given the configured model and the
    * caller's options, and returns what it could not send, which the client reports on
    * `Completion.adjustments` (RFC 0008). Standard: adds nothing, and reports a set
-   * `CompletionOptions.reasoning` as `Dropped`.
+   * `CompletionOptions.reasoning` or `CompletionOptions.thinking` as `Dropped`.
    */
   def addReasoning(@unused body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] =
-    UnmappedOptions.reasoning(model, options)
+    UnmappedOptions.reasoningAndThinking(model, options)
 
   /**
    * Adds an assistant turn's thinking - its

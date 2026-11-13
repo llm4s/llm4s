@@ -25,7 +25,7 @@ final class CompletionOptionsCheck {
         .presencePenalty(0.5)
         .frequencyPenalty(-0.5)
         .reasoning(JReasoningEffort.HIGH)
-        .budgetTokens(4096)
+        .thinking(JThinking.budget(4096))
         .build();
   }
 
@@ -34,7 +34,7 @@ final class CompletionOptionsCheck {
     return JCompletionOptions.builder()
         .maxTokens(OptionalInt.of(256))
         .reasoning(Optional.of(JReasoningEffort.LOW))
-        .budgetTokens(OptionalInt.of(1024))
+        .thinking(Optional.of(JThinking.adaptive()))
         .build();
   }
 
@@ -43,7 +43,7 @@ final class CompletionOptionsCheck {
     return options.toBuilder()
         .maxTokens(OptionalInt.empty())
         .reasoning(Optional.empty())
-        .budgetTokens(OptionalInt.empty())
+        .thinking(Optional.empty())
         .build();
   }
 
@@ -62,25 +62,49 @@ final class CompletionOptionsCheck {
     double presencePenalty = options.presencePenalty();
     double frequencyPenalty = options.frequencyPenalty();
     Optional<JReasoningEffort> reasoning = options.reasoning();
-    OptionalInt budgetTokens = options.budgetTokens();
+    Optional<JThinking> thinking = options.thinking();
     log.add("temperature:" + temperature);
     log.add("topP:" + topP);
     log.add("maxTokens:" + (maxTokens.isPresent() ? String.valueOf(maxTokens.getAsInt()) : "none"));
     log.add("presencePenalty:" + presencePenalty);
     log.add("frequencyPenalty:" + frequencyPenalty);
     log.add("reasoning:" + reasoning.map(CompletionOptionsCheck::describe).orElse("none"));
-    log.add("budgetTokens:" + (budgetTokens.isPresent() ? String.valueOf(budgetTokens.getAsInt()) : "none"));
+    log.add("thinking:" + thinking.map(JThinking::toString).orElse("none"));
     return log;
   }
 
   /** A {@code switch} over the reasoning levels covers every one. */
   static String describe(JReasoningEffort effort) {
     return switch (effort) {
-      case NONE -> "none";
+      case MINIMAL -> "minimal";
       case LOW -> "low";
       case MEDIUM -> "medium";
       case HIGH -> "high";
+      case XHIGH -> "xhigh";
+      case MAX -> "max";
     };
+  }
+
+  /** Each thinking mode, built and read back from Java. */
+  static List<String> thinkingModes() {
+    List<String> log = new ArrayList<>();
+    JThinking off = JThinking.off();
+    JThinking adaptive = JThinking.adaptive();
+    JThinking budget = JThinking.budget(8000);
+    log.add("off:" + off.isOff() + "," + off.isAdaptive() + "," + off.budgetTokens().isPresent());
+    log.add("adaptive:" + adaptive.isOff() + "," + adaptive.isAdaptive() + "," + adaptive.budgetTokens().isPresent());
+    log.add("budget:" + budget.isOff() + "," + budget.isAdaptive() + "," + budget.budgetTokens().getAsInt());
+    return log;
+  }
+
+  /** The message of the {@code IllegalArgumentException} a budget of {@code tokens} throws, caught in Java. */
+  static String rejectedBudget(int tokens) {
+    try {
+      JThinking.budget(tokens);
+      return "accepted";
+    } catch (IllegalArgumentException e) {
+      return e.getMessage();
+    }
   }
 
   /** A builder is immutable: two options built from one base do not affect each other or it. */

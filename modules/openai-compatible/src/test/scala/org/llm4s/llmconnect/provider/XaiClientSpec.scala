@@ -33,7 +33,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val conversation = Conversation(Seq(SystemMessage("Be brief."), UserMessage("Is 91 prime?")))
 
-  private val efforts = Seq(ReasoningEffort.None, ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
+  private val efforts = ReasoningEffort.values
 
   /** The request bodies `complete` and `streamComplete` send for `model` and `options`. */
   private def sentBodies(
@@ -164,32 +164,68 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
-  "xAI on Grok 4.5 to 4.9" should "send each level by name, and None as low with a warning once" in {
-    XaiDialect.warnedReasoningNotDisabled.set(false)
-    val expected = Map(
-      ReasoningEffort.None   -> "low",
-      ReasoningEffort.Low    -> "low",
-      ReasoningEffort.Medium -> "medium",
-      ReasoningEffort.High   -> "high"
+  "xAI on Grok 4.5 to 4.9" should "send each level it takes by name, and the nearest for the rest" in {
+    val upToHigh = Map[ReasoningEffort, String](
+      ReasoningEffort.Minimal -> "low",
+      ReasoningEffort.Low     -> "low",
+      ReasoningEffort.Medium  -> "medium",
+      ReasoningEffort.High    -> "high",
+      ReasoningEffort.XHigh   -> "high",
+      ReasoningEffort.Max     -> "high"
     )
-    Seq("grok-4.7", "grok-4.6-latest", "GROK-4.5").foreach { model =>
+    // 4.6 and later also take xhigh
+    val withXHigh = upToHigh ++ Map(ReasoningEffort.XHigh -> "xhigh", ReasoningEffort.Max -> "xhigh")
+    Seq("grok-4.7" -> withXHigh, "grok-4.6-latest" -> withXHigh, "GROK-4.5" -> upToHigh).foreach { (model, expected) =>
       efforts.foreach { effort =>
         withClue(s"$model $effort: ")(effortSent(model, effort) shouldBe Seq.fill(2)(Some(expected(effort))))
       }
     }
-    XaiDialect.warnedReasoningNotDisabled.get shouldBe true
+  }
+
+  it should "report a level it sends as another, and nothing for one it takes" in {
+    XaiDialect.addReasoning(ujson.Obj(), "grok-4.5", CompletionOptions().withReasoning(ReasoningEffort.Max)) shouldBe
+      List(RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "grok-4.5 has no max level"))
+    XaiDialect.addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withReasoning(ReasoningEffort.XHigh)) shouldBe
+      Nil
+  }
+
+  it should "send Thinking.Off as low, the least, and report it, over a level also set" in {
+    Seq(
+      CompletionOptions().withThinking(Thinking.Off),
+      CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High)
+    ).foreach(options => sentBodies("grok-4.7", options).foreach(_("reasoning_effort") shouldBe ujson.Str("low")))
+    XaiDialect.addReasoning(
+      ujson.Obj(),
+      "grok-4.7",
+      CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High)
+    ) shouldBe List(
+      RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", "grok-4.7 cannot stop reasoning"),
+      RequestAdjustment.Adjusted(RequestOption.Reasoning, "high", "low", "thinking = Off takes precedence")
+    )
+  }
+
+  it should "report adaptive thinking as not needed and a thinking budget as dropped" in {
+    XaiDialect.addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withThinking(Thinking.Adaptive)) shouldBe
+      List(RequestAdjustment.NotNeeded(RequestOption.Thinking, "grok-4.7 sets how much it reasons by its effort"))
+    XaiDialect
+      .addReasoning(ujson.Obj(), "grok-4.7", CompletionOptions().withThinking(Thinking.budget(2048).toOption.get))
+      .map(_.option) shouldBe List(RequestOption.Thinking)
   }
 
   "xAI on Grok 3 mini" should "send low or high, the two levels it takes" in {
-    val expected = Map(
-      ReasoningEffort.None   -> "low",
-      ReasoningEffort.Low    -> "low",
-      ReasoningEffort.Medium -> "high",
-      ReasoningEffort.High   -> "high"
+    val expected = Map[ReasoningEffort, String](
+      ReasoningEffort.Minimal -> "low",
+      ReasoningEffort.Low     -> "low",
+      ReasoningEffort.Medium  -> "high",
+      ReasoningEffort.High    -> "high",
+      ReasoningEffort.XHigh   -> "high",
+      ReasoningEffort.Max     -> "high"
     )
     efforts.foreach { effort =>
       withClue(s"$effort: ")(effortSent("grok-3-mini-fast", effort) shouldBe Seq.fill(2)(Some(expected(effort))))
     }
+    sentBodies("grok-3-mini-fast", CompletionOptions().withThinking(Thinking.Off))
+      .foreach(_("reasoning_effort") shouldBe ujson.Str("low"))
   }
 
   "xAI on other models" should "send no reasoning_effort, which grok-4 rejects" in {

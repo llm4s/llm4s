@@ -42,6 +42,12 @@ import java.security.MessageDigest
  * rejected request. Everything else on the request - effort, token limits, sampling, the endpoint -
  * is outside what the providers check, and outside the fingerprint.
  *
+ * `CompletionOptions.thinking` is outside it too (RFC 0008, decision 4). Anthropic documents, for
+ * its API and Bedrock alike, that a change of thinking configuration between turns is allowed, and
+ * that one within a turn "doesn't error" but disables thinking for that request; either way the
+ * signed blocks stay valid, and only the prompt cache is invalidated. Fingerprinting `thinking`
+ * would unseal blocks that could have been replayed.
+ *
  * Every client serialises a conversation as a deterministic function of exactly these inputs, so
  * an unchanged fingerprint means an unchanged wire prefix.
  */

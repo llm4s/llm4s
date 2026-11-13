@@ -554,8 +554,10 @@ requested options were not sent as asked from `Completion.adjustments`, a list o
 - adds a `Dropped` for an option its own request mapping cannot send, rather than ignoring it.
 
 An `OpenAICompatibleDialect` does the second through `addReasoning`, which returns what it could not
-send: the standard one reports a set `reasoning` as `Dropped`, and an override that sends it returns
-`List.empty`. `OpenAICompatibleClient` puts the list on the `Completion`.
+send: the standard one reports a set `reasoning` or `thinking` as `Dropped`, and an override that sends them returns
+`List.empty`, or an `Adjusted` for a level it sent as another. `OpenAICompatibleClient` puts the list on the
+`Completion`. `org.llm4s.model.EffortMapping` (`private[llm4s]`) holds the shared pieces llm4s's own clients use: the
+nearest level a model accepts, and the reports for a changed level and for a level `thinking = Off` overrode.
 
 A `RequestTransformer` of your own reports nothing yet. The hook that turns the transformer's drops into
 adjustments, `adjustOptions`, is `private[llm4s]`, so only llm4s's own transformers fill

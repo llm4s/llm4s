@@ -436,20 +436,41 @@ class ModelCapabilitiesSpec extends AnyFlatSpec with Matchers {
     val caps = ModelCapabilities.fromJson(
       ujson.Obj("supports_reasoning" -> true, "supports_none_reasoning_effort" -> true)
     )
-    caps.supportedReasoningEfforts.exists(_.contains(ReasoningEffort.None)) shouldBe false
+    caps.supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
     caps.supportsThinkingOff shouldBe Some(true)
   }
 
-  it should "ignore the minimal, xhigh and max keys until ReasoningEffort has those levels" in {
+  it should "add minimal, xhigh and max only when the entry says so" in {
     ModelCapabilities
       .fromJson(
         ujson.Obj(
           "supports_reasoning"                -> true,
           "supports_minimal_reasoning_effort" -> true,
-          "supports_xhigh_reasoning_effort"   -> true,
+          "supports_xhigh_reasoning_effort"   -> false,
           "supports_max_reasoning_effort"     -> true
         )
       )
-      .supportedReasoningEfforts shouldBe Some(Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High))
+      .supportedReasoningEfforts shouldBe Some(
+      Set(
+        ReasoningEffort.Minimal,
+        ReasoningEffort.Low,
+        ReasoningEffort.Medium,
+        ReasoningEffort.High,
+        ReasoningEffort.Max
+      )
+    )
+  }
+
+  it should "read the effort levels a real Claude Opus 4.7 entry carries" in {
+    val opus47 = ujson.Obj(
+      "supports_reasoning"              -> true,
+      "supports_adaptive_thinking"      -> true,
+      "supports_output_config"          -> true,
+      "supports_xhigh_reasoning_effort" -> true,
+      "supports_max_reasoning_effort"   -> true
+    )
+    ModelCapabilities.fromJson(opus47).supportedReasoningEfforts shouldBe Some(
+      Set(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High, ReasoningEffort.XHigh, ReasoningEffort.Max)
+    )
   }
 }

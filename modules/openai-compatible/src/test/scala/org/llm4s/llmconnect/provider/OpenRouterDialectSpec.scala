@@ -60,7 +60,8 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     )
     high("thinking") shouldBe ujson.Obj("type" -> "enabled", "budget_tokens" -> 4095)
 
-    val low = body("anthropic/claude-3.5-sonnet", CompletionOptions().withBudgetTokens(10), hi)
+    val low =
+      body("anthropic/claude-3.5-sonnet", CompletionOptions().withThinking(Thinking.budget(10).toOption.get), hi)
     low("thinking")("budget_tokens").num shouldBe 1024
   }
 
@@ -69,11 +70,11 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
       ujson.Str(ReasoningEffort.Medium.name)
   }
 
-  it should "send no reasoning fields for other models, for effort None, or for a budget alone on a non-Anthropic model" in {
+  it should "send no reasoning fields for other models, for thinking off, or for a budget alone on a non-Anthropic model" in {
     val keys = Seq(
       body("meta-llama/llama-3-70b", CompletionOptions().withReasoning(ReasoningEffort.High), hi),
-      body("anthropic/claude-3.5-sonnet", CompletionOptions().withReasoning(ReasoningEffort.None), hi),
-      body("openai/o3-mini", CompletionOptions().withBudgetTokens(4096), hi)
+      body("anthropic/claude-3.5-sonnet", CompletionOptions().withThinking(Thinking.Off), hi),
+      body("openai/o3-mini", CompletionOptions().withThinking(Thinking.budget(4096).toOption.get), hi)
     ).flatMap(_.obj.keySet)
     keys should contain noneOf ("thinking", "reasoning_effort")
   }

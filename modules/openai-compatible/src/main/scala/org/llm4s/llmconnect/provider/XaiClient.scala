@@ -4,12 +4,11 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.XaiConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ EffortMapping, ModelRegistryService }
 import org.llm4s.types.{ Result, TryOps }
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -111,33 +110,56 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
    *
    * xAI's reasoning models cannot stop reasoning; the effort sets only how much:
    *  - Grok 4.5 to 4.9 (`grok-4.5`, `grok-4.6`, `grok-4.7` and their `-latest` aliases) take
-   *    `low`, `medium` and `high` (their default; 4.6 and later also `xhigh`). Each level sends
-   *    its own name; `None` sends `low`, the least they allow, and logs a warning once per
-   *    process, because the model still reasons and its reasoning tokens are still billed.
-   *  - Grok 3 mini takes `low` and `high` only. `None` and `Low` send `low`; `Medium` and `High`
-   *    send `high`.
+   *    `low`, `medium` and `high` (their default), and 4.6 and later also `xhigh`. Each level sends
+   *    its own name; one the model lacks sends the nearest it has, reported `Adjusted`.
+   *  - Grok 3 mini takes `low` and `high` only. `Minimal` and `Low` send `low`; `Medium` and above
+   *    send `high`, each reported `Adjusted` where the name changes.
    *  - Any other model is sent nothing: `grok-4` and its fast variants reject the parameter, and
    *    on `grok-4.20-multi-agent` it sets the number of agents, not the depth of reasoning.
    *
-   * With `reasoning` unset nothing is sent for it.
+   * `Thinking.Off` sends `low`, the least these models allow, reported `Adjusted`: the model still
+   * reasons and its reasoning tokens are still billed. It wins over a `reasoning` also set.
+   * `Thinking.Adaptive` is `NotNeeded` (the effort is all xAI takes) and `Thinking.Budget` is
+   * `Dropped`. With neither set nothing is sent for them.
    */
   override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] = {
-    options.reasoning.foreach { effort =>
-      XaiDialect.family(model) match {
-        case XaiDialect.Family.Effort =>
-          if (effort == ReasoningEffort.None) warnReasoningNotDisabled(model)
-          body("reasoning_effort") = effort match {
-            case ReasoningEffort.None | ReasoningEffort.Low => "low"
-            case ReasoningEffort.Medium                     => "medium"
-            case ReasoningEffort.High                       => "high"
-          }
-        case XaiDialect.Family.LowHigh =>
-          body("reasoning_effort") = effort match {
-            case ReasoningEffort.None | ReasoningEffort.Low    => "low"
-            case ReasoningEffort.Medium | ReasoningEffort.High => "high"
-          }
-        case XaiDialect.Family.Other => ()
-      }
+    val family = XaiDialect.family(model)
+    val levels: Option[Seq[ReasoningEffort]] = family match {
+      case XaiDialect.Family.Effort =>
+        val base = Seq(ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
+        Some(if (XaiDialect.takesXHigh(model)) base :+ ReasoningEffort.XHigh else base)
+      case XaiDialect.Family.LowHigh => Some(Seq(ReasoningEffort.Low, ReasoningEffort.High))
+      case XaiDialect.Family.Other   => None
+    }
+    val reasoningReport = levels match {
+      case None => Nil // a reasoning effort a Family.Other model is not sent is not reported yet: a follow-up
+      case Some(accepted) =>
+        options.thinking match {
+          case Some(Thinking.Off) =>
+            body("reasoning_effort") = "low"
+            RequestAdjustment.Adjusted(RequestOption.Thinking, "Off", "low", s"$model cannot stop reasoning") ::
+              EffortMapping.overriddenByOff(options, "low")
+          case _ =>
+            options.reasoning.toList.flatMap { effort =>
+              val sent =
+                if (family == XaiDialect.Family.LowHigh)
+                  // as before RFC 0008: Medium rounds up, to high
+                  if (ReasoningEffort.values.indexOf(effort) >= ReasoningEffort.values.indexOf(ReasoningEffort.Medium))
+                    "high"
+                  else "low"
+                else EffortMapping.nearest(effort, accepted.toSet).name
+              body("reasoning_effort") = sent
+              EffortMapping.level(model, effort, sent)
+            }
+        }
+    }
+    val thinkingReport = (options.thinking, levels) match {
+      case (Some(Thinking.Off), Some(_)) => Nil // reported with the effort it was sent as
+      case (Some(Thinking.Adaptive), Some(_)) =>
+        List(RequestAdjustment.NotNeeded(RequestOption.Thinking, s"$model sets how much it reasons by its effort"))
+      case (Some(_), _) =>
+        List(RequestAdjustment.Dropped(RequestOption.Thinking, s"xAI takes no thinking setting for $model"))
+      case (None, _) => Nil
     }
     // a reasoning model rejects the penalties, so they are left out and reported (the client logs them once)
     val penalties =
@@ -145,29 +167,17 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
     val unsent =
       if (XaiDialect.isReasoningModel(model)) penalties.filter((field, _) => body.value.contains(field)) else Nil
     unsent.foreach((field, _) => body.value.remove(field))
-    // a reasoning effort a Family.Other model is not sent is not reported yet: a follow-up under RFC 0008
-    unsent.toList.map((field, option) =>
+    reasoningReport ++ thinkingReport ++ unsent.toList.map((field, option) =>
       RequestAdjustment.Dropped(option, s"$model is a reasoning model, which rejects $field")
     )
   }
-
-  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-
-  /** Whether the `ReasoningEffort.None` warning has been logged in this process. */
-  private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
-
-  private def warnReasoningNotDisabled(model: String): Unit =
-    if (warnedReasoningNotDisabled.compareAndSet(false, true))
-      logger.warn(
-        s"xAI model $model cannot disable reasoning: ReasoningEffort.None is sent as reasoning_effort=low, " +
-          "and reasoning tokens are still generated and billed. Logged once per process."
-      )
 
   /** How a Grok model takes `reasoning_effort`. */
   private[provider] enum Family:
     case Effort, LowHigh, Other
 
   private val EffortModel  = """grok-4\.[5-9](?:-.*)?""".r
+  private val XHighModel   = """grok-4\.[6-9](?:-.*)?""".r
   private val LowHighModel = """grok-3-mini(?:-.*)?""".r
 
   /** The family of a configured model id, matched case-insensitively. */
@@ -177,6 +187,9 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
       case LowHighModel() => Family.LowHigh
       case _              => Family.Other
     }
+
+  /** Whether a [[Family.Effort]] model also takes `xhigh`: Grok 4.6 and later. */
+  private[provider] def takesXHigh(model: String): Boolean = XHighModel.matches(model.toLowerCase)
 
   private val ReasoningModel =
     """grok-(?:3-mini|4|4\.[5-9]|4\.20-multi-agent|4\.20(?:-.*)?-reasoning|code-fast)(?:-.*)?""".r
