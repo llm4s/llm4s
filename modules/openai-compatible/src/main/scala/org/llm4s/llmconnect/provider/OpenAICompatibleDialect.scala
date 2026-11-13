@@ -4,13 +4,17 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{
   CompletionOptions,
   ContentPart,
+  RequestAdjustment,
   ResponseFormat,
   ResponseFormatMapper,
   ThinkingBlock,
   ToolCall
 }
 import org.llm4s.media.MediaSource
+import org.llm4s.model.UnmappedOptions
 import org.llm4s.util.BoundedJson
+
+import scala.annotation.unused
 
 /**
  * The places where an OpenAI-compatible provider departs from the plain
@@ -119,11 +123,13 @@ trait OpenAICompatibleDialect:
   def streamUsageOption: Boolean = true
 
   /**
-   * Adds provider-specific reasoning fields to a request body, given the
-   * configured model and the caller's options. Standard: adds nothing, so
-   * `CompletionOptions.reasoning` is ignored.
+   * Adds provider-specific reasoning fields to a request body, given the configured model and the
+   * caller's options, and returns what it could not send, which the client reports on
+   * `Completion.adjustments` (RFC 0008). Standard: adds nothing, and reports a set
+   * `CompletionOptions.reasoning` or `CompletionOptions.thinking` as `Dropped`.
    */
-  def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = ()
+  def addReasoning(@unused body: ujson.Obj, model: String, options: CompletionOptions): List[RequestAdjustment] =
+    UnmappedOptions.reasoningAndThinking(model, options)
 
   /**
    * Adds an assistant turn's thinking - its

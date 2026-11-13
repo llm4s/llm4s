@@ -102,8 +102,10 @@ import scala.util.{ Try, Using }
  * OpenAI's gpt-oss models, `openai/gpt-oss-*`, which IBM's clients send it to (`JAVA` ChatServiceThinkingTest;
  * LCIBM chat_models.py:657-690). Any other model is sent nothing, and a warning is logged once per process: IBM's
  * Model Gateway rejects the parameter for models without it (`JAVA` ModelGatewayChatServiceIT), and whether the
- * chat API does is unchecked. The chat API has no value that turns reasoning off, so `ReasoningEffort.None` is
- * sent as `low`, the least, with a warning logged once per process ([[WatsonXClient.reasoningEffortValue]]).
+ * chat API does is unchecked. The chat API has no value that turns reasoning off, so `Thinking.Off` is sent as
+ * `low`, the least, winning over a `reasoning` also set, with a warning logged once per process; `Minimal` is sent
+ * as `low` and `XHigh` and `Max` as `high` ([[WatsonXClient.reasoningEffortValue]]). `Thinking.Adaptive` and
+ * `Thinking.Budget` have no counterpart and are not sent (this client reports no adjustments yet).
  * `include_reasoning` is not sent: it defaults to true (NODE types/vml_v1.ts:858).
  *
  * A reply's reasoning is read as thinking, from any model: `message.reasoning_content` on `complete` (NODE
@@ -517,9 +519,13 @@ class WatsonXClient(
     if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
-    options.reasoning.foreach { effort =>
-      if (takesReasoningEffort(config.model)) body("reasoning_effort") = reasoningEffortValue(config.model, effort)
-      else warnReasoningNotSent(config.model)
+    val off = options.thinking.contains(Thinking.Off)
+    if (off || options.reasoning.isDefined) {
+      if (!takesReasoningEffort(config.model)) warnReasoningNotSent(config.model)
+      else if (off) {
+        warnReasoningNotDisabled(config.model)
+        body("reasoning_effort") = "low"
+      } else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
@@ -707,19 +713,16 @@ object WatsonXClient {
 
   /**
    * A [[ReasoningEffort]] as the chat API's `reasoning_effort`, which takes `low`, `medium` and `high` (NODE
-   * types/vml_v1.ts:860-864). `None` has no counterpart, since the models that take the field always reason: it is
-   * sent as `low`, the least, and a warning naming `model` is logged once per process.
+   * types/vml_v1.ts:860-864): `Minimal` is sent as `low` and `XHigh` and `Max` as `high`, the nearest it takes.
+   * Turning reasoning off has no counterpart (see the class Scaladoc).
    */
-  private[provider] def reasoningEffortValue(model: String, effort: ReasoningEffort): String = effort match {
-    case ReasoningEffort.None =>
-      warnReasoningNotDisabled(model)
-      "low"
-    case ReasoningEffort.Low    => "low"
-    case ReasoningEffort.Medium => "medium"
-    case ReasoningEffort.High   => "high"
+  private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort match {
+    case ReasoningEffort.Minimal | ReasoningEffort.Low                      => "low"
+    case ReasoningEffort.Medium                                             => "medium"
+    case ReasoningEffort.High | ReasoningEffort.XHigh | ReasoningEffort.Max => "high"
   }
 
-  /** Whether the `ReasoningEffort.None` warning has been logged in this process. */
+  /** Whether the `Thinking.Off` warning has been logged in this process. */
   private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
 
   /** Whether the warning that a model is not sent `reasoning_effort` has been logged in this process. */
@@ -728,7 +731,7 @@ object WatsonXClient {
   private def warnReasoningNotDisabled(model: String): Unit =
     if (warnedReasoningNotDisabled.compareAndSet(false, true))
       logger.warn(
-        s"watsonx model $model cannot turn reasoning off: ReasoningEffort.None is sent as reasoning_effort=low, " +
+        s"watsonx model $model cannot turn reasoning off: Thinking.Off is sent as reasoning_effort=low, " +
           "and the model still reasons. Logged once per process."
       )
 
@@ -736,7 +739,7 @@ object WatsonXClient {
     if (warnedReasoningNotSent.compareAndSet(false, true))
       logger.warn(
         s"watsonx model $model is not known to take reasoning_effort (only openai/gpt-oss-* models are sent it): " +
-          "CompletionOptions.reasoning is not sent. Logged once per process."
+          "CompletionOptions.reasoning and Thinking.Off are not sent. Logged once per process."
       )
 
   /**

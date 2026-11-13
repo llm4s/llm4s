@@ -301,6 +301,33 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     chunks should have size 2
   }
 
+  it should "report a requested reasoning effort as dropped, from complete and from a stream (RFC 0008)" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .onCall((_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right(
+          StreamingHttpResponse(
+            200,
+            new ByteArrayInputStream(
+              "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n"
+                .getBytes(StandardCharsets.UTF_8)
+            )
+          )
+        )
+      )
+    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
+    val dropped = List(
+      RequestAdjustment
+        .Dropped(RequestOption.Reasoning, s"reasoning effort is not sent to ${testConfig.model} by this client")
+    )
+
+    client.complete(conversation("Hi"), reasoning).toOption.value.adjustments shouldBe dropped
+    client.streamComplete(conversation("Hi"), reasoning, _ => ()).toOption.value.adjustments shouldBe dropped
+    client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
+  }
+
   it should "report grounding sources from the stream as citations" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}," +
