@@ -8,7 +8,7 @@ nav_order: 8
 
 # RFC 0008: Generation controls and reported adjustments
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Author(s):** @jwgcooke
 - **Tracking issue:** [#2115](https://github.com/llm4s/llm4s/issues/2115)
 - **Pull request:** [#2445](https://github.com/llm4s/llm4s/pull/2445)
@@ -21,7 +21,7 @@ and PRs 1–6 throughout, so the two never share a number.
 - **Part 1: Reported adjustments.** Today, when a provider or model can't honour a request option, it is dropped and
   logged only at DEBUG. This part reports each such drop to the caller instead. `RequestTransformer`'s existing
   violations become a public value, `RequestAdjustment`. Every `Completion`, streamed or not, carries them, and so
-  does an agent's `ModelCallCompleted` event. Purely additive.
+  does an agent's `ModelCallCompleted` event. Additive, apart from one provider-SPI change (decision 13).
 - **Part 2: Thinking, separated from effort.** `CompletionOptions` gains `thinking: Option[Thinking]` (`Off`,
   `Adaptive`, `Budget(n)`). `ReasoningEffort` keeps its name and its meaning (how hard to think) and gains the levels
   providers now accept. Two members that blur the two ideas go, as a clean break before the MiMa baseline:
@@ -82,19 +82,19 @@ for Anthropic, and multi-provider callers keep losing settings without notice.
 
 ### Part 1: Reported adjustments
 
-A public, `@Experimental` value describing what happened to one requested option. The option is typed, so a
+A public, `@Stable` value describing what happened to one requested option. The option is typed, so a
 caller's `match` on it is checked by the compiler and survives a field rename:
 
 ```scala
 package org.llm4s.llmconnect.model
 
-@Experimental
+@Stable
 enum RequestOption derives ReadWriter {
   case Temperature, TopP, MaxTokens, PresencePenalty, FrequencyPenalty, Tools, ResponseFormat,
        Reasoning, Thinking, PromptCache
 }
 
-@Experimental
+@Stable
 enum RequestAdjustment derives ReadWriter {
   /** The option was not sent: the provider or model cannot honour it. */
   case Dropped(option: RequestOption, reason: String)
@@ -109,9 +109,10 @@ enum RequestAdjustment derives ReadWriter {
 }
 ```
 
-`RequestOption` names each `CompletionOptions` field that can be adjusted. A field added later adds a case, under
-the same `@Experimental` tier. `reason`, `requested` and `sent` stay strings: they are for people and logs, not for
-matching.
+`RequestOption` names each `CompletionOptions` field that can be adjusted. A field added later adds a case. Both
+types are `@Stable` because `Completion` and `TransformationResult`, which are `@Stable`, expose them, and a `@Stable`
+signature may not name an `@Experimental` type (#1818; decision 12). `reason`, `requested` and `sent` stay strings:
+they are for people and logs, not for matching.
 
 **Where they come from.** There are two sources, both pure, and the result is one list:
 
@@ -316,16 +317,18 @@ below).
 ## Compatibility impact
 
 - **Modules and tiers:** `llm4s-core` (Frozen at 1.0): `CompletionOptions`, `ReasoningEffort`, `Completion`,
-  `TransformationResult` and `ModelCapabilities` change. `RequestOption`, `RequestAdjustment`, `Thinking` and
-  `PromptCache` are new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
-  Provider modules change only internally. `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
+  `TransformationResult` and `ModelCapabilities` change. `RequestOption` and `RequestAdjustment` are new and
+  `@Stable` (decision 12); `Thinking` and `PromptCache` are new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
+  Provider modules change only internally, except `llm4s-openai-compatible`: `OpenAICompatibleDialect.addReasoning`
+  returns the `List[RequestAdjustment]` it could not send instead of `Unit` (decision 13). `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
   `NONE` and gains `MINIMAL`, `XHIGH` and `MAX`, `JCompletionOptions` loses `budgetTokens` and gains `thinking`, and
   the Kotlin `CompletionOptionsDsl` swaps its `budgetTokens` property for `thinking`.
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
   `ModelCallCompleted`). Part 2 breaks code that uses `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None`
-  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels.
+  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels. Part 1 also breaks an
+  `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
 - **Behaviour:** a call that compiles after PR 4 sends the same request as before, except a `reasoning`-only call to
   a model that rejects a thinking budget, which fails today and now succeeds with `output_config.effort`. The new
   parts come into play only through the new setters. Two visible additions from PR 1:
@@ -337,7 +340,9 @@ below).
 
 ## Migration
 
-Parts 1 and 3 need none. Part 2 (PR 4):
+Part 3 needs none. Part 1 needs one change, and only for an `OpenAICompatibleDialect` that overrides
+`addReasoning`: it returns what it did not send (PR 1, decision 13; `docs/reference/migration.md` has the
+before and after). Part 2 (PR 4):
 
 ```scala
 // Before
@@ -359,8 +364,8 @@ One behaviour to note: on OpenAI, `ReasoningEffort.None` sent no `reasoning_effo
 while `Thinking.Off` asks for the lowest effort the model accepts. A caller who wants the provider default sets
 neither.
 
-The CHANGELOG gets **Added** entries for each PR and, for PR 4, one line under `### Breaking changes`.
-`docs/reference/migration.md` gets a section for PR 4, and `docs/guide/cost-controls.md` documents the mapping
+The CHANGELOG gets **Added** entries for each PR and, for PR 1 and PR 4, one line each under
+`### Breaking changes`. `docs/reference/migration.md` gets a section for each of those two, and `docs/guide/cost-controls.md` documents the mapping
 table, the precedence rule and its exception, and the cache warm-up pattern.
 
 New controls, for reference:
@@ -376,7 +381,10 @@ completion.adjustments                                 // what was dropped, adju
 Each PR has its own review:
 
 1. **PR 1 (Part 1).** `RequestOption` and `RequestAdjustment` on `TransformationResult` and `Completion`, the
-   transformer's existing drops reported, and per-client, capped warn-once logging. No new options.
+   transformer's existing drops reported, a `reasoning` that Gemini, Vertex AI, Bedrock, Ollama and the standard
+   OpenAI-compatible dialect do not send reported as `Dropped` (decision 13), the sampling options OpenAI leaves out of a
+   reasoning model's request reported when set away from their defaults, and per-client, capped warn-once
+   logging. No new options.
 2. **PR 2 (Part 1).** `AgentEvents.ModelCallCompleted.adjustments`, filled from each call's `Completion`.
 3. **PR 3 (Part 2).** `ModelCapabilities` reads the metadata keys above, plus `supportsBudgetThinking` from the
    overrides file.
@@ -424,6 +432,23 @@ The review of this PR settled these:
 10. **Warn-once state is per client, thread-safe and capped at 256 entries.**
 11. **A `reasoning`-only request to a model that rejects a thinking budget maps to `output_config.effort`**, driven
     by `supportsBudgetThinking` in the overrides file.
+
+PR 1 settled these:
+
+12. **`RequestOption` and `RequestAdjustment` are `@Stable`**, not `@Experimental` as first written. `Completion`
+    and `TransformationResult` are `@Stable` and expose them, and `stabilityTierCheck` (#1818) rejects a `@Stable`
+    signature that names an `@Experimental` type unless the member itself is marked `@Experimental`. Marking
+    `adjustments` and `withAdjustments` that way was the alternative; the maintainers chose promotion in review,
+    since the design is settled by this RFC.
+13. **PR 1 also reports the provider-side drops that #2115's three-PR plan put in its first step**: a `reasoning`
+    ignored by Gemini, Vertex AI, Bedrock, Ollama and the standard OpenAI-compatible dialect. The OpenAI client reports the
+    sampling options (`temperature`, `top_p`, the penalties) a reasoning model's request leaves out, replacing the
+    transformer's report for the same option, since nothing is sent for it. Each is reported only when set away from
+    its `CompletionOptions` default, so a default call reports no `Dropped` that a caller treating one as a failure
+    would trip on; an explicit value equal to the default goes unreported, since it cannot be told apart. `addReasoning` returns
+    what it could not send, as "Where they come from" describes, which for xAI includes the penalties it strips from
+    a reasoning model's request. The dialects that map reasoning themselves (Z.ai,
+    xAI, OpenRouter) report nothing new yet; a level one of them leaves unsent is a follow-up under this RFC.
 
 ## Open questions
 
