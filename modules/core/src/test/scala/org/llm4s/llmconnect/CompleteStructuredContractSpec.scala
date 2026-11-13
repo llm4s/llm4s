@@ -76,7 +76,7 @@ class CompleteStructuredContractSpec extends AnyFlatSpec with Matchers {
       presencePenalty = 0.1,
       frequencyPenalty = 0.2,
       reasoning = Some(ReasoningEffort.High),
-      budgetTokens = Some(2048)
+      thinking = Thinking.budget(2048).toOption
     )
     val c = okClient
     c.completeStructured[Person](conv, personSchema, callerOpts)

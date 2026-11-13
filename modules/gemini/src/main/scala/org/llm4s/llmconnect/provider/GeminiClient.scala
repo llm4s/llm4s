@@ -15,7 +15,7 @@ import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -106,6 +106,13 @@ class GeminiClient(
   // the references Gemini takes: web URLs and this provider's uploaded files
   private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
 
+  // what the transformer dropped, and what `reasoning` and `thinking` were sent as (see GeminiThinking), goes
+  // on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
+  // the model's registry capabilities, looked up once: the registry is a static snapshot
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -127,10 +134,13 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
+        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val adjustments  = transformed.adjustments ++ thinkingPlan.adjustments
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
-        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-        val requestText             = requestBody.render()
-        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=$key"
+        val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
+        val requestText = requestBody.render()
+        val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=$key"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
@@ -146,6 +156,7 @@ class GeminiClient(
               if (response.statusCode >= 200 && response.statusCode < 300)
                 parseCompletionResponse(response.body).map(c =>
                   c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
+                    .withAdjustments(adjustments)
                 )
               else handleErrorResponse(response.statusCode, response.body, response.headers)
             }.toEither.left
@@ -178,10 +189,13 @@ class GeminiClient(
       )
       .flatMap(transformed => requestKey().map(transformed -> _))
       .flatMap { (transformed, key) =>
+        val thinkingPlan = GeminiThinking.plan(config.model, transformed.options, capabilities)
+        val adjustments  = transformed.adjustments ++ thinkingPlan.adjustments
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
-        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-        val requestText             = requestBody.render()
-        val url                     = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=$key&alt=sse"
+        val requestBody = buildRequestBody(transformedConversation, transformed.options, thinkingPlan.thinkingConfig)
+        val requestText = requestBody.render()
+        val url         = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=$key&alt=sse"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
@@ -257,6 +271,7 @@ class GeminiClient(
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
+                      .withAdjustments(adjustments)
                   }
                 )
 
@@ -282,7 +297,8 @@ class GeminiClient(
    */
   private def buildRequestBody(
     conversation: Conversation,
-    options: CompletionOptions
+    options: CompletionOptions,
+    thinkingConfig: Option[ujson.Obj]
   ): ujson.Value = {
     val contents    = scala.collection.mutable.ArrayBuffer[ujson.Value]()
     var systemInstr = Option.empty[String]
@@ -361,6 +377,7 @@ class GeminiClient(
       "topP"        -> options.topP
     )
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
+    thinkingConfig.foreach(tc => generationConfig("thinkingConfig") = tc)
 
     options.responseFormat.foreach {
       case ResponseFormat.Json =>

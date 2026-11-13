@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory
  *
  * This example shows how to:
  * - Configure reasoning effort levels
- * - Use explicit budget tokens for Anthropic
+ * - Use an explicit thinking budget or adaptive thinking
  * - Access thinking content from completions
  * - Track thinking token usage
  *
@@ -90,16 +90,23 @@ object ReasoningModesExample {
       logger.info("  {}: {} tokens", effort.name, tokens)
     }
 
-    // 4. With explicit budget tokens (overrides reasoning effort)
-    logger.info("\nWith explicit budgetTokens (16000):")
-    val explicitBudget = CompletionOptions()
-      .withReasoning(ReasoningEffort.High)
-      .withBudgetTokens(16000)
-    logger.info("  reasoning: {}", explicitBudget.reasoning.map(_.name))
-    logger.info("  budgetTokens: {}", explicitBudget.budgetTokens)
-    logger.info("  effectiveBudgetTokens: {} (overrides High's 32768)", explicitBudget.effectiveBudgetTokens)
+    // 4. With an explicit thinking budget (wins over the reasoning effort's)
+    logger.info("\nWith an explicit Thinking.budget(16000):")
+    Thinking.budget(16000).map(CompletionOptions().withReasoning(ReasoningEffort.High).withThinking) match {
+      case Right(explicitBudget) =>
+        logger.info("  reasoning: {}", explicitBudget.reasoning.map(_.name))
+        logger.info("  thinking: {}", explicitBudget.thinking)
+        logger.info("  effectiveBudgetTokens: {} (overrides High's 32768)", explicitBudget.effectiveBudgetTokens)
+      case Left(error) => logger.error("  {}", error.message)
+    }
 
-    // 5. Parsing from string
+    // 5. Adaptive thinking: the model decides how much to think, at the effort asked for
+    val adaptive = CompletionOptions().withThinking(Thinking.Adaptive).withReasoning(ReasoningEffort.Low)
+    logger.info("\nWith Thinking.Adaptive and ReasoningEffort.Low:")
+    logger.info("  hasReasoning: {}", adaptive.hasReasoning)
+    logger.info("  effectiveBudgetTokens: {} (none: the model decides)", adaptive.effectiveBudgetTokens)
+
+    // 6. Parsing from string
     logger.info("\nParsing ReasoningEffort from strings:")
     Seq("low", "MEDIUM", "high", "invalid").foreach { s =>
       val result = ReasoningEffort.fromString(s)

@@ -357,6 +357,50 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     chunks should have size 2
   }
 
+  // RFC 0008 (#2115): Gemini's request carries no reasoning setting, so a requested one is reported, not dropped silently
+  it should "report a requested reasoning effort as dropped, from complete and from a stream" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(successBody)))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .onCall((_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right(
+          StreamingHttpResponse(
+            200,
+            new ByteArrayInputStream(
+              "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n"
+                .getBytes(StandardCharsets.UTF_8)
+            )
+          )
+        )
+      )
+    val client    = mkClient(mockHttp)
+    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
+    val dropped = List(
+      RequestAdjustment.Dropped(
+        RequestOption.Reasoning,
+        "reasoning effort is not sent to gemini-2.0-flash by this client"
+      )
+    )
+
+    client.complete(conversation("Hi"), reasoning).toOption.value.adjustments shouldBe dropped
+    client.streamComplete(conversation("Hi"), reasoning, _ => ()).toOption.value.adjustments shouldBe dropped
+    client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
+  }
+
+  it should "send thinking as generationConfig.thinkingConfig: a budget on 2.5, a level on 3 and later" in {
+    requestBody(testConfig.withModel("gemini-2.5-flash"), CompletionOptions().withThinking(Thinking.Off))(
+      "generationConfig"
+    )("thinkingConfig") shouldBe ujson.Obj("thinkingBudget" -> 0)
+    requestBody(testConfig.withModel("gemini-3-pro-preview"), CompletionOptions().withReasoning(ReasoningEffort.High))(
+      "generationConfig"
+    )("thinkingConfig") shouldBe ujson.Obj("thinkingLevel" -> "HIGH")
+    requestBody(testConfig, CompletionOptions().withReasoning(ReasoningEffort.High))(
+      "generationConfig"
+    ).obj.keySet should
+      not contain "thinkingConfig"
+  }
+
   it should "report grounding sources from the stream as citations, however the chunks carry them" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +

@@ -378,6 +378,21 @@ Great for cost-conscious projects and high-volume applications.
 - Very fast inference latency
 - Strong code generation capabilities
 
+### Thinking
+
+`CompletionOptions.thinking` and `reasoning` go in `generationConfig.thinkingConfig`, for `gemini` and `vertexai`
+alike, by model generation ([Cost controls](cost-controls.md#thinking-and-reasoning-effort)):
+
+| Model | `thinking` | `reasoning` |
+|---|---|---|
+| Gemini 2.5 Pro | `thinkingBudget`: `Off` → 128 (it cannot turn thinking off; reported), `Adaptive` → -1, `Budget(n)` fitted to 128-32,768 | dropped: no level |
+| Gemini 2.5 Flash, Flash-Lite | `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` fitted to 1-24,576 (Flash-Lite 512-24,576) | dropped: no level |
+| Gemini 3 and later | `Off` → the lowest `thinkingLevel` (reported), `Adaptive` not needed, `Budget` dropped | `thinkingLevel`: `MINIMAL` (Flash models), `LOW`, `MEDIUM`, `HIGH`, `XHIGH` (Gemini 4 Hydrogen); another level is sent as the nearest (reported) |
+| Gemini 2.0 and earlier, image, audio and speech models | dropped | dropped |
+
+A request never carries both `thinkingBudget` and `thinkingLevel`, which Gemini rejects. Whatever was not sent as
+asked is on `Completion.adjustments`.
+
 ---
 
 ### Google Search grounding
@@ -532,8 +547,9 @@ Behaviour to know about:
   depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
 - **Reasoning.** `CompletionOptions.reasoning` goes as `reasoning_effort` (`Low`, `Medium` and `High` as
   `low`, `medium` and `high`) to OpenAI's gpt-oss models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b` and
-  their variants), the models IBM's own clients send it to. The chat API has no value that turns reasoning
-  off, so `ReasoningEffort.None` goes as `low`, and a warning is logged once per process. Any other model
+  their variants), the models IBM's own clients send it to; `Minimal` goes as `low`, and `XHigh` and `Max` as `high`.
+  The chat API has no value that turns reasoning off, so `Thinking.Off` goes as `low`, and a warning is logged once per
+  process. Any other model
   is sent nothing for `reasoning`, again with a warning logged once per process: IBM's Model Gateway
   rejects the field for models without it, and whether the chat API does is unconfirmed.
   `include_reasoning` is not sent; the service defaults it to true.
@@ -541,7 +557,7 @@ Behaviour to know about:
   `Completion.thinking` on `complete`, and `StreamedChunk.thinkingDelta` on a stream, with the whole
   text on the final completion. It is not sent back on later turns. The chat API reports no reasoning
   token count, so `TokenUsage.thinkingTokens` stays empty (IBM's recorded replies suggest the
-  reasoning is counted in `completion_tokens`). `budgetTokens` has no counterpart and is ignored. Granite models that put their
+  reasoning is counted in `completion_tokens`). `Thinking.Adaptive` and `Thinking.Budget` have no counterpart and are ignored. Granite models that put their
   reasoning inside the content between tags (`<think>...</think>`) are not split: that text stays in
   `content`. The field names come from IBM's SDKs and from replies IBM's Java SDK recorded from
   `openai/gpt-oss-120b`; like the rest of this section, they are unconfirmed until the probe suite runs.
@@ -680,7 +696,7 @@ llm4s sees is the **deployment name**, which need not name the model behind it. 
   reasoning effort, since asking is the only sign it is a reasoning model. The request then
   also follows the reasoning-model rules: `max_completion_tokens`, and no sampling parameters.
   Asking for reasoning on such a deployment that is not a reasoning model gets an error from
-  Azure; leave `reasoning` unset (or `ReasoningEffort.None`) for it.
+  Azure; leave `reasoning` and `thinking` unset for it.
 
 ### Streamed token usage
 
@@ -793,23 +809,26 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. For a Claude model,
+`Thinking.Budget(n)` is the budget, fitted to `[1024, maxTokens)`, and `Thinking.Off` sends no thinking block;
+any other `thinking` is reported as dropped.
 
 Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
 `reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with
 the effort, and `High` sends `max`, Z.ai's maximum and its default, so no level reasons more than
 `High`:
 
-| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+| Model | `Thinking.Off` | `Minimal`, `Low` | `Medium` | `High`, `XHigh`, `Max` |
 |---|---|---|---|---|
 | GLM-5.3, GLM-5.3-Flash, GLM-5.3-FlashX | `reasoning_effort: low` | `low` | `high` | `max` |
 | GLM-5.2 | `reasoning_effort: none` | `low` | `medium` | `max` |
 | GLM-5.1, GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 (and variants) | `thinking.type: disabled` | not sent | not sent | not sent |
 | any other model | not sent | not sent | not sent | not sent |
 
-GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `None` gets the lowest effort it
-accepts, as Z.ai advises; it still produces, and bills, thinking tokens, and the first such request
-in a process logs a warning naming the model. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
+GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `Thinking.Off` gets the lowest effort
+it accepts, as Z.ai advises; it still produces, and bills, thinking tokens, which the completion reports
+as an `Adjusted` adjustment naming the model. `Thinking.Off` wins over a `reasoning` also set. `Minimal`
+and `XHigh` have no Z.ai level of their own and are reported as adjusted. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
 accepts `none`, `low`, `medium`, `high` and `max`, but Z.ai currently runs `low` and `medium` as
 `high` on it; llm4s still sends the level requested. The GLM-4.x and earlier GLM-5 models document
 no `reasoning_effort`. With `reasoning` unset, neither field is sent. A GLM thinking
@@ -1598,18 +1617,19 @@ structured output, model listing (`/v1/models`) and exchange logging.
   `usage.completion_tokens_details.reasoning_tokens`. xAI counts them outside `completion_tokens`
   and inside `total_tokens`.
 - **Reasoning effort.** `CompletionOptions.reasoning` is sent as `reasoning_effort` where the model
-  takes it. xAI's reasoning models cannot stop reasoning, so `None` sends the lowest level, and the
-  first such request in a process logs a warning:
+  takes it, a level the model lacks as the nearest it has (reported as adjusted). xAI's reasoning models
+  cannot stop reasoning, so `Thinking.Off` sends the lowest level, reported as adjusted:
 
-| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
-|---|---|---|---|---|
-| `grok-4.5`, `grok-4.6`, `grok-4.7` (and their `-latest` aliases) | `low` | `low` | `medium` | `high` |
-| `grok-3-mini` (and variants) | `low` | `low` | `high` | `high` |
-| any other model | not sent | not sent | not sent | not sent |
+| Model | `Thinking.Off` | `Minimal`, `Low` | `Medium` | `High` | `XHigh`, `Max` |
+|---|---|---|---|---|---|
+| `grok-4.6`, `grok-4.7` (and their `-latest` aliases) | `low` | `low` | `medium` | `high` | `xhigh` |
+| `grok-4.5` (and its `-latest` alias) | `low` | `low` | `medium` | `high` | `high` |
+| `grok-3-mini` (and variants) | `low` | `low` | `high` | `high` | `high` |
+| any other model | not sent | not sent | not sent | not sent | not sent |
 
-  `high` is the default on Grok 4.5 and later; `xhigh` (4.6 and later) is not reachable from
-  `CompletionOptions`. `grok-4` rejects the parameter, and on `grok-4.20-multi-agent` it sets the
-  number of agents, so neither is sent it. With `reasoning` unset nothing is sent.
+  `high` is the default on Grok 4.5 and later. `grok-4` rejects the parameter, and on
+  `grok-4.20-multi-agent` it sets the number of agents, so neither is sent it. With `reasoning` and
+  `thinking` unset nothing is sent.
 - **Penalties.** xAI rejects `presence_penalty`, `frequency_penalty` and `stop` on reasoning models.
   llm4s never sends `stop`; a non-zero `presencePenalty` or `frequencyPenalty` is left out of a
   request to a reasoning model (logged once), and sent as given to a `-non-reasoning` model.
