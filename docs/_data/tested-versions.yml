@@ -13,6 +13,10 @@ stacks:
     artifact: "llm4s-spring-boot-starter"
     versions: ["4.0.8", "4.1.1"]
     note: "The same artifact's Boot 4 health indicator, built against 4.0.8; CI also runs the specs on 4.1.1."
+  - name: "Spring AI"
+    artifact: "llm4s-spring-ai"
+    versions: ["2.0.0", "2.0.2"]
+    note: "Built against 2.0.0, with Spring Boot 4; CI also runs the module's specs on 2.0.2."
   - name: "Cats Effect"
     artifact: "llm4s-effect"
     versions: ["3.5.7"]

@@ -107,6 +107,7 @@ map_file_to_project() {
     modules/vectorstore-elasticsearch/*)  echo "vectorstoreElasticsearch" ;;
     modules/vectorstore-redis/*)          echo "vectorstoreRedis" ;;
     modules/reactor/*)                    echo "reactor" ;;
+    modules/spring-ai/*)                  echo "springAi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
     modules/observability-micrometer/*)   echo "observabilityMicrometer" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
@@ -230,6 +231,7 @@ propagate_downstream() {
       ;;
     javaApi)
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE samples
@@ -237,6 +239,9 @@ propagate_downstream() {
       ;;
     observabilityMicrometer)
       set_add DOWNSTREAM_COMPILE springBootStarter
+      ;;
+    springBootStarter)
+      set_add DOWNSTREAM_COMPILE springAi
       ;;
     llm4sEffect)
       set_add DOWNSTREAM_COMPILE samples
@@ -323,6 +328,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE llm4sOx
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       set_add DOWNSTREAM_COMPILE vectorstoreElasticsearch
@@ -383,6 +389,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -394,6 +401,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -405,6 +413,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -421,6 +430,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -487,6 +497,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
@@ -547,6 +558,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE llm4sOx
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE javaRag
       ;;
     agentCheckpointSqlite | agentCheckpointPostgres)
@@ -596,6 +608,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE reactor
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE springAi
       set_add DOWNSTREAM_COMPILE deployService
       set_add DOWNSTREAM_COMPILE javaRag
       ;;

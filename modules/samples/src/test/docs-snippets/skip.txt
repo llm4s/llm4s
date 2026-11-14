@@ -43,7 +43,7 @@ getting-started/installation.md | ae34e42f15 | skip | sbt build definition, not 
 getting-started/installation.md | 9aef71a790 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 975f60b158 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 99cfae3041 | skip | sbt build definition, not Scala source
-getting-started/installation.md | 5b7a066a84 | skip | sbt build definition, not Scala source
+getting-started/installation.md | e081f41bf6 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 425f37584b | skip | sbt build definition, not Scala source
 getting-started/installation.md | 6b26cf14c7 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 4f8485e651 | skip | sbt build definition, not Scala source
@@ -163,3 +163,4 @@ tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import
 tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
 tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
 tutorials/support-assistant/part-3-tools.md | 41049c3fc7 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
+guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask

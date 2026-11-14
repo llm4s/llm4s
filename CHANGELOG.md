@@ -365,6 +365,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `llm4s-reactor` (Experimental): `Streams.toFlux(client, query | conversation[, options])` returns a streamed
   reply as a Reactor `Flux<String>` over `JLlmClient.streamAsPublisher`, with backpressure, and cancellation that
   interrupts the provider call [#1492](https://github.com/llm4s/llm4s/issues/1492); see [Java Reactor](docs/guide/java-reactor.md).
+- **Added** `llm4s-spring-ai` (Experimental, Spring AI 2.0.x provided): `Llm4sChatModel` / `Llm4sEmbeddingModel` (an llm4s client as a Spring AI
+  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
@@ -547,6 +549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completeStructured` and a tool's `ReadWriter`, tested, and the sample `JsoniterStructuredOutputExample` [#2295](https://github.com/llm4s/llm4s/issues/2295).
 - **Added** [Coming from sttp-ai or openai-scala-client](docs/guide/migrating-from-scala-llm-clients.md): their calls next to
   LLM4S code compiled and run by `ScalaClientMigrationGuideSpec`, and when to stay on your client [#2343](https://github.com/llm4s/llm4s/issues/2343).
+- **Added** [Coming from Python](docs/guide/for-python-developers.md): OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to
+  Scala 3 + LLM4S, one Scala concept per section, run by `PythonDevelopersGuideSpec` [#2344](https://github.com/llm4s/llm4s/issues/2344).
 - **Added** [Replacing a Python sidecar](docs/guide/replacing-a-python-sidecar.md): vLLM, TGI and llama.cpp models as `openai-compatible` sections, and a Python
   function as an agent tool over MCP stdio, with the CI-run sample `PythonToolBridgeExample` [#2333](https://github.com/llm4s/llm4s/issues/2333).
 - **Added** the [Enterprise Reference Architecture](docs/guide/reference-architecture.md) (AI gateway, secret injection, egress, failover, spend) with a tested

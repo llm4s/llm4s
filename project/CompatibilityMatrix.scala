@@ -32,6 +32,7 @@ object CompatibilityMatrix {
       find(ci, """(?m)^\s+java: \[([^\]]+)\]""".r, "`java:` matrix of the test job").split(',').map(_.trim).toSeq
     val boot3    = find(ci, """-Dllm4s\.springBootVersion=([0-9.]+)""".r, "Spring Boot 3.x (latest) version")
     val boot4    = find(ci, """-Dllm4s\.springBoot4Version=([0-9.]+)""".r, "Spring Boot 4.x version")
+    val springAi = find(ci, """-Dllm4s\.springAiVersion=([0-9.]+)""".r, "Spring AI 2.0.x (latest) version")
     val kotlinKt = base / "modules" / "kotlin-api" / "build.gradle.kts"
     val kotlin   = find(kotlinKt, """kotlin\("jvm"\) version "([^"]+)"""".r, "Kotlin plugin version")
     val coroutines =
@@ -55,6 +56,12 @@ object CompatibilityMatrix {
         "llm4s-spring-boot-starter",
         Seq(Versions.springBoot4Baseline, boot4).distinct,
         s"The same artifact's Boot 4 health indicator, built against ${Versions.springBoot4Baseline}; CI also runs the specs on $boot4."
+      ),
+      Stack(
+        "Spring AI",
+        "llm4s-spring-ai",
+        Seq(Versions.springAiBaseline, springAi).distinct,
+        s"Built against ${Versions.springAiBaseline}, with Spring Boot 4; CI also runs the module's specs on $springAi."
       ),
       Stack("Cats Effect", "llm4s-effect", Seq(Versions.catsEffect), ""),
       Stack("fs2", "llm4s-effect", Seq(Versions.fs2), ""),

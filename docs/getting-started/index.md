@@ -37,6 +37,7 @@ This section will guide you through:
 14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
 15. **[Try llm4s in the REPL](repl)** - `ask`, `extract` and `chat()` behind one import, in the Scala CLI REPL, a worksheet or a script
 16. **[First Answer, No Key, No Server](local-jlama)** - A small model run inside your JVM by Jlama: no API key, no model server
+17. **[Coming from Python?](../guide/for-python-developers)** - OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3, one Scala concept at a time
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 
