@@ -579,7 +579,7 @@ private[runner] object CommandPolicy {
     }
 
     runtimeForm.orElse(
-      candidates(args, options, switches)
+      candidates(program, args, options, switches)
         .flatMap { case (arg, candidate) =>
           candidateForm(candidate).map(notAllowed(program, arg, _))
         }
@@ -1078,7 +1078,7 @@ private[runner] object CommandPolicy {
     else {
       val budget   = new Budget(MaxPathSteps)
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
-      indexedCandidates(args, ProgramOptions.getOrElse(program, Options()), switches)
+      indexedCandidates(program, args, ProgramOptions.getOrElse(program, Options()), switches)
         .map { case (_, arg, candidate) => arg -> namesGitMetadata(base, candidate, realRoot, budget) }
         .collectFirst {
           case (_, Left(_))       => tooCostly(program)
@@ -1164,7 +1164,8 @@ private[runner] object CommandPolicy {
       val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
       val strings =
-        if (program == "sort" && !isWindows) sortCandidates(args) else indexedCandidates(args, options, switches)
+        if (program == "sort" && !isWindows) sortCandidates(args)
+        else indexedCandidates(program, args, options, switches)
       // An operand that names a link itself is judged by the directory holding it, not by where the link leads.
       val links: Set[Int] =
         if (isWindows) Set.empty
@@ -1205,21 +1206,30 @@ private[runner] object CommandPolicy {
    * No argument is exempt here: an option's value given as the next argument is a plain argument, whatever the
    * option. POSIX `sort`, whose `-t` value is a separator, is parsed instead by [[sortCandidates]] (#1763).
    */
-  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] =
-    indexedCandidates(args, options, switches).map { case (_, arg, candidate) => (arg, candidate) }
+  private def candidates(
+    program: String,
+    args: Seq[String],
+    options: Options,
+    switches: Boolean
+  ): Iterator[(String, String)] =
+    indexedCandidates(program, args, options, switches).map { case (_, arg, candidate) => (arg, candidate) }
 
   /** [[candidates]], each with the index in `args` of the argument it came from. */
   private def indexedCandidates(
+    program: String,
     args: Seq[String],
     options: Options,
     switches: Boolean
   ): Iterator[(Int, String, String)] = {
     // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
-    // next-but-one tail, is checked; so is `D:file` in `/G:D:file`).
+    // next-but-one tail, is checked; so is `D:file` in `/G:D:file`). For a validated native findstr switch,
+    // flags may precede that letter: `/IC:file` must not contribute the artificial drive path `C:file` either.
     def plain(arg: String): Iterator[String] =
-      if (switches && arg.length > 1 && arg.startsWith("/"))
-        tails(arg).filterNot(tail => tail.length == arg.length - 1 && SwitchWithValue.matches(tail))
-      else Iterator.single(arg)
+      if (switches && arg.length > 1 && arg.startsWith("/")) {
+        val valueSwitchIndex =
+          if (program == "findstr" && isNativeFindstrSwitch(arg)) arg.indexOf(':') - 1 else 1
+        tails(arg).filterNot(tail => tail.length == arg.length - valueSwitchIndex && SwitchWithValue.matches(tail))
+      } else Iterator.single(arg)
     def textLong(name: String): Boolean = name.length > 3 && options.textLong.exists(_.startsWith(name))
 
     @tailrec

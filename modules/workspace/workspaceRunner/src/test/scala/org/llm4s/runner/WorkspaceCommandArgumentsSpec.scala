@@ -1316,6 +1316,9 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     val out                       = fx.outside.toString
     windows("findstr", s"/G:$out\\secret.txt", "a.txt") shouldBe Some(PathEscape)
     windows("findstr", "/G:C:\\x", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", s"/IG:$out\\secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/IG:C:\\x", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/IG:C:..\\secret.txt", "a.txt") shouldBe Some(PathEscape)
     windows("findstr", s"/D:$out", "x", "*.txt") shouldBe Some(PathEscape)
   }
 
@@ -1338,6 +1341,9 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       Seq("findstr", "/I", "/C:foo", "a.txt"),
       Seq("findstr", "/i", "/c:foo", "a.txt"),
       Seq("findstr", "/IC:foo", "a.txt"),
+      Seq("findstr", "/ic:foo", "a.txt"),
+      Seq("findstr", "/ILC:foo", "a.txt"),
+      Seq("findstr", "/IG:a.txt", "b.txt"),
       Seq("findstr", "/B", "/E", "/L", "/R", "/S", "/I", "/X", "/V", "/N", "/M", "/O", "/P", "x", "a.txt"),
       Seq("findstr", "/BELRSIXVNMOP", "x", "a.txt"),
       Seq("findstr", "/OFF", "x", "a.txt"),

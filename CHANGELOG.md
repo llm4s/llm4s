@@ -399,6 +399,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tools
 
+- **Fixed** the Windows workspace command policy treating the `C:` in a native `findstr /IC:text` switch as a drive
+  path. Combined flags now preserve the switch's value while real drive paths in `/IG:` values remain confined.
 - **Fixed** HTTP tool blocklist matching so a configured domain with a leading `www.` blocks the same host and its
   subdomains consistently with allowlist matching [#2496](https://github.com/llm4s/llm4s/issues/2496).
 - **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
