@@ -1,0 +1,11 @@
+name: "llm4s"
+metadata:
+  short-name: "llm4s"
+  keywords:
+    - "llm4s"
+    - "llm"
+    - "ai"
+  guide: "https://llm4s.org/guide/quarkus"
+  categories:
+    - "ai"
+  status: "experimental"

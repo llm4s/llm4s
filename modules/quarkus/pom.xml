@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  quarkus-llm4s: the Quarkus extension for llm4s (#2280). A Quarkus extension is a runtime and a deployment module
+  built by Maven with Quarkus's own plugins, not by sbt, so this is a build of its own. It consumes the llm4s modules
+  from the local Maven repository: from the root of the repository run
+    sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+  first, then `mvn install` here. CI does the same in its `quarkus-extension` job. See README.md.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>org.llm4s</groupId>
+  <artifactId>quarkus-llm4s-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>quarkus-llm4s (parent)</name>
+
+  <modules>
+    <module>runtime</module>
+    <module>deployment</module>
+  </modules>
+
+  <properties>
+    <!-- llm4s-java-api is JDK 21 bytecode. -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- The llm4s modules this extension is built against: the snapshot `sbt publishM2` installs. -->
+    <llm4s.version>0.1.0-SNAPSHOT</llm4s.version>
+    <!-- The Quarkus release the extension is built and tested against (docs/guide/quarkus.md states the range). -->
+    <quarkus.version>3.40.1</quarkus.version>
+    <!-- The Scala 3 library the llm4s modules were built with. -->
+    <scala3.version>3.7.1</scala3.version>
+    <compiler-plugin.version>3.14.0</compiler-plugin.version>
+    <surefire.version>3.5.4</surefire.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-bom</artifactId>
+        <version>${quarkus.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- Pin scala3-library_3 by name: Scala 3 runs on the Scala 2.13 scala-library, which has no 3.x release. -->
+      <dependency>
+        <groupId>org.scala-lang</groupId>
+        <artifactId>scala3-library_3</artifactId>
+        <version>${scala3.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.llm4s</groupId>
+        <artifactId>llm4s-java-api_3</artifactId>
+        <version>${llm4s.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.llm4s</groupId>
+        <artifactId>llm4s-ollama_3</artifactId>
+        <version>${llm4s.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.llm4s</groupId>
+        <artifactId>quarkus-llm4s</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${compiler-plugin.version}</version>
+          <configuration>
+            <parameters>true</parameters>
+            <annotationProcessorPaths>
+              <path>
+                <groupId>io.quarkus</groupId>
+                <artifactId>quarkus-extension-processor</artifactId>
+                <version>${quarkus.version}</version>
+              </path>
+            </annotationProcessorPaths>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${surefire.version}</version>
+          <configuration>
+            <systemPropertyVariables>
+              <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>io.quarkus</groupId>
+          <artifactId>quarkus-extension-maven-plugin</artifactId>
+          <version>${quarkus.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

@@ -1,8 +1,8 @@
 ---
 layout: page
 title: Quarkus
-description: "Call a model from a Quarkus app with LLM4S: a CDI producer for JLlmClient, settings in application.properties and a REST endpoint off the event loop."
-search_title: "Use LLM4S with Quarkus: LLM client as a CDI bean"
+description: "Call a model from a Quarkus app with the quarkus-llm4s extension: JLlmClient beans from application.properties, checked at build time, with a readiness check."
+search_title: "Use LLM4S with Quarkus: the quarkus-llm4s extension"
 parent: User Guide
 nav_order: 37
 ---
@@ -10,7 +10,7 @@ nav_order: 37
 # Using LLM4S with Quarkus
 {: .no_toc }
 
-Call a model from a Quarkus application: a CDI producer for the `JLlmClient`, its settings in `application.properties`, and a REST endpoint that keeps the blocking call off the event loop.
+Call a model from a Quarkus application with the `quarkus-llm4s` extension: the clients configured in `application.properties` and checked when the application is built, injected as CDI beans, with a readiness check.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -21,47 +21,50 @@ Call a model from a Quarkus application: a CDI producer for the `JLlmClient`, it
 
 ---
 
-There is no Quarkus extension for llm4s. This page wires the [Java API](java) into Quarkus with plain CDI and
-MicroProfile Config, which is all a first application needs. Every snippet is a file of the runnable sample,
+`quarkus-llm4s` ([`modules/quarkus`](https://github.com/llm4s/llm4s/tree/main/modules/quarkus)) is a Quarkus
+extension over the [Java API](java). Every snippet on this page is a file of the runnable sample,
 [`modules/samples/quarkus-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/quarkus-java), which CI
-builds and tests against the library on every pull request.
+builds and tests against the extension on every pull request.
+
+**Status.** The extension is new ([#2280](https://github.com/llm4s/llm4s/issues/2280)) and **not yet published**: build
+it from this repository as below. It is built and tested against **Quarkus 3.40.1**, in JVM mode only. Dev Services,
+metrics, a Dev UI card and native images are not there yet ([What is not supported](#what-is-not-supported)).
 
 ## Run the sample
 
-You need **JDK 21 or newer** and **Maven 3.9 or newer**. The sample's default provider is a local
-[Ollama](../getting-started/ollama-quickstart) server at `http://localhost:11434`, which needs no key:
+You need **JDK 21 or newer**, **sbt** and **Maven 3.9 or newer**. Install the llm4s modules and the extension in your
+local Maven repository, from the root of the repository:
+
+```bash
+sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+(cd modules/quarkus && mvn install)
+```
+
+The sample's default provider is a local [Ollama](../getting-started/ollama-quickstart) server at
+`http://localhost:11434`, which needs no key:
 
 ```bash
 ollama pull llama3.2
 cd modules/samples/quarkus-java
-mvn quarkus:dev -Dllm4s.version=0.5.1
-```
-
-Then ask it something:
-
-```bash
+mvn quarkus:dev
 curl -X POST -H 'Content-Type: text/plain' -d 'What is Quarkus, in one sentence?' http://localhost:8080/chat
 ```
 
-The reply is the model's answer as plain text. Without `-Dllm4s.version` the build uses `0.1.0-SNAPSHOT`, the code of
-your checkout, which you first publish to your local Maven repository with `sbt publishM2` from the repository root,
-after setting the build's version to `0.1.0-SNAPSHOT` as the sample's README shows.
-
+The reply is the model's answer as plain text, and `http://localhost:8080/q/health/ready` reports the client.
 `mvn verify` runs the sample's tests, which need neither Ollama nor a key: they start a stub Ollama server on a
 loopback port (see [Testing](#testing)).
 
 ## Dependencies
 
-llm4s is Scala 3 only, and Maven has no notion of Scala cross-versions, so the artifact is written with its Scala
-binary suffix, `llm4s-java-api_3`. It brings `llm4s-core`, the agent runtime and the Scala 3 library, and no provider
-module: the sample declares the three its producer builds clients for (`llm4s-openai` brings `llm4s-openai-compatible`).
-Keep only the ones you use, so no other vendor's SDK reaches the application
-([#1496](https://github.com/llm4s/llm4s/issues/1496)):
+The extension brings `llm4s-java-api` (and with it `llm4s-core`, the agent runtime and the Scala 3 library) and no
+provider module: declare the ones your configuration names, and only those, so no other vendor's SDK reaches the
+application ([#1496](https://github.com/llm4s/llm4s/issues/1496)). The provider modules are Scala 3 only, and Maven has
+no notion of Scala cross-versions, so each is written with its Scala binary suffix, `_3`:
 
 ```xml
 <dependency>
   <groupId>org.llm4s</groupId>
-  <artifactId>llm4s-java-api_3</artifactId>
+  <artifactId>quarkus-llm4s</artifactId>
   <version>${llm4s.version}</version>
 </dependency>
 <dependency>
@@ -71,114 +74,70 @@ Keep only the ones you use, so no other vendor's SDK reaches the application
 </dependency>
 ```
 
-Next to the Quarkus BOM, the sample pins `org.scala-lang:scala3-library_3` to the version llm4s was built with in
-`dependencyManagement`, by name: Scala 3 runs on the Scala 2.13 `scala-library`, so never pin the whole
-`org.scala-lang` group. The Quarkus BOM pins Jackson to its own version, newer than the one the OpenAI and Anthropic
-SDKs ask for; the sample's tests build both clients with it.
+The sample also declares `llm4s-openai` and `llm4s-anthropic`, so switching provider is configuration only, and
+`quarkus-smallrye-health` for the readiness check. Next to the Quarkus BOM, it pins `org.scala-lang:scala3-library_3`
+to the version llm4s was built with in `dependencyManagement`, by name: Scala 3 runs on the Scala 2.13
+`scala-library`, so never pin the whole `org.scala-lang` group.
 
 Quarkus routes SLF4J to its own log manager (`slf4j-jboss-logmanager`), so llm4s's logs appear in the Quarkus log with
-no logging backend added. Do not add `logback-classic`, as a plain Java application would: two SLF4J providers make
-SLF4J pick one and warn.
+no logging backend added. Do not add `logback-classic`: two SLF4J providers make SLF4J pick one and warn.
 
 ## Configuration
 
-The client's settings are four `llm4s.*` keys in `application.properties`, read by a `@ConfigMapping` interface.
-Quarkus maps `baseUrl()` to `llm4s.base-url` and `apiKey()` to `llm4s.api-key`, and each key can also be set as a
-system property or an environment variable (`LLM4S_PROVIDER`, `LLM4S_MODEL`, `LLM4S_BASE_URL`, `LLM4S_API_KEY`):
-
-```java
-@ConfigMapping(prefix = "llm4s")
-public interface Llm4sSettings {
-
-    /** Which client to build: {@code ollama}, {@code openai}, {@code anthropic} or {@code openai-compatible}. */
-    @WithDefault("ollama")
-    String provider();
-
-    /** The model name, as the provider spells it. */
-    String model();
-
-    /** {@code llm4s.base-url}: the provider's endpoint; each provider has a default except {@code openai-compatible}. */
-    Optional<String> baseUrl();
-
-    /** {@code llm4s.api-key}: required by {@code openai} and {@code anthropic}, unused by {@code ollama}. */
-    Optional<String> apiKey();
-}
-```
+The clients are sections of `llm4s.providers` in `application.properties`, in the
+[Spring Boot starter](spring-boot)'s spelling, which mirrors the `llm4s.providers` block of llm4s's own
+[configuration](../getting-started/configuration):
 
 ```properties
-llm4s.provider=ollama
-llm4s.model=llama3.2
+llm4s.providers.provider=main
+llm4s.providers.main.provider=ollama
+llm4s.providers.main.model=llama3.2
 ```
 
-So `LLM4S_PROVIDER=openai LLM4S_MODEL=gpt-4o-mini LLM4S_API_KEY=sk-... mvn quarkus:dev` runs the same application
-against OpenAI. Keep a real key out of `application.properties`: use the environment variable, or a `.env` file that
-is not committed.
+- **Sections.** Each section `llm4s.providers.<section>.*` is one client: `provider` (a provider id, such as `ollama`,
+  `openai`, `anthropic`, `gemini`, `azure` or `openai-compatible`, whose module is a dependency) and `model` are
+  required, and every other key is the provider's own: `base-url`, `api-key`, `headers.*`, `endpoint` for Azure, ...
+  (each provider module's README lists them). `kebab-case` names are read as llm4s's `camelCase` (`api-key` is
+  `apiKey`); header names stay as written.
+- **The default.** `llm4s.providers.provider` names the section whose client is the `@Default` bean. Unset, the only
+  section is the default; with several and none named, each client is reachable by name only.
+- **Keys.** A section with no `api-key` uses the vendor's shared key, `llm4s.credentials.<provider>.api-key`, and then
+  the vendor's conventional environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...). Keep a real key out of
+  `application.properties`: rely on the variable, or write `api-key=${MY_KEY}`.
+- **Embeddings.** `llm4s.embeddings.model=<provider>/<model>` (for example `ollama/nomic-embed-text`) makes a
+  `JEmbeddingClient` bean; that provider's settings are `llm4s.embeddings.<provider>.*`
+  (`llm4s.embeddings.ollama.base-url`).
+- **HTTP.** `llm4s.http.*` sets the proxy and TLS settings, as in HOCON.
+- **Profiles and variables.** These are Quarkus properties: `%dev.` and `%test.` profiles and `${...}` expressions work
+  as usual, and an environment variable such as `LLM4S_PROVIDERS_MAIN_MODEL` overrides a key that
+  `application.properties` declares. A `llm4s.providers` block in an `application.conf` is not read.
 
-These keys are the sample's own and are separate from llm4s's HOCON configuration (`application.conf`, the
-[Configuration guide](../getting-started/configuration)): the client is built with the Java API's builders, which
-take every setting as an argument and read no provider section. An application that already keeps its provider in
-`application.conf` can build the client with `Llm4s.createDefaultClient()` in the producer instead.
+### Checked at build time
 
-## The client as a CDI bean
+The sections are fixed when the application is built: each becomes a bean. The build fails, with a message naming the
+property, when a section has no `provider` or `model`, when a provider is not on the classpath (the message lists those
+that are), when `llm4s.providers.provider` names no section, or when `llm4s.embeddings.model` is not
+`provider/model` of an embedding provider on the classpath:
 
-A producer method makes the `JLlmClient` an application-scoped bean, built from the settings, and a disposer method
-closes it when the application stops. A setting llm4s refuses, such as a missing key, fails the first injection with
-llm4s's message:
-
-```java
-@ApplicationScoped
-public class LlmClientProducer {
-
-    @Produces
-    @ApplicationScoped
-    JLlmClient llmClient(Llm4sSettings settings) {
-        LlmResult<JLlmClient> client = build(settings);
-        if (client.isFailure()) {
-            // a missing key or an unknown provider: fail the first injection with llm4s's message
-            throw new IllegalStateException(
-                "Cannot build the llm4s client: " + client.getError().getMessage(), client.getError());
-        }
-        return client.get();
-    }
-
-    void close(@Disposes JLlmClient client) {
-        client.close();
-    }
-
-    static LlmResult<JLlmClient> build(Llm4sSettings settings) {
-        String baseUrl = settings.baseUrl().orElse(null);
-        String apiKey = settings.apiKey().orElse(null);
-        return switch (settings.provider()) {
-            case "ollama" -> {
-                var builder = Llm4s.ollama().model(settings.model());
-                yield (baseUrl == null ? builder : builder.baseUrl(baseUrl)).build();
-            }
-            case "openai" -> {
-                var builder = Llm4s.openAi().model(settings.model()).apiKey(apiKey);
-                yield (baseUrl == null ? builder : builder.baseUrl(baseUrl)).build();
-            }
-            case "anthropic" -> {
-                var builder = Llm4s.anthropic().model(settings.model()).apiKey(apiKey);
-                yield (baseUrl == null ? builder : builder.baseUrl(baseUrl)).build();
-            }
-            case "openai-compatible" -> {
-                var builder = Llm4s.openAiCompatible().model(settings.model()).baseUrl(baseUrl);
-                yield (apiKey == null ? builder : builder.apiKey(apiKey)).build();
-            }
-            default -> throw new IllegalStateException("Unknown llm4s.provider '" + settings.provider()
-                + "': use ollama, openai, anthropic or openai-compatible");
-        };
-    }
-}
+```text
+The llm4s configuration is not valid:
+  - Provider 'olama' (from llm4s.providers.main.provider) is not registered. Registered providers: anthropic, ollama, openai. ...
 ```
 
-`JLlmClient` is a final class with no public constructor, which CDI cannot normally proxy for a normal scope such as
-`@ApplicationScoped`. Quarkus's ArC handles it at build time (`quarkus.arc.transform-unproxyable-classes`, on by
-default); if you have turned that off, produce the client as `@Singleton` instead, which needs no proxy.
+The values themselves (the model, the key) are read when the application starts, so they can differ per environment.
+A client that still cannot be built, such as one whose key is missing, fails the start with llm4s's message.
 
-One client serves every request: one `JLlmClient` can be used by many threads at once
-([Sharing one client](java-threading-and-cancellation#sharing-one-client-or-agent)), and it holds an HTTP client that
-should be built once and closed once.
+## The clients as CDI beans
+
+Each section is a `@Singleton` `JLlmClient` bean qualified `@Named("<section>")` (and `@Identifier("<section>")`), the
+default section's also `@Default`; the embedding model is a `JEmbeddingClient` bean. They are built when the
+application starts and closed when it stops. So `@Inject JLlmClient client` is the default section's client,
+`@Inject @Named("fast") JLlmClient fast` the client of `llm4s.providers.fast`, and `@Inject JEmbeddingClient embeddings`
+the embedding model's. One client serves every request: a `JLlmClient` can be used by many threads at once
+([Sharing one client](java-threading-and-cancellation#sharing-one-client-or-agent)).
+
+Every bean is a default bean: a producer of your own for the same type and qualifiers replaces the extension's, which
+is then never built. That is also how a test supplies a fake ([Testing](#testing)).
 
 ## Calling it from a REST resource
 
@@ -232,48 +191,57 @@ A failed call is an `LlmResult` value, not an exception, so the resource reads i
 [kind](java#handling-a-failure) and answers with a status: a rate limit stays a 429, a timeout becomes a 504, and
 anything else a 502, since the failure is the model's and not the caller's.
 
+## Health
+
+With `quarkus-smallrye-health` on the classpath, the extension registers a readiness check named `llm4s` for the
+default client, at `/q/health/ready`:
+
+| Property | Default | |
+|---|---|---|
+| `llm4s.health.enabled` | `true` | Register the check (read at build time). |
+| `llm4s.health.probe` | `false` | Off, the check is UP with `probe=disabled`: the client was built, nothing is sent. On, it sends a one-token completion: UP with `probe=ok`, or DOWN with `probe=failed` or `timeout` and the provider's error. |
+| `llm4s.health.probe-timeout` | `10s` | How long the probe waits. |
+| `llm4s.health.probe-ttl` | `60s` | How long a probe's outcome is reused, so frequent checks do not each pay for a call. |
+
+The check's data names the section, the provider and the model; a key-like string in an error is redacted.
+
 ## Testing
 
-`@QuarkusTest` starts the application with the real producer and the real client, pointed at a stub. The sample's
-`OllamaStub` is a `QuarkusTestResourceLifecycleManager`: it starts a JDK `HttpServer` on a free loopback port that
-answers Ollama's `POST /api/chat` with a canned reply, and returns `llm4s.base-url` (with `llm4s.provider` and
-`llm4s.model`) as configuration for the test run. The test then calls `/chat` with REST Assured and checks the reply,
-the request the stub received, and that a stub failure comes back as a 502; no model and no key are involved.
+`@QuarkusTest` starts the application with the extension's real client, pointed at a stub. The sample's `OllamaStub`
+is a `QuarkusTestResourceLifecycleManager`: it starts a JDK `HttpServer` on a free loopback port that answers Ollama's
+`POST /api/chat` with a canned reply, and returns `llm4s.providers.main.base-url` and `llm4s.providers.main.model` as
+configuration for the test run. The test then calls `/chat` with REST Assured and checks the reply, the request the
+stub received, that a stub failure comes back as a 502, and that the readiness check is UP; no model and no key are
+involved.
 
-To test code that uses the client without any HTTP, inject a fake instead: `FakeLlmClient.replying("...").client()`
-from `llm4s-java-api` ([Testing your code](java#testing-your-code)) is a `JLlmClient`, which a test producer
-annotated `@Alternative @Priority(1)`, or a `@QuarkusTest` with `QuarkusMock.installMockForType`, can supply.
+To test code that uses the client without any HTTP, produce a fake: `FakeLlmClient.replying("...").client()` from
+`llm4s-java-api` ([Testing your code](java#testing-your-code)) is a `JLlmClient`, and a test producer of it replaces the
+extension's bean.
+
+## Without the extension
+
+An application that cannot use the extension (it needs a provider setting the extension does not pass, or builds
+clients at run time) can wire the Java API into Quarkus with plain CDI: a `@ConfigMapping` interface for its own
+settings, and a `@Produces @Singleton JLlmClient` method that builds the client with the Java API's builders
+(`Llm4s.ollama()`, `Llm4s.openAi()`, ...) or `Llm4s.createDefaultClient()`, with a `@Disposes` method that closes it.
+The sample took that form before the extension; its last version is at commit
+[`225a7d77b`](https://github.com/llm4s/llm4s/tree/225a7d77b/modules/samples/quarkus-java).
 
 ## What is not supported
 
-- **Native image.** `mvn package -Dnative` is not supported: llm4s ships no GraalVM reachability metadata yet. That
-  work is the spike in [#1463](https://github.com/llm4s/llm4s/issues/1463). Run the application on the JVM.
+- **Native image.** A native build (`-Dnative`) fails at once with a message: llm4s ships no GraalVM reachability
+  metadata yet. That work is the spike in [#1463](https://github.com/llm4s/llm4s/issues/1463). Run the application on
+  the JVM.
+- **Not yet in the extension** ([#2280](https://github.com/llm4s/llm4s/issues/2280)): Dev Services (an Ollama container
+  in dev and test mode), Micrometer metrics (meanwhile, record them with `llm4s-observability-micrometer` over Quarkus's
+  registry: [Micrometer metrics](observability/micrometer)), a Dev UI card, tracing settings, and publication to Maven
+  Central with an entry in `llm4s-bom`.
 - **The agent API from Java.** This page uses `JLlmClient` and `ConversationBuilder` only; the Java agent API is
   still changing.
-- **Dev Services, Dev UI, health checks and metrics.** Nothing is registered for you. Add a health check of your own,
-  or record metrics with `llm4s-observability-micrometer` over Quarkus's Micrometer registry
-  ([Micrometer metrics](observability/micrometer)).
-
-## What an extension would add
-
-A Quarkus extension (`quarkus-llm4s`) would replace the producer and the configuration interface above, and could
-add what plain CDI cannot:
-
-- **Build-time wiring**: the `llm4s.*` configuration and the producer generated by the extension, with a
-  configuration error reported at build time instead of at first use.
-- **Dev Services**: an Ollama container started in dev and test mode when no base URL is configured, as Quarkus does
-  for databases.
-- **Observability**: a health check calling the provider, and Micrometer metrics and OpenTelemetry traces wired from
-  the Quarkus extensions already present.
-- **Native image**: the reflection and resource registrations llm4s needs, once
-  [#1463](https://github.com/llm4s/llm4s/issues/1463) has found them.
-- **A Dev UI card** with the configured provider and a prompt box.
-
-Whether that is worth building depends on feedback from this guide: open an issue or a discussion if you use it.
 
 ## Where next
 
 - [Java](java): conversations, completion options, structured output and failures from Java.
 - [Java threading and cancellation](java-threading-and-cancellation): which calls block and how to cancel them.
-- [Spring Boot](spring-boot): the same client as a Spring Boot starter, with auto-configuration.
+- [Spring Boot](spring-boot): the same clients as a Spring Boot starter, with auto-configuration.
 - [Maven quick start](../getting-started/maven): the plain Java project this sample builds on.

@@ -1761,14 +1761,6 @@ jobs:
         working-directory: modules/samples/maven-java
         run: mvn -q -B compile
 
-      # The Quarkus sample (docs/guide/quarkus.md): built and tested against the library just published. Its
-      # @QuarkusTest runs the real client against a stub Ollama server, so it needs no model and no key (#1468).
-      - name: Build and test the Quarkus sample
-        working-directory: modules/samples/quarkus-java
-        run: |
-          ../../../scripts/check-quarkus-guide-snippets.sh
-          mvn -q -B verify
-
       # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
       # against the library just published, and a Gradle project without the BOM must not (#1462).
       - name: Build a Gradle and a Maven project against llm4s-bom
@@ -1799,6 +1791,44 @@ jobs:
           name: kotlin-coverage-report
           path: modules/kotlin-api/build/reports/jacoco/
           retention-days: 14
+
+  # The Quarkus extension (modules/quarkus) and the Quarkus sample built on it: Maven builds that consume the llm4s
+  # modules from local Maven, in a job of their own so they add nothing to the Kotlin API job's time (#2280). Quarkus is
+  # pinned in modules/quarkus/pom.xml. The tests run against a stub Ollama server: no model, no key, no Docker.
+  quarkus-extension:
+    name: Quarkus extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Publish the library modules to local Maven
+        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+
+      # The extension's QuarkusUnitTest suites: the client beans from properties, a misconfigured provider failing the
+      # build with a message naming the property, the readiness check UP and DOWN, a user's bean replacing the client.
+      - name: Build and test the extension
+        working-directory: modules/quarkus
+        run: mvn -B --no-transfer-progress install
+
+      # The Quarkus sample (docs/guide/quarkus.md), on the extension just installed. Its @QuarkusTest runs the
+      # extension's client against a stub Ollama server (#1468).
+      - name: Build and test the Quarkus sample
+        working-directory: modules/samples/quarkus-java
+        run: |
+          ../../../scripts/check-quarkus-guide-snippets.sh
+          mvn -q -B verify
 
   # The starter is built against the oldest supported Spring Boot 3.x (project/Dependencies.scala); this runs its
   # specs against the latest 3.x, so the documented range (docs/guide/spring-boot.md) is tested at both ends (#1467).
@@ -1921,7 +1951,7 @@ jobs:
     if: always()
     # workspace-changes and workspace-integration run only where they apply (#1982): skipped is a pass for them, failed
     # is not, so a PR that changes the workspace cannot merge with the live suites red.
-    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, spring-boot-latest, spring-boot-4, framework-samples, spring-ai-latest, workspace-changes, workspace-integration]
+    needs: [quick-checks, test, performance-tests, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api, quarkus-extension, spring-boot-latest, spring-boot-4, framework-samples, spring-ai-latest, workspace-changes, workspace-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1964,6 +1994,10 @@ jobs:
           fi
           if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
             echo "Kotlin API tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.quarkus-extension.result }}" != "success" ]]; then
+            echo "Quarkus extension tests failed"
             exit 1
           fi
           if [[ "${{ needs.spring-boot-latest.result }}" != "success" ]]; then

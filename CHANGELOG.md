@@ -332,6 +332,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `quarkus-llm4s` (`modules/quarkus`, Maven, not yet published): `@Named` `JLlmClient` beans per
+  `llm4s.providers` section and a `JEmbeddingClient` from `application.properties` in the Spring starter's spelling,
+  checked at build time, and a SmallRye Health readiness check; JVM mode, Quarkus 3.40.1. Part of [#2280](https://github.com/llm4s/llm4s/issues/2280); see the [Quarkus guide](docs/guide/quarkus.md).
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
   streaming, and a step limit, checkpointer and tracer (`maxSteps`, `checkpointer`, `tracing`, #2279) [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
@@ -492,13 +495,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   projects in `docs/_data/showcase.yml`; ADOPTERS.md is unchanged. The home page's Scala sample is compiled with the
   other documentation snippets (`index.md` joins `DocSnippets.pages`). Existing permalinks are unchanged.
 - **Added** a Quarkus guide ([docs/guide/quarkus.md](docs/guide/quarkus.md)) and a runnable Maven sample,
-  `modules/samples/quarkus-java`: a `@Produces @ApplicationScoped JLlmClient` built with the Java API's builders from
-  a `@ConfigMapping` of `llm4s.provider`, `model`, `base-url` and `api-key`, closed by a `@Disposes` method, and a
-  `@Blocking` `POST /chat` resource; `mvn quarkus:dev` answers from a local Ollama. Its `@QuarkusTest` runs against a
-  stub Ollama server on a loopback port, and CI builds and tests it against the published snapshot and checks that
-  the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
-  suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
-  [#1468](https://github.com/llm4s/llm4s/issues/1468).
+  `modules/samples/quarkus-java`, on the `quarkus-llm4s` extension: a `@Blocking` `POST /chat` resource; `mvn quarkus:dev`
+  answers from a local Ollama. Its `@QuarkusTest` runs against a stub Ollama server on a loopback port, and CI builds and
+  tests it and checks that the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`)
+  [#1468](https://github.com/llm4s/llm4s/issues/1468), [#2280](https://github.com/llm4s/llm4s/issues/2280).
 - **Added** Micronaut 4 and Helidon SE 4 guides ([micronaut](docs/guide/micronaut.md), [helidon](docs/guide/helidon.md))
   with runnable Gradle samples, tested in CI with `FakeLlmClient` [#2281](https://github.com/llm4s/llm4s/issues/2281).
 - **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a

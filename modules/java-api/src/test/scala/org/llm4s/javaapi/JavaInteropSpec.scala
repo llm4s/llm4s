@@ -601,7 +601,8 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "org.llm4s.javaapi.FacadeAsync",         // the futures of the *Async methods and their executors (#2276)
     "org.llm4s.javaapi.AgentBuilds",         // what JAgentBuilder keeps and what its build() does with it (#2476)
     "org.llm4s.javaapi.AiServices",          // an AI service's method plans and its proxy handler (#2277)
-    "org.llm4s.javaapi.ProviderModules"      // whether an optional provider module is on the classpath (#1496)
+    "org.llm4s.javaapi.ProviderModules",     // whether an optional provider module is on the classpath (#1496)
+    "org.llm4s.javaapi.FrameworkConfig"      // the Quarkus extension's llm4s.* properties into clients (#2280)
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */
