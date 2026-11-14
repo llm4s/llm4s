@@ -56,7 +56,7 @@ Each library builds its tool definitions once, outside the measured call: Spring
 calls `agent.forget(threadId)` inside the measured call, since a completed thread stays in the agent's in-memory
 runtime until it is forgotten and a server would do the same.
 
-The versions are pinned in `project/Dependencies.scala` (`Versions.langchain4j`, `Versions.springAi`) and printed with
+The versions are pinned in `project/Dependencies.scala` (`Versions.langchain4j`, `Versions.springAiBenchmark`) and printed with
 every result. The benchmarks themselves are in
 [`ComparativeBenchmarks.scala`](https://github.com/llm4s/llm4s/blob/main/modules/benchmarks-comparative/jmh/src/main/scala/org/llm4s/benchcmp/ComparativeBenchmarks.scala).
 A correction to an adapter, from anyone who knows the library better, is welcome as a pull request.

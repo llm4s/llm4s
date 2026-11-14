@@ -100,11 +100,13 @@ llm4s/
 │   │   ├── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
 │   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
+│   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
 │   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
+│   ├── sttp/                  # llm4s-sttp: SttpLlm4sHttpClient, provider HTTP over a caller's sttp 4 backend (published)
 │   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
@@ -125,6 +127,7 @@ llm4s/
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
+│   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
@@ -137,6 +140,7 @@ llm4s/
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
 │   ├── benchmarks-comparative/ # llm4s vs LangChain4j and Spring AI on a mock server; outside the aggregate (unpublished)
+│   ├── docs/                  # Unified Scaladoc of the published modules: the `docs` project, its rootdoc.md (not published)
 │   ├── scalafix-rules/        # Scalafix rules migrating user code across breaking changes (a scalac 2.13 build-tool module; unpublished)
 │   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
 │   └── it/                    # Integration tests

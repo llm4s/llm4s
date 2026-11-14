@@ -21,6 +21,10 @@ documents. For whether LLM4S is the right choice, read the [comparison](comparis
 > methods, `FakeLlmClient` tests, the Spring Boot starter and provider configuration.
 
 {: .note }
+> Keeping your Spring AI code and adding llm4s beside it? [Using LLM4S with Spring AI](spring-ai) exposes an llm4s client
+> as a Spring AI `ChatModel` and `EmbeddingModel`, and a Spring AI `ChatModel` as an llm4s client.
+
+{: .note }
 > Calling a model from Scala with **sttp-ai** or **openai-scala-client** today? [Coming from sttp-ai or
 > openai-scala-client](migrating-from-scala-llm-clients) puts that code next to the same thing in LLM4S.
 

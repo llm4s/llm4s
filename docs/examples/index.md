@@ -48,6 +48,7 @@ and is run in CI:
 | Category | Count | Description |
 |----------|-------|-------------|
 | [Playground](#playground) | 1 | Offline demo — no API key needed |
+| [Jupyter Notebooks](#jupyter-notebooks) | 2 | Almond notebooks, offline: completion, streaming, structured output, a tool, RAG |
 | [Java Offline Example](#java-offline-example) | 1 | Test application code with a scripted model |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
 | [Agent Examples](#agent-examples) | 10 | Multi-turn agents, persistence, built-in tools, the harness exit examples |
@@ -65,6 +66,17 @@ and is run in CI:
 | [Other Examples](#other-examples) | 8 | Speech, actions, utilities |
 
 ---
+
+## Jupyter Notebooks
+
+**Files:** [`modules/samples/notebooks`](https://github.com/llm4s/llm4s/tree/main/modules/samples/notebooks)
+
+Two notebooks for the [Almond](https://almond.sh) Scala kernel. `getting-started.ipynb` makes a completion, streams an
+answer into one updating cell output, reads structured output with `derives SchemaOf` and runs a typed tool;
+`rag.ipynb` embeds a handful of documents into the in-memory vector store, searches them and answers a question. Both
+run with `ScriptedLLMClient`, without an API key or network access beyond Maven Central, and CI executes them.
+
+See [Jupyter Notebooks](../guide/notebooks) for installing Almond, configuration inside a notebook and known limits.
 
 ## Java Offline Example
 

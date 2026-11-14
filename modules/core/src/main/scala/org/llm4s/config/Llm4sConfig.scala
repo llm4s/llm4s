@@ -393,6 +393,10 @@ object Llm4sConfig {
   def tracing(): Result[TracingSettings] =
     org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)
 
+  /** [[tracing()*]] for a given source; `llm4s-spring-boot-starter` reads `llm4s.tracing.*` properties through it. */
+  private[llm4s] def tracing(source: ConfigSource): Result[TracingSettings] =
+    org.llm4s.config.TracingConfigLoader.load(source)
+
   /**
    * Loads provider exchange logging configuration from the current environment.
    *

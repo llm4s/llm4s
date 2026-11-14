@@ -5,7 +5,7 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [2277, 2278, 2279]
+cites_open_issues: [2277, 2278]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -15,6 +15,9 @@ A Java-to-Java guide: what each LangChain4j or Spring AI concept is called in ll
 replaces it - a first call, structured output, a tool, a conversation, embeddings, RAG, streaming, error handling, a
 Spring Boot controller and a test. No Scala is needed.
 {: .fs-6 .fw-300 }
+
+To keep your Spring AI `ChatClient` code and run it over llm4s instead of replacing it, see
+[Using LLM4S with Spring AI](spring-ai).
 
 Every llm4s Java block on this page is compiled by javac in CI and run against `FakeLlmClient` or a scripted client,
 with no network: `JavaMigrationGuideSpec` checks that each block is, word for word, in one of the source files the
@@ -296,9 +299,9 @@ public class AskController {
 `complete` blocks and throws `LlmException` on failure, so an `@ExceptionHandler` can map `getKind()` to a status;
 `tryComplete` returns the `LlmResult`, and `completeAsync` a `CompletableFuture<String>` on the starter's executor
 ([Spring Boot](spring-boot#use-the-template)). The starter auto-configures the client, the template, a health
-indicator, Micrometer metrics and an agent over your beans' `@Tool` methods
-([Spring Boot](spring-boot#an-agent-with-tools)); it does not yet auto-configure embeddings or streaming endpoints
-([#2279](https://github.com/llm4s/llm4s/issues/2279)).
+indicator, Micrometer metrics, an agent over your beans' `@Tool` methods
+([Spring Boot](spring-boot#an-agent-with-tools)), an embedding client ([Spring Boot](spring-boot#embeddings)) and
+`Flux` and `SseEmitter` streaming ([Spring Boot](spring-boot#streaming-to-a-browser)).
 
 ## A test with FakeLlmClient
 
@@ -405,8 +408,6 @@ Plainly, as of this page's sources:
   of your own needs the Scala `Agent.builder` and `Llm4s.wrapAgent`.
 - **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse
   ([#2278](https://github.com/llm4s/llm4s/issues/2278)).
-- **More Spring Boot auto-configuration.** Embeddings and streaming endpoints
-  ([#2279](https://github.com/llm4s/llm4s/issues/2279)).
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).
 - **Automatic retries.** Spring AI retries transient failures for you [S5]; an llm4s Java client reports them
