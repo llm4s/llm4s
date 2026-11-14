@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -58,12 +59,12 @@ class CohereRerankerSpec extends AnyFlatSpec with Matchers {
   "RerankProviderConfig" should "store configuration" in {
     val config = RerankProviderConfig(
       baseUrl = "https://api.cohere.com",
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       model = "rerank-english-v3.0"
     )
 
     config.baseUrl shouldBe "https://api.cohere.com"
-    config.apiKey shouldBe "test-key"
+    config.apiKey.reveal shouldBe "test-key"
     config.model shouldBe "rerank-english-v3.0"
   }
 
@@ -81,7 +82,7 @@ class CohereRerankerSpec extends AnyFlatSpec with Matchers {
   it should "create from config" in {
     val config = RerankProviderConfig(
       baseUrl = "https://custom.api.com",
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       model = "custom-model"
     )
 

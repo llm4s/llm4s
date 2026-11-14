@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -50,7 +51,7 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         .fold(error => fail(error.message), identity)
 
       config.model shouldBe "voyage-3"
-      config.apiKey shouldBe "pa-test"
+      config.apiKey.reveal shouldBe "pa-test"
       assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config)
     }
   }
@@ -59,8 +60,17 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = "test-key")
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config))
+      }
+    }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")
+      ) { (baseUrl, keys) =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }
   }

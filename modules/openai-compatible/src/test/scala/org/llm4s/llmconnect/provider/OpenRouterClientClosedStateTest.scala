@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -23,7 +24,7 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with Eit
   private def createTestConfig: OpenAIConfig = OpenAIConfig
     .fromValues(
       modelName = "openai/gpt-4",
-      apiKey = "test-api-key-for-closed-state-testing",
+      apiKey = Secret("test-api-key-for-closed-state-testing"),
       organization = None,
       // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
       baseUrl = "https://example.invalid/api/v1"
@@ -88,7 +89,7 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with Eit
     val config = OpenAIConfig
       .fromValues(
         modelName = "anthropic/claude-3-opus",
-        apiKey = "test-api-key",
+        apiKey = Secret("test-api-key"),
         organization = None,
         baseUrl = "https://example.invalid/api/v1"
       )

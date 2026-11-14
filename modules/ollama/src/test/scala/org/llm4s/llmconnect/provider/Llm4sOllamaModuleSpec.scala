@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
@@ -96,6 +97,10 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
   "a client built by the ollama descriptor" should {
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      assertUsesSuppliedHttpClient(OllamaProvider, section)
+    }
+
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
         assertStreams(clientAt(baseUrl))
@@ -139,8 +144,17 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = "test-key")
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
+      }
+    }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(_, 200, """{"embedding":[0.1,0.2]}""")
+      ) { (baseUrl, keys) =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }
   }

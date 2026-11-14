@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Vector Store
+description: "The VectorStore API for RAG and semantic search in Scala: in-memory, file, PostgreSQL with pgvector, Qdrant, Elasticsearch and OpenSearch stores."
+search_title: "Vector stores for Scala RAG: pgvector, Qdrant and more"
 parent: User Guide
 nav_order: 3
 ---
@@ -21,7 +23,7 @@ Low-level vector storage abstraction for RAG and semantic search.
 
 ## Overview
 
-The `VectorStore` trait provides a backend-agnostic interface for storing and searching vector embeddings. This is the foundation layer for building RAG (Retrieval-Augmented Generation) applications.
+The {% include api.html t="org.llm4s.vectorstore.VectorStore" %} trait provides a backend-agnostic interface for storing and searching vector embeddings. This is the foundation layer for building RAG (Retrieval-Augmented Generation) applications.
 
 **Key Features:**
 - Backend-agnostic API supporting multiple vector databases
@@ -105,6 +107,7 @@ store.close()
 ### PostgreSQL with pgvector
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore._
 
 // Local PostgreSQL with defaults
@@ -117,7 +120,7 @@ val store = VectorStoreFactory.pgvector().fold(
 val store2 = VectorStoreFactory.pgvector(
   connectionString = "jdbc:postgresql://localhost:5432/mydb",
   user = "postgres",
-  password = "secret",
+  password = Secret("secret"),
   tableName = "embeddings"
 )
 
@@ -198,6 +201,7 @@ detail of the config-based factories, and no public signature names it.
 ### Qdrant
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore._
 
 // Local Qdrant (docker run -p 6333:6333 qdrant/qdrant)
@@ -209,7 +213,7 @@ val store = VectorStoreFactory.qdrant().fold(
 // Or Qdrant Cloud
 val cloudStore = VectorStoreFactory.qdrantCloud(
   cloudUrl = "https://your-cluster.qdrant.io",
-  apiKey = "your-api-key",
+  apiKey = Secret("your-api-key"),
   collectionName = "my_vectors"
 )
 
@@ -226,6 +230,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-elasticsearch" % llm4sV
 ```
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.elasticsearch._
 
 // Local single node with security off:
@@ -237,7 +242,7 @@ val local = ElasticsearchVectorStore.local(index = "my-vectors")
 val encodedKey = "your-encoded-api-key" // from your secret store
 val config = ElasticsearchConfig("https://es.example.com:9200")
   .withIndex("my-vectors")
-  .withAuth(ElasticsearchAuth.ApiKey(encodedKey))
+  .withAuth(ElasticsearchAuth.ApiKey(Secret(encodedKey)))
   .withSimilarity(ElasticsearchSimilarity.Cosine) // or DotProduct, L2Norm, MaxInnerProduct
   .withDimensions(1536)                           // unset: the first record's size
 val store = ElasticsearchVectorStore(config)
@@ -302,6 +307,7 @@ metadata filter behave as described for [Elasticsearch](#elasticsearch). Only th
 scores and the authentication differ, and those are what `OpenSearchVectorStore` changes.
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.opensearch._
 
 // Local single node with the security plugin off:
@@ -313,7 +319,7 @@ val local = OpenSearchVectorStore.local(index = "my-vectors")
 val password = "your-password" // from your secret store
 val config = OpenSearchConfig("https://search.example.com:9200")
   .withIndex("my-vectors")
-  .withAuth(OpenSearchAuth.Basic("llm4s", password))
+  .withAuth(OpenSearchAuth.Basic("llm4s", Secret(password)))
   .withSpaceType(OpenSearchSpaceType.CosineSimil) // or InnerProduct, L2
   .withEngine(OpenSearchEngine.Lucene)            // or Faiss, Nmslib (deprecated)
   .withDimensions(1536)                           // unset: the first record's size
@@ -386,6 +392,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-vectorstore-redis" % llm4sVersion
 ```
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.redis._
 
 // Local server without authentication:
@@ -397,7 +404,7 @@ val password = "your-password" // from your secret store
 val config = RedisConfig("redis.example.com", port = 6380)
   .withTls(true)
   .withUsername("app")
-  .withPassword(password)
+  .withPassword(Secret(password))
   .withIndex("my-vectors")
   .withDistanceMetric(RedisDistanceMetric.Cosine) // or InnerProduct, L2
   .withAlgorithm(RedisVectorAlgorithm.Hnsw)       // or Flat
@@ -681,6 +688,7 @@ val configStore = VectorStoreFactory.create(config)
 ### Configuration Options
 
 ```scala
+import org.llm4s.security.Secret
 // Default in-memory config
 val defaultConfig = VectorStoreFactory.Config.default
 
@@ -705,7 +713,7 @@ val qdrantConfig = VectorStoreFactory.Config.qdrant(
 // Qdrant Cloud config
 val qdrantCloudConfig = VectorStoreFactory.Config.qdrantCloud(
   cloudUrl = "https://xxx.qdrant.io",
-  apiKey = "your-api-key",
+  apiKey = Secret("your-api-key"),
   collectionName = "vectors"
 )
 
@@ -896,6 +904,7 @@ For production deployments, you can run fully PostgreSQL-based hybrid search usi
 **Requirements:** PostgreSQL 16+ with pgvector extension (PostgreSQL 18+ recommended for best performance)
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore._
 
 val embedding = Array(0.1f, 0.2f, 0.3f)
@@ -905,7 +914,7 @@ val results = for {
   searcher <- HybridSearcher.pgvectorShared(
     connectionString = "jdbc:postgresql://localhost:5432/mydb",
     user = "postgres",
-    password = "secret",
+    password = Secret("secret"),
     vectorTableName = "vectors",
     keywordTableName = "documents"
   )
@@ -930,6 +939,7 @@ The `PgKeywordIndex` uses PostgreSQL native full-text search capabilities:
 - **GIN indexes** for fast full-text and metadata queries
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore._
 
 val filtered = for {
@@ -937,7 +947,7 @@ val filtered = for {
   keywordIndex <- KeywordIndex.postgres(
     connectionString = "jdbc:postgresql://localhost:5432/mydb",
     user = "postgres",
-    password = "secret",
+    password = Secret("secret"),
     tableName = "documents"  // Creates documents_keyword table
   )
 
@@ -970,6 +980,7 @@ val filtered = for {
 Use `withPgHybrid()` to configure fully PostgreSQL-based hybrid search in the RAG pipeline:
 
 ```scala
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag._
@@ -979,7 +990,7 @@ val config = RAGConfig()
   .withPgHybrid(
     connectionString = "jdbc:postgresql://localhost:5432/mydb",
     user = "postgres",
-    password = "secret",
+    password = Secret("secret"),
     vectorTableName = "vectors",
     keywordTableName = "documents"
   )
@@ -1042,6 +1053,7 @@ results.foreach(_.foreach { r =>
 
 ```scala
 import org.llm4s.reranker._
+import org.llm4s.security.Secret
 
 // Cohere reranker (recommended for production)
 val cohereReranker = RerankerFactory.cohere(
@@ -1055,7 +1067,7 @@ val passthrough = RerankerFactory.passthrough
 
 // From typed config
 val config = RerankProviderConfig(
-  apiKey = "your-api-key",
+  apiKey = Secret("your-api-key"),
   model = "rerank-english-v3.0",
   baseUrl = "https://api.cohere.com"
 )

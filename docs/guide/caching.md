@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Caching
+description: "Avoid paying twice for the same LLM work in LLM4S: an embedding cache for exact repeats and a semantic cache for model responses."
+search_title: "Cache LLM responses and embeddings in Scala"
 parent: User Guide
 nav_order: 16
 ---

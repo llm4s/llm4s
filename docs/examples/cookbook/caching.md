@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Cache repeated calls
+description: "Wrap an LLM4S client in CachingLLMClient so a question asked again is answered from the cache without a second model call."
+search_title: "Cache repeated LLM calls in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 9
@@ -15,7 +17,7 @@ Wrap a client in CachingLLMClient so that a question asked again is answered wit
 ## The problem
 
 Many applications send the same prompt again and again: a help bot asked the same question by different users.
-`CachingLLMClient` wraps any client: it embeds each prompt, and when a prompt at least `similarityThreshold` similar
+{% include api.html t="org.llm4s.llmconnect.caching.CachingLLMClient" %} wraps any client: it embeds each prompt, and when a prompt at least `similarityThreshold` similar
 was answered within the TTL with the same options, returns that answer without calling the model. The demo asks
 three questions, the third a repeat of the first, and the model is called twice.
 

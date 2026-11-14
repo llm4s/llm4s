@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -43,7 +44,7 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
       )
 
   private def resolver(model: String = ""): String => Result[EmbeddingProviderConfig] =
-    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = "k"))
+    _ => Right(EmbeddingProviderConfig(baseUrl = "http://fake", model = model, apiKey = Secret("k")))
 
   private def ingestOnce(rag: RAG): Unit =
     rag.ingestText("Some text worth embedding.", "doc-1").isRight shouldBe true

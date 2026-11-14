@@ -1,6 +1,8 @@
 ---
 layout: page
 title: 1.0 Scope
+description: "Which parts of the LLM4S API are safe to build on ahead of 1.0: maturity tiers, the package map and what frozen means."
+search_title: "LLM4S 1.0 scope: stable, beta and experimental APIs"
 parent: Reference
 nav_order: 6
 ---
@@ -70,6 +72,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `metrics` — Micrometer (`MicrometerMetrics`), a `MetricsCollector` over a `MeterRegistry` — **new** | `llm4s-observability-micrometer` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/auth/azure` — `AzureEntraId`: Microsoft Entra ID tokens (`DefaultAzureCredential`, any `TokenCredential`) for the `azure` provider's `authentication = "entra-id"` ([#2274](https://github.com/llm4s/llm4s/issues/2274)) — **new** | `llm4s-azure-identity` (`modules/providers/azure-identity`); carries Azure's `azure-identity` | Experimental |
+| `llmconnect/auth/vault` — `VaultApiKeyProvider`, `VaultSettings`: an `ApiKeyProvider` reading the key from HashiCorp Vault's KV engine over its HTTP API ([#2479](https://github.com/llm4s/llm4s/issues/2479)) — **new** | `llm4s-secrets-vault` (`modules/secrets-vault`) | Experimental |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |
 | `llmconnect/provider` — Gemini (and Vertex AI) — **carved** | `llm4s-gemini` | Frozen at 1.0 |
@@ -81,13 +84,22 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Jina AI embeddings — **new** | `llm4s-jina` (`modules/providers/jina`) | Beta |
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
 | `llmconnect/provider` — IBM watsonx.ai, on the chat endpoints (never run against the live service: verification against it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
+| `llmconnect/provider` — Perplexity Agent API (`/v1/agent`), with web search and citations (never run against the live service) — **new** | `llm4s-perplexity` (`modules/providers/perplexity`) | Beta |
+| `llmconnect/provider` — a local model run in-process by Jlama, on the JDK Vector API (incubator; a JDK upgrade can break it) — **new** | `llm4s-jlama` (`modules/providers/jlama`) | Experimental |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
 | `jev` — typed client for TypeSafe's Jev decision model (Noul, Choice, Score); not a chat provider — **new** | `llm4s-jev` (`modules/providers/jev`) | Beta |
 | `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | `agent/graph/sqlite` — `SqliteCheckpointer`, the first durable `Checkpointer`: threads, events and run claims in one SQLite file that survives a restart and that several processes on one host can share — **new** | `llm4s-agent-checkpoint-sqlite` (`modules/agent-checkpoint-sqlite`); carries the SQLite JDBC driver | Beta |
 | `agent/graph/postgres` — `PostgresCheckpointer`: threads, events and run claims in a PostgreSQL schema that runtimes on several machines share, claims and retention by the database's clock — **new** | `llm4s-agent-checkpoint-postgres` (`modules/agent-checkpoint-postgres`); carries the PostgreSQL JDBC driver and HikariCP | Beta |
 | `schema` — `SchemaOf`, a JSON schema derived from a case class with `derives`, and `completeStructuredOf`; builds core's `ObjectSchema` and adds no dependency (Map, recursive types and sealed hierarchies with fields are refused at compile time; a recursion through a hand-written given that derives its type fails on first use) — **new** | `llm4s-schema-derivation` (`modules/schema-derivation`) | Experimental |
+| `schema.iron` — `SchemaOf` and a uPickle `ReadWriter` for Iron refinement types: the constraint's bounds in the derived schema, a reply that breaks them refused; a constraint with no JSON Schema form refused at compile time. In a module of its own so `llm4s-schema-derivation` does not bring Iron — **new** | `llm4s-schema-iron` (`modules/schema-iron`) | Experimental |
+| `prompt` — the `prompt"..."` and `system"..."` interpolators: each value rendered by a `Promptable` found at compile time (`derives Promptable` for case classes and enums), `Untrusted` values fenced, `PromptTemplate`; adds no dependency — **new** | `llm4s-prompt` (`modules/prompt`) | Experimental |
+| `capability` — `Capable[C]`, a client whose model was checked once for the capability set `C` (`client.requireCapabilities[Vision & Tools](provider, model)`, or `Capable.assume`), `ModelRef[C]` from the compile-time `model"provider/model"` literal, and the operations a capability gates (`describe`, `completeWithTools`, `completeStructuredOf`) — **new** | `llm4s-capabilities` (`modules/capabilities`) | Experimental |
+| `sttp` — `SttpLlm4sHttpClient`: the provider clients' `Llm4sHttpClient` over a caller's sttp 4 synchronous backend (pool, proxy, logging, tracing, stub), passed with `LlmClientOptions.withHttpClient`; depends on core and sttp client 4's core only — **new** | `llm4s-sttp` (`modules/sttp`) | Experimental |
+| `tapir` — `EndpointTools`, `EndpointTool`: tapir endpoints as tools, each schema derived from the endpoint's inputs and each call made through sttp client 3; depends on core's tool API, not on the agent runtime — **new** | `llm4s-tapir` (`modules/tapir`) | Experimental |
 | `testkit` — a scriptable fake `LLMClient` for the tests of code that uses llm4s (`ScriptedLLMClient`, `Reply`, `RecordedCall`, `UnscriptedCallError`) — **new** | `llm4s-testkit` (`modules/testkit`), a test-scope dependency | Beta |
+| `doctor` — the setup checker: `DoctorCli` (its options, text report, JSON output and exit codes are a user contract), `Doctor.run` and its report, run on the application's own classpath — **new** | `llm4s-doctor` (`modules/doctor`), usually a test-scope dependency | Experimental |
+| `repl` — one-import helpers for the Scala CLI REPL, Metals worksheets and scripts (`Session`, `ask`, `extract`, `chat()`, `history`, `lastUsage`, `strict`, `Outcome`, `CallStats`, `History`); not for production code and never a dependency of another module — **new** | `llm4s-repl` (`modules/repl`); depends on `llm4s-schema-derivation` and `llm4s-testkit` | Experimental |
 | `agent/harness/memory` — `SemanticMemoryMiddleware`: recall before a turn, recording and consolidation after it, one store per tenant, each write a replayable effect on a `TransactionalMemoryStore` — **new** | `llm4s-agent-memory` (`modules/agent-memory`); depends on `llm4s-agent` and `llm4s-memory` | Experimental |
 | `agent/testkit` — `CheckpointerContract`, the contract every `Checkpointer` must pass (commits, event numbering, compaction, run-claim leases and fencing, two runtimes over one store), and `ManualClock` — **new** | `llm4s-agent-testkit` (`modules/agent-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | build — the bill of materials that pins every published artifact to one version (no code) — **new** | `llm4s-bom` (`modules/bom`) | Beta |
@@ -109,10 +121,12 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `javaapi.rag` — the Java facade for RAG (`JRag`, `JRagBuilder`, `JRagStore`, `JRagAnswer`, `JRagSource`) over `llm4s-rag`, in a module of its own so a chat-only Java user does not receive `llm4s-rag`'s dependencies — **new** | `llm4s-java-rag` (`modules/java-rag`) | Experimental |
 | `javaapi.reactor` — Reactor for the Java facade (`Streams.toFlux`: a streamed reply as a `Flux<String>`), in a module of its own so `llm4s-java-api` does not bring `reactor-core` — **new** | `llm4s-reactor` (`modules/reactor`) | Experimental |
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
+| `springai` — Spring AI interop: `Llm4sChatModel` and `Llm4sEmbeddingModel` (an llm4s client as a Spring AI `ChatModel`, `StreamingChatModel` and `EmbeddingModel`), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s `LLMClient`) and `Llm4sSpringAiAutoConfiguration`; Spring AI is a provided dependency — **new** | `llm4s-spring-ai` (`modules/spring-ai`) | Experimental |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |
 | `kotlin` — coroutine API (`LLMClientKt`, `AgentKt`, `AgentStreamItem`); a separate Gradle build, not part of sbt or the MiMa baseline, published with each release at the release's version (no `_3` suffix; managed by `llm4s-bom`) — **new** <!-- tier-drift: ignore (a Gradle-built artifact, not an sbt project; see PublishedArtifacts.Gradle) --> | `llm4s-kotlin-api` (`modules/kotlin-api`) | Experimental |
 | `pekko` — `LLMClientPekko`, `AgentPekko` (Apache Pekko Streams) — **new** | `llm4s-pekko` (`modules/llm4s-pekko`) | Beta |
+| `ox` — `LLMClientOx` (`streamFlow`, `parComplete`, `raceProviders`), `RetrySchedule`, `LLMException` (direct style with Ox on JDK 21 virtual threads) — **new** | `llm4s-ox` (`modules/llm4s-ox`) | Experimental |
 
 Notes:
 

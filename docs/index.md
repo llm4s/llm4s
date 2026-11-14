@@ -2,6 +2,7 @@
 layout: landing
 title: Home
 nav_order: 1
+search_title: "Scala LLM framework for the JVM"
 description: "LLM4S - Large Language Models for Scala. Type-safe agents, tools, RAG and multi-provider LLM calls for Scala and the JVM, from the community-led LLM4S Foundation."
 permalink: /
 ---
@@ -32,6 +33,15 @@ libraryDependencies ++= Seq(
     </div>
   </div>
 </section>
+
+{%- assign latest_post = site.posts | first %}
+{%- if latest_post %}
+<section class="lp-news-strip" aria-label="Latest news">
+  <div class="lp-wrap">
+    <p><strong>Latest:</strong> <a href="{{ latest_post.url | relative_url }}">{{ latest_post.title }}</a> ({{ latest_post.date | date: "%-d %B %Y" }}) &middot; <a href="{{ '/news/' | relative_url }}">All news</a> &middot; <a href="{{ '/feed.xml' | relative_url }}">Subscribe (Atom)</a></p>
+  </div>
+</section>
+{%- endif %}
 
 {% include stats-band.html %}
 
@@ -157,6 +167,7 @@ val ticket: Result[Ticket] = for {
     <header class="lp-section__head">
       <p class="lp-eyebrow">Use cases</p>
       <h2 id="usecases-heading">What teams build with it</h2>
+      <p>Short answers, each with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card lp-card--flat"><h3>Assistants inside JVM services</h3><p>Support, operations and internal assistants that run in your Spring Boot, Pekko or plain JVM service, with guardrails on what goes in and comes out.</p></li>

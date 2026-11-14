@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ GeminiConfig, VertexAIConfig }
@@ -52,7 +53,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
         Right(StreamingHttpResponse(200, new ByteArrayInputStream(wire.sse.getBytes(StandardCharsets.UTF_8))))
     }
     val config = GeminiConfig(
-      apiKey = "test-key",
+      apiKey = Secret("test-key"),
       model = model,
       baseUrl = "https://generativelanguage.googleapis.com/v1beta",
       contextWindow = 1048576,

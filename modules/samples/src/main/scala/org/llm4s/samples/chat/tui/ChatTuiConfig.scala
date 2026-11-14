@@ -1,5 +1,6 @@
 package org.llm4s.samples.chat.tui
 
+import org.llm4s.security.Secret
 import org.llm4s.config.{ Llm4sConfig, OpenAICompatibleConfigKeys }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.*
@@ -104,11 +105,12 @@ object ChatTuiConfig:
   private def buildProvider(provider: String, model: String, env: String => Option[String])(using
     ContextWindowResolver
   ): Result[ProviderConfig] = {
-    def requireKey(name: String): Result[String] =
+    def requireValue(name: String): Result[String] =
       env(name).map(_.trim).filter(_.nonEmpty) match {
         case Some(v) => Right(v)
         case None    => Left(ConfigurationError(s"$name is required when LLM_MODEL is set"))
       }
+    def requireKey(name: String): Result[Secret] = requireValue(name).map(Secret(_))
     def getOrElse(name: String, default: => String): String =
       env(name).map(_.trim).filter(_.nonEmpty).getOrElse(default)
     def get(name: String): Option[String] = env(name).map(_.trim).filter(_.nonEmpty)
@@ -149,7 +151,7 @@ object ChatTuiConfig:
         key match {
           case Some(apiKey) =>
             val baseUrl = getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
-            GeminiConfig.fromValues(model, apiKey, baseUrl)
+            GeminiConfig.fromValues(model, Secret(apiKey), baseUrl)
           case None =>
             Left(ConfigurationError("LLM_MODEL=gemini/... requires GOOGLE_API_KEY or GEMINI_API_KEY"))
         }
@@ -181,11 +183,11 @@ object ChatTuiConfig:
       case OpenAICompatibleConfig.ProviderIdName =>
         // Any OpenAI-compatible endpoint: it has no default, so the base URL is required, and
         // the key is optional because local servers take none.
-        requireKey(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL).flatMap { baseUrl =>
+        requireValue(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL).flatMap { baseUrl =>
           OpenAICompatibleConfig.fromValues(
             model = model,
             baseUrl = baseUrl,
-            apiKey = get(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_API_KEY)
+            apiKey = get(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_API_KEY).map(Secret(_))
           )
         }
 

@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -96,6 +97,10 @@ trait ProviderDescriptor:
    * `config` is whatever the caller passed, so implementations must check the
    * type rather than cast — `ProviderDescriptor.expectConfig` does that and
    * produces the standard mismatch error.
+   *
+   * A client that sends its own HTTP requests sends them through `options.httpClient` when it is set, and
+   * does not close that client, and declares so with `features.customHttpClient = true` (it defaults to
+   * `false`, which a provider built on a vendor SDK keeps).
    */
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService
@@ -163,13 +168,13 @@ object ProviderDescriptor:
    * `llm4s.credentials.<id>.apiKey` when the section set none, so this fails only for a
    * section that did not come through validation - one built in code.
    */
-  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[String] =
+  def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[Secret] =
     requireField(
       providerName,
       "api key",
       section.apiKey.map(_.asKey),
       s"llm4s.providers.$providerName.apiKey, or ${SharedCredentials.apiKeyPath(section.provider)}"
-    )
+    ).map(Secret(_))
 
   /**
    * The section's `baseUrl`, falling back to the spec's `defaultBaseUrl`.

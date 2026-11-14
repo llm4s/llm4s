@@ -49,6 +49,9 @@ object PlatformTests {
       "org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec",
       "org.llm4s.config.ProviderAuthConfigSpec",
       "org.llm4s.llmconnect.auth.IdentityTokenSourceSpec",
+      "org.llm4s.llmconnect.auth.ApiKeyProviderSpec",
+      "org.llm4s.config.ApiKeyFileConfigSpec",
+      "org.llm4s.config.SharedApiKeyFileSpec",
       "org.llm4s.model.ModelRegistryServiceSpec",
       "org.llm4s.http.Llm4sHttpClientSpec"
     ),
@@ -70,21 +73,35 @@ object PlatformTests {
       "org.llm4s.mcp.StdioStderrDrainSpec",
       "org.llm4s.mcp.MCPClientImplSpec"
     ),
-    "anthropic" -> Seq("org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec"),
-    "openai"    -> Seq("org.llm4s.llmconnect.provider.OpenAIWorkloadIdentitySpec"),
+    "anthropic" -> Seq(
+      "org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec",
+      "org.llm4s.llmconnect.provider.AnthropicApiKeyFileSpec"
+    ),
+    "openai" -> Seq(
+      "org.llm4s.llmconnect.provider.OpenAIWorkloadIdentitySpec",
+      "org.llm4s.llmconnect.provider.OpenAIApiKeyFileSpec"
+    ),
     "openaiCompatible" -> Seq(
+      "org.llm4s.llmconnect.provider.OpenAICompatibleApiKeyFileSpec",
       "org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec",
       "org.llm4s.config.OpenAICompatibleListModelsWorkloadIdentitySpec",
       "org.llm4s.llmconnect.provider.ProviderExchangeLoggingGuideSpec"
     ),
     "gemini" -> Seq(
       "org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec",
-      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec"
+      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec",
+      "org.llm4s.llmconnect.provider.GeminiApiKeyFileSpec"
     ),
-    "configPolicy" -> Seq(
-      "org.llm4s.configpolicy.DoctorSpec",
-      "org.llm4s.configpolicy.DoctorClassLoaderSpec",
-      "org.llm4s.configpolicy.CheckPoliciesSourceSpec"
+    "watsonx" -> Seq("org.llm4s.llmconnect.provider.WatsonXApiKeyFileSpec"),
+    // The default model directory under the user's home, and a `~` in a section's modelDir (#2284).
+    "jlama" -> Seq(
+      "org.llm4s.llmconnect.provider.JlamaConfigSpec",
+      "org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec"
+    ),
+    "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
+    "doctor" -> Seq(
+      "org.llm4s.doctor.DoctorSpec",
+      "org.llm4s.doctor.DoctorClassLoaderSpec"
     ),
     // `it` holds integration suites by tier. Only `@Local` ones (no Docker, model server or API key) belong here, as
     // in `sbt test`; of those, the vision clients' file-encoding paths create, write, read and delete temp files.

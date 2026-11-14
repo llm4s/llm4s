@@ -1,6 +1,7 @@
 package org.llm4s.agent.memory
 
 import com.zaxxer.hikari.HikariDataSource
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -106,7 +107,8 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     }
 
     private def prepared(sql: String): PreparedStatement = {
-      val params = mutable.Map.empty[Int, Any]
+      val params  = mutable.Map.empty[Int, Any]
+      val batched = mutable.ArrayBuffer.empty[mutable.Map[Int, Any]]
       proxy(classOf[PreparedStatement]) {
         case ("setString", a) => params(a(0).asInstanceOf[Integer]) = a(1); null
         case ("setLong", a)   => params(a(0).asInstanceOf[Integer]) = a(1).asInstanceOf[java.lang.Long].longValue; null
@@ -116,8 +118,13 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
         case ("setNull", a)       => params.remove(a(0).asInstanceOf[Integer]); null
         case ("executeQuery", _)  => query(sql, params)
         case ("executeUpdate", _) => Integer.valueOf(update(sql, params))
-        case ("close", _)         => null
-        case (other, _)           => throw new UnsupportedOperationException(other)
+        case ("addBatch", _)      => batched += params.clone(); null
+        case ("executeBatch", _) =>
+          val counts = batched.map(update(sql, _)).toArray
+          batched.clear()
+          counts
+        case ("close", _) => null
+        case (other, _)   => throw new UnsupportedOperationException(other)
       }
     }
 
@@ -224,6 +231,12 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     an[IllegalArgumentException] should be thrownBy PostgresMemoryStore.Config(tableName = "t" * 56)
     // `<table>_applied`, the longest derived name, fits PostgreSQL's limit untruncated
     (("t" * 55) + "_applied").length should be <= 63
+  }
+
+  it should "hold the password as a Secret that its toString masks" in KnownSecrets.isolated {
+    val config = PostgresMemoryStore.Config(password = Secret("pg-store-password-1"))
+    config.password.reveal shouldBe "pg-store-password-1"
+    (config.toString should not).include("pg-store-password-1")
   }
 
   "PostgresMemoryStore.applyAtomically" should "fail, writing nothing, when the connection fails" in {

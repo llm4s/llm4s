@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Postgres Memory Store
+description: "PostgresMemoryStore for LLM4S agents: durable memories with metadata and optional vector embeddings in PostgreSQL, with configuration and validation."
+search_title: "Postgres memory store for LLM agents in Scala"
 nav_order: 10
 parent: Reference
 ---
@@ -60,13 +62,14 @@ The store is configured using `PostgresMemoryStore.Config`.
 
 ```scala
 import org.llm4s.agent.memory.PostgresMemoryStore
+import org.llm4s.security.Secret
 
 val config = PostgresMemoryStore.Config(
   host = "localhost",
   port = 5432,
   database = "my_app_db",
   user = "postgres",
-  password = "secure_password",
+  password = Secret("secure_password"),
   tableName = "agent_memories"
 )
 
@@ -258,13 +261,14 @@ This section shows how a developer would use `PostgresMemoryStore` in a real app
 ```scala
 import java.time.Instant
 import org.llm4s.agent.memory.{PostgresMemoryStore, Memory, MemoryFilter, MemoryId, MemoryType}
+import org.llm4s.security.Secret
 
 val config = PostgresMemoryStore.Config(
   host = "localhost",
   port = 5432,
   database = "my_app_db",
   user = "postgres",
-  password = "secure_password",
+  password = Secret("secure_password"),
   tableName = "agent_memories"
 )
 
@@ -286,6 +290,21 @@ val result = for {
   _       <- store3.delete(MemoryId("memory-1"))
 } yield results
 ```
+
+### Bulk ingestion
+
+To import many memories at once (a chat history, extracted entity facts, document chunks), use `storeAll`
+rather than calling `store` in a loop:
+
+```scala
+val imported: Result[MemoryStore] = store.storeAll(memories)
+```
+
+`storeAll` writes the whole batch in one transaction on one connection: every memory is stored or, if any row
+fails, none is. The rows are sent as JDBC batches of up to 1,000, not one round trip per memory. A memory whose
+id appears more than once is stored once, as its last occurrence, and a memory whose id is already in the table
+is replaced. Over a data source of your own (`fromDataSource`), pgjdbc's `reWriteBatchedInserts=true` folds each
+batch into multi-row inserts.
 
 ---
 

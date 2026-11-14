@@ -2,6 +2,8 @@
 layout: page
 title: Apache Pekko Integration
 parent: User Guide
+description: "Use LLM4S with Apache Pekko: llm4s-pekko exposes streamed completions and agent runs as Pekko Streams Sources with backpressure and cancellation."
+search_title: "LLM4S with Apache Pekko Streams: stream LLM output"
 nav_order: 24
 ---
 
@@ -194,4 +196,6 @@ same way. What differs is the platform:
    [`llm4s-java-api`](java)'s `JAgent.stream`, which delivers the same events to a listener, or convert a `Source`
    you already have with `asJava()`.
  - Pekko HTTP routes and Play controllers are not part of the module. Serve a stream by mapping it to your framework's
-   response type, for example `Source[ServerSentEvent, NotUsed]` in Pekko HTTP.
+   response type, for example `Source[ServerSentEvent, NotUsed]` in Pekko HTTP. For Play 3, see
+   [the Play reference app](http-reference-apps#the-play-app): Guice wiring, configuration, a blocking dispatcher and
+   `Ok.chunked` server-sent events, with the cancellation above.

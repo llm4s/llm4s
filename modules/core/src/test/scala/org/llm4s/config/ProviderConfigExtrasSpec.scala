@@ -55,7 +55,11 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       for
         apiKey <- ProviderDescriptor.requireApiKey(providerName, section)
         region <- ProviderDescriptor.requireExtra(providerName, section, "region")
-        config <- FixtureChatConfig.fromValues(section.model.asString, apiKey, s"https://$region.regional.invalid")
+        config <- FixtureChatConfig.fromValues(
+          section.model.asString,
+          apiKey.reveal,
+          s"https://$region.regional.invalid"
+        )
       yield config
 
     def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
@@ -114,7 +118,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       Some(provider),
       Some("m"),
       None,
-      apiKey,
+      apiKey.map(ApiKey(_)),
       extras = extras ++ organization.map("organization" -> _)
     )
 

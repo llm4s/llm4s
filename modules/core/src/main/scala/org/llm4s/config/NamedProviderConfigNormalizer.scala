@@ -77,6 +77,20 @@ private[config] object NamedProviderConfigNormalizer:
                 )
               )
 
+    // Made absolute now, as an identity token file is; a blank value is unset, as a blank apiKey is.
+    val apiKeyFile: Result[Option[Path]] =
+      section.apiKeyFile.map(_.trim).filter(_.nonEmpty) match
+        case None => Right(None)
+        case Some(file) =>
+          Try(Path.of(file).toAbsolutePath.normalize).toEither.left
+            .map(e =>
+              ConfigurationError(
+                s"llm4s.providers.${providerName.asName}.apiKeyFile is not a valid path on this platform: " +
+                  e.getMessage
+              )
+            )
+            .map(Some(_))
+
     // The error names the key as the user wrote it: llm4s.providers.<name>.timeouts.request.
     val timeouts =
       section.timeouts.fold[Result[ProviderTimeouts]](Right(ProviderTimeouts.default)) { t =>
@@ -97,15 +111,17 @@ private[config] object NamedProviderConfigNormalizer:
       baseUrl  <- baseUrl
       auth     <- authConfig
       timeouts <- timeouts
+      keyFile  <- apiKeyFile
     yield NamedProviderConfig(
       provider = id,
       model = ModelName(model),
       baseUrl = baseUrl,
-      apiKey = section.apiKey.map(_.trim).filter(_.nonEmpty).map(ApiKey(_)),
+      apiKey = section.apiKey.map(_.asKey.trim).filter(_.nonEmpty).map(ApiKey(_)),
       headers = section.headers.getOrElse(Map.empty),
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
       extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim },
       timeouts = timeouts,
-      auth = auth
+      auth = auth,
+      apiKeyFile = keyFile
     )

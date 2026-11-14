@@ -1,9 +1,12 @@
 package org.llm4s.spring
 
-import org.llm4s.javaapi.{ JLlmClient, Llm4s }
+import org.llm4s.agent.graph.{ Checkpointer, InMemoryCheckpointer }
+import org.llm4s.javaapi.{ JAgent, JEmbeddingClient, JLlmClient, Llm4s }
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.trace.Tracing
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory
 import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.{
   ConditionalOnClass,
@@ -96,4 +99,74 @@ class Llm4sAutoConfiguration {
   @ConditionalOnMissingBean
   def llm4sTemplate(client: JLlmClient, @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService): LLM4STemplate =
     new LLM4STemplate(client, executor)
+
+  /**
+   * The embedding client `llm4s.embeddings.*` configures (#2279): registered when `llm4s.embeddings.model` is set, its
+   * `embedAsync` calls on the `llm4sTaskExecutor`. A bean of type `JEmbeddingClient` replaces it.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnProperty(prefix = "llm4s.embeddings", name = Array("model"))
+  def llm4sEmbeddingClient(
+    environment: ConfigurableEnvironment,
+    @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService
+  ): JEmbeddingClient =
+    SpringProviderSource.embeddings(environment).get().withAsyncExecutor(executor)
+
+  /**
+   * The tracer `llm4s.tracing.*` configures (#2279), which the `llm4sAgent` reports to: registered when
+   * `llm4s.tracing.mode` is set, for `console`, `none` or the mode of a `TracingBackend` on the classpath, such as
+   * `llm4s-observability-otel`'s `opentelemetry`. A mode no backend serves fails startup. A bean of type `Tracing`
+   * replaces it.
+   */
+  @Bean(destroyMethod = "shutdown")
+  @ConditionalOnMissingBean
+  @ConditionalOnProperty(prefix = "llm4s.tracing", name = Array("mode"))
+  def llm4sTracing(environment: ConfigurableEnvironment): Tracing =
+    SpringProviderSource
+      .tracing(environment)
+      .flatMap(Tracing.fromSettings)
+      .fold(error => throw new IllegalStateException(s"llm4s.tracing: ${error.message}"), identity)
+
+  /** The `@Tool` methods of the application's beans (#2279); a bean of type `Llm4sTools` replaces them. */
+  @Bean
+  @ConditionalOnMissingBean
+  def llm4sTools(beans: ConfigurableListableBeanFactory): Llm4sTools = Llm4sTools.collect(beans)
+
+  /**
+   * Where the `llm4sAgent` keeps its threads between turns (#2279): in memory. A bean of type `Checkpointer`, such as
+   * `llm4s-agent-checkpoint-sqlite`'s or `-postgres`'s, replaces it; `llm4s.agent.enabled=false` registers none.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnProperty(prefix = "llm4s.agent", name = Array("enabled"), havingValue = "true", matchIfMissing = true)
+  def llm4sCheckpointer(): Checkpointer = new InMemoryCheckpointer()
+
+  /**
+   * An agent over the client and the collected tools, configured by `llm4s.agent.*` (#2279), its threads in the
+   * `Checkpointer` bean, reporting to the `Tracing` bean when there is one, its `runAsync` calls on the
+   * `llm4sTaskExecutor`. A bean of type `JAgent` replaces it; `llm4s.agent.enabled=false` registers none.
+   */
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnProperty(prefix = "llm4s.agent", name = Array("enabled"), havingValue = "true", matchIfMissing = true)
+  def llm4sAgent(
+    client: JLlmClient,
+    tools: Llm4sTools,
+    checkpointer: Checkpointer,
+    tracing: ObjectProvider[Tracing],
+    properties: Llm4sProperties,
+    @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService
+  ): JAgent = {
+    val agent = properties.agent
+    val base = Llm4s
+      .agentBuilder(agent.id, client)
+      .tools(tools.tools())
+      .streaming(agent.streaming)
+      .maxSteps(agent.maxSteps)
+      .checkpointer(checkpointer)
+    val prompted = if (agent.systemPrompt.isEmpty) base else base.systemPrompt(agent.systemPrompt)
+    val traced   = Option(tracing.getIfUnique()).fold(prompted)(prompted.tracing)
+    traced.build().get().withAsyncExecutor(executor)
+  }
 }

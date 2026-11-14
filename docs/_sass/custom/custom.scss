@@ -1510,6 +1510,33 @@ body.landing .follow-links .btn {
 }
 .landing-main .event-card { border-radius: 14px; }
 
+// News (#2319): the post list on /news/, the latest-post strip on the home page, and a post (_layouts/post.html)
+
+.landing-main ul.lp-news {
+  display: grid;
+  gap: 1.1rem;
+  max-width: 52rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  > li { margin: 0; }
+}
+
+.landing-main .lp-hero__copy .lp-eyebrow a { color: inherit; }
+.landing-main .lp-hero__meta a { color: $lp-coral; }
+.landing-main .lp-post__date { margin: 0.75rem 0 0; color: $lp-muted-dark; }
+.landing-main .lp-post__nav { font-weight: 600; }
+
+.landing-main .lp-news-strip {
+  padding: 1rem 0;
+  background: $lp-cream;
+  border-bottom: 1px solid $lp-line;
+
+  p { margin: 0; color: $lp-text; }
+  a { font-weight: 600; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lp-btn, .lp-card, .landing-main ul.event-gallery img { transition: none; }
   .lp-btn:hover { transform: none; }

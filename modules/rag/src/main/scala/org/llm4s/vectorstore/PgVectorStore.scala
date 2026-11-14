@@ -2,7 +2,8 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
-import org.llm4s.util.SqlIdentifier
+import org.llm4s.util.{ SqlIdentifier, Redaction }
+import org.llm4s.security.Secret
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import java.util.concurrent.atomic.AtomicBoolean
@@ -81,7 +82,9 @@ final class PgVectorStore private (
           ()
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create HNSW index: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to create HNSW index: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def upsert(record: VectorRecord): Result[Unit] =
     Try {
@@ -110,7 +113,9 @@ final class PgVectorStore private (
           ()
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to upsert: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to upsert: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def upsertBatch(records: Seq[VectorRecord]): Result[Unit] =
     if (records.isEmpty) Right(())
@@ -154,11 +159,13 @@ final class PgVectorStore private (
             case scala.util.Failure(e) =>
               conn.rollback()
               conn.setAutoCommit(true)
-              Left(ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
+              Left(ProcessingError("pgvector-store", s"Failed to upsert batch: ${Redaction.scrubKnown(e.getMessage)}"))
           }
         }
       }.toEither.left
-        .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
+        .map[LLMError](e =>
+          ProcessingError("pgvector-store", s"Failed to upsert batch: ${Redaction.scrubKnown(e.getMessage)}")
+        )
         .flatMap(identity)
 
   /**
@@ -221,7 +228,7 @@ final class PgVectorStore private (
         }
       }
     }.toEither.left
-      .map[LLMError](e => ProcessingError("pgvector-store", s"Search failed: ${e.getMessage}"))
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Search failed: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def get(id: String): Result[Option[VectorRecord]] =
@@ -239,7 +246,7 @@ final class PgVectorStore private (
         }
       }
     }.toEither.left
-      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to get: ${e.getMessage}"))
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to get: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def getBatch(ids: Seq[String]): Result[Seq[VectorRecord]] =
@@ -272,7 +279,9 @@ final class PgVectorStore private (
           }
         }
       }.toEither.left
-        .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to get batch: ${e.getMessage}"))
+        .map[LLMError](e =>
+          ProcessingError("pgvector-store", s"Failed to get batch: ${Redaction.scrubKnown(e.getMessage)}")
+        )
         .flatMap(identity)
 
   override def delete(id: String): Result[Unit] =
@@ -284,7 +293,9 @@ final class PgVectorStore private (
           ()
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to delete: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to delete: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def deleteBatch(ids: Seq[String]): Result[Unit] =
     if (ids.isEmpty) Right(())
@@ -300,7 +311,9 @@ final class PgVectorStore private (
             ()
           }
         }
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to delete batch: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("pgvector-store", s"Failed to delete batch: ${Redaction.scrubKnown(e.getMessage)}")
+      )
 
   override def deleteByPrefix(prefix: String): Result[Long] =
     Try {
@@ -312,7 +325,9 @@ final class PgVectorStore private (
           stmt.executeUpdate().toLong
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to delete by prefix: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to delete by prefix: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def deleteByFilter(filter: MetadataFilter): Result[Long] =
     Try {
@@ -327,7 +342,9 @@ final class PgVectorStore private (
           stmt.executeUpdate().toLong
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to delete by filter: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to delete by filter: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def count(filter: Option[MetadataFilter]): Result[Long] =
     Try {
@@ -345,7 +362,9 @@ final class PgVectorStore private (
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to count: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to count: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def list(limit: Int, offset: Int, filter: Option[MetadataFilter]): Result[Seq[VectorRecord]] =
     Try {
@@ -378,7 +397,7 @@ final class PgVectorStore private (
         }
       }
     }.toEither.left
-      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to list: ${e.getMessage}"))
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to list: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(identity)
 
   override def clear(): Result[Unit] =
@@ -389,7 +408,9 @@ final class PgVectorStore private (
           ()
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to clear: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to clear: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def stats(): Result[VectorStoreStats] =
     Try {
@@ -423,7 +444,9 @@ final class PgVectorStore private (
           )
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to get stats: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pgvector-store", s"Failed to get stats: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   private val closed = new AtomicBoolean(false)
 
@@ -534,7 +557,9 @@ object PgVectorStore {
     validateTableName(tableName).flatMap { _ =>
       Try {
         new PgVectorStore(dataSource, tableName, ownsDataSource)
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("pgvector-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}")
+      )
     }
 
   /**
@@ -553,7 +578,7 @@ object PgVectorStore {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "vectors",
     maxPoolSize: Int = 10
   ) {
@@ -572,7 +597,7 @@ object PgVectorStore {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(config.jdbcUrl)
         hikariConfig.setUsername(config.user)
-        hikariConfig.setPassword(config.password)
+        hikariConfig.setPassword(config.password.reveal)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
         hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -580,7 +605,7 @@ object PgVectorStore {
         hikariConfig.setMaxLifetime(HikariDefaults.MaxLifetime.toMillis)
         hikariConfig
       }.toEither.left
-        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}"))
         .flatMap(ownedStore(_, config.tableName))
     }
 
@@ -596,27 +621,28 @@ object PgVectorStore {
   def apply(
     connectionString: String,
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "vectors"
   ): Result[PgVectorStore] =
     validateTableName(tableName).flatMap { _ =>
+      JdbcUrlCredentials.register(connectionString)
       Try {
         val hikariConfig = new HikariConfig()
         hikariConfig.setJdbcUrl(connectionString)
         hikariConfig.setUsername(user)
-        hikariConfig.setPassword(password)
+        hikariConfig.setPassword(password.reveal)
         hikariConfig.setMaximumPoolSize(10)
         hikariConfig.setMinimumIdle(1)
         hikariConfig
       }.toEither.left
-        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}"))
         .flatMap(ownedStore(_, tableName))
     }
 
   /** A store over a pool it creates from `hikariConfig` and owns; the pool is closed if the schema cannot be set up. */
   private def ownedStore(hikariConfig: HikariConfig, tableName: String): Result[PgVectorStore] =
     Try(new HikariDataSource(hikariConfig)).toEither.left
-      .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+      .map(e => ProcessingError("pgvector-store", s"Failed to create store: ${Redaction.scrubKnown(e.getMessage)}"))
       .flatMap(dataSource =>
         create(dataSource, tableName, ownsDataSource = true).left.map { e =>
           dataSource.close()

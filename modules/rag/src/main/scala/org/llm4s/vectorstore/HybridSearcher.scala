@@ -4,6 +4,8 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.error.ProcessingError
 import org.llm4s.reranker.{ RerankRequest, Reranker }
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
+import org.llm4s.security.Secret
 
 import javax.sql.DataSource
 import scala.util.Try
@@ -422,17 +424,18 @@ object HybridSearcher {
   def pgvectorShared(
     connectionString: String,
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     vectorTableName: String = "vectors",
     keywordTableName: String = "documents",
     defaultStrategy: FusionStrategy = FusionStrategy.default
   ): Result[HybridSearcher] =
+    JdbcUrlCredentials.register(connectionString)
     Try {
       // Create shared HikariDataSource
       val hikariConfig = new HikariConfig()
       hikariConfig.setJdbcUrl(connectionString)
       hikariConfig.setUsername(user)
-      hikariConfig.setPassword(password)
+      hikariConfig.setPassword(password.reveal)
       hikariConfig.setMaximumPoolSize(20) // Larger pool for shared usage
       hikariConfig.setMinimumIdle(2)
       hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -441,7 +444,9 @@ object HybridSearcher {
 
       new HikariDataSource(hikariConfig)
     }.toEither.left
-      .map(e => ProcessingError("hybrid-searcher", s"Failed to create connection pool: ${e.getMessage}"))
+      .map(e =>
+        ProcessingError("hybrid-searcher", s"Failed to create connection pool: ${Redaction.scrubKnown(e.getMessage)}")
+      )
       .flatMap { dataSource =>
         // The vector store owns the pool, so closing the searcher closes it; the keyword index borrows it.
         PgVectorStore.create(dataSource, vectorTableName, ownsDataSource = true) match {

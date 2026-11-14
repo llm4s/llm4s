@@ -31,7 +31,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
       Llm4sConfig.defaultProvider(ReferenceConfig.withEnv(hocon(0), env)) match {
         case Right(openai: OpenAIConfig) =>
           openai.model shouldBe "gpt-4o-mini"
-          openai.apiKey shouldBe "sk-openai-env"
+          openai.apiKey.reveal shouldBe "sk-openai-env"
         case other => fail(s"Expected OpenAIConfig, got $other")
       }
     }
@@ -53,7 +53,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
       Llm4sConfig.defaultProvider(source) match {
         case Right(anthropic: AnthropicConfig) =>
           anthropic.model shouldBe "claude-sonnet-4-20250514"
-          anthropic.apiKey shouldBe "sk-anthropic-env"
+          anthropic.apiKey.reveal shouldBe "sk-anthropic-env"
         case other => fail(s"Expected AnthropicConfig, got $other")
       }
       Llm4sConfig.provider(source, "ollama-local") match {
@@ -69,7 +69,7 @@ class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
         case Right((provider, config)) =>
           provider shouldBe "openai"
           config.model shouldBe "text-embedding-3-small"
-          config.apiKey shouldBe "sk-openai-env"
+          config.apiKey.reveal shouldBe "sk-openai-env"
         case Left(error) => fail(s"Expected the OpenAI embedding config, got $error")
       }
     }

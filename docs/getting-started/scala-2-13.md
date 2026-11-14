@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Using LLM4S from Scala 2.13
+description: "Call LLM4S from Scala 2.13 projects such as Spark, Play or Pekko services through the TASTy reader, with the compiler settings it needs."
+search_title: "Use LLM4S from Scala 2.13 (TASTy reader)"
 parent: Getting Started
 nav_order: 12
 # Every Scala 2.13 on this page is a Scala 2.13 caller reading the Scala 3 artifacts (scripts/check-doc-support.sh)

@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 // scalafix:off DisableSyntax.NoConfigFactory
+import org.llm4s.security.Secret
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
 import pureconfig.ConfigSource
@@ -47,7 +48,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
       pg.port shouldBe 5433
       pg.database shouldBe "vectors_db"
       pg.user shouldBe "pguser"
-      pg.password shouldBe "pgpass123"
+      pg.password shouldBe Secret("pgpass123")
       pg.vectorTableName shouldBe "my_vectors"
       pg.keywordTableName shouldBe "my_keywords"
       pg.maxPoolSize shouldBe 20
@@ -162,7 +163,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
         pg.port shouldBe 5432
         pg.database shouldBe "testdb"
         pg.user shouldBe "testuser"
-        pg.password shouldBe "testpass"
+        pg.password shouldBe Secret("testpass")
         pg.vectorTableName shouldBe "test_vectors"
         pg.keywordTableName shouldBe "test_keywords"
         pg.maxPoolSize shouldBe 5

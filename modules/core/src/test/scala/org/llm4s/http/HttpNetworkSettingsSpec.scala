@@ -1,5 +1,6 @@
 package org.llm4s.http
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.testutil.TestTls
 import org.scalatest.EitherValues
@@ -18,8 +19,8 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
     proxy.host shouldBe "proxy.corp"
     proxy.port shouldBe 3128
     proxy.username shouldBe Some("alice")
-    proxy.password shouldBe Some("s3cret")
-    proxy.credentials shouldBe Some(("alice", "s3cret"))
+    proxy.password shouldBe Some(Secret("s3cret"))
+    proxy.credentials shouldBe Some(("alice", Secret("s3cret")))
     proxy.nonProxyHosts shouldBe HttpProxy.DefaultNonProxyHosts
   }
 
@@ -70,12 +71,12 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   "The settings types" should "keep passwords out of toString" in {
-    val proxy = HttpProxy("proxy", 3128).withUsername("alice").withPassword("s3cret")
+    val proxy = HttpProxy("proxy", 3128).withUsername("alice").withPassword(Secret("s3cret"))
     val tls = HttpTls.default
       .withTrustStore(Path.of("/etc/ca.p12"))
-      .withTrustStorePassword("trustpw")
+      .withTrustStorePassword(Secret("trustpw"))
       .withKeyStore(Path.of("/etc/client.p12"))
-      .withKeyStorePassword("keypw")
+      .withKeyStorePassword(Secret("keypw"))
     val settings = HttpNetworkSettings.default.withProxy(proxy).withTls(tls)
     val printed  = Seq(proxy.toString, tls.toString, settings.toString)
     printed.foreach { text =>
@@ -94,8 +95,8 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
   they should "build with the setters, and report when they change nothing" in {
     HttpNetworkSettings.default.isDefault shouldBe true
     HttpNetworkSettings().isDefault shouldBe true
-    val proxy = HttpProxy("a", 1).withHost("b").withPort(2).withUsername(Some("u")).withPassword(Some("p"))
-    (proxy.host, proxy.port, proxy.credentials) shouldBe (("b", 2, Some(("u", "p"))))
+    val proxy = HttpProxy("a", 1).withHost("b").withPort(2).withUsername(Some("u")).withPassword(Some(Secret("p")))
+    (proxy.host, proxy.port, proxy.credentials) shouldBe (("b", 2, Some(("u", Secret("p")))))
     proxy.withUsername(None).withPassword(None).credentials shouldBe None
     proxy.withUsername("").credentials shouldBe None
     val settings = HttpNetworkSettings.default.withProxy(Some(proxy))
@@ -110,7 +111,7 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
       .withTrustStorePassword(None)
       .withKeyStore(None)
       .withKeyStorePassword(None) shouldBe HttpTls.default
-    HttpTls.default.withKeyStore(Path.of("k")).withKeyStorePassword("x").isDefault shouldBe false
+    HttpTls.default.withKeyStore(Path.of("k")).withKeyStorePassword(Secret("x")).isDefault shouldBe false
     HttpNetworkSettings(tls = tls).isDefault shouldBe false
   }
 
@@ -134,7 +135,7 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
 
   "HttpNetwork.authenticator" should "answer only the proxy's own challenge" in {
     HttpNetwork.authenticator(HttpProxy("proxy.corp", 3128)) shouldBe None
-    val auth = HttpNetwork.authenticator(HttpProxy("proxy.corp", 3128).withUsername("u").withPassword("p")).get
+    val auth = HttpNetwork.authenticator(HttpProxy("proxy.corp", 3128).withUsername("u").withPassword(Secret("p"))).get
     def ask(host: String, kind: Authenticator.RequestorType) =
       auth.requestPasswordAuthenticationInstance(
         host,
@@ -159,7 +160,7 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "trust the store's CA in addition to the JDK's" in {
     val material = HttpNetwork
-      .tlsMaterial(HttpTls.default.withTrustStore(TestTls.trustStore).withTrustStorePassword(TestTls.Password))
+      .tlsMaterial(HttpTls.default.withTrustStore(TestTls.trustStore).withTrustStorePassword(Secret(TestTls.Password)))
       .value
       .get
     val issuers = material.trustManager.getAcceptedIssuers.toSeq.map(_.getSubjectX500Principal.getName)
@@ -172,7 +173,7 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "load a client certificate's key managers" in {
     val material = HttpNetwork
-      .tlsMaterial(HttpTls.default.withKeyStore(TestTls.clientStore).withKeyStorePassword(TestTls.Password))
+      .tlsMaterial(HttpTls.default.withKeyStore(TestTls.clientStore).withKeyStorePassword(Secret(TestTls.Password)))
       .value
       .get
     material.keyManagers should not be empty
@@ -182,7 +183,7 @@ class HttpNetworkSettingsSpec extends AnyFlatSpec with Matchers with EitherValue
     val missing = HttpNetwork.tlsMaterial(HttpTls(trustStore = Some(Path.of("/no/such/ca.p12")))).left.value
     missing.message should (include("tls.trustStore").and(include("/no/such/ca.p12")))
     val wrong = HttpNetwork
-      .tlsMaterial(HttpTls.default.withTrustStore(TestTls.trustStore).withTrustStorePassword("wrong-secret-pw"))
+      .tlsMaterial(HttpTls.default.withTrustStore(TestTls.trustStore).withTrustStorePassword(Secret("wrong-secret-pw")))
       .left
       .value
     wrong.message should include("tls.trustStore")

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
@@ -25,7 +26,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
 
   private val model = "gpt-4o"
   private val config =
-    OpenAIConfig.fromValues(model, "test-api-key", None, "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(model, Secret("test-api-key"), None, "https://example.invalid/v1").value
 
   /** A chunk whose delta carries the given `tool_calls` entries. */
   private def toolDelta(calls: String*): String =

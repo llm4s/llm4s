@@ -1,5 +1,6 @@
 package org.llm4s.javaapi
 
+import org.llm4s.security.Secret
 import org.llm4s.testutil.TestTimeLimit
 
 import org.llm4s.llmconnect.LLMClient
@@ -48,7 +49,7 @@ class Llm4sSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     import org.llm4s.llmconnect.config.OpenAIConfig
 
     val config = OpenAIConfig(
-      apiKey = "sk-test-key",
+      apiKey = Secret("sk-test-key"),
       model = "gpt-4o",
       organization = None,
       baseUrl = "https://api.openai.com/v1",

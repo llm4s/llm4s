@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Reference
+description: "Reference for LLM4S: contributing, API stability, compatibility and support policy, security, roadmap, and project documentation."
 nav_order: 7
 has_children: true
 ---

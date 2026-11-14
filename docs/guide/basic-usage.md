@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Basic Usage
+description: "Create an LLM4S client, send a conversation, choose a model and handle the Result and LLMError values that every call returns in Scala."
+search_title: "Call LLMs from Scala with LLM4S: clients and results"
 parent: User Guide
 nav_order: 1
 ---
@@ -126,7 +128,7 @@ The same code works with any configured named provider without modifications: ch
 ### With Explicit Model Selection
 
 The model comes from the section's `model`; to use another one, load a section that names it with
-`Llm4sConfig.provider("<name>")`. To adjust the generation settings of one call, pass `CompletionOptions`:
+`Llm4sConfig.provider("<name>")`. To adjust the generation settings of one call, pass {% include api.html t="org.llm4s.llmconnect.model.CompletionOptions" %}:
 
 ```scala
 val startup = for {
@@ -185,7 +187,7 @@ result match {
 
 ### LLM Errors
 
-All LLM operations return an `LLMError` on failure. It is an open trait in `org.llm4s.error`
+All LLM operations return an {% include api.html t="org.llm4s.error.LLMError" %} on failure. It is an open trait in `org.llm4s.error`
 with a `message`, an optional `code` and a `context` map, and each subtype is either
 recoverable (worth retrying) or not:
 
@@ -281,7 +283,7 @@ val response = client.complete(conversation)
 
 ### System Messages
 
-Prepend a `SystemMessage` to the conversation to set context and behavior:
+Prepend a {% include api.html t="org.llm4s.llmconnect.model.SystemMessage" %} to the conversation to set context and behavior:
 
 ```scala
 val conversation = Conversation(Seq(
@@ -291,6 +293,10 @@ val conversation = Conversation(Seq(
 
 val response = client.complete(conversation)
 ```
+
+To build the messages from typed values, with untrusted text (a document, an email, a tool's result) fenced off from
+your instructions, use the `prompt"..."` and `system"..."` interpolators of `llm4s-prompt`: see
+[Typed Prompts](prompts).
 
 ---
 

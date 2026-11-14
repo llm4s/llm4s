@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.error.ConfigurationError
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -17,7 +18,7 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  * @param safeSearch The safe search level (off, moderate, or strict)
  */
 final case class BraveSearchToolConfig(
-  apiKey: String,
+  apiKey: Secret,
   apiUrl: String,
   count: Int,
   safeSearch: String
@@ -45,7 +46,7 @@ final case class DuckDuckGoSearchToolConfig(
  * @param maxCharacters Maximum characters for text content
  */
 final case class ExaSearchToolConfig(
-  apiKey: String,
+  apiKey: Secret,
   apiUrl: String,
   numResults: Int,
   searchType: String,
@@ -59,9 +60,9 @@ object ExaSearchToolConfig {
   /**
    * Validate API key is non-empty.
    */
-  def validateApiKey(key: String): Result[String] = {
-    val trimmed = key.trim
-    if (trimmed.nonEmpty) Right(trimmed)
+  def validateApiKey(key: Secret): Result[Secret] = {
+    val trimmed = key.reveal.trim
+    if (trimmed.nonEmpty) Right(Secret(trimmed))
     else Left(ConfigurationError("apiKey is required", List("apiKey")))
   }
 
@@ -155,6 +156,9 @@ object ExaSearchToolConfig {
  * `llm4s-agent-tools`' `reference.conf`.
  */
 object ToolsConfigLoader {
+
+  implicit private val secretReader: PureConfigReader[Secret] =
+    PureConfigReader[String].map(Secret(_))
 
   implicit private val braveSectionReader: PureConfigReader[BraveSearchToolConfig] =
     PureConfigReader.forProduct4("apiKey", "apiUrl", "count", "safeSearch")(BraveSearchToolConfig.apply)

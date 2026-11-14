@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 
+import java.nio.file.Path
+
 /** Shared model types and configuration data structures for the multi-provider configuration system. */
 @Stable
 object ProvidersConfigModel:
@@ -29,17 +31,19 @@ object ProvidersConfigModel:
    *                      whatever the provider reads from it
    *  @param http         the section's `http` block, if any, as read: its proxy and TLS keys override
    *                      `llm4s.http`'s for this section
+   *  @param apiKeyFile   the section's `apiKeyFile`, as read: a file holding the key, re-read when it changes
    */
   final private[llm4s] case class RawNamedProviderSection(
     provider: Option[String],
     model: Option[String],
     baseUrl: Option[String],
-    apiKey: Option[String],
+    apiKey: Option[ApiKey],
     headers: Option[Map[String, String]] = None,
     extras: Map[String, String] = Map.empty,
     timeouts: Option[ProviderTimeouts] = None,
     auth: Option[Map[String, String]] = None,
-    http: Option[com.typesafe.config.ConfigObject] = None
+    http: Option[com.typesafe.config.ConfigObject] = None,
+    apiKeyFile: Option[String] = None
   )
 
   /**
@@ -81,6 +85,10 @@ object ProvidersConfigModel:
    *                      exchange and the keys its provider declares in
    *                      `ProviderConfigSpec.authExtras`. Validation guarantees it is never set
    *                      together with `apiKey`. Redacted in `toString`.
+   *  @param apiKeyFile   the section's `apiKeyFile`: a file holding the key, which the client re-reads when it
+   *                      changes, so a rotated key is used without a restart (#2313). Validation reads it once
+   *                      into `apiKey`, so a descriptor builds its config as for a literal key; the loader then
+   *                      gives the config an `ApiKeyProvider.file` over it.
    */
   final case class NamedProviderConfig private (
     provider: ProviderId,
@@ -90,7 +98,8 @@ object ProvidersConfigModel:
     headers: Map[String, String],
     extras: Map[String, String],
     timeouts: ProviderTimeouts,
-    auth: Option[AuthConfig]
+    auth: Option[AuthConfig],
+    apiKeyFile: Option[Path]
   ):
 
     def withProvider(provider: ProviderId): NamedProviderConfig        = copy(provider = provider)
@@ -104,11 +113,14 @@ object ProvidersConfigModel:
     def withTimeouts(timeouts: ProviderTimeouts): NamedProviderConfig  = copy(timeouts = timeouts)
     def withAuth(auth: AuthConfig): NamedProviderConfig                = copy(auth = Some(auth))
     def withAuth(auth: Option[AuthConfig]): NamedProviderConfig        = copy(auth = auth)
+    def withApiKeyFile(apiKeyFile: Path): NamedProviderConfig          = copy(apiKeyFile = Some(apiKeyFile))
+    def withApiKeyFile(apiKeyFile: Option[Path]): NamedProviderConfig  = copy(apiKeyFile = apiKeyFile)
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
     // token, a provider-declared secret), so all are redacted; names are kept because they are
     // what a user needs to debug a section.
     override def toString: String =
-      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},${redacted(headers)},${redacted(extras)},$auth)"
+      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},${redacted(headers)}," +
+        s"${redacted(extras)},$auth${apiKeyFile.fold("")(p => s",apiKeyFile=$p")})"
 
     private def redacted(values: Map[String, String]): String =
       values.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")
@@ -171,9 +183,23 @@ object ProvidersConfigModel:
       headers: Map[String, String] = Map.empty,
       extras: Map[String, String] = Map.empty,
       timeouts: ProviderTimeouts = ProviderTimeouts.default,
-      auth: Option[AuthConfig] = None
+      auth: Option[AuthConfig] = None,
+      apiKeyFile: Option[Path] = None
     ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth)
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth, apiKeyFile)
+
+    /** The signature before `apiKeyFile` was added, kept so code compiled against it still links. */
+    def apply(
+      provider: ProviderId,
+      model: ModelName,
+      baseUrl: Option[BaseUrl],
+      apiKey: Option[ApiKey],
+      headers: Map[String, String],
+      extras: Map[String, String],
+      timeouts: ProviderTimeouts,
+      auth: Option[AuthConfig]
+    ): NamedProviderConfig =
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth, None)
 
     /** The signature before `timeouts` was added, kept so code compiled against it still links. */
     def apply(
@@ -184,7 +210,7 @@ object ProvidersConfigModel:
       headers: Map[String, String],
       extras: Map[String, String]
     ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, ProviderTimeouts.default, None)
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, ProviderTimeouts.default, None, None)
   }
 
   /**

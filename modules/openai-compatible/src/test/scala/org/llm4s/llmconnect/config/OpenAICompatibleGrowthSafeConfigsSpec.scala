@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -57,11 +58,12 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     val defaultContextWindow = DeepSeekConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = DeepSeekConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      DeepSeekConfig(a, m, b, cw, rc, t)
-    def withDefaults(a: String, m: String) = DeepSeekConfig(apiKey = a, model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String)        = DeepSeekConfig(a, m)
-    def fields(c: C) = Fields(c.apiKey, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
-    def withApiKey(c: C, v: String)             = c.withApiKey(v)
+      DeepSeekConfig(Secret(a), m, b, cw, rc, t)
+    def withDefaults(a: String, m: String) =
+      DeepSeekConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = DeepSeekConfig(Secret(a), m)
+    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
@@ -75,11 +77,13 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     val defaultBaseUrl       = ZaiConfig.DEFAULT_BASE_URL
     val defaultContextWindow = ZaiConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = ZaiConfig.DEFAULT_RESERVE_COMPLETION
-    def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) = ZaiConfig(a, m, b, cw, rc, t)
-    def withDefaults(a: String, m: String) = ZaiConfig(apiKey = a, model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String)        = ZaiConfig(a, m)
-    def fields(c: C) = Fields(c.apiKey, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
-    def withApiKey(c: C, v: String)             = c.withApiKey(v)
+    def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
+      ZaiConfig(Secret(a), m, b, cw, rc, t)
+    def withDefaults(a: String, m: String) =
+      ZaiConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = ZaiConfig(Secret(a), m)
+    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
@@ -93,11 +97,13 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     val defaultBaseUrl       = XaiConfig.DEFAULT_BASE_URL
     val defaultContextWindow = XaiConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = XaiConfig.DEFAULT_RESERVE_COMPLETION
-    def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) = XaiConfig(a, m, b, cw, rc, t)
-    def withDefaults(a: String, m: String) = XaiConfig(apiKey = a, model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String)        = XaiConfig(a, m)
-    def fields(c: C) = Fields(c.apiKey, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
-    def withApiKey(c: C, v: String)             = c.withApiKey(v)
+    def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
+      XaiConfig(Secret(a), m, b, cw, rc, t)
+    def withDefaults(a: String, m: String) =
+      XaiConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = XaiConfig(Secret(a), m)
+    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
@@ -112,11 +118,12 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     val defaultContextWindow = MistralConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = MistralConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      MistralConfig(a, m, b, cw, rc, t)
-    def withDefaults(a: String, m: String) = MistralConfig(apiKey = a, model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String)        = MistralConfig(a, m)
-    def fields(c: C) = Fields(c.apiKey, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
-    def withApiKey(c: C, v: String)             = c.withApiKey(v)
+      MistralConfig(Secret(a), m, b, cw, rc, t)
+    def withDefaults(a: String, m: String) =
+      MistralConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = MistralConfig(Secret(a), m)
+    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)
@@ -131,11 +138,12 @@ class OpenAICompatibleGrowthSafeConfigsSpec extends AnyFlatSpec with Matchers {
     val defaultContextWindow = CohereConfig.DEFAULT_CONTEXT_WINDOW
     val defaultReserve       = CohereConfig.DEFAULT_RESERVE_COMPLETION
     def full(a: String, m: String, b: String, cw: Int, rc: Int, t: ProviderTimeouts) =
-      CohereConfig(a, m, b, cw, rc, t)
-    def withDefaults(a: String, m: String) = CohereConfig(apiKey = a, model = m, timeouts = ProviderTimeouts.default)
-    def short(a: String, m: String)        = CohereConfig(a, m)
-    def fields(c: C) = Fields(c.apiKey, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
-    def withApiKey(c: C, v: String)             = c.withApiKey(v)
+      CohereConfig(Secret(a), m, b, cw, rc, t)
+    def withDefaults(a: String, m: String) =
+      CohereConfig(apiKey = Secret(a), model = m, timeouts = ProviderTimeouts.default)
+    def short(a: String, m: String) = CohereConfig(Secret(a), m)
+    def fields(c: C) = Fields(c.apiKey.reveal, c.model, c.baseUrl, c.contextWindow, c.reserveCompletion, c.timeouts)
+    def withApiKey(c: C, v: String)             = c.withApiKey(Secret(v))
     def withBaseUrl(c: C, v: String)            = c.withBaseUrl(v)
     def withContextWindow(c: C, v: Int)         = c.withContextWindow(v)
     def withReserveCompletion(c: C, v: Int)     = c.withReserveCompletion(v)

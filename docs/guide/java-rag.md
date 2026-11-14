@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Java RAG
+description: "Ingest documents and answer questions over them from Java with llm4s-java-rag, with answers that carry the chunks they came from."
+search_title: "RAG from Java with LLM4S: ingest and ask questions"
 parent: User Guide
 nav_order: 31
 ---
@@ -39,7 +41,8 @@ receive them. It is **Experimental**: its API may change in any release
 
 ## Add the dependency
 
-The artifact is `org.llm4s:llm4s-java-rag_3`; it brings `llm4s-java-api` and `llm4s-rag` with it.
+The artifact is `org.llm4s:llm4s-java-rag_3`; it brings `llm4s-java-api` and `llm4s-rag` with it, and no provider
+module: declare the ones your chat and embedding models use, as for [`llm4s-java-api`](java#add-the-dependency).
 
 **Maven**
 

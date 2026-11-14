@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
@@ -37,7 +38,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
     AnthropicConfig
       .fromValues(
         modelName = model,
-        apiKey = key,
+        apiKey = Secret(key),
         baseUrl = "https://api.anthropic.com"
       )
       .value

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Security Reference
+description: "The LLM4S threat model: data flow, trust boundaries, what is redacted, and known risks such as key leakage, prompt injection and SSRF with mitigations."
+search_title: "LLM4S security reference: threat model and mitigations"
 parent: Reference
 nav_order: 16
 ---
@@ -42,6 +44,17 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 | Provider API errors | **Untrusted** | Error bodies may echo back API keys |
 | Memory store reads | **Semi-trusted** | Content was written by the agent but may originate from user or tools |
 | Config / environment | **Trusted** | Read at startup via `Llm4sConfig` |
+
+## What llm4s redacts
+
+Every credential llm4s holds is a `Secret`, registered when it is created; a provider section's credential-named headers (`Authorization`, `x-api-key`, ...) are registered when the section is read. A registered credential is removed by exact match, whatever the syntax around it, from the error messages, exchange logs and other diagnostic text llm4s builds, store errors included. Your own log lines are not scrubbed, and trace content follows in a later PR (#1932). The forms covered are the raw value, its JSON-escaped form, its URL-encoded form and its Basic base64 form. Values under 8 characters are not registered. Runtime tokens (exchanged or workload-identity tokens) are kept for one rotation, so the previous token is still masked after a refresh.
+
+The heuristics for secrets llm4s was never given (patterns for known key shapes, `key=value` pairs, headers) are best effort. The layered design is completed by follow-up PRs 2-4 (#1932).
+
+Limits:
+- Bedrock credentials stay inside the AWS SDK; llm4s never holds the signed header.
+- In a multi-tenant process the registry is process-wide, so one tenant's secret may be masked in another tenant's output. This is harmless over-masking.
+- Configured keys are never evicted, so a process that registers very many distinct keys (per-tenant BYOK, say) grows the registry, and rebuilds its matcher on each new key; only runtime tokens are bounded (4096).
 
 ## Known Risks and Mitigations
 
@@ -240,25 +253,32 @@ the release, which holds the PGP and Sonatype secrets.
 **Mitigation (implemented,
 [#2306](https://github.com/llm4s/llm4s/issues/2306)):** `.github/workflows/scorecard.yml` runs
 [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s) on every push to `main`, weekly and when
-a branch-protection rule changes, publishes the result (the README badge) and uploads the findings to the repository's
+a branch-protection rule changes, publishes the result and uploads the findings to the repository's
 code scanning alerts. Every workflow declares a read-only top-level `permissions:` block, with wider grants only on
 the jobs that need them, and every third-party action is pinned by full commit SHA with its version as a comment,
 which Dependabot keeps current. `scripts/check-workflow-security.sh` (Quick Checks) fails a pull request that breaks
 either rule; see *Workflow security* in [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#workflow-security).
 
-The baseline is the first published run after #2306 merged, at the link above. Where each scored check stands:
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/llm4s/llm4s/badge)](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)
 
-| Check | Status |
-|---|---|
-| Token-Permissions | Addressed: read-only top level in every workflow; writes only on jobs (release publishing, Pages deploy, the star-history commit, PR comments). |
-| Pinned-Dependencies | Actions addressed. Not yet: the `Ollama Integration` job (runs only on `main`) installs Ollama with `curl ... \| sh`; replacing it with a checksummed release download is a follow-up, since it can be verified only on `main`. |
-| Dangerous-Workflow, Dependency-Update-Tool, Security-Policy, License, Code-Review, Maintained, CI-Tests, Vulnerabilities | Already in place (the one `pull_request_target` workflow only comments and checks out no PR code; Dependabot and Scala Steward, `SECURITY.md`, MIT, reviewed PRs). |
-| Branch-Protection | Needs an admin (see *Repository settings* in `MAINTAINERS.md`): require pull-request reviews (one approval, dismiss stale approvals), the required status checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog Secret Scan`), no force pushes or deletions on `main`, and apply the rules to administrators. Scorecard reads the full settings only with a fine-grained admin token, which this repository does not give it, so some points stay unscored. |
-| Signed-Releases | Tracked separately (signed releases and provenance). Artifacts on Maven Central are PGP-signed; Scorecard looks for signatures or provenance attached to the GitHub Release. |
-| CII-Best-Practices | Tracked separately (the OpenSSF Best Practices badge). |
-| SAST | Not addressed: Scorecard counts CodeQL or a similar analyser on every PR; CodeQL's Scala support (via the Java extractor of compiled code) would add a full build to each PR. Scalafix and the review checklist below cover part of it. |
-| Fuzzing | Not addressed deliberately: Scorecard recognises OSS-Fuzz, ClusterFuzzLite or language-native fuzzers (Go, Rust, ...), none of which covers Scala. Parsers that take untrusted input (`Redaction`, the workspace command policy) are covered by their unit tests instead. |
-| Packaging | Not applicable as scored: Scorecard looks for a GitHub Packages or registry publishing workflow it recognises; llm4s publishes to Maven Central from `release.yml`. |
+The badge lives on this page rather than in the root `README.md`, which is kept unchanged.
+
+**Baseline** (the published result of 2026-11-08): **6.0 / 10**. The live score is at the link above. Where each
+scored check stands, with its baseline score:
+
+| Check | Baseline | Status |
+|---|---|---|
+| Token-Permissions | 10 | Addressed: read-only top level in every workflow; writes only on jobs (release publishing, Pages deploy, the star-history commit, PR comments). |
+| Pinned-Dependencies | 9 | Addressed: every action is pinned by SHA. The one finding of the baseline, the `Ollama Integration` job's `curl ... \| sh` install, is replaced by the `ollama/ollama` image as a service container pinned by digest. Dependabot does not update service images, so that digest is bumped by hand. |
+| Dangerous-Workflow, Dependency-Update-Tool, Security-Policy, License, Maintained, CI-Tests, Binary-Artifacts, Contributors | 10 | Already in place (the one `pull_request_target` workflow only comments and checks out no PR code; Dependabot and Scala Steward, `SECURITY.md`, MIT, no checked-in binaries). |
+| Code-Review | 1 | Scorecard counts changesets approved by a reviewer other than the author: 4 of the last 30. Requiring an approving review (Branch-Protection below) raises it. |
+| Vulnerabilities | 0 | The 12 advisories are in two lock files outside the published library: the docs site's `docs/Gemfile.lock` (`addressable`, `concurrent-ruby`) and the MCP reference test server's `modules/it/mcp-reference-server/package-lock.json` (`body-parser`, `fast-uri`, `ip-address`, `qs`, `zod`). Not yet addressed; the published artifacts' dependencies are scanned separately, by `dependency-scan.yml` (OSV-Scanner over each module's SBOM). |
+| Branch-Protection | 0 | Needs an admin (see *Repository settings* in `MAINTAINERS.md`): require pull-request reviews (one approval, dismiss stale approvals), the required status checks (`All Tests Pass`, `Check DCO sign-off`, `TruffleHog Secret Scan`), no force pushes or deletions on `main`, and apply the rules to administrators. Scorecard reads the full settings only with a fine-grained admin token, which this repository does not give it, so some points stay unscored. |
+| Signed-Releases | 0 | Tracked separately (signed releases and provenance). Artifacts on Maven Central are PGP-signed; Scorecard looks for signatures or provenance attached to the GitHub Release. |
+| CII-Best-Practices | 0 | Tracked separately (the OpenSSF Best Practices badge). |
+| SAST | 0 | Not addressed: Scorecard counts CodeQL or a similar analyser on every PR; CodeQL's Scala support (via the Java extractor of compiled code) would add a full build to each PR. Scalafix and the review checklist below cover part of it. |
+| Fuzzing | 0 | Not addressed deliberately: Scorecard recognises OSS-Fuzz, ClusterFuzzLite or language-native fuzzers (Go, Rust, ...), none of which covers Scala. Parsers that take untrusted input (`Redaction`, the workspace command policy) are covered by their unit tests instead. |
+| Packaging | 10 | Scorecard recognises the publishing workflow (`release.yml`, to Maven Central). |
 
 ### 9. File Tool Path Policy
 

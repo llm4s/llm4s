@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Derived Schemas
+description: "Derive the JSON schema for structured output and typed tools from a Scala case class with llm4s-schema-derivation (experimental)."
+search_title: "Derive JSON schemas from Scala case classes for LLMs"
 parent: User Guide
 nav_order: 28
 ---
@@ -75,6 +77,10 @@ which is
 ```
 
 This is exactly the schema that `Schema.object[Invoice](...)` with three `withRequiredField` calls builds by hand; the module's tests compare the two.
+
+To show the value while the model writes it, `client.streamStructuredOf[Invoice](conversation) { p => ... }` streams
+the same request and hands each partial value to your function, typed: see
+[Streaming structured output](structured-output#10-streaming-structured-output).
 
 ## What is derived
 
@@ -180,6 +186,105 @@ The problems are collected, every field at once, in declaration order: one is re
 
 The built-in calculator, re-expressed this way next to the hand-built original, is the `TypedCalculatorExample` sample (`sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"`).
 
+## Scoped tools
+
+`Tool.scoped` builds the same tool from a function that returns its result directly and runs in a `ToolScope`: the call it serves, given to the function and nowhere else. Inside it, `reject(message)` ends the call with `message` as the error the model sees, `ensure(condition, message)` ends it unless the condition holds, and `.?` unwraps a `Result` or an `Either[String, T]`, ending the call with the `LLMError`'s formatted message or the `Left`'s text. `ToolScope.idempotencyKey` is the key to pass to a system with a side effect, so that running the same call again does not repeat the effect:
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.ToolFunction
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+@description("A charge to a customer's saved card")
+case class Charge(
+  @description("The customer to charge") customerId: String,
+  @description("Amount in cents, above zero") amountCents: Long,
+  @description("ISO 4217 code: EUR or USD") currency: String
+) derives SchemaOf, ReadWriter
+
+case class Receipt(chargeId: String) derives ReadWriter
+
+case class Customer(id: String, blocked: Boolean)
+
+trait Customers { def find(id: String): Result[Customer] }
+trait Payments { def charge(customer: Customer, amountCents: Long, idempotencyKey: String): Result[String] }
+
+def chargeTool(customers: Customers, payments: Payments): Result[ToolFunction[Charge, Receipt]] =
+  Tool.scoped[Charge, Receipt]("charge_card", "Charge a customer's saved card") { c =>
+    ensure(c.amountCents > 0, "amountCents must be positive")
+    ensure(Set("EUR", "USD")(c.currency), s"unsupported currency ${c.currency}")
+    val customer = customers.find(c.customerId).?
+    if (customer.blocked) reject("this customer cannot be charged")
+    Receipt(payments.charge(customer, c.amountCents, ToolScope.idempotencyKey).?)
+  }
+```
+
+The arguments are decoded, and refused, exactly as by `Tool.of`, and the result is the same `ToolFunction`. An agent runs every call with its `ToolCallInfo`, which the function reads as `ToolScope.call`; `ToolScope.idempotencyKey` is then that call's key, the same in every run of the call (a retry, a `recover`, an approval). Without a `ToolCallInfo`, as with plain `ToolRegistry` calling, the key is derived from the tool's name and the arguments, with their object keys sorted: equal arguments give equal keys, so two separate calls with equal arguments share one.
+
+`reject`, `ensure`, `.?` and `ToolScope` need the scope, so using them outside a `Tool.scoped` function does not compile; the message says they are only available inside one. They end the call with `scala.util.boundary`'s `break`, which works from a lambda inside the function (in a `map` or a `foreach`) but is an exception underneath: a `Try` or a `catch NonFatal` around them catches it, so leave them outside one, and do not use the scope on another thread or after the function returns. An exception the function throws is not caught by the tool: a `ToolRegistry` turns it into the tool's error, as for `Tool.of`.
+
+The `TypedCalculatorExample` sample has a scoped calculator next to the others.
+
+## Tools from methods
+
+Most tools already exist as methods on a service. `Tools.derive[S](service)` makes one tool per public method of the trait or class `S`, and `Tool.fromMethod(service.method)` makes the tool of one method, with no argument case class: the method's parameters are the tool's, and its Scaladoc describes it.
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+case class Order(id: String, totalCents: Long) derives ReadWriter
+case class Cancellation(orderId: String, refunded: Boolean) derives ReadWriter
+
+trait CustomerService {
+
+  /**
+   * Orders placed by a customer, newest first.
+   *
+   * @param customerId the customer's id, for example C-1001
+   * @param limit      at most this many orders
+   */
+  def findOrders(customerId: String, limit: Option[Int]): Result[List[Order]]
+
+  /** Cancel an order that has not shipped yet. */
+  @toolName("cancel")
+  def cancelOrder(
+    @description("The order's id, for example O-17") orderId: String,
+    reason: String
+  ): Either[String, Cancellation]
+
+  @notATool
+  def poolSize: Int
+}
+
+def supportTools(service: CustomerService): Result[ToolRegistry] =
+  Tools.derive[CustomerService](service).map(tools => new ToolRegistry(tools))
+
+def cancelTool(service: CustomerService): Result[ToolFunction[?, Cancellation]] =
+  Tool.fromMethod(service.cancelOrder)
+```
+
+`supportTools` has two tools, `find_orders` and `cancel`:
+
+| | Comes from |
+|---|---|
+| Name | the method's `@toolName`, else its name in `snake_case` |
+| Description | the method's `@description`, else its Scaladoc's text before the first tag, else its name |
+| A parameter's description | its `@description`, else its Scaladoc `@param`, else its type's `@description`, else its name |
+| Parameters | the method's parameters: the schema, the checks and the errors `Tool.of` gives a case class with those fields |
+| The error the model sees | a `Left(message)`; a `Result`'s `LLMError`, formatted; a `Try`'s failure, its message. Any other result is the answer. |
+
+Methods inherited from `Any`, `Object`, `Product`, `Equals` and `Serializable`, synthetic, private, protected and extension methods, `val`s and methods marked `@notATool` are left out; the tools come in the order of their names. A parameter with a default value is still required, as a case class field with one is.
+
+Everything is read at compile time, with no reflection at run time. A method no tool can take is refused when it compiles, with a message naming it: a parameter whose type has no `SchemaOf` (a `Map`, say), a result without a `ReadWriter`, an overloaded method (a model cannot tell two tools of one name apart), a polymorphic method, a by-name, repeated or context parameter, several parameter lists, two methods with one tool name, and a `@toolName` providers do not accept. Mark a method the model should not call `@notATool`.
+
+Scaladoc is read from the source when the service is compiled in the same run as the call to `Tools.derive`, with no compiler flag. For a service compiled separately (another module of your build, or a library), the compiler reads Scaladoc from its TASTy only when asked: add `scalacOptions += "-Xread-docs"` to the project that calls `Tools.derive`. Without it such a service's tools fall back to their names, unless `@description` describes them. A method that overrides another without Scaladoc or annotations of its own takes those of the method it overrides, so `Tool.fromMethod(live.cancelOrder)` on the implementing class describes the tool as the trait does.
+
+The `DerivedToolsExample` sample derives a service's tools and runs an agent on them with a scripted model, so it needs no API key.
+
 ## An agent's answer
 
 An agent's response format is a schema too: pass `SchemaOf[A].definition` to `AgentBuilder.withOutput`, and read the answer with `decodeOutput[A]` (see [the agent guide](agents/#a-typed-answer)). `withOutput` is in `llm4s-agent`, which this module does not depend on.
@@ -235,6 +340,37 @@ OpenAI's strict mode refuses an `anyOf` at the root of a schema, so `completeStr
 
 A sum type has no schema in `llm4s-core`'s model, which has no union node: `SchemaOf[Action].toJsonSchema()` is its schema, while `SchemaOf[Action].definition` throws an `UnsupportedOperationException`. So a tool's parameters cannot hold a sum type yet, and `Tool.of` returns a `Left` for one.
 
+## Named tuples
+
+For two or three fields wanted once, at one call site, a Scala 3.7 named tuple does without the case class. `SchemaOf` describes it as the case class with the same fields, and `org.llm4s.schema.namedtuples` provides the uPickle `ReadWriter` that uPickle itself lacks; import it explicitly.
+
+```scala
+import org.llm4s.schema.*
+import org.llm4s.schema.namedtuples.given
+import org.llm4s.toolapi.ToolFunction
+import upickle.default.ReadWriter
+
+enum Sentiment derives SchemaOf, ReadWriter {
+  case Positive, Neutral, Negative
+}
+
+def review(client: LLMClient, conversation: Conversation): Result[String] =
+  client
+    .completeStructuredOf[(sentiment: Sentiment, confidence: Double, quote: Option[String])](conversation)
+    .map(r => s"${r.sentiment} (${r.confidence})")
+
+val lookup: Result[ToolFunction[(city: String, days: Int), (high: Double, low: Double)]] =
+  Tool.of[(city: String, days: Int), (high: Double, low: Double)]("forecast", "Daily forecast") { query =>
+    Right((high = 20.0 + query.days, low = 12.5))
+  }
+```
+
+- **The schema** is an object with one property per element, in order, exactly as for a case class with those fields: an `Option` element may be `null` (or absent in the relaxed form), elements may be case classes, enums, sum types, collections or other named tuples, and a named tuple may be a field of a case class.
+- **Descriptions.** A named tuple's elements cannot carry annotations, so each property is described by its element type's `@description`, else by its name. When the model needs a description per field, use a case class.
+- **The `ReadWriter`** writes exactly what uPickle writes for the case class with the same fields (`null` for `None`), and reads it back; an absent `Option` element reads as `None`, and keys the tuple has no element for are ignored. Each element type needs a `ReadWriter` of its own. It is never found without the import, so it cannot compete with an instance uPickle may add later.
+- **Everywhere a case class goes:** `completeStructuredOf`, `Tool.of` (arguments, with the same argument errors, and result) and an agent's `withOutput(SchemaOf[T].definition)` with `decodeOutput[T]`.
+- A tuple without names (`(Int, String)`) is still refused: uPickle writes it as an array.
+
 ## Descriptions
 
 The model sees a description for every property and for the object. `@description("...")` sets it: on a case class parameter it describes the field, on a case class, enum or sealed trait it describes the type. The text must be a string literal, because the annotation is read at compile time. Without it a field is described by its type's `@description` if it has one, and otherwise by its name, and a type by its name.
@@ -277,8 +413,7 @@ These are refused at compile time, with a message that names the type:
 - **Recursive types** (a `Tree` with `children: List[Tree]`, or an `Expr` sum type with an `Add(left: Expr, right: Expr)` case). They need a JSON Schema `$ref`, which the derivation does not emit yet. One case is caught only at run time: see [Recursion](#recursion).
 - **A sealed hierarchy nested in another** (a sealed trait whose case is itself a sealed trait), and **a sum type with a generic case** (`case class Holds[A](a: A)`). List the cases directly under one sealed trait or enum, without type parameters.
 - **`Option` directly inside `Option`** (`Option[Option[Int]]`). uPickle writes it as a JSON array (`[]`, `[null]`, `[1]`), not as the value or `null`. An `Option` inside a `List` inside an `Option` is fine.
-- **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class with named fields.
-- **Named tuples** (`(a: Int, b: String)`). uPickle has no `ReadWriter` for them, so nothing could read the reply back. Use a case class.
+- **Tuples** (`(Int, String)`). uPickle writes them as JSON arrays of mixed types. Use a case class or a [named tuple](#named-tuples).
 - **A class that is not a case class**, and a field of a type nothing describes (a function, for instance).
 
 `completeStructuredOf` also needs the type to be a case class or a sum type whose cases have fields, since the model answers with a JSON object: for an enum of singletons or another type it returns a `Left` before calling the model.
@@ -302,7 +437,74 @@ This compiles, and making the instances still works: a derived instance does not
 
 A generic case class may be nested in itself at most 16 deep. `W[W[...[Int]]]` with 16 `W`s is described; with 17 it is taken for a recursion. Spelled out in a field's type, the deeper nesting is refused at compile time; summoned through `W`'s own `derives SchemaOf` instance (`SchemaOf[W[...[Int]]]`), it is refused at run time, when the schema is built, with the same `IllegalStateException` (`recursive type W: ...`).
 
-A derived schema has no length or range constraints. When you need `withRange` or `withLengthConstraints`, build that schema by hand as before; `completeStructured` takes both.
+## Iron refinements
+
+A plain `Int` or `String` has no bounds to describe. When a field must be "between 1 and 5" or "at most 80 characters", give it an [Iron](https://github.com/Iltotore/iron) refinement type and add `llm4s-schema-iron`: the derived schema then carries the bound, so the model is told it, and a reply that breaks it fails to decode instead of becoming a value the type should have rejected.
+
+```sbt
+libraryDependencies += "org.llm4s" %% "llm4s-schema-iron" % "{{ site.data.project.latest_release }}"
+```
+
+It is a module of its own, so Iron is not a dependency of `llm4s-schema-derivation` or `llm4s-core`. It brings Iron 3.3.2 (Apache-2.0), the latest Iron whose TASTy the build's Scala 3 compiler can read (Iron 3.4 is built with a newer Scala 3). Import its givens next to `org.llm4s.schema.*`:
+
+```scala
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+import org.llm4s.schema.*
+import org.llm4s.schema.iron.given
+import upickle.default.ReadWriter
+
+@description("A product review")
+case class Review(
+  @description("Short headline") title: String :| (Not[Blank] & MaxLength[80]),
+  @description("Stars") rating: Int :| Interval.Closed[1, 5],
+  @description("One to ten topics") tags: List[String] :| (MinLength[1] & MaxLength[10])
+) derives SchemaOf, ReadWriter
+
+def review(client: LLMClient, conversation: Conversation): Result[Review] =
+  client.completeStructuredOf[Review](conversation)
+```
+
+Put a conjunction in parentheses: `:|` binds more tightly than `&`, so `List[String] :| MinLength[1] & MaxLength[10]` would refine with `MinLength[1]` alone. The properties of the schema sent for `Review`:
+
+```json
+{
+  "title": {"type": "string", "description": "Short headline", "minLength": 1, "maxLength": 80},
+  "rating": {"type": "integer", "description": "Stars", "minimum": 1, "maximum": 5},
+  "tags": {
+    "type": "array",
+    "description": "One to ten topics",
+    "items": {"type": "string", "description": "string"},
+    "minItems": 1,
+    "maxItems": 10
+  }
+}
+```
+
+`import org.llm4s.schema.iron.given` also brings a uPickle `ReadWriter` for each refined type: it reads the base value and refines it, and a value that breaks the constraint fails with Iron's message. So `completeStructuredOf` returns a `Left(ValidationError)` naming the field and the bound (`$['rating']: Should be included in [1, 5]`), and a typed tool reports a `ToolParameterError.TypeMismatch` for the field, which the model sees as the tool's error and can correct:
+
+```scala
+case class Booking(
+  @description("Guest name") guest: String :| Not[Blank],
+  @description("Nights to stay") nights: Int :| Interval.Closed[1, 14]
+) derives SchemaOf, ReadWriter
+
+val book: Result[ToolFunction[Booking, String]] =
+  Tool.of[Booking, String]("book_stay", "Books a stay")(b => Right(s"Booked ${b.nights} nights for ${b.guest}"))
+```
+
+Iron's own `iron-upickle` module defines the same `ReadWriter`; import one of the two, not both.
+
+| Constraint | On | JSON Schema |
+|---|---|---|
+| `Greater`, `GreaterEqual`, `Less`, `LessEqual`, `StrictEqual`, `Positive`, `Positive0`, `Negative`, `Negative0`, `Interval.*` | `Int`, `Long` | `minimum`, `maximum`; an exclusive bound as the inclusive one it equals (`Positive` is `minimum: 1`) |
+| the same | `Double`, `Float` | `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum` |
+| `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `String` | `minLength`, `maxLength` |
+| `Not[Blank]` | `String` | `minLength: 1`; that it is not only whitespace is checked when the reply is read |
+| `MinLength`, `MaxLength`, `FixedLength`, `Not[Empty]` | `List`, `Seq`, `Vector`, `Set` | `minItems`, `maxItems` |
+| `C1 & C2` of the above | | both; of two bounds of one kind, the tighter |
+
+Every other constraint is refused at compile time with a message naming it, rather than left out of the schema without a word: `Match` (llm4s-core's `StringSchema` has no `pattern` yet), `Multiple`, `StartWith`, `ForAll` and the rest, a union other than the `>=` and `<=` Iron builds, `Not` of anything but `Empty` and `Blank`, and a constraint on any other type, such as `BigDecimal`, which is written as a JSON string. To use one of them, describe the type with a `given SchemaOf` of your own, which is taken as it is. A provider may or may not enforce these keywords while it generates; the `ReadWriter` enforces the constraint on every reply.
 
 ## Compile time
 

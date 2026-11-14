@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, OllamaConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, EmbeddingRequest, UserMessage }
@@ -114,7 +115,7 @@ final class OllamaConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
         EmbeddingProviderConfig(
           baseUrl = baseUrl,
           model = "nomic-embed-text",
-          apiKey = "ollama",
+          apiKey = Secret("ollama"),
           timeouts = ProviderTimeouts(request = Some(300.millis))
         )
       )

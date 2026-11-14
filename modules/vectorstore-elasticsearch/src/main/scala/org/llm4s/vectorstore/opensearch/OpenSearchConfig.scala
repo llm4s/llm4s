@@ -15,7 +15,7 @@ import scala.concurrent.duration.*
  * {{{
  * val config = OpenSearchConfig("https://search.example.com:9200")
  *   .withIndex("docs")
- *   .withAuth(OpenSearchAuth.Basic("llm4s", password))
+ *   .withAuth(OpenSearchAuth.Basic("llm4s", Secret(password)))
  *   .withEngine(OpenSearchEngine.Faiss)
  * }}}
  *
@@ -78,7 +78,7 @@ final case class OpenSearchConfig private (
       _ <- SearchConfigChecks.checkIndex("OpenSearch", index)
       _ <- auth match {
         case OpenSearchAuth.BearerToken(token)
-            if token.trim.isEmpty || token.exists(c => c.isWhitespace || c.isControl) =>
+            if token.reveal.trim.isEmpty || token.reveal.exists(c => c.isWhitespace || c.isControl) =>
           Left(ConfigurationError("The OpenSearch token is blank or contains whitespace"))
         case OpenSearchAuth.Basic(user, _) if user.trim.isEmpty || user.contains(':') =>
           Left(ConfigurationError("The OpenSearch username is blank or contains ':'"))

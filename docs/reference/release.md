@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Release Process
+description: "How an LLM4S release is made: tag format, release steps, the docs deploy, what is published and how to verify a release."
 parent: Reference
 nav_order: 3
 ---
@@ -35,7 +36,33 @@ git push origin v0.3.2
 
 Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
 it replaces, in the same pull request that prepares the release. The table is rendered on the
-[Support Policy](support-policy). Nothing checks it yet, so a release tag missing from it is not caught by CI.
+[Support Policy](support-policy). `scripts/check-support-table.sh` checks it: Quick Checks fails when the table lacks
+the newest CHANGELOG release, and the release workflow's `support-table` job fails a tag that is not the table's
+`latest` line, before `publish` runs. A pre-release tag (`v1.0.0-RC1`) is not a support line and is not checked.
+
+### Write the News post
+
+Every minor release, and every patch worth announcing, gets a post on [llm4s.org/news](/news/), which also feeds
+`feed.xml` (Atom) and the home page's "Latest" strip. In the same pull request that prepares the release, after the
+CHANGELOG section `## [<version>] - <date>` is final:
+
+```bash
+scripts/new-release-post.sh 0.6.0   # drafts docs/_posts/<date>-llm4s-0.6.0.md from the CHANGELOG section
+```
+
+The draft carries the front matter (`title`, `description`, the share `image`, `tags: [release]`, `version`), the
+section's highlights or entries, its breaking changes, the dependency line and the links to the CHANGELOG section and
+the GitHub release. Rewrite the summary into a sentence or two on what is new and why it matters, cut the lists to what
+a user acts on, link upgrade notes to `docs/migrations/` or the migration guide, and set `date:` to the release's time
+if you want two posts of one day in order. A post carries no Scala code: link to the compile-checked guide pages
+instead. `scripts/check-docs-site-links.sh` checks its links.
+
+The release workflow's `docs` job warns (`scripts/new-release-post.sh --check`) when the tag has no post; it does not
+fail the release. A post merged to `main` after the tag is deployed with the next docs deploy.
+
+Other posts use the same feed with their own tag: `community` (Dev Hour recaps, GSoC results, talks with their
+recordings) or `guides` (a summary of an external article, or a cross-post with `canonical_url` set to the
+original). Each tag gets its own feed at `/feed/by_tag/<tag>.xml` once a post uses it.
 
 Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
@@ -51,7 +78,7 @@ ci → publish → publish-kotlin → github-release → docs
 | `publish` | Checks the Scaladoc it will package (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list), then signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
 | `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
-| `docs` | Deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
+| `docs` | Warns when the tag has no [News post](#write-the-news-post), then deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
 | `docker` | Builds and pushes the container image |
 
 ### The docs deploy runs from `main`, built from the tag
@@ -250,6 +277,13 @@ it never overwrites. Write whatever the release deserves once it exists.
   `llm4sVersion` in `modules/samples/mill/build.mill` is the release now on Maven Central (bump it with
   `docs/_data/project.yml` in the prepare commit) and runs `./mill app.compile + app.test`; it also runs weekly.
   Locally: `scripts/check-mill-quickstart.sh --central --build`.
+- Test the Flink sample: `gh workflow run flink-sample.yml`. Bump the `org.llm4s::llm4s-*` versions in
+  `modules/samples/flink/project.scala` with `docs/_data/project.yml` in the prepare commit (ci.yml's
+  `scripts/check-flink-guide-snippets.sh` fails otherwise); the workflow runs the sample's MiniCluster test, and also
+  runs weekly. Locally: `cd modules/samples/flink && scala-cli test .`.
+- Run the Almond notebooks: `gh workflow run notebooks.yml`. Bump the `org.llm4s::llm4s-*` versions in the
+  `//> using dep` cells of `modules/samples/notebooks/*.ipynb` with `docs/_data/project.yml` in the prepare commit
+  (ci.yml's `scripts/check-notebooks.sh` fails otherwise); the workflow executes both notebooks in the Almond kernel.
 
 - After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
   Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's

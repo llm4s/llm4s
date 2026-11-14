@@ -2,6 +2,7 @@ package org.llm4s.rag.permissions
 
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord }
+import org.llm4s.security.Secret
 
 /**
  * Top-level search index with permission-based filtering.
@@ -182,7 +183,7 @@ object SearchIndex {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     vectorTableName: String = "vectors",
     keywordTableName: String = "documents",
     maxPoolSize: Int = 10

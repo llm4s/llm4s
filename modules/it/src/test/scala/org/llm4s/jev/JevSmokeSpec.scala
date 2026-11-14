@@ -1,5 +1,6 @@
 package org.llm4s.jev
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -43,7 +44,7 @@ class JevSmokeSpec extends AnyFlatSpec with Matchers {
   "Jev" should "answer a Noul, a Choice and a Score in one call, in the documented shapes" in {
     Tier.require(apiKey.isDefined, "TYPESAFE_API_KEY not set")
 
-    val client   = JevClient(JevConfig(apiKey.get)).fold(e => fail(e.message), identity)
+    val client   = JevClient(JevConfig(Secret(apiKey.get))).fold(e => fail(e.message), identity)
     val response = client.evaluate(request).fold(e => fail(s"evaluate failed: ${e.formatted}"), identity)
     client.close()
 
@@ -69,7 +70,7 @@ class JevSmokeSpec extends AnyFlatSpec with Matchers {
   it should "report the request id and the versioned model for the alias jev-latest" in {
     Tier.require(apiKey.isDefined, "TYPESAFE_API_KEY not set")
 
-    val client = JevClient(JevConfig(apiKey.get)).fold(e => fail(e.message), identity)
+    val client = JevClient(JevConfig(Secret(apiKey.get))).fold(e => fail(e.message), identity)
     val response = client
       .evaluate(JevRequest(ticket, Map("urgent" -> request.questions("urgent"))))
       .fold(e => fail(e.message), identity)
@@ -80,7 +81,7 @@ class JevSmokeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reject an invalid API key with an AuthenticationError, and not retry it" in {
-    val client = JevClient(JevConfig("tsk-invalid-key-for-smoke-test")).fold(e => fail(e.message), identity)
+    val client = JevClient(JevConfig(Secret("tsk-invalid-key-for-smoke-test"))).fold(e => fail(e.message), identity)
 
     val error = client.evaluate(request).left.getOrElse(fail("an invalid key was accepted"))
     client.close()

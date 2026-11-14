@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Structured Output
+description: "Get a typed value instead of free text with completeStructured: describe the type, set options and handle replies that do not comply."
+search_title: "Structured output from LLMs in Scala with LLM4S"
 parent: User Guide
 nav_order: 6
 ---
@@ -61,7 +63,8 @@ sbt "samples/runMain org.llm4s.samples.basic.StructuredOutputExample"
 ```
 
 Use it for extraction, classification, routing and any step whose output a program, not a person, reads.
-Streaming is not part of it: `completeStructured` makes one non-streaming `complete` call.
+`completeStructured` makes one non-streaming `complete` call; to show the value while the model writes it, see
+[Streaming structured output](#10-streaming-structured-output).
 
 ## 2. Describing the type
 
@@ -206,7 +209,7 @@ A reply that cannot become an `A` is a `ValidationError` whose `field` is `"stru
 |---|---|
 | text with no JSON in it | `Response is not valid JSON` |
 | the JSON value `null` | `Response does not match expected schema: got JSON null` |
-| JSON of the wrong shape (an array for an object, a missing field, a wrong type) | `Response does not match expected schema` |
+| JSON of the wrong shape (an array for an object, a missing field, a wrong type) | `Response does not match expected schema`, then the JSON path (`$['amount']`) and the reader's reason |
 
 The reply is deserialised, not validated against the schema. A missing field or a wrong type fails because
 the uPickle reader for `A` fails on it, but a constraint the reader does not check is not checked at all: an
@@ -276,14 +279,74 @@ use that provider.
 - **Every property is required** (section 4), whatever you declared.
 - **Integers above 2^53.** A uPickle `Long` field reads a number such as 9007199254740993 exactly, because
   `completeStructured` reads `A` from the reply's text. A reader that starts from `ujson.Value` (the circe,
-  play-json and zio-json bridges) and every tool argument get the rounded double instead, so send large identifiers as
-  strings there; see [Numbers](json-libraries#numbers).
-- **One call, no streaming, no repair.** There is no automatic retry inside `completeStructured`.
+  play-json, zio-json and jsoniter-scala bridges) and every tool argument get the rounded double instead, so send
+  large identifiers as strings there; see [Numbers](json-libraries#numbers).
+- **One call, no repair.** There is no automatic retry inside `completeStructured`. It does not stream; `streamStructuredOf`
+  does (section 10).
 - **The content goes to the provider.** The conversation and the schema are sent to whichever provider the client
   talks to, like any other completion.
 - **The schema is JSON Schema, not your case class.** A type uPickle can read but `ObjectSchema` cannot describe
   (a map with free keys, a recursive type) needs a schema that matches what the model should produce, and a
   reader that accepts it. A sum type is described by `completeStructuredOf` ([Sum types](#sum-types)).
+
+## 10. Streaming structured output
+
+`completeStructured` shows nothing until the whole reply has arrived. For a long object, such as an invoice with
+thirty line items, `llm4s-schema-derivation`'s `client.streamStructuredOf[A]` streams it instead: it sends the request
+`completeStructuredOf[A]` sends, through `streamComplete`, and calls your function with the value so far each time it
+changes. The result is the finished value, read exactly as `completeStructuredOf` reads it, with the same errors.
+
+```scala
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.Conversation
+import org.llm4s.schema.*
+import org.llm4s.types.Result
+import upickle.default.ReadWriter
+
+case class LineItem(sku: String, quantity: Int, price: BigDecimal) derives SchemaOf, ReadWriter
+case class Order(vendor: String, currency: String, items: List[LineItem]) derives SchemaOf, ReadWriter
+
+def extractOrder(client: LLMClient, conversation: Conversation): Result[Order] =
+  client.streamStructuredOf[Order](conversation) { p =>
+    p.vendor.foreach(vendor => println(s"vendor: $vendor")) // p.vendor: Option[String]
+    println(s"rows: ${p.items.getOrElse(Nil).size}")        // p.items: Option[List[(sku: Option[String], ...)]]
+  }
+```
+
+The value passed to the function is a named tuple with `Order`'s field names, so `p.vendor` compiles and `p.vendr`
+does not. Each field is `None` until the model starts writing it, then holds what has arrived:
+
+| Field type | Partial value |
+|---|---|
+| `String` | the text so far |
+| a case class | its own named tuple of `Option`s |
+| `List`, `Vector`, `Seq` | the elements so far; the last one partial when it is a string or a case class |
+| `Option[T]` | `Some(None)` once the model writes `null`, else `T`'s partial value in a `Some` |
+| anything else: numbers, `Boolean`, `BigDecimal`, enums, sum types, `Set` | the value, only once complete |
+
+Each value extends the one before it: a string only grows, a list only gains elements, and a number is shown only
+once complete, never `1` while `12.5` is still arriving. A value the model writes with the wrong type (a number for a
+string) is left out, and the result is then the `ValidationError` of section 7. Text before the first `{`, such as a
+code fence, and thinking deltas are not parsed. The function runs on the thread that streams, so keep it quick.
+
+To name the partial type in a signature, take it from its instance:
+
+```scala
+val orders = summon[PartialOf[Order]]
+
+def render(p: orders.Out): String =
+  s"${p.vendor.getOrElse("...")}: ${p.items.getOrElse(Nil).size} rows"
+```
+
+`A` must be a case class with fields; a sum type (which `completeStructuredOf` accepts) does not compile, and nor does
+a field type that has neither a partial form nor a uPickle `Reader`. Field access by name needs Scala 3.7's default
+source level. The reply is parsed again on each chunk with `PartialJson`, which is public if you need it on its own,
+so the cost grows with the square of the reply's length: fine for structured output, slow for many megabytes.
+`StreamingStructuredOutputExample` in `modules/samples` prints a growing invoice from a scripted stream, with no API key:
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.StreamingStructuredOutputExample"
+```
 
 ## Related
 

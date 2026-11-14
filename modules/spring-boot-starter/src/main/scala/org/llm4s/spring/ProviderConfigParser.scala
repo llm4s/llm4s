@@ -1,7 +1,8 @@
 package org.llm4s.spring
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.javaapi.LlmResult
+import org.llm4s.javaapi.{ LlmResult, ProviderModules }
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 
@@ -31,9 +32,16 @@ object ProviderConfigParser {
       )
     } else {
       provider match {
-        case "openai"    => parseOpenAI(properties, model)
-        case "anthropic" => parseAnthropic(properties, model)
-        case "ollama"    => parseOllama(properties, model)
+        // The provider modules are optional dependencies of the starter (#1496): the application declares the one
+        // it uses, and a provider whose module is absent fails here with the artifact to add.
+        case "openai" =>
+          ProviderModules.guard(ProviderModules.OpenAI, "llm4s.provider=openai")(parseOpenAI(properties, model))
+        case "anthropic" =>
+          ProviderModules.guard(ProviderModules.Anthropic, "llm4s.provider=anthropic")(
+            parseAnthropic(properties, model)
+          )
+        case "ollama" =>
+          ProviderModules.guard(ProviderModules.Ollama, "llm4s.provider=ollama")(parseOllama(properties, model))
         case unknown =>
           val registered = ProviderRegistry.default.descriptors.map(_.id.asString).mkString("[", ", ", "]")
           invalid(
@@ -56,7 +64,7 @@ object ProviderConfigParser {
       val org     = Some(text(p.organization)).filter(_.nonEmpty)
       LlmResult.success(
         OpenAIConfig(
-          apiKey = apiKey,
+          apiKey = Secret(apiKey),
           model = model,
           organization = org,
           baseUrl = baseUrl,
@@ -75,7 +83,7 @@ object ProviderConfigParser {
       val baseUrl = Some(text(p.baseUrl)).filter(_.nonEmpty).getOrElse("https://api.anthropic.com")
       LlmResult.success(
         AnthropicConfig(
-          apiKey = apiKey,
+          apiKey = Secret(apiKey),
           model = model,
           baseUrl = baseUrl,
           contextWindow = p.contextWindow,

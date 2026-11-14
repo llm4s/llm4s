@@ -13,6 +13,10 @@ stacks:
     artifact: "llm4s-spring-boot-starter"
     versions: ["4.0.8", "4.1.1"]
     note: "The same artifact's Boot 4 health indicator, built against 4.0.8; CI also runs the specs on 4.1.1."
+  - name: "Spring AI"
+    artifact: "llm4s-spring-ai"
+    versions: ["2.0.0", "2.0.2"]
+    note: "Built against 2.0.0, with Spring Boot 4; CI also runs the module's specs on 2.0.2."
   - name: "Cats Effect"
     artifact: "llm4s-effect"
     versions: ["3.5.7"]
@@ -29,10 +33,26 @@ stacks:
     artifact: "llm4s-pekko"
     versions: ["1.7.1"]
     note: ""
+  - name: "Ox"
+    artifact: "llm4s-ox"
+    versions: ["1.0.9"]
+    note: ""
   - name: "Project Reactor"
     artifact: "llm4s-reactor"
     versions: ["3.8.8"]
     note: ""
+  - name: "Tapir"
+    artifact: "llm4s-tapir"
+    versions: ["1.11.20"]
+    note: "With sttp client 3.10.3."
+  - name: "sttp client 4"
+    artifact: "llm4s-sttp"
+    versions: ["4.0.27"]
+    note: "Any synchronous backend."
+  - name: "Iron"
+    artifact: "llm4s-schema-iron"
+    versions: ["3.3.2"]
+    note: "Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the 3.7.1 compiler cannot read."
   - name: "Kotlin"
     artifact: "llm4s-kotlin-api"
     versions: ["2.0.21"]
@@ -53,6 +73,10 @@ stacks:
     artifact: "modules/examples-http (unpublished)"
     versions: ["3.2.0"]
     note: ""
+  - name: "Play Framework"
+    artifact: "modules/examples-http (unpublished)"
+    versions: ["3.0.12"]
+    note: "Play's Pekko artifacts pinned to llm4s-pekko's 1.7.1."
   - name: "Micrometer"
     artifact: "llm4s-observability-micrometer"
     versions: ["1.17.1"]
@@ -77,6 +101,14 @@ stacks:
     artifact: "docs/guide/json-libraries.md (tested recipe)"
     versions: ["1.0.0"]
     note: "Pinned: later releases are built with a newer Scala 3 whose TASTy the 3.7.1 compiler cannot read."
+  - name: "jsoniter-scala"
+    artifact: "docs/guide/json-libraries.md (tested recipe)"
+    versions: ["2.42.2"]
+    note: ""
+  - name: "fs2-kafka"
+    artifact: "docs/guide/kafka.md (tested pipeline)"
+    versions: ["3.7.0"]
+    note: ""
   - name: "OpenAI Java SDK"
     artifact: "llm4s-openai"
     versions: ["4.69.3"]

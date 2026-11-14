@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing
 
+import org.llm4s.security.Secret
 import org.llm4s.imageprocessing.config._
 import org.llm4s.imageprocessing.provider._
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
@@ -30,7 +31,7 @@ object ImageProcessing {
     apiKey: String,
     model: String = "gpt-4-vision-preview"
   ): ImageProcessingClient = {
-    val config = OpenAIVisionConfig(apiKey, model)
+    val config = OpenAIVisionConfig(Secret(apiKey), model)
     new OpenAIVisionClient(config)
   }
 
@@ -45,7 +46,7 @@ object ImageProcessing {
     apiKey: String,
     model: String = "claude-3-sonnet-20240229"
   ): ImageProcessingClient = {
-    val config = AnthropicVisionConfig(apiKey, model)
+    val config = AnthropicVisionConfig(Secret(apiKey), model)
     new AnthropicVisionClient(config)
   }
 
@@ -60,7 +61,7 @@ object ImageProcessing {
     apiKey: String,
     model: String = "gemini-3.6-flash"
   ): ImageProcessingClient = {
-    val config = GeminiVisionConfig(apiKey, model)
+    val config = GeminiVisionConfig(Secret(apiKey), model)
     new GeminiVisionClient(config)
   }
 

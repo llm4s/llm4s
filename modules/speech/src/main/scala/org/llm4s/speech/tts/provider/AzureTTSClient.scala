@@ -39,7 +39,7 @@ final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4
       response <- httpClient.postRaw(
         s"${config.baseUrl}/cognitiveservices/v1",
         Map(
-          "Ocp-Apim-Subscription-Key" -> config.apiKey,
+          "Ocp-Apim-Subscription-Key" -> config.apiKey.reveal,
           "Content-Type"              -> "application/ssml+xml",
           "X-Microsoft-OutputFormat"  -> AzureTTSClient.outputFormat(options.outputFormat),
           "User-Agent"                -> "llm4s"

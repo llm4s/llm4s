@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.security.Secret
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.BeforeAndAfterEach
@@ -36,7 +37,7 @@ class PgVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEac
       store = PgVectorStore(
         testUrl.get,
         sys.env.getOrElse("PGVECTOR_TEST_USER", "postgres"),
-        sys.env.getOrElse("PGVECTOR_TEST_PASSWORD", ""),
+        Secret(sys.env.getOrElse("PGVECTOR_TEST_PASSWORD", "")),
         testTableName
       ).fold(
         e => fail(s"Failed to create store: ${e.formatted}"),

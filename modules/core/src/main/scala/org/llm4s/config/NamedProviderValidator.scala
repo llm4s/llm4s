@@ -2,7 +2,8 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
-import org.llm4s.llmconnect.auth.AuthConfig
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, AuthConfig }
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -307,6 +308,14 @@ private[llm4s] object NamedProviderConfigValidator:
         (),
         ConfigurationError(s"$sectionPath sets both apiKey and auth; a section authenticates one way - remove one")
       )
+      _ <- Either.cond(
+        normalized.apiKeyFile.isEmpty || (normalized.apiKey.isEmpty && normalized.auth.isEmpty),
+        (),
+        ConfigurationError(
+          s"$sectionPath sets apiKeyFile and ${if normalized.auth.isDefined then "auth" else "apiKey"}; " +
+            "a section authenticates one way - remove one"
+        )
+      )
       // The exchanged token is the request's bearer; a configured Authorization header would replace it
       // or be sent beside it, depending on the client, so the section is refused rather than guessed at.
       _ <- Either.cond(
@@ -322,10 +331,11 @@ private[llm4s] object NamedProviderConfigValidator:
       // is one way to authenticate, as `auth` is: a key of the section's own is refused, not ignored.
       keyless = descriptor.configSpec.isKeyless(normalized.extras)
       _ <- Either.cond(
-        !keyless || normalized.apiKey.isEmpty,
+        !keyless || (normalized.apiKey.isEmpty && normalized.apiKeyFile.isEmpty),
         (),
         ConfigurationError(
-          s"$sectionPath sets both apiKey and ${keylessSetting(descriptor)}; a section authenticates one way - " +
+          s"$sectionPath sets both ${if normalized.apiKeyFile.isDefined then "apiKeyFile" else "apiKey"} and " +
+            s"${keylessSetting(descriptor)}; a section authenticates one way - " +
             "remove one"
         )
       )
@@ -336,16 +346,35 @@ private[llm4s] object NamedProviderConfigValidator:
       noKey = normalized.auth.isDefined || keyless
       resolved <-
         if noKey then Right(None)
-        else credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+        else
+          normalized.apiKeyFile match
+            // Read once now, so a missing or empty file fails the load; the client reads it again when it changes.
+            case Some(file) => keyFromFile(sectionPath, file).map(Some(_))
+            case None =>
+              credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,
         if noKey then normalized
-        else normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
+        else normalized.withApiKey(resolved.map(key => ApiKey(key.value.reveal)))
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))
-      validated
+      // A key that came from the vendor's shared `llm4s.credentials.<id>.apiKeyFile` (#2478) is re-read as a
+      // section's own file is: the loader gives the config an `ApiKeyProvider.file` over it.
+      resolved.flatMap(_.file) match
+        case Some(file) if normalized.apiKeyFile.isEmpty && descriptor.configSpec.requiresApiKey =>
+          validated.withApiKeyFile(file)
+        case _ => validated
+
+  /** The key `file` holds now, logged as coming from the file; an unreadable or empty file names its path. */
+  private def keyFromFile(sectionPath: String, file: java.nio.file.Path): Result[SharedCredentials.Resolved] =
+    ApiKeyProvider
+      .file(file)
+      .current()
+      .left
+      .map(error => ConfigurationError(s"$sectionPath.apiKeyFile: ${error.message}", List("apiKeyFile")))
+      .map(key => SharedCredentials.Resolved(Secret(key.asKey), s"file $file ($sectionPath.apiKeyFile)"))
 
   /** The provider's keyless setting as a section writes it, e.g. `authentication = "entra-id"`. */
   private def keylessSetting(descriptor: ProviderDescriptor): String =

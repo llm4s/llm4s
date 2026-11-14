@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Writing a Provider
+description: "Publish your own LLM4S provider module, a chat client or embedding provider, against llm4s-core without changing LLM4S itself."
+search_title: "Write a custom LLM provider module for LLM4S"
 parent: User Guide
 nav_order: 13
 ---
@@ -397,7 +399,11 @@ in the request body you record; send them in headers.
 
 `org.llm4s.http.Llm4sHttpClient` is the JDK-backed HTTP client (`Llm4sHttpClient.create()`), with
 `get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
-as a constructor parameter so tests can inject a stub.
+as a constructor parameter so tests can inject a stub. When `LlmClientOptions.httpClient` is set, send your requests
+through that client and do not close it - the caller owns it; otherwise build your own and close it in
+`releaseResources`. A provider that does so opts in by overriding `features` with
+`ProviderFeatures.default.withCustomHttpClient(true)` and runs `assertUsesSuppliedHttpClient` in its module spec;
+`customHttpClient` defaults to `false`, which a client built on a vendor SDK keeps.
 
 ```scala
 def post(
@@ -453,6 +459,35 @@ provider with no timeouts to offer needs to do nothing. An embedding provider re
 
 Methods added to the trait after 1.0 will have default implementations, so a test double that
 implements it keeps compiling.
+
+### Honouring `apiKeyFile` (key rotation)
+
+A section may name its key with `apiKeyFile` instead of `apiKey` (#2313). Validation reads the file once into
+`NamedProviderConfig.apiKey`, so your descriptor builds its config as usual; the loader then calls
+`ProviderConfig.withApiKeyProvider(ApiKeyProvider.file(path))` on it. To support rotation, carry the provider
+and ask it for the key on every request, not once when the client is built:
+
+```scala
+final case class AcmeConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  override val apiKeyProvider: Option[ApiKeyProvider] = None
+) extends ProviderConfig:
+  // ... providerId, contextWindow and the rest ...
+  override def withApiKeyProvider(provider: ApiKeyProvider): AcmeConfig = copy(apiKeyProvider = Some(provider))
+
+// in the client, per request
+val key: Result[String] = config.apiKeyProvider.fold[Result[String]](Right(config.apiKey))(_.current().map(_.asKey))
+```
+
+A config that does not override `withApiKeyProvider` keeps returning `this`: its client gets the key the file
+held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
+an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
+
+An embedding provider gets the same from its block's `apiKeyFile` (or the vendor's shared one) through
+`EmbeddingProviderConfig.apiKeyProvider`: read the key per request with `cfg.currentApiKey()`, which falls back
+to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
 
 ### `HttpErrorMapper`
 
@@ -687,7 +722,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`, `assertUsesSuppliedHttpClient` (a client built with `LlmClientOptions.withHttpClient` sends `complete` and `streamComplete` through it, and does not close it). Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |
@@ -833,7 +868,7 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
       `apiKeyEnv` names the same variable
 - [ ] defaults (base URL, model) on the spec, not in `reference.conf`
 - [ ] provider-specific keys declared as `ProviderConfigKey` extras
-- [ ] `ProviderFeatures` honest about streaming and tool calling
+- [ ] `ProviderFeatures` honest about streaming, tool calling and `customHttpClient` (opt in only when `LlmClientOptions.httpClient` is honoured)
 - [ ] client built on `BaseLifecycleLLMClient`, errors via `HttpErrorMapper`, cost via
       `CostEstimator`, exchanges via `ProviderExchangeRecorder`
 - [ ] no exceptions escape, no environment reads

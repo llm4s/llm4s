@@ -5,6 +5,7 @@ import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.error.{ CancelledError, NetworkError, TimeoutError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.AccessTokenProvider
+import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -78,11 +79,11 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-    requireApiKey(config).map(_ => fromConfig(config))
+    requireApiKey(config.apiKey).map(_ => fromConfig(config))
 
   /** A blank `apiKey` would be sent as an empty bearer token: a `ConfigurationError` instead. */
-  private def requireApiKey(config: EmbeddingProviderConfig): Result[Unit] =
-    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", config.apiKey)
+  private def requireApiKey(key: Secret): Result[Unit] =
+    ProviderConfig.nonEmpty("OpenAI embeddings", "apiKey", key.reveal)
 
   /**
    * Creates an OpenAI embedding provider from configuration.
@@ -91,7 +92,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
-    provider(cfg, () => requireApiKey(cfg).map(_ => cfg.apiKey), _ => ())
+    // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+    provider(cfg, () => cfg.currentApiKey().flatMap(key => requireApiKey(key).map(_ => key.reveal)), _ => ())
 
   /**
    * An embedding provider that authenticates with bearer tokens from `tokenProvider` rather than an API key
@@ -101,8 +103,19 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * provider that caches the token and refreshes it before it expires; a token the service rejects with a
    * 401 is reported to `tokenProvider`, so the next call fetches a new one.
    */
-  def fromConfig(cfg: EmbeddingProviderConfig, tokenProvider: AccessTokenProvider): EmbeddingProvider =
-    provider(cfg, () => tokenProvider.token(), tokenProvider.invalidate)
+  def fromConfig(cfg: EmbeddingProviderConfig, tokenProvider: AccessTokenProvider): EmbeddingProvider = {
+    // The provider may be the caller's own code: each token is registered here, before it is sent.
+    val generations = new TokenGenerations
+    provider(
+      cfg,
+      () =>
+        tokenProvider.token().map { token =>
+          generations.rotate(token)
+          token
+        },
+      tokenProvider.invalidate
+    )
+  }
 
   /**
    * The provider; `bearer` gives the token for each request, and `rejected` hears of one the service refused.

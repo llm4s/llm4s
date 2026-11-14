@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Jev decision model
+description: "Use llm4s-jev, a client for TypeSafe's Jev System One model: send a state and typed questions, and get typed answers your code can act on."
 parent: User Guide
 nav_order: 25
 ---
@@ -63,7 +64,9 @@ llm4s.jev {
 Or build a config in code:
 
 ```scala
-val config = JevConfig(apiKey = "tsk-...")
+import org.llm4s.security.Secret
+
+val config = JevConfig(apiKey = Secret("tsk-..."))
   .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
   .withTimeout(20.seconds)
   .withRetry(JevRetryPolicy(maxRetries = 3))

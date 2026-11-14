@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Testing Guide
+description: "How contributors write, run and reason about tests in LLM4S: unit, integration and end-to-end tests, directory structure and effective test design."
 nav_order: 8
 parent: Reference
 ---
@@ -274,7 +275,7 @@ to say which tier does run it.
 | `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
 | `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main`, PRs that change the workspace, and manual `workflow_dispatch` with `tier=workspace` |
 | `@McpReference` | the MCP reference server at `MCP_SERVER_URL` | `sbt testMcpReference` | pushes to `main` and manual `workflow_dispatch` with `tier=mcp-reference` (a container started in a CI step) |
-| `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
+| `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` and manual `workflow_dispatch` with `tier=ollama` (the `ollama/ollama` image as a service container) |
 | `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` with `tier=cloud-smoke` |
 
 ```scala
@@ -315,6 +316,7 @@ docker run -d -p 9200:9200 -e discovery.type=single-node -e xpack.security.enabl
 docker run -d -p 9201:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true -e DISABLE_INSTALL_DEMO_CONFIG=true opensearchproject/opensearch:2.19.1
 docker run -d -p 6379:6379 redis/redis-stack-server:7.4.0-v8
 docker run -d -p 6380:6379 valkey/valkey-bundle:9.0.6
+docker run -d -p 9092:9092 apache/kafka:3.9.1
 docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
 
 export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
@@ -325,6 +327,7 @@ export QDRANT_TEST_URL=http://localhost:6333
 export ELASTICSEARCH_TEST_URL=http://localhost:9200
 export OPENSEARCH_TEST_URL=http://localhost:9201
 export REDIS_TEST_URL=redis://localhost:6379 VALKEY_TEST_URL=redis://localhost:6380
+export KAFKA_TEST_BOOTSTRAP=localhost:9092
 export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
 export LLM4S_IT_STRICT=true
 

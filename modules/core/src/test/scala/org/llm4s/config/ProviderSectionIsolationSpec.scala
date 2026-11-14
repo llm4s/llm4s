@@ -167,7 +167,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
       block.map(_._1) shouldBe Right(Some(ProviderName("bad-one")))
       val sections = block.map(_._2).getOrElse(Map.empty)
       sections.keySet shouldBe Set(ProviderName("good-one"), ProviderName("bad-one"))
-      sections(ProviderName("good-one")).map(_.apiKey) shouldBe Right(Some("good-key"))
+      sections(ProviderName("good-one")).map(_.apiKey.map(_.asKey)) shouldBe Right(Some("good-key"))
       sections(ProviderName("bad-one")).left.map(_.message.contains("headers")) shouldBe Left(true)
     }
 

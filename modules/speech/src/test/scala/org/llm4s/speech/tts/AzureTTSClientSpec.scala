@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.speech.{ AudioFormat, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
@@ -13,7 +14,7 @@ class AzureTTSClientSpec extends AnyFlatSpec with Matchers {
     "azure",
     "en-US-JennyNeural",
     "en-US-JennyNeural",
-    "azure-key",
+    Secret("azure-key"),
     "https://westus.tts.speech.microsoft.com",
     Some("westus")
   )

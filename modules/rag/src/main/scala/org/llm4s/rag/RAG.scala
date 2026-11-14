@@ -2,6 +2,7 @@ package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError }
+import org.llm4s.security.Secret
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -1497,7 +1498,7 @@ object RAG {
     build(
       config,
       Some(embeddingClient),
-      _ => Right(EmbeddingProviderConfig("", "", "")),
+      _ => Right(EmbeddingProviderConfig("", "", Secret(""))),
       resolveRerankerConfig,
       hybridSearcher
     )
@@ -1697,7 +1698,7 @@ object RAG {
     config.pgVectorConnectionString match {
       case Some(connStr) =>
         val user        = config.pgVectorUser.getOrElse("postgres")
-        val password    = config.pgVectorPassword.getOrElse("")
+        val password    = config.pgVectorPassword.getOrElse(Secret(""))
         val vectorTable = config.pgVectorTableName.getOrElse("vectors")
 
         config.pgKeywordTableName match {

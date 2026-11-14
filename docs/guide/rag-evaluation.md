@@ -1,6 +1,8 @@
 ---
 layout: page
 title: RAG Evaluation
+description: "Measure the quality of a RAG pipeline in Scala with RAGAS metrics (faithfulness, relevancy, context precision and recall) and the LLM4S benchmark harness."
+search_title: "Evaluate RAG pipelines in Scala with RAGAS metrics"
 parent: User Guide
 nav_order: 18
 ---

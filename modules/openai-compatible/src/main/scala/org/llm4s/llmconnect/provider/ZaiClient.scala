@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ ZaiConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -34,7 +35,8 @@ import scala.util.Try
 class ZaiClient(
   config: ZaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -42,7 +44,7 @@ class ZaiClient(
         displayName = "Z.ai",
         model = config.model,
         baseUrl = config.baseUrl,
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -50,7 +52,8 @@ class ZaiClient(
       ),
       ZaiDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 object ZaiClient {
@@ -59,16 +62,27 @@ object ZaiClient {
     config: ZaiConfig,
     metrics: MetricsCollector = MetricsCollector.noop
   )(using ModelRegistryService): Result[ZaiClient] =
-    ProviderConfig.nonEmpty("Z.ai", "apiKey", config.apiKey).flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
+    OpenAICompatibleClient
+      .requireKey("Z.ai", config.apiKey, config.apiKeyProvider)
+      .flatMap(_ => Try(new ZaiClient(config, metrics)).toResult)
 
   def apply(
     config: ZaiConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[ZaiClient] =
-    ProviderConfig
-      .nonEmpty("Z.ai", "apiKey", config.apiKey)
-      .flatMap(_ => Try(new ZaiClient(config, metrics, exchangeLogging)).toResult)
+    apply(config, metrics, exchangeLogging, Llm4sHttpClient.FromConfig)
+
+  /** As the three-argument `apply`, sending requests through `httpClient`, which the caller keeps owning. */
+  def apply(
+    config: ZaiConfig,
+    metrics: MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient
+  )(using ModelRegistryService): Result[ZaiClient] =
+    OpenAICompatibleClient
+      .requireKey("Z.ai", config.apiKey, config.apiKeyProvider)
+      .flatMap(_ => Try(new ZaiClient(config, metrics, exchangeLogging, httpClient)).toResult)
 }
 
 /**

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.BedrockConfigKeys.*
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
@@ -71,6 +72,10 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       assertRefusesForeignConfig(BedrockProvider)
     }
 
+    "declare that its SDK ignores a supplied HTTP client (#2341)" in {
+      BedrockProvider.features.customHttpClient shouldBe false
+    }
+
     "bind no vendor API key, so its credential round trip is vacuous but must still pass" in {
       BedrockProvider.configSpec.apiKeyEnv shouldBe empty
       assertCredentialBindings(BedrockProvider, extraFields = """region = "us-east-1"""")
@@ -111,7 +116,7 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       val config = load(
         """region = "us-east-1", accessKeyId = "AKIDEXAMPLE", secretAccessKey = "secret", sessionToken = "tok""""
       ).toOption.value.asInstanceOf[BedrockConfig]
-      config.credentials shouldBe Some(BedrockCredentials("AKIDEXAMPLE", "secret", Some("tok")))
+      config.credentials shouldBe Some(BedrockCredentials(Secret("AKIDEXAMPLE"), Secret("secret"), Some(Secret("tok"))))
     }
 
     "carry the endpoint override from baseUrl and the profile" in {

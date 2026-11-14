@@ -2,9 +2,10 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.security.Secret
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for IBM watsonx.ai.
@@ -25,9 +26,12 @@ import org.llm4s.util.Redaction
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts      how long a request and a stream may take: the section's `timeouts` block. An absent
  *                      value keeps the client's own default ([[ProviderTimeouts]]).
+ * @param apiKeyProvider asked for the API key on every request instead of exchanging `apiKey`, so a rotated key
+ *                      is exchanged for a new IAM token without rebuilding the client (#2477): a section's
+ *                      `apiKeyFile` sets one.
  */
 final case class WatsonXConfig(
-  apiKey: String,
+  apiKey: Secret,
   projectId: String,
   spaceId: Option[String],
   model: String,
@@ -37,17 +41,20 @@ final case class WatsonXConfig(
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default,
-  override val network: HttpNetworkSettings = HttpNetworkSettings.default
+  override val network: HttpNetworkSettings = HttpNetworkSettings.default,
+  override val apiKeyProvider: Option[ApiKeyProvider] = None
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                   = ProviderId("watsonx")
-  override def endpointUrl: Option[String]                              = Some(baseUrl)
-  override def withModel(model: String): WatsonXConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig = copy(network = network)
+  override val providerId: ProviderId                                      = ProviderId("watsonx")
+  override def endpointUrl: Option[String]                                 = Some(baseUrl)
+  override def withModel(model: String): WatsonXConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): WatsonXConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): WatsonXConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): WatsonXConfig  = copy(apiKeyProvider = provider)
   override def toString: String =
-    s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, spaceId=$spaceId, model=$model, " +
+    s"WatsonXConfig(apiKey=$apiKey, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion, timeouts=$timeouts)"
+      s"reserveCompletion=$reserveCompletion, timeouts=$timeouts${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 object WatsonXConfig:
   val DEFAULT_BASE_URL: String = "https://us-south.ml.cloud.ibm.com"
@@ -96,7 +103,7 @@ object WatsonXConfig:
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     projectId: Option[String],
     spaceId: Option[String] = None,
     baseUrl: String = DEFAULT_BASE_URL,
@@ -105,7 +112,7 @@ object WatsonXConfig:
   )(using resolver: ContextWindowResolver): Result[WatsonXConfig] =
     // A trailing slash would put `//` in every endpoint (`$baseUrl/ml/v1/...`); stray whitespace
     // would make the URL unparseable.
-    val key     = apiKey.trim
+    val key     = apiKey.reveal.trim
     val base    = baseUrl.trim.replaceAll("/+$", "")
     val version = apiVersion.trim
     val iam     = iamUrl.trim
@@ -137,7 +144,7 @@ object WatsonXConfig:
         fallbackResolver = watsonxFallback
       )
       WatsonXConfig(
-        apiKey = key,
+        apiKey = Secret(key),
         projectId = project.getOrElse(""),
         spaceId = space,
         model = modelName,

@@ -2,6 +2,7 @@ package org.llm4s.rag.loader.s3
 
 import org.llm4s.extract.DocumentExtractor
 import org.llm4s.rag.loader.{ DocumentLoader, SourceBackedLoader }
+import org.llm4s.security.Secret
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
 
 /**
@@ -19,8 +20,8 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider
  * // With explicit credentials
  * val loader = S3Loader.withCredentials(
  *   bucket = "my-bucket",
- *   accessKeyId = "...",
- *   secretAccessKey = "..."
+ *   accessKeyId = Secret("..."),
+ *   secretAccessKey = Secret("...")
  * )
  *
  * // For LocalStack testing
@@ -71,8 +72,8 @@ object S3Loader {
    */
   def withCredentials(
     bucket: String,
-    accessKeyId: String,
-    secretAccessKey: String,
+    accessKeyId: Secret,
+    secretAccessKey: Secret,
     region: String = "us-east-1",
     prefix: String = ""
   ): DocumentLoader = {

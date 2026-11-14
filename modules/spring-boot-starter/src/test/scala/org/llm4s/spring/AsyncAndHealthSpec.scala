@@ -377,6 +377,18 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "remove a registered credential the settings do not list, before its own redaction" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val registered = "plain-registered-credential-77"
+      org.llm4s.security.Secret(registered)
+      val provider = new FakeProvider(_ => Left(APIError("openai", s"rejected $registered")))
+      withPool(pool(1)) { ex =>
+        val error = indicator(provider, probe = true, ex).health().getDetails.get("error").toString
+        error should include("rejected")
+        (error should not).include(registered)
+      }
+    }
+
   it should "redact a configured key even when it does not look like a token" in {
     val plain    = "correct-horse-battery"
     val provider = new FakeProvider(_ => Left(APIError("openai", s"rejected credential $plain")))

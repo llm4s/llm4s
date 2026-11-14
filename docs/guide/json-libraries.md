@@ -1,14 +1,16 @@
 ---
 layout: page
 title: JSON Libraries
+description: "Use LLM4S with circe, play-json, zio-json or jsoniter-scala: pass your own types in and get them back without writing a second schema."
+search_title: "Use LLM4S with circe, play-json, zio-json and jsoniter-scala"
 parent: User Guide
 nav_order: 17
 ---
 
-# Using LLM4S with circe, play-json and zio-json
+# Using LLM4S with circe, play-json, zio-json and jsoniter-scala
 {: .no_toc }
 
-LLM4S reads and writes JSON with uPickle and its `ujson` AST. This page shows how an application that already uses circe, play-json or zio-json passes its own types in and gets them back, without writing a second set of codecs.
+LLM4S reads and writes JSON with uPickle and its `ujson` AST. This page shows how an application that already uses circe, play-json, zio-json or jsoniter-scala passes its own types in and gets them back, without writing a second set of codecs.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -53,7 +55,7 @@ val orderSchema: ObjectSchema[Order] = Schema
 
 ## What to add
 
-Nothing here goes into LLM4S itself; add the library you use to your own build. uPickle's `ujson-circe` is the bridge for circe. **There is no Scala 3 build of `ujson-play`** (on Maven Central it exists for Scala 2.11 to 2.13 only, checked on 2026-10-08), and zio-json has no bridge at all, so those two cross as text. The versions below are the ones this page was run with.
+Nothing here goes into LLM4S itself; add the library you use to your own build. uPickle's `ujson-circe` is the bridge for circe. **There is no Scala 3 build of `ujson-play`** (on Maven Central it exists for Scala 2.11 to 2.13 only, checked on 2026-10-08), and neither zio-json nor jsoniter-scala has a bridge, so those cross as text or bytes. The versions below are the ones this page was run with.
 
 ```sbt
 // circe: ujson-circe is uPickle's own bridge, built for Scala 3. Keep its version equal to the ujson that LLM4S uses.
@@ -67,6 +69,12 @@ libraryDependencies += "org.playframework" %% "play-json" % "3.0.6"
 
 // zio-json (no bridge needed: it crosses as text)
 libraryDependencies += "dev.zio" %% "zio-json" % "1.0.0"
+
+// jsoniter-scala (no bridge needed: it crosses as bytes). The macros are needed only at compile time.
+libraryDependencies ++= Seq(
+  "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-core"   % "2.42.2",
+  "com.github.plokhotnyuk.jsoniter-scala" %% "jsoniter-scala-macros" % "2.42.2" % "compile-internal"
+)
 ```
 
 **zio-json 1.1.0 needs a Scala 3.9 compiler.** It depends on `scala3-library` 3.9.0, and a project compiled with Scala 3.7.1 (the version LLM4S is built with) cannot read that library: the compiler stops with "Forward incompatible TASTy file ... produced by Scala 3.9.0". Use 1.0.0 (built against Scala 3.3) unless your project is on Scala 3.9 or later. zio-json 1.0.0 also needs zio 2.1.26 or newer, which sbt resolves for you. <!-- doc-support: ignore -->
@@ -210,9 +218,97 @@ def orderViaZio(client: LLMClient, conversation: Conversation): Result[Order] =
   client.completeStructured[Order](conversation, orderSchema)(using zioReader[Order])
 ```
 
+## jsoniter-scala
+
+jsoniter-scala reads and writes bytes, so the document crosses as bytes: `ujson.writeToByteArray` renders a `ujson.Value` and `readFromArray` decodes it with your `JsonValueCodec`; `writeToArray` and `ujson.read` go the other way. This costs one serialisation round trip each way, which is fine for tool arguments and structured answers, since they are small. Here the codec comes from jsoniter-scala's own derivation, with its default configuration (`Address` is derived inside `Order`'s codec):
+
+```scala
+import com.github.plokhotnyuk.jsoniter_scala.core.{ readFromArray, writeToArray, JsonValueCodec, ReaderConfig }
+import com.github.plokhotnyuk.jsoniter_scala.macros.JsonCodecMaker
+
+given JsonValueCodec[Order] = JsonCodecMaker.make
+```
+
+```scala
+// No hex dump of the model's reply in error messages: they end up in logs and in the Left.
+val jsoniterReaderConfig: ReaderConfig = ReaderConfig.withAppendHexDumpToParseException(false)
+
+def readJsoniter[A](value: ujson.Value)(using codec: JsonValueCodec[A]): A =
+  readFromArray[A](ujson.writeToByteArray(value), jsoniterReaderConfig)
+
+def fromJsoniter[A](value: A)(using codec: JsonValueCodec[A]): ujson.Value = ujson.read(writeToArray(value))
+```
+
+### Using your JsonValueCodec with completeStructured and tools
+
+The bridge turns a codec into the `Reader` that `completeStructured` takes, and into the `ReadWriter` that a tool's result type needs:
+
+```scala
+import upickle.default.{ readwriter, ReadWriter }
+
+def jsoniterReader[A](using JsonValueCodec[A]): Reader[A] =
+  reader[ujson.Value].map(value => readJsoniter[A](value))
+
+def jsoniterReadWriter[A](using JsonValueCodec[A]): ReadWriter[A] =
+  readwriter[ujson.Value].bimap[A](value => fromJsoniter(value), json => readJsoniter[A](json))
+```
+
+```scala
+def orderViaJsoniter(client: LLMClient, conversation: Conversation): Result[Order] =
+  client.completeStructured[Order](conversation, orderSchema)(using jsoniterReader[Order])
+```
+
+The schema still comes from LLM4S's `Schema` (or `SchemaOf` from `llm4s-schema-derivation`), because a jsoniter-scala codec carries no schema. The codec and the schema must therefore describe the same document. These `JsonCodecMaker` settings keep them in step:
+
+- **Field names as declared** (the default `fieldNameMapper`). A mapper such as `JsonCodecMaker.enforce_snake_case` reads `order_id` where the schema asks the model for `orderId`, so the schema's field names must be renamed to match.
+- **`Option` fields** read as `None` from both `null` and an absent field (the default), which is what a model gives for a field that is not required. When it encodes, the codec leaves a `None` field out (`transientNone`, the default), as zio-json does.
+- **Empty collections and default values** are left out when the codec encodes (`transientEmpty` and `transientDefault`, both on by default), and read back as empty or default. That only affects documents you send, such as a tool's result; turn them off if the receiver expects every field.
+- **Sealed traits and enums** are written with a `type` discriminator field holding the simple class name by default (`discriminatorFieldName`, `adtLeafClassNameMapper`). If you ask a model for one, the schema must require that field with those names.
+- **Numbers as strings** (`isStringified`) must be strings in the schema too.
+
+**When decoding fails.** jsoniter-scala throws a `JsonReaderException` from inside the `Reader`. `completeStructured` catches anything thrown while reading and returns `Left(ValidationError("structured_output", "Response does not match expected schema: ..."))` with jsoniter-scala's message, the same error the uPickle path gives. Here the model answers with a string where the codec wants a number:
+
+```scala
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
+
+val malformed = ScriptedLLMClient.always(
+  Reply.text("""{"id":"seven","total":19.5,"address":{"city":"Oslo"},"tags":[]}""")
+)
+
+def malformedOrder(conversation: Conversation): Result[Order] = orderViaJsoniter(malformed, conversation)
+// Left(ValidationError: Response does not match expected schema: $: illegal number, offset: 0x00000006)
+```
+
+The offset counts bytes of the document the bridge rendered, which is compact JSON, not the reply as the model wrote it. By default jsoniter-scala also appends a hex dump of the input to its message; `jsoniterReaderConfig` turns that off, so the model's reply is not copied into your logs. A reply that is JSON `null` is refused and never comes back as `Right(null)`.
+
+A tool decodes its arguments with `readJsoniter` and returns its result type directly, with the `ReadWriter` built from the codec:
+
+```scala
+import scala.util.Try
+
+given JsonValueCodec[AddArgs]   = JsonCodecMaker.make
+given JsonValueCodec[AddResult] = JsonCodecMaker.make
+given ReadWriter[AddResult]     = jsoniterReadWriter[AddResult]
+
+val addToolViaJsoniter = ToolBuilder[Map[String, Any], AddResult]("add", "Adds two integers", addSchema)
+  .withHandler { extractor =>
+    Try(readJsoniter[AddArgs](extractor.params)).toEither
+      .map(args => AddResult(args.a.toLong + args.b))
+      .left
+      .map(_.getMessage)
+  }
+  .buildSafe()
+```
+
+Arguments that do not fit `AddArgs` are returned to the model as a tool error, not thrown. The same bridge is in the runnable sample `org.llm4s.samples.json.JsoniterStructuredOutputExample`, which scripts its model with `llm4s-testkit` and needs no API key:
+
+```bash
+sbt "samples/runMain org.llm4s.samples.json.JsoniterStructuredOutputExample"
+```
+
 ## Numbers
 
-A `ujson` number is a double. Doubles and ordinary integers (up to 2^53) round trip unchanged, but **a whole number above 2^53 is rounded to the nearest double as soon as it is parsed into the `ujson` AST**. That is `ujson`'s own parse, so it is not a property of circe, play-json or zio-json:
+A `ujson` number is a double. Doubles and ordinary integers (up to 2^53) round trip unchanged, but **a whole number above 2^53 is rounded to the nearest double as soon as it is parsed into the `ujson` AST**. That is `ujson`'s own parse, so it is not a property of circe, play-json, zio-json or jsoniter-scala:
 
 ```scala
 val big = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
@@ -225,14 +321,14 @@ The first integer a double cannot hold, 2^53 + 1 (9007199254740993), comes back 
 What this means for structured output depends on the reader:
 
 - **uPickle readers are exact.** `completeStructured` reads `A` from the reply's text, so a uPickle `Long` field receives 9007199254740993 unchanged.
-- **The bridges on this page round.** `circeReader`, `playReader` and `zioReader` start from `reader[ujson.Value]`, so a circe `Decoder[Long]` (and its play-json and zio-json counterparts) reads the already-rounded value.
+- **The bridges on this page round.** `circeReader`, `playReader`, `zioReader` and `jsoniterReader` start from `reader[ujson.Value]`, so a circe `Decoder[Long]` (and its play-json, zio-json and jsoniter-scala counterparts) reads the already-rounded value.
 - **Tool arguments round too.** A tool call's arguments reach a handler as a `ujson.Value`. `SafeParameterExtractor.getInt` refuses any number outside the `Int` range, so a typed integer parameter is never silently wrong; a large number read from the raw JSON, though, has already been rounded.
 
 So if a model has to return or receive large identifiers (snowflake ids, database keys above 9 quadrillion) through a bridge or a tool, make them strings in the schema and the case class, and convert in your own code. See [#1597](https://github.com/llm4s/llm4s/issues/1597).
 
 ## What this page does not cover
 
-- **A bridge module.** No `llm4s-circe` module is published. The conversion is two lines and the `Reader` is five, as shown above, so a module would add a dependency and a maintenance promise for little. Its main value would be one place for the error mapping, and only circe has a Scala 3 bridge, so a module could not treat the three libraries alike. If you would use one, say so on [#1458](https://github.com/llm4s/llm4s/issues/1458).
+- **A bridge module.** No `llm4s-circe` or `llm4s-jsoniter` module is published. The conversion is two lines and the `Reader` is five, as shown above, so a module would add a dependency and a maintenance promise for little. Its main value would be one place for the error mapping, and only circe has a Scala 3 bridge, so a module could not treat the four libraries alike. If you would use one, say so on [#1458](https://github.com/llm4s/llm4s/issues/1458) (circe, play-json, zio-json) or [#2295](https://github.com/llm4s/llm4s/issues/2295) (jsoniter-scala).
 - **Deriving tool or response schemas** from your case classes. The schemas are still built with LLM4S's `Schema` (issue [#1472](https://github.com/llm4s/llm4s/issues/1472)).
 - **Streaming events.** The event fields that are `ujson.Value`s, such as the `arguments` of `ToolCallStarted`, convert the same way.
 

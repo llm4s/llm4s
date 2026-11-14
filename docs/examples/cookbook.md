@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Cookbook
+description: "The LLM4S cookbook: complete Scala programs for classification, extraction, summarising, RAG, tool calling, streaming and agents, each runnable without a key."
+search_title: "LLM4S cookbook: Scala recipes for LLM apps"
 parent: Examples
 nav_order: 1
 has_children: true
@@ -19,8 +21,16 @@ and every one runs with **no API key**: by default a scripted client stands in f
 flow work in seconds. Add `--live` to run the same code against the provider your configuration names
 (`llm4s.providers.provider`, see [running the samples](../getting-started/configuration#running-the-samples)).
 
+To run the recipes with no local setup at all, open a GitHub Codespace from the
+[playground](../getting-started/playground): it has sbt and a small local model, so `--live` works there too.
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/llm4s/llm4s?quickstart=1)
+
 CI runs every recipe against its scripted client on every pull request, and checks that the program on each page is
 the source file, so what you read compiles and works.
+
+A recipe solves one problem on one page. For one application built a part at a time, with exercises, follow the
+[support-assistant tutorial](../tutorials/support-assistant/).
 
 ## The recipes
 

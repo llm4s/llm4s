@@ -45,7 +45,7 @@ final class OpenAITTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm
       _ = options.speakingRate.foreach(rate => payload("speed") = rate)
       response <- httpClient.postRaw(
         s"${config.baseUrl}/v1/audio/speech",
-        Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json"),
+        Map("Authorization" -> s"Bearer ${config.apiKey.reveal}", "Content-Type" -> "application/json"),
         ujson.write(payload),
         60.seconds
       )

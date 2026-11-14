@@ -15,9 +15,11 @@ import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JContextWindow;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
+import org.llm4s.javaapi.JGuardrails;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JTool;
@@ -34,6 +36,7 @@ import org.llm4s.llmconnect.config.OllamaConfig;
 import org.llm4s.llmconnect.config.OpenAIConfig;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.metrics.MetricsCollector;
+import org.llm4s.security.Secret;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,8 +72,8 @@ final class GuideSnippets {
 
     /** The second "Configure in code" block: a client from a provider config, with no application.conf. */
     static List<LlmResult<JLlmClient>> inCode(String apiKey) {
-        LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(apiKey, "gpt-4o-mini"));
-        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(apiKey, "claude-sonnet-4-20250514"));
+        LlmResult<JLlmClient> openai = Llm4s.createClient(OpenAIConfig.apply(Secret.apply(apiKey), "gpt-4o-mini"));
+        LlmResult<JLlmClient> anthropic = Llm4s.createClient(AnthropicConfig.apply(Secret.apply(apiKey), "claude-sonnet-4-20250514"));
         LlmResult<JLlmClient> local = Llm4s.createClient(OllamaConfig.apply("llama3.2", "http://localhost:11434"));
 
         return Arrays.asList(openai, anthropic, local);
@@ -242,6 +245,25 @@ final class GuideSnippets {
         List<JTool> tools = new java.util.ArrayList<>(JTool.fromAnnotated(new Payments(billing)).get());
         tools.add(refund.get());
         return Llm4s.createAgentWithTools(client, tools).get().run("Charge 5 cents, then refund it").get();
+    }
+
+    /** The "An agent with a system prompt, guardrails and a context window" block (#2476). */
+    static JAgentResult agentBuilder(JLlmClient client, JTool add) {
+        LlmResult<JAgent> built = Llm4s.agentBuilder("support", client)
+            .systemPrompt("You are a support assistant. Answer in JSON.")
+            .tools(List.of(add))
+            .inputGuardrails(List.of(JGuardrails.length(1, 10_000), JGuardrails.profanity()))
+            .outputGuardrails(List.of(JGuardrails.json()))
+            .contextWindow(JContextWindow.lastMessages(20))
+            .streaming(true)
+            .build();
+
+        JAgent agent = built.get();
+        JAgentResult result = agent.run("What is 2 + 3?").get();
+        result.status().guardrail().ifPresent(g ->
+            System.out.println("Blocked by " + g + ": " + result.status().reason().orElse("")));
+
+        return result;
     }
 
     /** The "Streaming the reply" block (#1485). */

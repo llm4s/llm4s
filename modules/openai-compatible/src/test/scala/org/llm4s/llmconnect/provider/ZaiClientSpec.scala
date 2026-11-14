@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.ZaiConfig
@@ -19,7 +20,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   // Test configuration
   private val testConfig = ZaiConfig(
-    apiKey = "test-api-key",
+    apiKey = Secret("test-api-key"),
     model = "GLM-4.7",
     baseUrl = "https://api.z.ai/api/paas/v4",
     contextWindow = 128000,
@@ -734,7 +735,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
 class ZaiClientMetricsSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = ZaiConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "test-model",
     baseUrl = "http://test.com",
     contextWindow = 128000,

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.NetworkError
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -25,7 +26,7 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
   private val secretKey = "jina-SECRET-key-123"
 
   private def cfg(base: String = "http://jina-test") =
-    EmbeddingProviderConfig(baseUrl = base, model = "jina-embeddings-v3", apiKey = secretKey)
+    EmbeddingProviderConfig(baseUrl = base, model = "jina-embeddings-v3", apiKey = Secret(secretKey))
 
   private def ok(vectors: Seq[Seq[Double]]): HttpResponse = {
     val items = vectors.zipWithIndex.map { case (v, i) =>

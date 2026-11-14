@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Installation
+description: "Add LLM4S to an sbt build: JDK 21 and Scala 3.7 requirements, the llm4s-core artifact, and which provider module to depend on."
+search_title: "Install LLM4S: add the Scala LLM library to sbt"
 parent: Getting Started
 nav_order: 1
 ---
@@ -456,6 +458,19 @@ It brings Azure's `azure-identity` (MIT, with `azure-core`, MSAL4J, Netty and Re
 it is not part of `llm4s-openai`. See
 [Enterprise authentication](../guide/providers#azure-openai-with-microsoft-entra-id).
 
+### For API keys read from HashiCorp Vault
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-secrets-vault" % llm4sVersion
+```
+
+`VaultApiKeyProvider` ([#2479](https://github.com/llm4s/llm4s/issues/2479)) reads a provider's API key from
+Vault's KV secrets engine, caches it and reads it again every refresh interval, for a deployment that cannot run
+Vault Agent or a CSI driver to write the key to an `apiKeyFile`. It talks to Vault's HTTP API with llm4s's own
+HTTP client, so it brings no Vault SDK. See
+[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 ```scala
@@ -557,6 +572,27 @@ libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
 The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
 `llm4s-core`. See [IBM watsonx.ai](../guide/providers#ibm-watsonxai).
 
+### For Perplexity
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
+```
+
+The Perplexity Agent API chat provider (`provider = "perplexity"`): answers grounded in web search, with
+citations. It brings no dependency beyond `llm4s-core`. See [Perplexity](../guide/providers#perplexity).
+
+### For a local model in the JVM (Jlama)
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-jlama" % llm4sVersion
+run / fork := true
+run / javaOptions ++= Seq("--add-modules=jdk.incubator.vector", "--enable-preview")
+```
+
+A model run inside your JVM by [Jlama](https://github.com/tjake/Jlama) (`provider = "jlama"`): no API key and no
+model server. It brings `jlama-core` and its dependencies. See
+[First answer, no key, no server](local-jlama).
+
 ### For Java, Spring Boot, cats-effect and ZIO
 
 ```scala
@@ -565,9 +601,11 @@ libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-java-rag"             % llm4sVersion  // Java facade for RAG (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-reactor"              % llm4sVersion  // Reactor Flux over the Java facade (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
+libraryDependencies += "org.llm4s" %% "llm4s-spring-ai"            % llm4sVersion  // Spring AI ChatModel / EmbeddingModel interop (Experimental)
 libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
 libraryDependencies += "org.llm4s" %% "llm4s-pekko"                % llm4sVersion  // Apache Pekko Streams
+libraryDependencies += "org.llm4s" %% "llm4s-ox"                   % llm4sVersion  // Ox direct style (Experimental)
 ```
 
 `llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
@@ -578,8 +616,11 @@ see [Quarkus](../guide/quarkus)) and the base of the Spring starter, which adds 
 pipeline behind one Java class, `JRag` ([Java RAG](../guide/java-rag)); it is a separate artifact so that a Java
 facade user who only calls a model does not receive document parsing and the database drivers. `llm4s-reactor` turns
 a streamed reply into a Reactor `Flux<String>` ([Java Reactor](../guide/java-reactor)), apart from the facade so that it
-does not bring `reactor-core` to an application without Reactor. `llm4s-effect`,
-`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems.
+does not bring `reactor-core` to an application without Reactor. `llm4s-spring-ai` exposes an llm4s client as a Spring
+AI `ChatModel` and `EmbeddingModel`, and a Spring AI `ChatModel` as an llm4s client; Spring AI 2.0.x is a provided
+dependency, which the application brings ([Using LLM4S with Spring AI](../guide/spring-ai)). `llm4s-effect`,
+`llm4s-zio` and `llm4s-pekko` wrap `LLMClient` and `Agent` for their effect and streaming systems. `llm4s-ox` adds an
+Ox `Flow` of a streamed reply, bounded fan-out, races and retries to direct-style code ([Direct style](../guide/direct-style)).
 
 ### For Kotlin (coroutines and Flow)
 
@@ -599,6 +640,7 @@ released at the same version as every other llm4s module, so the BOM manages it 
 dependencies {
     implementation(platform("org.llm4s:llm4s-bom:{{ site.data.project.latest_release }}"))
     implementation("org.llm4s:llm4s-kotlin-api")   // brings llm4s-java-api_3 and kotlinx-coroutines-core
+    implementation("org.llm4s:llm4s-ollama_3")     // the provider module you call
 }
 ```
 
@@ -705,6 +747,26 @@ JSON, file access, HTTP, shell, and the Brave, DuckDuckGo and Exa search tools -
 tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unchanged. See the
 [migration note](../reference/migration#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 
+### For tapir endpoints as tools
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-tapir" % llm4sVersion // same version as llm4s-core
+```
+
+`EndpointTools` turns tapir endpoints into tools, each schema derived from its endpoint's inputs, called through
+sttp client 3. It depends on `tapir-core` 1.11, not on the agent runtime (Experimental). See
+[Tapir Endpoints as Tools](../guide/tapir-tools).
+
+### For your own sttp backend as the HTTP transport
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-sttp" % llm4sVersion // same version as llm4s-core
+```
+
+`SttpLlm4sHttpClient` sends the SDK-free provider clients' requests through an sttp 4 synchronous backend you
+already have: its pool, proxy, logging, tracing, or a stub in tests. It depends on sttp client 4's `core` only
+(Experimental). See [Your HTTP Client](../guide/http-transport).
+
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
 ```scala
@@ -748,10 +810,37 @@ and `llm4s-knowledgegraph` and brings the Neo4j driver.
 ```scala
 // same version as llm4s-core
 libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+libraryDependencies += "org.llm4s" %% "llm4s-schema-iron"       % llm4sVersion  // bounds from Iron refinement types
 ```
 
 `SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
 with `derives`. It is experimental, and depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+`llm4s-schema-iron` (experimental) adds the bounds of [Iron](https://github.com/Iltotore/iron) refinement types, such
+as `Int :| Interval.Closed[1, 5]`, to the derived schema and refuses a reply that breaks them; it brings Iron. See
+[Iron refinements](../guide/derived-schemas#iron-refinements).
+
+### Typed prompts
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-prompt" % llm4sVersion
+```
+
+The `prompt"..."` and `system"..."` interpolators: each value is rendered by a `Promptable` checked at compile time,
+and `Untrusted` input is fenced. It is experimental, and depends on `llm4s-core` only. See
+[Typed Prompts](../guide/prompts).
+
+### Capability-typed clients
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-capabilities" % llm4sVersion
+```
+
+`client.requireCapabilities[Vision & Tools](provider, model)` and `Capable`: check a model's capabilities once, and passing a
+client not checked for one fails to compile; `model"openai/gpt-4o"` is typed from the bundled model data at compile
+time. It is experimental, and depends on `llm4s-core`; its `completeStructuredOf` also needs `llm4s-schema-derivation`
+(optional). See [Capability-Typed Clients](../guide/capabilities).
 
 ### Testing your own code (the testkit)
 
@@ -763,6 +852,28 @@ libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
 A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned replies, scripted tool calls,
 injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
 [Testing with the Testkit](../guide/testing-with-the-testkit).
+
+### Checking your setup (the doctor)
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-doctor" % llm4sVersion % Test
+```
+
+`DoctorCli` checks your JDK, `application.conf`, default provider, provider module, API key and, with `--local` or
+`--live`, the model server, and says what to fix: `sbt "Test/runMain org.llm4s.doctor.DoctorCli"`. It depends on
+`llm4s-core` only. See [Doctor](../reference/doctor) for Maven, Gradle and Coursier.
+
+### Trying llm4s in the REPL
+
+```scala
+// same version as llm4s-core; for the REPL, worksheets and scripts, not for production code
+libraryDependencies += "org.llm4s" %% "llm4s-repl" % llm4sVersion
+```
+
+`ask`, `extract`, `chat()`, `history` and `lastUsage` behind one `import org.llm4s.repl.*`, with an offline session
+that needs no API key. It is experimental, and depends on `llm4s-core`, `llm4s-schema-derivation` and
+`llm4s-testkit`. See [Try llm4s in the REPL](repl).
 
 ### For provider authors (testing a provider module)
 

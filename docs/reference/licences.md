@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Dependency Licences
+description: "The licences of LLM4S dependencies: the MIT licence, where each module's licence report is, how a licence is determined and the policy for new dependencies."
 parent: Reference
 ---
 

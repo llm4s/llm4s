@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig }
@@ -34,7 +35,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with P
     GeminiConfig
       .fromValues(
         modelName = "gemini-1.5-flash",
-        apiKey = key,
+        apiKey = Secret(key),
         baseUrl = "https://generativelanguage.googleapis.com/v1beta"
       )
       .value

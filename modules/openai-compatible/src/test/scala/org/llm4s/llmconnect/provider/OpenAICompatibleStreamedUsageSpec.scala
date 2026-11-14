@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
@@ -89,7 +90,8 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
   }
 
   it should "carry the dialect's reasoning tokens" in {
-    val deepSeek = new DeepSeekClient(DeepSeekConfig("k", "deepseek-reasoner", "http://localhost:1", 128000, 8192))
+    val deepSeek =
+      new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-reasoner", "http://localhost:1", 128000, 8192))
     val usage =
       ""","usage":{"prompt_tokens":4,"completion_tokens":9,"total_tokens":13,""" +
         """"completion_tokens_details":{"reasoning_tokens":6}}"""

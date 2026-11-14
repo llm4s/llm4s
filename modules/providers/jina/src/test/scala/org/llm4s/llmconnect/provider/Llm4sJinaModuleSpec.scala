@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.JinaConfigKeys
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -43,7 +44,7 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
         .fold(error => fail(error.message), identity)
 
       config.model shouldBe "jina-embeddings-v3"
-      config.apiKey shouldBe "jina-test"
+      config.apiKey.reveal shouldBe "jina-test"
       config.baseUrl shouldBe "https://api.jina.ai/v1"
       assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config)
     }
@@ -82,8 +83,19 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = "test-key")
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config))
+      }
+    }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(_, 200, """{"data":[{"embedding":[0.1,0.2]}]}""")
+      ) { (baseUrl, keys) =>
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }
   }

@@ -2,6 +2,7 @@ package org.llm4s.vectorstore.opensearch
 
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.{ MetadataFilter, VectorRecord }
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.matchers.should.Matchers
@@ -47,7 +48,7 @@ class OpenSearchVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAnd
     val config = OpenSearchConfig(
       baseUrl = testUrl.getOrElse(fail("OPENSEARCH_TEST_URL not set")),
       index = s"llm4s-it-${engine.wireName}-${System.nanoTime()}",
-      auth = username.fold[OpenSearchAuth](OpenSearchAuth.NoAuth)(OpenSearchAuth.Basic(_, password)),
+      auth = username.fold[OpenSearchAuth](OpenSearchAuth.NoAuth)(OpenSearchAuth.Basic(_, Secret(password))),
       spaceType = spaceType,
       engine = engine
     )

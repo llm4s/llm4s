@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
 import org.llm4s.speech.stt.provider.{ AzureSTTClient, OpenAISTTClient }
 import org.llm4s.speech.tts.provider.{ AzureTTSClient, ElevenLabsTTSClient, OpenAITTSClient }
@@ -20,27 +21,29 @@ class CloudSpeechCancellationSpec extends AnyFlatSpec {
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen)(test)
 
   "AzureSTTClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new AzureSTTClient(STTConfig("azure", "en-US", "azure-key", url, Some("eastus")))
+    val client = new AzureSTTClient(STTConfig("azure", "en-US", Secret("azure-key"), url, Some("eastus")))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("azure-stt transcribe")(client.transcribe(audio))
   }
 
   "OpenAISTTClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new OpenAISTTClient(STTConfig("openai", "whisper-1", "sk-test-key", url))
+    val client = new OpenAISTTClient(STTConfig("openai", "whisper-1", Secret("sk-test-key"), url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("openai-stt transcribe")(client.transcribe(audio))
   }
 
   "AzureTTSClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new AzureTTSClient(TTSConfig("azure", "azure", "en-US-JennyNeural", "azure-key", url, Some("eastus")))
+    val client =
+      new AzureTTSClient(TTSConfig("azure", "azure", "en-US-JennyNeural", Secret("azure-key"), url, Some("eastus")))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("azure-tts synthesize")(client.synthesize("Hello"))
   }
 
   "ElevenLabsTTSClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new ElevenLabsTTSClient(TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", "el-key", url))
+    val client =
+      new ElevenLabsTTSClient(TTSConfig("elevenlabs", "eleven_multilingual_v2", "voice123", Secret("el-key"), url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("elevenlabs-tts synthesize")(client.synthesize("Hello"))
   }
 
   "OpenAITTSClient" should "return CancelledError when its thread is interrupted" in withHeldServer { url =>
-    val client = new OpenAITTSClient(TTSConfig("openai", "tts-1", "alloy", "sk-test-key", url))
+    val client = new OpenAITTSClient(TTSConfig("openai", "tts-1", "alloy", Secret("sk-test-key"), url))
     ProviderModuleChecks.assertCallCancelsWhenInterrupted("openai-tts synthesize")(client.synthesize("Hello"))
   }
 }

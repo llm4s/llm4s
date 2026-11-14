@@ -6,9 +6,9 @@ import com.fasterxml.jackson.databind.json.JsonMapper
 import com.openai.auth.{ SubjectTokenProvider, SubjectTokenType, WorkloadIdentity }
 import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
-import com.openai.client.okhttp.OpenAIOkHttpClient
-import com.openai.client.{ OpenAIClient => SdkClient }
-import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
+import com.openai.client.okhttp.{ OkHttpClient, OpenAIOkHttpClient }
+import com.openai.client.{ OpenAIClient => SdkClient, OpenAIClientImpl }
+import com.openai.core.{ ClientOptions, JsonField, ObjectMappers, RequestOptions, Timeout }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, ProxyAuthenticator, StreamResponse }
 import com.openai.credential.BearerTokenCredential
 import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException, UnauthorizedException }
@@ -35,7 +35,12 @@ import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, IdentityTokenSource }
+import org.llm4s.llmconnect.auth.{
+  AccessTokenProvider,
+  ApiKeyProvider,
+  CachingAccessTokenProvider,
+  IdentityTokenSource
+}
 import org.llm4s.llmconnect.config.{
   AzureConfig,
   OpenAIConfig,
@@ -49,6 +54,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -130,8 +136,8 @@ class OpenAIClient private[provider] (
 
   private val displayName: String = OpenAIClient.displayName(provider)
 
-  /** The configured credentials, which an error built from a remote reply must not repeat. */
-  private val credentialSecrets: Seq[String] = OpenAIClient.credentialSecrets(config)
+  // The workload-identity ids, which an error built from a remote reply must not repeat; the keys are Secrets.
+  OpenAIClient.registerCredentials(config)
 
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
@@ -255,7 +261,7 @@ class OpenAIClient private[provider] (
   /** Runs one SDK call, logging and mapping any failure to an [[org.llm4s.error.LLMError LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      val error = OpenAIClient.mapError(e, providerName, credentialSecrets)
+      val error = OpenAIClient.mapError(e, providerName)
       e match {
         // The SDK's exceptions carry the service's (or the token endpoint's) reply in their message, which
         // may repeat a credential: only the redacted error is logged, not the exception.
@@ -777,6 +783,19 @@ class OpenAIClient private[provider] (
 object OpenAIClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Registers with `KnownSecrets` the workload-identity ids of an [[OpenAIConfig]] (identity provider, service
+   * account, client id), which the SDK sends and its errors may quote. The keys are `Secret`s, registered already.
+   */
+  private[provider] def registerCredentials(config: ProviderConfig): Unit = config match {
+    case openAI: OpenAIConfig =>
+      openAI.workloadIdentity.foreach { wi =>
+        (Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId.map(_.reveal))
+          .foreach(KnownSecrets.registerIdentifier)
+      }
+    case _ => ()
+  }
+
   private[provider] def forTest(
     model: String,
     transport: OpenAIClientTransport,
@@ -817,59 +836,35 @@ object OpenAIClient {
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
    */
-  private[provider] def mapError(e: Throwable, provider: String, secrets: Seq[String] = Nil): LLMError =
-    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider, secrets))
+  private[provider] def mapError(e: Throwable, provider: String): LLMError =
+    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider))
 
   /**
-   * A service reply's body is scrubbed of `secrets` and of credential JSON fields before `HttpErrorMapper`
+   * A service reply's body is scrubbed of registered credentials and of credential JSON fields before `HttpErrorMapper`
    * extracts (and redacts) its detail; any other SDK exception's message - the workload-identity token
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
-  private def mapSdkError(e: Throwable, provider: String, secrets: Seq[String]): LLMError = e match {
+  private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
     case service: OpenAIServiceException =>
       HttpErrorMapper
         .mapHttpError(
           service.statusCode(),
           // Rendered as JSON: the SDK's `JsonValue.toString` is a Java map's (`{error={message=...}}`), which
           // `HttpErrorMapper` cannot parse, so the service's message never reached the error.
-          Redaction.scrubRemote(
-            Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse(""),
-            secrets
-          ),
+          Redaction.scrubRemote(Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).getOrElse("")),
           provider,
           Try(headerMap(service.headers())).getOrElse(Map.empty)
         )
         .left
-        .getOrElse(redactMessage(service.toLLMError, service, secrets))
-    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause, secrets)
-    case other                                        => redactMessage(other.toLLMError, other, secrets)
+        .getOrElse(redactMessage(service.toLLMError, service))
+    case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
+    case other                                        => redactMessage(other.toLLMError, other)
   }
 
   /** `error` with its message redacted when it is the exception's own message, as `UnknownError`'s is. */
-  private def redactMessage(error: LLMError, cause: Throwable, secrets: Seq[String]): LLMError = error match {
-    case unknown: UnknownError => UnknownError(Redaction.remoteBody(unknown.message, secrets), cause)
+  private def redactMessage(error: LLMError, cause: Throwable): LLMError = error match {
+    case unknown: UnknownError => UnknownError(Redaction.remoteBody(unknown.message), cause)
     case other                 => other
-  }
-
-  /**
-   * The configured values an error built from a remote reply must not repeat: the API key, or with
-   * workload identity a literal identity token and the ids `toString` redacts (those long enough to scrub
-   * without garbling the body, [[org.llm4s.util.Redaction.identifiers Redaction.identifiers]]).
-   */
-  private[provider] def credentialSecrets(config: ProviderConfig): Seq[String] = config match {
-    case openAI: OpenAIConfig =>
-      openAI.workloadIdentity match {
-        case None => Seq(openAI.apiKey)
-        case Some(wi) =>
-          Redaction.identifiers(
-            Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId
-          ) ++ (wi.identityToken match {
-            case IdentitySource.Literal(token) => Seq(token)
-            case IdentitySource.File(_)        => Nil
-          })
-      }
-    case azure: AzureConfig => Seq(azure.apiKey).filter(_.nonEmpty)
-    case _                  => Nil
   }
 
   /** The SDK's response headers as the multi-valued map `HttpErrorMapper` reads. */
@@ -995,22 +990,95 @@ private[provider] object OpenAIClientTransport {
    * OpenAI, Requesty or any OpenAI-compatible base URL: a bearer API key, the configured
    * organisation, and requests to `<baseUrl>/chat/completions`.
    */
-  def openAI(
-    config: OpenAIConfig,
-    customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
-  ): OpenAIClientTransport = {
+  def openAI(config: OpenAIConfig): OpenAIClientTransport = {
     // A config built with `apply` or a `with*` setter skipped `fromValues`: `OpenAIClient.apply` refuses it as a
     // ConfigurationError, and every constructor here, so an exchanged OpenAI token never goes to another provider.
     OpenAIConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
-    val builder = OpenAIOkHttpClient
-      .builder()
-      .baseUrl(config.baseUrl)
-      .organization(config.organization.orNull)
     config.workloadIdentity match {
-      case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
-      case None     => builder.apiKey(config.apiKey)
+      case Some(wi) => sdk(workloadIdentityClient(config, wi), config.timeouts)
+      case None =>
+        val builder = OpenAIOkHttpClient
+          .builder()
+          .baseUrl(config.baseUrl)
+          .organization(config.organization.orNull)
+        config.apiKeyProvider match {
+          case None => builder.apiKey(config.apiKey.reveal)
+          // The SDK asks the credential for its token on each request (#2313).
+          case Some(keys) => builder.credential(BearerTokenCredential.create(new RotatingKey(keys)))
+        }
+        sdk(withNetwork(builder, config.network, config.baseUrl).build(), config.timeouts)
     }
-    sdk(customize(withNetwork(builder, config.network, config.baseUrl)).build(), config.timeouts)
+  }
+
+  /**
+   * The SDK client for workload identity, assembled as `OpenAIOkHttpClient.build` assembles it, but over an HTTP
+   * client that registers each request's bearer ([[RegisteringBearer]]). The SDK exchanges the identity token and
+   * sends the access token itself; its workload-identity layer wraps the HTTP client given here, so the requests
+   * this client sees already carry that token.
+   *
+   * Mirrored by hand from `OpenAIOkHttpClient.Builder.build()` in openai-java 4.69.3 (`Versions.openaiJava`): the
+   * OkHttp client with the SDK's default `Timeout`, its proxy, proxy authenticator and SSL socket factory/trust
+   * manager, then `ClientOptions` with the base URL, organization and workload identity. Re-check this against
+   * `build()` whenever openai-java is bumped: a setting `build()` gains is silently missing here.
+   */
+  private def workloadIdentityClient(config: OpenAIConfig, wi: OpenAIWorkloadIdentity): SdkClient = {
+    val http = OkHttpClient.builder().timeout(Timeout.default())
+    applyNetwork(config.network, config.baseUrl)(
+      http.proxy(_),
+      http.proxyAuthenticator(_),
+      (factory, trust) => http.sslSocketFactory(factory).trustManager(trust)
+    )
+    workloadIdentitySdk(config, wi, http.build())
+  }
+
+  /** [[workloadIdentityClient]] over `base`, the HTTP client every request (the token exchange too) goes out on. */
+  private[provider] def workloadIdentitySdk(
+    config: OpenAIConfig,
+    wi: OpenAIWorkloadIdentity,
+    base: SdkHttpClient
+  ): SdkClient =
+    new OpenAIClientImpl(
+      ClientOptions
+        .builder()
+        .httpClient(new RegisteringBearer(base))
+        .baseUrl(config.baseUrl)
+        .organization(config.organization.orNull)
+        .workloadIdentity(sdkWorkloadIdentity(wi))
+        .build()
+    )
+
+  /**
+   * Registers the bearer token of each request before passing it on, through its own [[TokenGenerations]], so an
+   * error body echoing a workload-identity access token the SDK obtained is scrubbed.
+   */
+  final private[provider] class RegisteringBearer(next: SdkHttpClient) extends SdkHttpClient {
+    private val generations = new TokenGenerations
+
+    private def register(request: com.openai.core.http.HttpRequest): Unit =
+      request
+        .headers()
+        .values("Authorization")
+        .asScala
+        .collect { case value if value.regionMatches(true, 0, "Bearer ", 0, 7) => value.drop(7).trim }
+        .foreach(generations.rotate)
+
+    override def execute(
+      request: com.openai.core.http.HttpRequest,
+      options: RequestOptions
+    ): com.openai.core.http.HttpResponse = {
+      register(request)
+      next.execute(request, options)
+    }
+
+    override def executeAsync(
+      request: com.openai.core.http.HttpRequest,
+      options: RequestOptions
+    ): CompletableFuture[com.openai.core.http.HttpResponse] = {
+      register(request)
+      next.executeAsync(request, options)
+    }
+
+    override def close(): Unit = next.close()
   }
 
   /**
@@ -1026,19 +1094,44 @@ private[provider] object OpenAIClientTransport {
     network: HttpNetworkSettings,
     baseUrl: String
   ): OpenAIOkHttpClient.Builder = {
-    HttpNetwork.proxyForUrl(network, baseUrl).foreach { proxy =>
-      builder.proxy(proxy)
+    applyNetwork(network, baseUrl)(
+      builder.proxy(_),
+      builder.proxyAuthenticator(_),
+      (factory, trust) => builder.sslSocketFactory(factory).trustManager(trust)
+    )
+    builder
+  }
+
+  /** [[withNetwork]] over any builder, given its proxy, proxy-authenticator and TLS setters. */
+  private def applyNetwork(network: HttpNetworkSettings, baseUrl: String)(
+    proxy: java.net.Proxy => Any,
+    proxyAuthenticator: ProxyAuthenticator => Any,
+    tls: (javax.net.ssl.SSLSocketFactory, javax.net.ssl.X509TrustManager) => Any
+  ): Unit = {
+    HttpNetwork.proxyForUrl(network, baseUrl).foreach { p =>
+      proxy(p)
       network.proxy.flatMap(_.credentials).foreach { case (user, password) =>
-        builder.proxyAuthenticator(ProxyAuthenticator.basic(user, password))
+        proxyAuthenticator(ProxyAuthenticator.basic(user, password.reveal))
       }
     }
     HttpNetwork
       .tlsMaterial(network.tls)
       .fold(
         error => throw new IllegalArgumentException(error.message),
-        _.foreach(tls => builder.sslSocketFactory(tls.sslContext.getSocketFactory).trustManager(tls.trustManager))
+        _.foreach(material => tls(material.sslContext.getSocketFactory, material.trustManager))
       )
-    builder
+  }
+
+  /**
+   * The key `keys` holds now, for each request (#2313). A failure to get it rides through the SDK in an
+   * [[IdentityTokenException]], so it reaches the caller as the `LLMError` it was; a provider that throws fails the
+   * request the same way, with an `AuthenticationError` naming the exception's class.
+   */
+  final private[provider] class RotatingKey(keys: ApiKeyProvider) extends java.util.function.Supplier[String] {
+    override def get(): String =
+      CachingAccessTokenProvider
+        .guarded(keys.current())
+        .fold(error => throw new IdentityTokenException(error), _.asKey)
   }
 
   /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */
@@ -1061,13 +1154,23 @@ private[provider] object OpenAIClientTransport {
   /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
   private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
     val source = IdentityTokenSource.from(wi.identityToken)
+    // Each subject token is registered before the SDK sends it, so an exchange error quoting it is scrubbed.
+    val subjects = new TokenGenerations
     val subject = new SubjectTokenProvider {
       override def tokenType(): SubjectTokenType = SubjectTokenType.JWT
 
       // The SDK's callback contract is exceptions. The error rides inside one, whatever the SDK wraps it
       // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
       override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
-        source.fetch().fold(error => throw new IdentityTokenException(error), identity)
+        source
+          .fetch()
+          .fold(
+            error => throw new IdentityTokenException(error),
+            token => {
+              subjects.rotate(token)
+              token
+            }
+          )
 
       // The read is blocking file I/O: it runs on a virtual thread, not on the common pool.
       override def getTokenAsync(httpClient: SdkHttpClient, jsonMapper: JsonMapper): CompletableFuture[String] =
@@ -1078,12 +1181,13 @@ private[provider] object OpenAIClientTransport {
       .identityProviderId(wi.identityProviderId)
       .serviceAccountId(wi.serviceAccountId)
       .provider(subject)
-    wi.clientId.foreach(builder.clientId)
+    wi.clientId.foreach(id => builder.clientId(id.reveal))
     builder.build()
   }
 
   /**
-   * Azure OpenAI: an `api-key` header - or, with `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
+   * Azure OpenAI: an `api-key` header - its key asked of `apiKeyProvider` per request when that is set - or, with
+   * `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
    * `<endpoint>/openai/deployments/<model>/chat/completions?api-version=<apiVersion>`,
    * where `model` is the deployment name - the URL the Azure SDK built.
    *
@@ -1106,15 +1210,65 @@ private[provider] object OpenAIClientTransport {
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.
     def transport(): OpenAIClientTransport =
       sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
-    config.tokenProvider match {
-      case None =>
-        builder.credential(AzureApiKeyCredential.create(config.apiKey))
+    (config.tokenProvider, config.apiKeyProvider) match {
+      case (None, None) =>
+        builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))
         transport()
-      case Some(tokens) =>
+      case (None, Some(keys)) =>
+        val key = new RotatingAzureKey(keys)
+        builder.credential(key.credential)
+        key.refreshing(transport())
+      case (Some(tokens), _) =>
         val bearer = new EntraIdBearer(tokens)
         builder.credential(BearerTokenCredential.create(bearer))
         bearer.invalidatingOnRejection(transport())
     }
+  }
+
+  /**
+   * Azure's `api-key` header from `keys`, asked before each request (#2477), so a rotated key is sent without
+   * rebuilding the client. The SDK reads the header from an [[AzureApiKeyCredential]] when it prepares each request,
+   * and takes no supplier for it, so the credential is updated - through the SDK's own `update` - before each call.
+   * Updates are serialised and made only when the key differs, so a slower call never puts back a key the provider
+   * has since replaced. A failure to get the key rides through the SDK in an [[IdentityTokenException]], so it
+   * reaches the caller as the `LLMError` it was; a provider that throws fails the request with an
+   * `AuthenticationError` naming the exception's class.
+   */
+  final private[provider] class RotatingAzureKey(keys: ApiKeyProvider) {
+    // A non-blank placeholder (the SDK refuses a blank key); never sent, as each call sets the current key first.
+    private val azureKey = AzureApiKeyCredential.create("llm4s-api-key-provider").asInstanceOf[AzureApiKeyCredential]
+
+    /** The credential to give the SDK builder. */
+    def credential: com.openai.credential.Credential = azureKey
+
+    // Not `synchronized`: `keys` may fetch from a secret store, and a caller waiting behind that fetch must stay
+    // interruptible, with no virtual thread's carrier pinned. An interrupt reaches the caller as a `CancelledError`.
+    private val lock = new java.util.concurrent.locks.ReentrantLock()
+
+    private def refresh(): Unit = {
+      lock.lockInterruptibly()
+      Using.resource((() => lock.unlock()): AutoCloseable) { _ =>
+        val key = CachingAccessTokenProvider
+          .guarded(keys.current())
+          .fold(error => throw new IdentityTokenException(error), _.asKey)
+        if (azureKey.apiKey() != key) azureKey.update(key): Unit
+      }
+    }
+
+    def refreshing(underlying: OpenAIClientTransport): OpenAIClientTransport =
+      new OpenAIClientTransport {
+        override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion = {
+          refresh()
+          underlying.createChatCompletion(params)
+        }
+        override def createChatCompletionStream(
+          params: ChatCompletionCreateParams
+        ): StreamResponse[ChatCompletionChunk] = {
+          refresh()
+          underlying.createChatCompletionStream(params)
+        }
+        override def close(): Unit = underlying.close()
+      }
   }
 
   /**
@@ -1125,9 +1279,12 @@ private[provider] object OpenAIClientTransport {
    */
   final private[provider] class EntraIdBearer(tokens: AccessTokenProvider) extends java.util.function.Supplier[String] {
     private val lastIssued = new java.util.concurrent.atomic.AtomicReference[String]()
+    // The provider may be the caller's own code: each token is registered here, before the SDK sends it.
+    private val generations = new TokenGenerations
 
     override def get(): String = {
       val token = tokens.token().fold(error => throw new IdentityTokenException(error), identity)
+      generations.rotate(token)
       lastIssued.set(token)
       token
     }

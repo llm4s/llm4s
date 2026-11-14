@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Local
 import org.llm4s.llmconnect.LLMClient
@@ -66,16 +67,16 @@ class SmokeContractOfflineSpec
   }
 
   private def deepSeek(): LLMClient =
-    DeepSeekClient(DeepSeekConfig.fromValues("fake-model", "test-key", server.baseUrl).value).value
+    DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
 
   private def openRouter(): LLMClient =
-    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", "test-key", None, server.baseUrl).value)
+    new OpenRouterClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), None, server.baseUrl).value)
 
   private def cohere(): LLMClient =
-    CohereClient(CohereConfig.fromValues("fake-model", "test-key", server.baseUrl).value).value
+    CohereClient(CohereConfig.fromValues("fake-model", Secret("test-key"), server.baseUrl).value).value
 
   private def openAI(): LLMClient =
-    OpenAIClient(OpenAIConfig.fromValues("fake-model", "test-key", None, s"${server.baseUrl}/v1").value).value
+    OpenAIClient(OpenAIConfig.fromValues("fake-model", Secret("test-key"), None, s"${server.baseUrl}/v1").value).value
 
   /**
    * The real clients the contract runs through, with how each reports reasoning: DeepSeek returns the thinking text
@@ -243,7 +244,7 @@ class SmokeContractOfflineSpec
     val gone = new FakeOpenAIServer()
     val base = gone.baseUrl
     gone.close()
-    val client = DeepSeekClient(DeepSeekConfig.fromValues("fake-model", "test-key", base).value).value
+    val client = DeepSeekClient(DeepSeekConfig.fromValues("fake-model", Secret("test-key"), base).value).value
     failedMessage(SmokeChecks.run(Capability.SystemPrompt, client)).value should startWith("[system message]")
     client.close()
   }

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Serving an Agent over HTTP
+description: "Reference apps that serve an LLM4S agent over HTTP with http4s, ZIO HTTP, Tapir and Play: a chat endpoint, a streamed endpoint, cancellation and tests."
+search_title: "Serve an LLM agent over HTTP in Scala"
 parent: User Guide
 nav_order: 36
 ---
@@ -20,6 +22,7 @@ serves the same two endpoints, so they can be compared:
 | http4s (Ember) | [`llm4s-effect`](cats-effect): `AgentIO[IO]`, an fs2 `Stream` | available |
 | ZIO HTTP (Netty) | [`llm4s-zio`](zio): `AgentZ`, `ZStream` | available |
 | Tapir, served by http4s (Ember) | endpoint definitions interpreted by `tapir-http4s-server`, over `AgentIO[IO]`; OpenAPI docs at `/docs` | available |
+| Play 3 (Pekko HTTP) | [`llm4s-pekko`](pekko): `AgentPekko`, a Pekko `Source`; Guice wiring | available |
 
 The module is not published: it is code to read and copy. Its HTTP dependencies stay in it. The apps share what does
 not depend on the stack: the request and event JSON (`ChatProtocol`), the error mapping (`HttpErrors`), the command
@@ -49,6 +52,7 @@ LLM4S_PROVIDER=openai-main sbt examplesHttp/run    # with OPENAI_API_KEY set
 sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain --fake"
 LLM4S_PROVIDER=openai-main sbt "examplesHttp/runMain org.llm4s.examples.http.ziohttp.ZioChatServerMain"
 sbt "examplesHttp/runMain org.llm4s.examples.http.tapir.TapirChatServerMain --fake"
+sbt "examplesHttp/runMain org.llm4s.examples.http.playframework.PlayChatServerMain --fake"
 ```
 
 `--port N` and `--host H` change the address (default `127.0.0.1:8080`). Then:
@@ -123,12 +127,16 @@ its first chunk is interrupted once the test's socket closes.
 The Tapir app hands the same stream to Ember through `tapir-http4s-server`, so a disconnect cancels the run in the same
 way; `TapirChatServerSpec` makes the same check.
 
+In the Play app, Play's Pekko HTTP server cancels the response's `Source` when the connection closes, and cancelling
+`AgentPekko.stream` cancels the run in the same way; `PlayChatServerSpec` makes the same check.
+
 In the ZIO HTTP app, the server interrupts the response stream when the connection closes, or when a write fails;
 interrupting `AgentZ.stream` cancels the run in the same way. `ZioChatServerSpec` makes the same check.
 
 `POST /chat` runs the turn with `AgentIO.run` or `AgentZ.run`, each of which cancels the turn when its fiber is
 cancelled. Ember does not watch a connection while it computes a response, so with the http4s app the turn of a client
-that leaves `/chat` runs to the end; use `/chat/stream` when that matters, or bound the run with a timeout
+that leaves `/chat` runs to the end, and so does the Play app's, whose `AgentPekko.run` is a `Future`, which cannot be
+cancelled; use `/chat/stream` when that matters, or bound the run with a timeout
 (`RunConfig().withBudgets(RunBudgets().withTimeout(...))`).
 
 ## The Tapir app
@@ -202,6 +210,127 @@ The document has both endpoints, the request, answer and error body schemas, and
 description; the `429` response documents `Retry-After`. To watch the stream's events as they arrive, use `curl -N`
 rather than the Swagger UI.
 
+## The Play app
+
+`modules/examples-http/src/main/scala/org/llm4s/examples/http/playframework` is a Play 3 app on Scala 3, over
+[`llm4s-pekko`](pekko). It uses Play as a library - `play-guice` and `play-pekko-http-server` - without the Play sbt
+plugin: the routes are a SIRD router (`ChatRouter`) instead of a compiled `conf/routes` file, and `PlayChatServerMain`
+starts the server itself (`PekkoHttpServer.fromApplication`). In an application built with the plugin, the module, the
+controller and the configuration below are the same; only the router and the start differ.
+
+```bash
+sbt "examplesHttp/runMain org.llm4s.examples.http.playframework.PlayChatServerMain --fake"
+LLM4S_PROVIDER=openai-main sbt "examplesHttp/runMain org.llm4s.examples.http.playframework.PlayChatServerMain"
+```
+
+### Versions
+
+Play 3.0.12 is built on Pekko 1.0.3 and Pekko HTTP 1.0.1; `llm4s-pekko` is built on Pekko 1.7.1. Pekko refuses to
+start with mixed versions of its modules, so the module pins every Pekko artifact Play brings (`pekko-actor`,
+`pekko-actor-typed`, `pekko-slf4j`, `pekko-serialization-jackson`, `pekko-protobuf-v3`, `pekko-stream`) to 1.7.1 with
+`dependencyOverrides`, which Pekko's binary compatibility within 1.x allows. An application on Play 3.0 does the same;
+Pekko HTTP keeps its own version. Play is Apache-2.0 licensed, and only this unpublished module depends on it.
+
+### Wiring with Guice
+
+`ChatModule`, a Play `Module` enabled in `application.conf`, binds the `LLMClient` and the agent as eager
+singletons, so a provider section that cannot be loaded stops the application from starting instead of failing its
+first request:
+
+```scala
+bind[LLMClient].toProvider[LLMClientProvider].eagerly(),
+bind[AgentPekko].toProvider[AgentPekkoProvider].eagerly()
+```
+
+`LLMClientProvider` loads the client and registers an `ApplicationLifecycle` stop hook that closes it when the
+application stops:
+
+```scala
+lifecycle.addStopHook(() => Future.fromTry(Try(client.close())))
+```
+
+### Configuration
+
+The llm4s settings live in Play's own `application.conf`, beside Play's keys. The client is loaded from the
+`Configuration` Play injects, with `Llm4sConfig.from`, not from a second read of the classpath:
+
+```scala
+settings <- Llm4sConfig.from(configuration.underlying)
+registry <- settings.modelRegistryService()
+provider <- settings.defaultProvider()
+client   <- LLMConnect.getClient(provider)(using registry)
+```
+
+The precedence is the library's: JVM system properties (`-Dllm4s.providers.provider=openai-main`) override Play's
+configuration, which overrides each llm4s module's `reference.conf` - so `llm4s.credentials.<provider>.apiKey`, bound
+to the vendor's variable such as `OPENAI_API_KEY`, applies without a line in `application.conf`. A key a test sets with
+`GuiceApplicationBuilder().configure(...)` is part of Play's configuration, so it reaches llm4s too. The module's
+`application.conf` adds Play's keys to the shared `llm4s` block:
+
+```hocon
+play {
+  modules.enabled += "org.llm4s.examples.http.playframework.ChatModule"
+  http.router = "org.llm4s.examples.http.playframework.ChatRouter"
+}
+
+examples.chat {
+  heartbeat = 15 seconds
+  blocking-dispatcher {
+    executor = "thread-pool-executor"
+    throughput = 1
+    thread-pool-executor {
+      fixed-pool-size = 16
+    }
+  }
+}
+```
+
+(Production mode also needs `play.http.secret.key`, at least 32 bytes; the app signs nothing, so it sets a fixed one
+that `APPLICATION_SECRET` overrides.)
+
+### Not blocking Play's dispatcher
+
+A provider call blocks its thread. `POST /chat` waits for its run with `AgentPekko.run` on `ChatExecutionContext`, a
+`CustomExecutionContext` over `examples.chat.blocking-dispatcher`, so Play's default dispatcher, which serves every
+request, is never held:
+
+```scala
+agent
+  .run(message)(using blocking)
+  .map(result => Ok(ChatProtocol.result(result).render()).as(ContentTypes.JSON))
+  .recover { case error => failed(HttpErrors.of(PlayChatEvents.llmError(error))) }
+```
+
+`POST /chat/stream` needs no dispatcher of its own: `AgentPekko.stream` runs the turn on a thread of its own. The
+controller answers the stream with `Ok.chunked`:
+
+```scala
+Ok.chunked(PlayChatEvents(agent, message, heartbeat))
+  .as(ContentTypes.EVENT_STREAM)
+  .withHeaders(HeaderNames.CACHE_CONTROL -> "no-cache")
+```
+
+`PlayChatEvents` writes each event in the SSE format itself, so the keep-alive can be a comment (Play's
+`EventSource.Event` has no comment), and merges in the heartbeat until the run ends:
+
+```scala
+val run = agent
+  .stream(ThreadId(UUID.randomUUID().toString), message)
+  .collect {
+    case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => event("delta", ChatProtocol.delta(d.attempt, d.text))
+    case AgentStreamItem.Event(AgentEvents.ToolCallStarted(t)) =>
+      event("tool_call", ChatProtocol.toolCall(t.toolCallId, t.tool))
+    case AgentStreamItem.Done(result) => event("done", ChatProtocol.result(result))
+  }
+  .recover { case error => event("error", ChatProtocol.streamError(HttpErrors.of(llmError(error)))) }
+run
+  .merge(Source.tick(heartbeat, heartbeat, KeepAlive), eagerComplete = true)
+  .mapMaterializedValue(_ => NotUsed)
+```
+
+Errors map to the same statuses as the other apps (`HttpErrors.of`, below); a failed `Future` or stream carries its
+`LLMError` in `llm4s-pekko`'s `LLMException`.
+
 ## Errors
 
 An error is answered as `{"error": {"type", "message", "recoverable"}}`. `HttpErrors.of` chooses the status from the
@@ -228,6 +357,13 @@ port and calls it over real sockets, including the disconnect above. `ZioChatRou
 `ZioChatServerSpec` check the ZIO HTTP app the same way, and `TapirChatRoutesSpec` and `TapirChatServerSpec` the Tapir
 app. `ChatEndpointsSpec` checks the generated OpenAPI document: both endpoints, their schemas, every error status, and
 `Retry-After` on the `429` response.
+
+The Play app is tested with Play's test helpers. `ChatControllerSpec` sends `FakeRequest`s through `route` to an
+application built by `GuiceApplicationBuilder` with the agent overridden: the same checks as `ChatRoutesSpec`.
+`PlayChatServerSpec` starts the app on Play's server on an ephemeral port, including the disconnect above, and
+`ChatModuleSpec` checks the wiring: the client from Play's configuration, the start that fails on a missing provider
+section, the blocking dispatcher, and the stop hook that closes the client. `PlayGuideSpec` checks that every line of
+this page's Play snippets is in the app's sources.
 
 ```bash
 sbt examplesHttp/test

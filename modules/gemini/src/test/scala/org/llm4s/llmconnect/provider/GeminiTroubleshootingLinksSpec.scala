@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.TroubleshootingLinks.Entry
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, ServiceError, TroubleshootingLinks }
 import org.llm4s.llmconnect.config.GeminiConfig
@@ -39,7 +40,7 @@ final class GeminiTroubleshootingLinksSpec extends AnyWordSpec with Matchers {
   }
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] =
-    new GeminiClient(GeminiConfig("test-key", "gemini-2.0-flash", baseUrl, 1048576, 8192))
+    new GeminiClient(GeminiConfig(Secret("test-key"), "gemini-2.0-flash", baseUrl, 1048576, 8192))
       .complete(hello, CompletionOptions())
 
   private def googleError(code: Int, status: String, message: String): String =

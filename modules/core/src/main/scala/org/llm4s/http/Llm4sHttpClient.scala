@@ -485,6 +485,17 @@ object Llm4sHttpClient {
   /** `client`, or a client for `network` when `client` is [[FromConfig]]. */
   private[llm4s] def resolve(client: Llm4sHttpClient, network: HttpNetworkSettings): Llm4sHttpClient =
     if (client eq FromConfig) create(network) else client
+
+  /** The client a provider passes its constructor: `supplied` (from `LlmClientOptions.httpClient`), else [[FromConfig]]. */
+  private[llm4s] def suppliedOrFromConfig(supplied: Option[Llm4sHttpClient]): Llm4sHttpClient =
+    supplied.getOrElse(FromConfig)
+
+  /**
+   * Closes `resolved` - what [[resolve]] returned for `client` - only when the provider client built it itself:
+   * a client the caller supplied stays the caller's to close (#2341).
+   */
+  private[llm4s] def closeIfOwned(client: Llm4sHttpClient, resolved: Llm4sHttpClient): Unit =
+    if (client eq FromConfig) resolved.close()
 }
 
 /**
@@ -507,7 +518,7 @@ private[llm4s] object HttpFailures {
    */
   def toLLMError(t: Throwable, method: String, url: String, timeout: FiniteDuration): LLMError = {
     val endpoint = safeEndpoint(url)
-    val detail   = Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getSimpleName)
+    val detail   = Option(t.getMessage).filter(_.nonEmpty).map(Redaction.redact(_)).getOrElse(t.getClass.getSimpleName)
     t match {
       case e if CancelledError.isCancellation(e) =>
         CancelledError(s"http.$method", Some(e))

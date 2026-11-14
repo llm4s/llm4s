@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, TokenExchange, TokenExchangeConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for the generic `openai-compatible` provider: any endpoint
@@ -49,29 +49,37 @@ import org.llm4s.util.Redaction
  *                          `baseUrl`, a host the user chooses, so no host is allow-listed here. [[OpenAICompatibleConfig.fromValues]] checks
  *                          these, and `OpenAICompatibleClient` refuses a config built any other way that
  *                          breaks them.
+ * @param apiKeyProvider    asked for the bearer key on every request instead of sending `apiKey`, so a
+ *                          rotated key is used without rebuilding the client (#2313): a section's
+ *                          `apiKeyFile` sets one. Never set together with `tokenExchange` or an
+ *                          `Authorization` entry in `headers`, which would replace it.
  */
 @Stable
 final case class OpenAICompatibleConfig private (
   model: String,
   baseUrl: String,
-  apiKey: Option[String],
+  apiKey: Option[Secret],
   contextWindow: Int,
   reserveCompletion: Int,
   headers: Map[String, String],
   streamUsage: Boolean,
   override val timeouts: ProviderTimeouts,
   tokenExchange: Option[TokenExchangeConfig],
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): OpenAICompatibleConfig = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): OpenAICompatibleConfig =
+    copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): OpenAICompatibleConfig = copy(apiKeyProvider = provider)
 
   def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
-  def withApiKey(apiKey: String): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
-  def withApiKey(apiKey: Option[String]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
+  def withApiKey(apiKey: Option[Secret]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
   def withContextWindow(contextWindow: Int): OpenAICompatibleConfig = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): OpenAICompatibleConfig =
     copy(reserveCompletion = reserveCompletion)
@@ -85,10 +93,10 @@ final case class OpenAICompatibleConfig private (
   def withTokenExchange(tokenExchange: Option[TokenExchangeConfig]): OpenAICompatibleConfig =
     copy(tokenExchange = tokenExchange)
   override def toString: String =
-    s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
+    s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=$apiKey, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +
       s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")}, streamUsage=$streamUsage, " +
-      s"tokenExchange=$tokenExchange)"
+      s"tokenExchange=$tokenExchange${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 object OpenAICompatibleConfig {
 
@@ -114,7 +122,7 @@ object OpenAICompatibleConfig {
   def apply(
     model: String,
     baseUrl: String,
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     headers: Map[String, String] = Map.empty,
@@ -132,7 +140,8 @@ object OpenAICompatibleConfig {
       streamUsage,
       timeouts,
       tokenExchange,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**
@@ -164,12 +173,38 @@ object OpenAICompatibleConfig {
    * `tokenUrl` and `baseUrl` must belong to the same trusted service - check both when configuring.
    */
   private[llm4s] def validate(config: OpenAICompatibleConfig): Result[OpenAICompatibleConfig] =
+    validateApiKeyProvider(config).flatMap(validateTokenExchange)
+
+  /**
+   * An `apiKeyProvider` is the request's bearer: an exchanged token or a configured `Authorization` header would
+   * replace it, so neither may be set with it.
+   */
+  private def validateApiKeyProvider(config: OpenAICompatibleConfig): Result[OpenAICompatibleConfig] =
+    if config.apiKeyProvider.isEmpty then Right(config)
+    else if config.tokenExchange.isDefined then
+      Left(
+        ConfigurationError(
+          "OpenAI-compatible config sets both an API key provider (apiKeyFile) and tokenExchange; use one",
+          List("apiKeyFile", "auth")
+        )
+      )
+    else if config.headers.keys.exists(_.equalsIgnoreCase("Authorization")) then
+      Left(
+        ConfigurationError(
+          "an Authorization header cannot be set with an API key provider (apiKeyFile): the request's " +
+            "Authorization is the provider's key - remove the header",
+          List("headers")
+        )
+      )
+    else Right(config)
+
+  private def validateTokenExchange(config: OpenAICompatibleConfig): Result[OpenAICompatibleConfig] =
     config.tokenExchange match
       case None => Right(config)
       case Some(exchange) =>
         for
           _ <- Either.cond(
-            config.apiKey.forall(_.trim.isEmpty),
+            config.apiKey.forall(_.reveal.trim.isEmpty),
             (),
             ConfigurationError(
               "OpenAI-compatible config sets both apiKey and tokenExchange; use one",
@@ -210,7 +245,7 @@ object OpenAICompatibleConfig {
   def fromValues(
     model: String,
     baseUrl: String,
-    apiKey: Option[String] = None,
+    apiKey: Option[Secret] = None,
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
     headers: Map[String, String] = Map.empty,
@@ -239,7 +274,7 @@ object OpenAICompatibleConfig {
         OpenAICompatibleConfig(
           model = model.trim,
           baseUrl = baseUrl.trim.stripSuffix("/"),
-          apiKey = apiKey.map(_.trim).filter(_.nonEmpty),
+          apiKey = apiKey.map(_.reveal.trim).filter(_.nonEmpty).map(Secret(_)),
           contextWindow = window,
           reserveCompletion = reserve,
           headers = headers,

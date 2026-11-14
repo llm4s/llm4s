@@ -1,12 +1,14 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.util.Redaction
 import org.llm4s.types.Result
 import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError }
+import org.llm4s.security.Secret
 import org.llm4s.vectorstore.PostgresVectorHelpers
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
-import java.sql.{ Connection, PreparedStatement, ResultSet, Timestamp }
+import java.sql.{ BatchUpdateException, Connection, PreparedStatement, ResultSet, Timestamp }
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 import scala.util.{ Try, Using }
@@ -79,7 +81,11 @@ final class PostgresMemoryStore private[memory] (
       }
       this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to replace memories: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to replace memories: ${PostgresMemoryStore.writeFailure(e)}",
+        cause = Some(PostgresMemoryStore.writeCause(e))
+      )
     )
 
   override def applyAtomically(
@@ -137,7 +143,11 @@ final class PostgresMemoryStore private[memory] (
         }
       }
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to count applied writes: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to count applied writes: ${Redaction.scrubKnown(e.getMessage)}",
+        cause = Some(e)
+      )
     )
 
   /**
@@ -179,7 +189,11 @@ final class PostgresMemoryStore private[memory] (
       }
     }.toEither.left
       .map[LLMError](e =>
-        ProcessingError("postgres-memory-store", s"Failed to apply memory write: ${e.getMessage}", cause = Some(e))
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to apply memory write: ${PostgresMemoryStore.writeFailure(e)}",
+          cause = Some(PostgresMemoryStore.writeCause(e))
+        )
       )
       .flatten
 
@@ -235,22 +249,37 @@ final class PostgresMemoryStore private[memory] (
       withConnection(conn => writeAll(conn, Seq(memory)))
       this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to store memory: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to store memory: ${PostgresMemoryStore.writeFailure(e)}",
+        cause = Some(PostgresMemoryStore.writeCause(e))
+      )
     )
 
   /**
    * Store `memories` in one transaction, on one pooled connection: all of them are stored or, if any write fails,
-   * none is.
+   * none is. The rows go to the server as JDBC batches of at most `WriteBatchSize` (1000), not one
+   * round trip each, and a memory whose id appears twice is written once, as its last occurrence - so a data source
+   * with pgjdbc's `reWriteBatchedInserts=true` can fold a batch into one multi-row insert.
    */
   override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
     Try {
       if (memories.nonEmpty) withConnection(conn => inTransaction(conn)(writeAll(conn, memories)))
       this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to store memories: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to store memories: ${PostgresMemoryStore.writeFailure(e)}",
+        cause = Some(PostgresMemoryStore.writeCause(e))
+      )
     )
 
-  /** Upsert each memory, in order, with one prepared statement. */
+  /**
+   * Upsert `memories` with one prepared statement, sent as JDBC batches of at most
+   * `WriteBatchSize` (1000) rows. A repeated id is written once, as its last occurrence: one
+   * multi-row `INSERT ... ON CONFLICT DO UPDATE` (what `reWriteBatchedInserts` makes of a batch) cannot touch a row
+   * twice.
+   */
   private def writeAll(conn: Connection, memories: Seq[Memory]): Unit = {
     val sql = s"""
       INSERT INTO $tableName
@@ -266,26 +295,32 @@ final class PostgresMemoryStore private[memory] (
     """
 
     Using.resource(conn.prepareStatement(sql)) { stmt =>
-      memories.foreach { memory =>
-        stmt.setString(1, memory.id.value)
-        stmt.setString(2, memory.content)
-        stmt.setString(3, memory.memoryType.name)
-        stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
-        stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
-
-        memory.importance match {
-          case Some(v) => stmt.setDouble(6, v)
-          case None    => stmt.setNull(6, java.sql.Types.DOUBLE)
-        }
-
-        memory.embedding match {
-          case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
-          case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
-        }
-
-        stmt.executeUpdate()
+      TransactionalMemoryStore.distinctById(memories).grouped(PostgresMemoryStore.WriteBatchSize).foreach { chunk =>
+        chunk.foreach(memory => addRow(stmt, memory))
+        stmt.executeBatch(): Unit
       }
     }
+  }
+
+  /** Bind `memory` to the upsert of `writeAll` and add it to the statement's batch. */
+  private def addRow(stmt: PreparedStatement, memory: Memory): Unit = {
+    stmt.setString(1, memory.id.value)
+    stmt.setString(2, memory.content)
+    stmt.setString(3, memory.memoryType.name)
+    stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
+    stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
+
+    memory.importance match {
+      case Some(v) => stmt.setDouble(6, v)
+      case None    => stmt.setNull(6, java.sql.Types.DOUBLE)
+    }
+
+    memory.embedding match {
+      case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
+      case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
+    }
+
+    stmt.addBatch()
   }
 
   /**
@@ -318,7 +353,11 @@ final class PostgresMemoryStore private[memory] (
       }
     }.toEither.left
       .map[LLMError](e =>
-        ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to get memory: ${Redaction.scrubKnown(e.getMessage)}",
+          cause = Some(e)
+        )
       )
       .flatMap(identity)
 
@@ -353,7 +392,11 @@ final class PostgresMemoryStore private[memory] (
         }
       }.toEither.left
         .map[LLMError](e =>
-          ProcessingError("postgres-memory-store", s"Failed to recall memories: ${e.getMessage}", cause = Some(e))
+          ProcessingError(
+            "postgres-memory-store",
+            s"Failed to recall memories: ${Redaction.scrubKnown(e.getMessage)}",
+            cause = Some(e)
+          )
         )
         .flatMap(identity)
     }
@@ -431,7 +474,11 @@ final class PostgresMemoryStore private[memory] (
         }
       }.toEither.left
         .map[LLMError](e =>
-          ProcessingError("postgres-memory-store", s"Vector search failed: ${e.getMessage}", cause = Some(e))
+          ProcessingError(
+            "postgres-memory-store",
+            s"Vector search failed: ${Redaction.scrubKnown(e.getMessage)}",
+            cause = Some(e)
+          )
         )
         .flatMap(identity)
     }
@@ -446,7 +493,11 @@ final class PostgresMemoryStore private[memory] (
       }
       this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to delete memory: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to delete memory: ${Redaction.scrubKnown(e.getMessage)}",
+        cause = Some(e)
+      )
     )
 
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
@@ -466,7 +517,7 @@ final class PostgresMemoryStore private[memory] (
       }.toEither.left.map(e =>
         ProcessingError(
           "postgres-memory-store",
-          s"Failed to delete matching memories: ${e.getMessage}",
+          s"Failed to delete matching memories: ${Redaction.scrubKnown(e.getMessage)}",
           cause = Some(e)
         )
       )
@@ -513,7 +564,11 @@ final class PostgresMemoryStore private[memory] (
           }
         }.toEither.left
           .map(e =>
-            ProcessingError("postgres-memory-store", s"Failed to update memory: ${e.getMessage}", cause = Some(e))
+            ProcessingError(
+              "postgres-memory-store",
+              s"Failed to update memory: ${Redaction.scrubKnown(e.getMessage)}",
+              cause = Some(e)
+            )
           )
           .flatMap { rowsAffected =>
             if (rowsAffected == 0)
@@ -547,7 +602,11 @@ final class PostgresMemoryStore private[memory] (
           }
         }
       }.toEither.left.map(e =>
-        ProcessingError("postgres-memory-store", s"Failed to count memories: ${e.getMessage}", cause = Some(e))
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to count memories: ${Redaction.scrubKnown(e.getMessage)}",
+          cause = Some(e)
+        )
       )
     }
 
@@ -558,7 +617,11 @@ final class PostgresMemoryStore private[memory] (
       }
       this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to clear memories: ${e.getMessage}", cause = Some(e))
+      ProcessingError(
+        "postgres-memory-store",
+        s"Failed to clear memories: ${Redaction.scrubKnown(e.getMessage)}",
+        cause = Some(e)
+      )
     )
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] =
@@ -588,7 +651,11 @@ final class PostgresMemoryStore private[memory] (
       }
     }.toEither.left
       .map[LLMError](e =>
-        ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to get memory: ${Redaction.scrubKnown(e.getMessage)}",
+          cause = Some(e)
+        )
       )
       .flatMap(identity)
 
@@ -643,6 +710,24 @@ object PostgresMemoryStore {
 
   import SqlParam._
 
+  /** The most rows `storeAll` (and every other multi-row write) sends in one JDBC batch. */
+  private[memory] val WriteBatchSize: Int = 1000
+
+  /**
+   * The scrubbed message of a failed write. A failed JDBC batch reports the statement of its failing row, parameters
+   * and embedding included, and chains the server's error behind it: that error is the message, as it was before
+   * writes were batched.
+   */
+  private[memory] def writeFailure(e: Throwable): String =
+    Redaction.scrubKnown(writeCause(e).getMessage)
+
+  /** The exception a failed write reports: a batch's chained server error, as its own message holds the bound rows. */
+  private[memory] def writeCause(e: Throwable): Throwable =
+    e match {
+      case batch: BatchUpdateException if batch.getNextException != null => batch.getNextException
+      case other                                                         => other
+    }
+
   /**
    * At most 55 characters, so every name the store derives from it - `<table>_applied`, `<table>_fences` and the
    * `idx_<table>_...` indexes - stays distinct within PostgreSQL's 63-byte identifier limit, which truncates silently.
@@ -667,7 +752,7 @@ object PostgresMemoryStore {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "agent_memories",
     maxPoolSize: Int = 10
   ) {
@@ -697,7 +782,7 @@ object PostgresMemoryStore {
       val hikariConfig = new HikariConfig()
       hikariConfig.setJdbcUrl(config.jdbcUrl)
       hikariConfig.setUsername(config.user)
-      hikariConfig.setPassword(config.password)
+      hikariConfig.setPassword(config.password.reveal)
       hikariConfig.setMaximumPoolSize(config.maxPoolSize)
       hikariConfig.setMinimumIdle(1)
       new HikariDataSource(hikariConfig)
@@ -712,7 +797,11 @@ object PostgresMemoryStore {
       }
 
   private def initFailure(e: Throwable): LLMError =
-    ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}", cause = Some(e))
+    ProcessingError(
+      "postgres-memory-store",
+      s"Failed to initialize: ${Redaction.scrubKnown(e.getMessage)}",
+      cause = Some(e)
+    )
 
   private def initialized(store: PostgresMemoryStore): Result[PostgresMemoryStore] =
     Try(store.initializeSchema()).toEither.left.map(initFailure).map(_ => store)

@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.redis
 
 import org.llm4s.error.{ AuthenticationError, NetworkError, ProcessingError, TimeoutError }
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -54,9 +55,29 @@ class JedisConnectionSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "build a client with credentials and TLS" in {
-    val config     = RedisConfig(username = Some("app"), password = Some("pw"), tls = true, database = 1)
+    val config     = RedisConfig(username = Some("app"), password = Some(Secret("pw")), tls = true, database = 1)
     val connection = JedisConnection(config).value
     connection.close()
-    JedisConnection(RedisConfig(password = Some("pw"))).value.close()
+    JedisConnection(RedisConfig(password = Some(Secret("pw")))).value.close()
   }
+
+  it should "send the real password, not the masked one, to the client" in {
+    val client = JedisConnection.clientConfig(RedisConfig(username = Some("app"), password = Some(Secret("pw-real-1"))))
+    (client.getUser, client.getPassword) shouldBe ("app", "pw-real-1")
+  }
+
+  it should "keep a registered credential out of the errors it builds from exceptions (#1932)" in KnownSecrets
+    .isolated {
+      Secret("redis-password-0001")
+      val failures = Seq(
+        new JedisAccessControlException("WRONGPASS redis-password-0001"),
+        new JedisConnectionException("cannot connect with redis-password-0001"),
+        new IllegalStateException("unexpected redis-password-0001")
+      ).map(e => JedisConnection.failure(e, "localhost:6379", 1.second))
+      failures.foreach(f => (f.message should not).include("redis-password-0001"))
+      JedisConnection.fromJedis(new JedisDataException("ERR redis-password-0001")) match {
+        case RedisReply.Error(text) => (text should not).include("redis-password-0001")
+        case other                  => fail(s"expected an error reply, got $other")
+      }
+    }
 }

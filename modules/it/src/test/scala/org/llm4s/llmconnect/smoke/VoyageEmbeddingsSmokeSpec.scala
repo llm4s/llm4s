@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -28,7 +30,7 @@ class VoyageEmbeddingsSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def provider(apiKey: String): EmbeddingProvider =
     VoyageAIEmbeddingProvider.fromConfig(
-      EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = Model, apiKey = apiKey)
+      EmbeddingProviderConfig(baseUrl = "https://api.voyageai.com/v1", model = Model, apiKey = Secret(apiKey))
     )
 
   private def request(purpose: InputPurpose, texts: String*): EmbeddingRequest =

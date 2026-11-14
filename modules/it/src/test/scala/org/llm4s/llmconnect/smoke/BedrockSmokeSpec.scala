@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -74,7 +75,7 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   it should "return AuthenticationError for invalid credentials" in {
-    val bogus  = Some(BedrockCredentials("AKIAINVALIDKEYFORSMOKE", "invalid-secret-key-for-smoke-test"))
+    val bogus  = Some(BedrockCredentials(Secret("AKIAINVALIDKEYFORSMOKE"), Secret("invalid-secret-key-for-smoke-test")))
     val result = client(region.getOrElse("us-east-1"), bogus).complete(conversation, CompletionOptions())
 
     result.isLeft shouldBe true

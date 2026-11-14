@@ -21,8 +21,8 @@ object ProviderModelTypes:
   /** The base URL of a provider's API endpoint, e.g. `"https://api.openai.com/v1"`. */
   opaque type BaseUrl = String
 
-  /** A secret key used to authenticate with a provider. */
-  opaque type ApiKey = String
+  /** A secret key used to authenticate with a provider. Prints as `***`; registered with llm4s for redaction. */
+  opaque type ApiKey = org.llm4s.security.Secret
 
   /** A provider identifier, e.g. `"openai"` or `"anthropic"`. */
   opaque type ProviderName = String
@@ -39,8 +39,8 @@ object ProviderModelTypes:
 
   /** Companion for the [[ApiKey]] opaque type. */
   object ApiKey:
-    /** Wraps a raw string as an [[ApiKey]]. */
-    def apply(value: String): ApiKey = value
+    /** Wraps a raw string as an [[ApiKey]], registering it for redaction. */
+    def apply(value: String): ApiKey = org.llm4s.security.Secret(value)
 
   /** Companion for the [[ProviderName]] opaque type. */
   object ProviderName:
@@ -53,8 +53,8 @@ object ProviderModelTypes:
   /** Returns the underlying base URL string. */
   extension (value: BaseUrl) def asUrl: String = value
 
-  /** Returns the underlying key string. */
-  extension (value: ApiKey) def asKey: String = value
+  /** Returns the underlying key string. Use only where the key is sent: a header, a URL, an SDK builder. */
+  extension (value: ApiKey) def asKey: String = value.reveal
 
   /** Returns the underlying provider name string. */
   extension (value: ProviderName) def asName: String = value

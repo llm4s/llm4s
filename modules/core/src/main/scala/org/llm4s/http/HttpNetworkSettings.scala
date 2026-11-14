@@ -2,6 +2,7 @@ package org.llm4s.http
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 
 import java.net.URI
@@ -43,7 +44,7 @@ final case class HttpProxy private (
   host: String,
   port: Int,
   username: Option[String],
-  password: Option[String],
+  password: Option[Secret],
   nonProxyHosts: Seq[String]
 ):
 
@@ -51,12 +52,12 @@ final case class HttpProxy private (
   def withPort(port: Int): HttpProxy                           = copy(port = port)
   def withUsername(username: String): HttpProxy                = copy(username = Some(username))
   def withUsername(username: Option[String]): HttpProxy        = copy(username = username)
-  def withPassword(password: String): HttpProxy                = copy(password = Some(password))
-  def withPassword(password: Option[String]): HttpProxy        = copy(password = password)
+  def withPassword(password: Secret): HttpProxy                = copy(password = Some(password))
+  def withPassword(password: Option[Secret]): HttpProxy        = copy(password = password)
   def withNonProxyHosts(nonProxyHosts: Seq[String]): HttpProxy = copy(nonProxyHosts = nonProxyHosts)
 
   /** The user name and password, when both are set: the proxy's Basic credentials. */
-  def credentials: Option[(String, String)] =
+  def credentials: Option[(String, Secret)] =
     for
       user <- username.filter(_.nonEmpty)
       pass <- password
@@ -74,7 +75,7 @@ final case class HttpProxy private (
     }
 
   override def toString: String =
-    s"HttpProxy($host:$port, username=${username.getOrElse("None")}, password=${password.fold("None")(_ => "***")}, " +
+    s"HttpProxy($host:$port, username=${username.getOrElse("None")}, password=${password.fold("None")(_.toString)}, " +
       s"nonProxyHosts=${nonProxyHosts.mkString("[", ", ", "]")})"
 
 object HttpProxy:
@@ -113,7 +114,7 @@ object HttpProxy:
       case Some(uri) =>
         val userInfo = Option(uri.getUserInfo).filter(_.nonEmpty)
         val user     = userInfo.map(_.takeWhile(_ != ':')).filter(_.nonEmpty)
-        val pass     = userInfo.filter(_.contains(':')).map(_.dropWhile(_ != ':').drop(1))
+        val pass     = userInfo.filter(_.contains(':')).map(_.dropWhile(_ != ':').drop(1)).map(Secret(_))
         Right(new HttpProxy(uri.getHost, uri.getPort, user, pass, DefaultNonProxyHosts))
 
   /** Lower case, without the brackets of an IPv6 literal. */
@@ -147,26 +148,26 @@ object HttpProxy:
 @Stable
 final case class HttpTls private (
   trustStore: Option[Path],
-  trustStorePassword: Option[String],
+  trustStorePassword: Option[Secret],
   keyStore: Option[Path],
-  keyStorePassword: Option[String]
+  keyStorePassword: Option[Secret]
 ):
 
   def withTrustStore(trustStore: Path): HttpTls                 = copy(trustStore = Some(trustStore))
   def withTrustStore(trustStore: Option[Path]): HttpTls         = copy(trustStore = trustStore)
-  def withTrustStorePassword(password: String): HttpTls         = copy(trustStorePassword = Some(password))
-  def withTrustStorePassword(password: Option[String]): HttpTls = copy(trustStorePassword = password)
+  def withTrustStorePassword(password: Secret): HttpTls         = copy(trustStorePassword = Some(password))
+  def withTrustStorePassword(password: Option[Secret]): HttpTls = copy(trustStorePassword = password)
   def withKeyStore(keyStore: Path): HttpTls                     = copy(keyStore = Some(keyStore))
   def withKeyStore(keyStore: Option[Path]): HttpTls             = copy(keyStore = keyStore)
-  def withKeyStorePassword(password: String): HttpTls           = copy(keyStorePassword = Some(password))
-  def withKeyStorePassword(password: Option[String]): HttpTls   = copy(keyStorePassword = password)
+  def withKeyStorePassword(password: Secret): HttpTls           = copy(keyStorePassword = Some(password))
+  def withKeyStorePassword(password: Option[Secret]): HttpTls   = copy(keyStorePassword = password)
 
   /** `true` when neither store is set, so every client keeps the JDK's TLS defaults. */
   def isDefault: Boolean = trustStore.isEmpty && keyStore.isEmpty
 
   override def toString: String =
-    s"HttpTls(trustStore=${trustStore.getOrElse("None")}, trustStorePassword=${trustStorePassword.fold("None")(_ => "***")}, " +
-      s"keyStore=${keyStore.getOrElse("None")}, keyStorePassword=${keyStorePassword.fold("None")(_ => "***")})"
+    s"HttpTls(trustStore=${trustStore.getOrElse("None")}, trustStorePassword=${trustStorePassword.fold("None")(_.toString)}, " +
+      s"keyStore=${keyStore.getOrElse("None")}, keyStorePassword=${keyStorePassword.fold("None")(_.toString)})"
 
 object HttpTls:
 
@@ -183,9 +184,9 @@ object HttpTls:
    */
   def apply(
     trustStore: Option[Path] = None,
-    trustStorePassword: Option[String] = None,
+    trustStorePassword: Option[Secret] = None,
     keyStore: Option[Path] = None,
-    keyStorePassword: Option[String] = None
+    keyStorePassword: Option[Secret] = None
   ): HttpTls =
     new HttpTls(trustStore, trustStorePassword, keyStore, keyStorePassword)
 

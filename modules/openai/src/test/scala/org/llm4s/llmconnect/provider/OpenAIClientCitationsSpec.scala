@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ Citation, CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, completion => completionOf, stream, transport }
@@ -26,7 +27,12 @@ final class OpenAIClientCitationsSpec extends AnyFlatSpec with Matchers with Eit
   private val model = "gpt-5-search-api"
 
   private val config = OpenAIConfig
-    .fromValues(modelName = model, apiKey = "test-api-key", organization = None, baseUrl = "https://example.invalid/v1")
+    .fromValues(
+      modelName = model,
+      apiKey = Secret("test-api-key"),
+      organization = None,
+      baseUrl = "https://example.invalid/v1"
+    )
     .value
 
   private def complete(annotations: String, content: String = "Scala 3 was released in 2021.") = {

@@ -2,6 +2,7 @@ package org.llm4s.spring
 
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.testutil.{ FixtureChatConfig, RecordingProxy }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -71,7 +72,7 @@ class SpringHttpNetworkSpec extends AnyFlatSpec with Matchers {
       .toOption
       .get
     val proxy = network.proxy.get
-    (proxy.host, proxy.port, proxy.credentials) shouldBe (("proxy.corp", 3128, Some(("alice", "s3cret"))))
+    (proxy.host, proxy.port, proxy.credentials) shouldBe (("proxy.corp", 3128, Some(("alice", Secret("s3cret")))))
     proxy.nonProxyHosts shouldBe Seq("localhost", "*.internal")
   }
 

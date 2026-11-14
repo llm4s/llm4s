@@ -5,6 +5,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -58,6 +59,47 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         grant("organization_id") shouldBe "org_1"
         fake.apiAuthorizations.last shouldBe "Bearer t1"
       }
+
+    "mask the access token the SDK obtained when the API's error body echoes it bare (#1932)" in KnownSecrets.isolated {
+      val token  = "opaqueAnthropicAccess01"
+      val seen   = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+      val server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("localhost", 0), 0)
+      def reply(ex: com.sun.net.httpserver.HttpExchange, status: Int, body: String): Unit =
+        ex.getRequestBody.readAllBytes()
+        val bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8)
+        ex.getResponseHeaders.add("Content-Type", "application/json")
+        ex.sendResponseHeaders(status, bytes.length.toLong)
+        ex.getResponseBody.write(bytes)
+        ex.close()
+      server.createContext(
+        "/v1/oauth/token",
+        ex => reply(ex, 200, s"""{"access_token":"$token","token_type":"Bearer","expires_in":3600}""")
+      )
+      server.createContext(
+        "/v1/messages",
+        ex =>
+          seen.add(Option(ex.getRequestHeaders.getFirst("Authorization")).getOrElse(""))
+          reply(
+            ex,
+            403,
+            s"""{"type":"error","error":{"type":"permission_error","message":"request with $token is denied"}}"""
+          )
+      )
+      server.start()
+      val outcome = scala.util.Try {
+        val file    = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+        val base    = s"http://localhost:${server.getAddress.getPort}"
+        val client  = assertBuildsClient(AnthropicProvider, sectionOf(section(base, file.toString)))
+        val message = client.complete(conversation, CompletionOptions()).left.value.message
+        client.close()
+        message
+      }
+      server.stop(0)
+      val message = outcome.get
+      seen.toArray.toSeq should contain(s"Bearer $token")
+      message should include("denied")
+      (message should not).include(token)
+    }
 
     "refresh after a 401" in FakeTokenExchangeServer.withServer { fake =>
       val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
@@ -143,7 +185,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
           a[ConfigurationError]
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = AnthropicConfig(
-          "",
+          Secret(""),
           "claude-test",
           fake.refusedBaseUrl,
           200000,
@@ -219,7 +261,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     val identity = AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "fdrl_1", "org_1")
 
     def fromValues(baseUrl: String, apiKey: String = "") =
-      AnthropicConfig.fromValues("claude-test", apiKey, baseUrl, Some(identity))
+      AnthropicConfig.fromValues("claude-test", Secret(apiKey), baseUrl, Some(identity))
 
     "keep the workload identity and the timeouts independently" in {
       import scala.concurrent.duration.DurationInt
@@ -266,7 +308,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     }
 
     "leave a plain-http baseUrl alone without workload identity" in {
-      AnthropicConfig.fromValues("claude-test", "sk-ant", "http://api.example").isRight shouldBe true
+      AnthropicConfig.fromValues("claude-test", Secret("sk-ant"), "http://api.example").isRight shouldBe true
     }
 
     "be refused by AnthropicClient when built with apply or changed with a with* setter" in {
@@ -274,8 +316,8 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       val bad = Seq(
         valid.withBaseUrl("http://api.example"),
         valid.withBaseUrl("https://gateway.example"),
-        valid.withApiKey("sk-ant"),
-        AnthropicConfig("", "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
+        valid.withApiKey(Secret("sk-ant")),
+        AnthropicConfig(Secret(""), "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
       )
       for config <- bad do
         AnthropicClient(config).left.value shouldBe a[ConfigurationError]
@@ -293,7 +335,8 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       )
       for (field, blank) <- blanks do
         withClue(field) {
-          val error = AnthropicConfig.fromValues("claude-test", "", "https://api.anthropic.com", Some(blank)).left.value
+          val error =
+            AnthropicConfig.fromValues("claude-test", Secret(""), "https://api.anthropic.com", Some(blank)).left.value
           error shouldBe a[ConfigurationError]
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
           error.message should include(field)
@@ -306,23 +349,23 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     "leave AnthropicClient refusing a blank apiKey once the identity is removed, rather than send no credential" in {
       val keyless = fromValues("https://api.anthropic.com").value.withWorkloadIdentity(None)
       for key <- Seq("", "  ") do
-        val error = AnthropicClient(keyless.withApiKey(key)).left.value
+        val error = AnthropicClient(keyless.withApiKey(Secret(key))).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
-        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(key))
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(Secret(key)))
     }
 
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would authenticate as nobody
       for key <- Seq("", "  ") do
-        AnthropicClient(AnthropicConfig(key, "claude-test")).left.value.message should include("apiKey")
+        AnthropicClient(AnthropicConfig(Secret(key), "claude-test")).left.value.message should include("apiKey")
       // the short apply's default base URL is api.anthropic.com, so a keyless config with an identity is valid
-      val federated = AnthropicConfig("", "claude-test").withWorkloadIdentity(identity)
+      val federated = AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(identity)
       AnthropicConfig.validate(federated) shouldBe Right(federated)
       val bad = Seq(
-        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(identity),
-        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(Some(identity)),
-        federated.withApiKey("sk-ant"),
+        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(identity),
+        AnthropicConfig(Secret("sk-ant"), "claude-test").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey(Secret("sk-ant")),
         federated.withBaseUrl("https://gateway.example"),
         federated.withWorkloadIdentity(identity.withOrganizationId("")),
         federated.withWorkloadIdentity(None)
@@ -335,7 +378,9 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
     def configFor(file: Path) =
-      AnthropicConfig("", "claude-test").withWorkloadIdentity(AnthropicWorkloadIdentity(file, "fdrl_1", "org_1"))
+      AnthropicConfig(Secret(""), "claude-test").withWorkloadIdentity(
+        AnthropicWorkloadIdentity(file, "fdrl_1", "org_1")
+      )
 
     "refuse an identity token file the SDK would read unchecked: a directory or a file larger than a token (#1818)" in {
       val dir = Files.createTempDirectory("svid-dir")
@@ -363,7 +408,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       AnthropicClient(configFor(file)).value.close()
       val missing = file.resolveSibling(s"not-yet-${System.nanoTime()}.jwt")
       AnthropicClient(configFor(missing)).value.close()
-      AnthropicClient(AnthropicConfig("sk-ant", "claude-test")).value.close()
+      AnthropicClient(AnthropicConfig(Secret("sk-ant"), "claude-test")).value.close()
     }
 
     "carry a Stable AnthropicWorkloadIdentity (#1818)" in {
@@ -374,58 +419,26 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
   }
 
   "AnthropicClient.mapError" should {
-    val config = AnthropicConfig(
-      "",
-      "claude-test",
-      "https://api.anthropic.com",
-      200000,
-      4096,
-      Some(
-        AnthropicWorkloadIdentity(
-          Path.of("/var/run/svid.jwt"),
-          "fdrl_secret_1",
-          "org_secret_1",
-          serviceAccountId = Some("svac_secret_1"),
-          workspaceId = Some("wrkspc_secret_1")
-        )
-      )
-    )
-    val secrets = AnthropicClient.credentialSecrets(config)
-    val echoed  = Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1", "opaque-access-tok-1")
+    val echoed = Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1", "opaque-access-tok-1")
     val body =
       """{"error":"federation rejected","federation_rule_id":"fdrl_secret_1","organization_id":"org_secret_1",""" +
         """"service_account_id":"svac_secret_1","workspace_id":"wrkspc_secret_1","access_token":"opaque-access-tok-1"}"""
 
-    "redact the federation exchange's reply and the configured ids from any SDK failure" in {
+    "redact the federation exchange's reply and the registered ids from any SDK failure" in KnownSecrets.isolated {
+      Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1").foreach(KnownSecrets.registerIdentifier)
       val failures = Seq(
         new com.anthropic.errors.AnthropicInvalidDataException(s"invalid token response: $body"),
         new IllegalStateException(s"token exchange failed: $body")
       )
       for failure <- failures do
-        val error = AnthropicClient.mapError(failure, secrets)
+        val error = AnthropicClient.mapError(failure)
         error.message should include("federation rejected")
         for secret <- echoed do (error.message should not).include(secret)
     }
 
-    "not scrub ids too short to scrub without garbling the body, but always an API key" in {
-      val short = config.withWorkloadIdentity(
-        AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "rule", "org", workspaceId = Some("prod"))
-      )
-      AnthropicClient.credentialSecrets(short) shouldBe Nil
-      AnthropicClient.credentialSecrets(config.withApiKey("k").withWorkloadIdentity(None)) shouldBe Seq("k")
-      val error = AnthropicClient.mapError(
-        new IllegalStateException("org prod rejected"),
-        AnthropicClient.credentialSecrets(short)
-      )
-      error.message should include("org prod rejected")
-    }
-
-    "redact an API key echoed by a failure when no workload identity is configured" in {
-      val keyed = config.withApiKey("opaque-anthropic-key-1").withWorkloadIdentity(None)
-      val error = AnthropicClient.mapError(
-        new IllegalStateException("rejected key opaque-anthropic-key-1"),
-        AnthropicClient.credentialSecrets(keyed)
-      )
+    "redact an API key echoed by a failure when it is registered" in KnownSecrets.isolated {
+      Secret("opaque-anthropic-key-1")
+      val error = AnthropicClient.mapError(new IllegalStateException("rejected key opaque-anthropic-key-1"))
       (error.message should not).include("opaque-anthropic-key-1")
     }
   }

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Answer questions over a folder of files
+description: "Answer questions over a folder of files in Scala: ingest each file into the LLM4S RAG pipeline, retrieve passages and answer from them."
+search_title: "Answer questions over a folder of files with RAG in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 4
@@ -15,7 +17,7 @@ Ingest every file in a folder into the RAG pipeline, retrieve the passages for a
 ## The problem
 
 You have a folder of documents (here a three-file handbook) and want answers drawn from them, with the files
-they came from. `llm4s-rag`'s `RAG` pipeline reads every supported file in a folder (text, Markdown, PDF, Word and
+they came from. `llm4s-rag`'s {% include api.html t="org.llm4s.rag.RAG" %} pipeline reads every supported file in a folder (text, Markdown, PDF, Word and
 more), chunks and embeds it, keeps it in an in-memory vector store and keyword index, and answers a question from the
 passages that match best (hybrid search). The recipe runs offline: `BagOfWordsEmbeddings`, a stand-in embedding model
 in [`Recipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/Recipe.scala), turns text into word-count vectors without a network call.

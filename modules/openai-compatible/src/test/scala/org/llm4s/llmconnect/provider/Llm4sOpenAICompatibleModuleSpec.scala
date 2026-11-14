@@ -3,7 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.ContextWindowResolver
+import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{
   holdOpen,
   openAICompletion,
@@ -87,6 +89,10 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       }
     }
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      expectations.foreach((descriptor, _, _) => assertUsesSuppliedHttpClient(descriptor, section(descriptor)))
+    }
+
     "load the generic provider entirely from a named section, as an application does" in {
       given ProviderRegistry = ProviderRegistry.default
       ProviderTestConfig
@@ -130,6 +136,23 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       // Z.ai and Cohere had no lister in core either.
       ZaiProvider.modelLister shouldBe None
       CohereProvider.modelLister shouldBe None
+    }
+  }
+
+  "a client built by each openai-compatible descriptor" should {
+
+    "send the key its ApiKeyProvider holds at each request (#2313, #2477)" in {
+      given ModelRegistryService = registryService
+      expectations.map(_._1).foreach { descriptor =>
+        withClue(s"${descriptor.id.asString}: ") {
+          assertHonoursApiKeyProvider(sendJsonResponse(_, 200, openAICompletion("done"))) { (baseUrl, keys) =>
+            descriptor
+              .buildConfig("rotation", section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
+              .flatMap(config => descriptor.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+              .fold(error => fail(error.message), identity)
+          }
+        }
+      }
     }
   }
 

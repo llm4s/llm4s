@@ -1,11 +1,11 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.llmconnect.auth.AccessTokenProvider
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, ApiKeyProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Configuration for Azure OpenAI deployments.
@@ -38,18 +38,22 @@ import org.llm4s.util.Redaction
  *                 `llm4s-azure-identity`; in code, build one with that module's `AzureEntraId`, or
  *                 implement [[org.llm4s.llmconnect.auth.AccessTokenProvider]] directly. Use [[AzureConfig.keyless]]
  *                 or [[withTokenProvider]].
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is used
+ *                 without rebuilding the client (#2477): a section's `apiKeyFile` sets one. Never set together
+ *                 with `tokenProvider`.
  */
 @Stable
 final case class AzureConfig private (
   endpoint: String,
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   override val network: HttpNetworkSettings,
-  tokenProvider: Option[AccessTokenProvider]
+  tokenProvider: Option[AccessTokenProvider],
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
   override val providerId: ProviderId                                 = ProviderId("azure")
   override def endpointUrl: Option[String]                            = Some(endpoint)
@@ -57,8 +61,18 @@ final case class AzureConfig private (
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig  = copy(timeouts = timeouts)
   override def withNetwork(network: HttpNetworkSettings): AzureConfig = copy(network = network)
 
+  /**
+   * Sends the key `provider` holds at each request in the `api-key` header, instead of `apiKey`, so a rotated key
+   * is used without rebuilding the client (#2477). A config authenticates one way: this clears `tokenProvider`.
+   */
+  override def withApiKeyProvider(provider: ApiKeyProvider): AzureConfig = withApiKeyProvider(Some(provider))
+
+  /** `Some` as [[withApiKeyProvider(provider:* withApiKeyProvider]]; `None` goes back to `apiKey`. */
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): AzureConfig =
+    copy(apiKeyProvider = provider, tokenProvider = if provider.isDefined then None else tokenProvider)
+
   def withEndpoint(endpoint: String): AzureConfig                = copy(endpoint = endpoint)
-  def withApiKey(apiKey: String): AzureConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): AzureConfig                    = copy(apiKey = apiKey)
   def withApiVersion(apiVersion: String): AzureConfig            = copy(apiVersion = apiVersion)
   def withContextWindow(contextWindow: Int): AzureConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): AzureConfig = copy(reserveCompletion = reserveCompletion)
@@ -68,10 +82,15 @@ final case class AzureConfig private (
 
   /** `Some` as [[withTokenProvider(tokenProvider:* withTokenProvider]]; `None` goes back to the API key. */
   def withTokenProvider(tokenProvider: Option[AccessTokenProvider]): AzureConfig =
-    copy(tokenProvider = tokenProvider, apiKey = if tokenProvider.isDefined then "" else apiKey)
+    copy(
+      tokenProvider = tokenProvider,
+      apiKey = if tokenProvider.isDefined then Secret("") else apiKey,
+      apiKeyProvider = if tokenProvider.isDefined then None else apiKeyProvider
+    )
 
   override def toString: String =
-    val credential = tokenProvider.fold(s"apiKey=${Redaction.secret(apiKey)}")(_ => "auth=entra-id")
+    val credential =
+      tokenProvider.fold(s"apiKey=$apiKey${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")}")(_ => "auth=entra-id")
     s"AzureConfig(endpoint=$endpoint, $credential, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
 
@@ -93,7 +112,7 @@ object AzureConfig {
    */
   def apply(
     endpoint: String,
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     apiVersion: String,
     contextWindow: Int,
@@ -103,20 +122,21 @@ object AzureConfig {
   ): AzureConfig =
     new AzureConfig(
       endpoint,
-      if tokenProvider.isDefined then "" else apiKey,
+      if tokenProvider.isDefined then Secret("") else apiKey,
       model,
       apiVersion,
       contextWindow,
       reserveCompletion,
       timeouts,
       HttpNetworkSettings.default,
-      tokenProvider
+      tokenProvider,
+      apiKeyProvider = None
     )
 
   /** The shape before `tokenProvider` (#2274): API-key authentication. */
   def apply(
     endpoint: String,
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     apiVersion: String,
     contextWindow: Int,
@@ -132,7 +152,7 @@ object AzureConfig {
    * alone (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*`
    * setters, or use [[fromValues]] to consult the bundled model catalogue.
    */
-  def apply(endpoint: String, apiKey: String, model: String): AzureConfig = {
+  def apply(endpoint: String, apiKey: Secret, model: String): AzureConfig = {
     val (cw, rc) = azureFallback(model)
     apply(endpoint, apiKey, model, DEFAULT_API_VERSION, cw, rc)
   }
@@ -140,11 +160,11 @@ object AzureConfig {
   /**
    * A keyless config (#2274): the endpoint and deployment name, authenticated with Microsoft Entra ID
    * tokens from `tokenProvider` - such as `AzureEntraId.defaultCredential()` from `llm4s-azure-identity` -
-   * every other field at its default, as [[apply(endpoint:String,apiKey:String,model:String)* apply]]
+   * every other field at its default, as [[apply(endpoint:String,apiKey:org.llm4s.security.Secret,model:String)* apply]]
    * gives it. Usable from Java and Kotlin.
    */
   def keyless(endpoint: String, model: String, tokenProvider: AccessTokenProvider): AzureConfig =
-    apply(endpoint, "", model).withTokenProvider(tokenProvider)
+    apply(endpoint, Secret(""), model).withTokenProvider(tokenProvider)
 
   /**
    * [[fromValues]] for keyless Microsoft Entra ID authentication (#2274): validates the endpoint and
@@ -183,7 +203,7 @@ object AzureConfig {
   def fromValues(
     modelName: String,
     endpoint: String,
-    apiKey: String,
+    apiKey: Secret,
     apiVersion: String
   )(using ContextWindowResolver): Result[AzureConfig] =
     resolved(modelName, endpoint, Some(apiKey), apiVersion)
@@ -192,12 +212,12 @@ object AzureConfig {
   private def resolved(
     modelName: String,
     endpoint: String,
-    apiKey: Option[String],
+    apiKey: Option[Secret],
     apiVersion: String
   )(using resolver: ContextWindowResolver): Result[AzureConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("Azure", "endpoint", endpoint)
-      _ <- ProviderConfig.nonEmptyIfSet("Azure", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmptyIfSet("Azure", "apiKey", apiKey.map(_.reveal))
     } yield {
       val (cw, rc) = resolver.resolve(
         lookupProviders = Seq("azure", "openai"),
@@ -209,7 +229,7 @@ object AzureConfig {
       )
       AzureConfig(
         endpoint = endpoint,
-        apiKey = apiKey.getOrElse(""),
+        apiKey = apiKey.getOrElse(Secret("")),
         model = modelName,
         apiVersion = apiVersion,
         contextWindow = cw,

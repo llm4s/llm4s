@@ -56,10 +56,11 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 
 - **Names.** Within a section, `kebab-case` and `snake_case` names are read as the `camelCase` names of the HOCON block
   (`api-key` is `apiKey`, `base-url` is `baseUrl`, `api-version` is `apiVersion`). The section name is kept as written.
-- **Providers on the classpath.** `llm4s-spring-boot-starter` brings `openai`, `azure`, `requesty`, `anthropic`, `ollama`,
-  `gemini` (alias `google`), `vertexai` (alias `vertex`) and the OpenAI-compatible family: `openai-compatible`,
-  `deepseek`, `zai`, `openrouter`, `mistral` and `cohere`. A provider module you add to the classpath is found the
-  same way, with no change to the starter. Each provider's own keys (`endpoint` for Azure, `project` and `location` for
+- **Providers on the classpath.** `llm4s-spring-boot-starter` brings no provider module (#1496): declare the ones your
+  sections name, at the same version. `llm4s-openai` has `openai`, `azure` and `requesty`; `llm4s-anthropic` has
+  `anthropic`; `llm4s-ollama` has `ollama`; `llm4s-gemini` has `gemini` (alias `google`) and `vertexai` (alias
+  `vertex`); `llm4s-openai-compatible` has `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral` and
+  `cohere`. Any other provider module you add to the classpath is found the same way, with no change to the starter. Each provider's own keys (`endpoint` for Azure, `project` and `location` for
   Vertex AI, ...) are listed in its module's README.
 - **Keys.** A section with no `api-key` uses the vendor's shared key,
   `llm4s.credentials.<provider>.api-key`, and llm4s's own conventional environment variable for the vendor
@@ -93,6 +94,13 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 | `llm4sClient` (`JLlmClient`) | closed on context shutdown |
 | `llm4sTaskExecutor` (`ExecutorService`) | defined by name: a bean called `llm4sTaskExecutor` replaces it |
 | `llm4sTemplate` (`LLM4STemplate`) | |
+| `llm4sTools` (`Llm4sTools`) | the `@Tool` (`org.llm4s.javaapi.Tool`) methods of every singleton bean; a tool bean must not be an AOP proxy |
+| `llm4sAgent` (`JAgent`) | over the client and `llm4sTools`; `llm4s.agent.system-prompt`, `.id`, `.streaming`, `.max-steps`; off with `llm4s.agent.enabled=false` |
+| `llm4sCheckpointer` (`Checkpointer`) | where the agent keeps its threads: in memory; off with `llm4s.agent.enabled=false` |
+| `llm4sEmbeddingClient` (`JEmbeddingClient`, only with `llm4s.embeddings.model`) | `llm4s.embeddings.<provider>.api-key`, `.base-url` as in HOCON |
+| `llm4sTracing` (`Tracing`, only with `llm4s.tracing.mode`) | `console`, `none` or a `TracingBackend`'s mode (`opentelemetry`, `langfuse`), its settings under `llm4s.tracing.<mode>`; the agent reports to it |
+| `llm4sReactiveTemplate` (`ReactiveLLM4STemplate`, only with `llm4s-reactor`) | `stream(...)` returns a Reactor `Flux<String>`, for WebFlux |
+| `llm4sSseTemplate` (`SseLLM4STemplate`, only with Spring MVC) | `stream(...)` returns an `SseEmitter` |
 | `llmHealthIndicator` (`LlmHealthIndicator`, or `LlmBoot4HealthIndicator` on Spring Boot 4; only with Spring Boot Actuator) | |
 | `llm4sMetricsCollector` (`MicrometerMetrics`, only with `llm4s-observability-micrometer` and a `MeterRegistry` bean) | any `MetricsCollector` bean; the client reports to all of them |
 

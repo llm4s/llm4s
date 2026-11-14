@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Agents
+description: "Build AI agents in Scala with LLM4S: tools, multi-turn conversations, guardrails, handoffs, memory, streaming and multi-agent coordination."
+search_title: "Build AI agents in Scala with LLM4S"
 nav_order: 12
 parent: User Guide
 has_children: true
@@ -29,7 +31,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
+- **Graphs** - Typed multi-agent workflows on {% include api.html t="org.llm4s.agent.graph.GraphBuilder" %}: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook/multi-agent-graph.html))
 
 ## Quick Start
 
@@ -66,7 +68,7 @@ result match {
 ```
 
 `Agent.builder(id, client)` takes the agent's id (letters, digits, `_` and `-`, up to 52) and an
-`LLMClient`. `build()` returns a `Result[Agent]` and refuses an invalid agent: clashing tool names,
+{% include api.html t="org.llm4s.llmconnect.LLMClient" %}. `build()` returns a `Result[Agent]` and refuses an invalid agent: clashing tool names,
 a bad or duplicate handoff id, or `withMaxSteps` below 1.
 
 ### Agent with Tools
@@ -104,7 +106,7 @@ val result = for {
 } yield result
 ```
 
-`withTools` takes a `ToolRegistry` (an `MCPToolRegistry` too) or a `ToolSet` of `AgentTool`s.
+`withTools` takes a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} (an `MCPToolRegistry` too) or a `ToolSet` of `AgentTool`s.
 
 ### Multi-Turn Conversations
 
@@ -153,7 +155,7 @@ result.map { r =>
 }
 ```
 
-`AgentResult` also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
+{% include api.html t="org.llm4s.agent.AgentResult" %} also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
 history, never a system prompt) and `usage`.
 
 ### A Typed Answer
@@ -187,7 +189,8 @@ target answers in its own format, or freely.
 ## Safety Defaults
 
 - **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
-- **Run token budget**: off by default. `RunConfig().withBudgets(RunBudgets.default.withMaxTokens(n))` bounds the input and output tokens one run (`run`, `recover` or `resume`) may use, counted from the thread's usage when the run started. Before each model call - the loop's own, and every call a middleware makes through `next` or `ModelContext.accounted` - the run's tokens are compared with it, and at the budget the turn ends `AgentStatus.TokenLimitReached` without calling the model. A call in flight is never interrupted, so a run can overshoot the budget by one model call. A completion that reports no usage is charged an estimate of the whole request (messages, tool definitions and response schema) and the whole answer, never zero. A retrying client (`ReliableClient`) is one call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in mind. Each run brings its own budget, like its `timeout`; a task reads the run's deadline as `RunContext.deadline`.
+- **Run token budget**: off by default. `RunConfig().withBudgets(RunBudgets.default.withMaxTokens(n))` bounds the input and output tokens one run (`run`, `recover` or `resume`) may use, counted from the thread's usage when the run started. Before each model call - the loop's own, and every call a middleware makes through `next` or `ModelContext.accounted` - the run's tokens are compared with it, and at the budget the turn ends `AgentStatus.TokenLimitReached` without calling the model. A call in flight is never interrupted, so a run can overshoot the budget by one model call. A completion that reports no usage is charged an estimate of the whole request (messages, tool definitions and response schema) and the whole answer, never zero. A retrying client ({% include api.html t="org.llm4s.reliability.ReliableClient" %}) is one call: its failed attempts carry no usage and are not counted, so set `maxTokens` with retries in mind. Each run brings its own budget, like its `timeout`; a task reads the run's deadline as `RunContext.deadline`.
+- **Untrusted text in a query**: an agent sends its query as written. Build it with `prompt"..."` from `llm4s-prompt` and wrap a document, email or tool result in `Untrusted`, so it reaches the model fenced and marked as data; see [Typed Prompts](../prompts). Fencing reduces prompt injection, it does not prevent it.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
@@ -198,9 +201,9 @@ target answers in its own format, or freely.
 
 A conversation lives in a thread on a `GraphRuntime` (in memory unless you call `withRuntime`). The
 thread holds the messages, the active agent and the usage; it holds no tools, guardrails or agents,
-which belong to the `Agent`. `AgentResult` is a value to read, not something to pass back in.
+which belong to the {% include api.html t="org.llm4s.agent.Agent" %}. `AgentResult` is a value to read, not something to pass back in.
 
-- `agent.start(threadId, query)` returns an `AgentRun` at once, with `await()` and `cancel()`;
+- `agent.start(threadId, query)` returns an {% include api.html t="org.llm4s.agent.AgentRun" %} at once, with `await()` and `cancel()`;
   `run` is `start` followed by `await`.
 - A run that failed or was cancelled leaves its thread recoverable: `agent.recover(threadId)`
   re-runs only the work that did not finish.

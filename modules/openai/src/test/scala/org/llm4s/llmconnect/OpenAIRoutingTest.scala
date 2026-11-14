@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.security.Secret
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.*
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
@@ -46,7 +47,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("OpenAI provider with OpenAIConfig returns OpenAIClient") {
     val cfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "gpt-4o",
       organization = None,
       baseUrl = "https://api.openai.com/v1",
@@ -63,7 +64,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   test("Azure provider with AzureConfig returns OpenAIClient (Azure-backed)") {
     val cfg: ProviderConfig = AzureConfig(
       endpoint = "https://example.azure.com",
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "gpt-4o",
       apiVersion = "V2025_01_01_PREVIEW",
       contextWindow = 128000,
@@ -85,7 +86,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("Azure provider with non-AzureConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "gpt-4o",
       organization = None,
       baseUrl = "https://api.openai.com/v1",
@@ -144,7 +145,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
       prov match {
         case openai: OpenAIConfig =>
           openai.model shouldBe "gpt-4o"
-          openai.apiKey shouldBe "test-key"
+          openai.apiKey.reveal shouldBe "test-key"
           openai.baseUrl should startWith("https://api.openai.com/")
         case other => fail(s"Expected OpenAIConfig, got $other")
       }
@@ -153,7 +154,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
 
   test("Requesty provider with OpenAIConfig returns OpenAIClient") {
     val cfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
+      apiKey = Secret("key"),
       model = "openai/gpt-4o-mini",
       organization = None,
       baseUrl = "https://router.requesty.ai/v1",

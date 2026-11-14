@@ -100,24 +100,29 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
 
-      val auth =
-        if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") Map("Authorization" -> s"Bearer ${cfg.apiKey}")
-        else Map.empty
-      val headers = Map("Content-Type" -> "application/json") ++ auth
+      // Asked per request, so a key read from a rotated apiKeyFile is sent from the next call on (#2478).
+      def headers(key: String): Map[String, String] = {
+        val auth =
+          if (key.nonEmpty && key != "not-required") Map("Authorization" -> s"Bearer $key")
+          else Map.empty
+        Map("Content-Type" -> "application/json") ++ auth
+      }
 
       // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
       // A cancellation (design section 4.4), a network failure and a timeout pass through as they are; any other
       // failure is an EmbeddingError.
       val respEither: Result[org.llm4s.http.HttpResponse] =
-        httpClient
-          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
-          .left
-          .map {
-            // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
-            case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
-            case e =>
-              EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
-          }
+        cfg.currentApiKey().flatMap { key =>
+          httpClient
+            .post(url, headers(key.reveal), payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
+            .left
+            .map {
+              // a provider that cannot be reached, or does not answer in time, keeps the client's typed error (#1781)
+              case typed @ (_: CancelledError | _: NetworkError | _: TimeoutError) => typed
+              case e =>
+                EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
+            }
+        }
 
       respEither.flatMap { response =>
         response.statusCode match {

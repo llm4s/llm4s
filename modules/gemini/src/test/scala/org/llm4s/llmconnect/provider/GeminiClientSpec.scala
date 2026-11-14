@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.metrics.MockMetricsCollector
@@ -10,7 +11,7 @@ class GeminiClientSpec extends AnyFunSuite {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = GeminiConfig(
-    apiKey = "test-key",
+    apiKey = Secret("test-key"),
     model = "gemini-2.0-flash-exp",
     baseUrl = "https://generativelanguage.googleapis.com",
     contextWindow = 1048576,

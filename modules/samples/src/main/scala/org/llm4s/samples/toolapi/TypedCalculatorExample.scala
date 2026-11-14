@@ -1,6 +1,11 @@
 package org.llm4s.samples.toolapi
 
+// The build compiles with -source:3.3, which turns off named tuple field access by name; Scala 3.7's default source
+// level has it, so a project on the default needs no such import.
+import scala.language.`3.7`
+
 import org.llm4s.schema.*
+import org.llm4s.schema.namedtuples.given
 import org.llm4s.toolapi.{ ToolCallRequest, ToolFunction, ToolRegistry }
 import org.llm4s.toolapi.builtin.core.{ CalculatorResult, CalculatorTool }
 import org.llm4s.types.Result
@@ -32,7 +37,15 @@ import upickle.default.ReadWriter
  *
  * The typed way writes them once, in [[TypedCalculator.CalculatorArgs]], and the function receives them decoded.
  * The two send the same schema, except that the typed one says what the handler always did: `b` may be left out.
- * The sample needs no model; it calls both tools with the same arguments and prints what each returns.
+ *
+ * A third version, [[TypedCalculator.namedTupleTool]], takes its arguments as a named tuple,
+ * `(operation: Operation, a: Double, b: Option[Double])`, with no case class to declare: the same schema, except that
+ * each parameter is described by its name, since a named tuple's elements cannot carry a `@description`.
+ *
+ * A fourth, [[TypedCalculator.scopedTool]], is built with `Tool.scoped`: its function returns the result itself and
+ * ends the call early with `reject`, `ensure` or `?`, where the others return an `Either`.
+ *
+ * The sample needs no model; it calls the tools with the same arguments and prints what each returns.
  *
  * {{{
  * sbt "samples/runMain org.llm4s.samples.toolapi.TypedCalculatorExample"
@@ -51,21 +64,29 @@ object TypedCalculatorExample {
     )
 
     val outcome = for {
-      handBuilt <- CalculatorTool.toolSafe
-      typed     <- TypedCalculator.tool
+      handBuilt  <- CalculatorTool.toolSafe
+      typed      <- TypedCalculator.tool
+      namedTuple <- TypedCalculator.namedTupleTool
+      scoped     <- TypedCalculator.scopedTool
     } yield {
       println("Schema, hand-built:")
       println(handBuilt.toOpenAITool().render(indent = 2))
       println("Schema, typed:")
       println(typed.toOpenAITool().render(indent = 2))
+      println("Schema, named tuple:")
+      println(namedTuple.toOpenAITool().render(indent = 2))
 
-      val handBuiltTools = new ToolRegistry(Seq(handBuilt))
-      val typedTools     = new ToolRegistry(Seq(typed))
+      val handBuiltTools  = new ToolRegistry(Seq(handBuilt))
+      val typedTools      = new ToolRegistry(Seq(typed))
+      val namedTupleTools = new ToolRegistry(Seq(namedTuple))
+      val scopedTools     = new ToolRegistry(Seq(scoped))
       calls.foreach { arguments =>
         val request = ToolCallRequest("calculator", arguments)
         println(s"\ncalculator(${arguments.render()})")
-        println(s"  hand-built: ${show(handBuiltTools.execute(request))}")
-        println(s"  typed:      ${show(typedTools.execute(request))}")
+        println(s"  hand-built:  ${show(handBuiltTools.execute(request))}")
+        println(s"  typed:       ${show(typedTools.execute(request))}")
+        println(s"  named tuple: ${show(namedTupleTools.execute(request))}")
+        println(s"  scoped:      ${show(scopedTools.execute(request))}")
       }
     }
 
@@ -98,6 +119,48 @@ object TypedCalculator {
   val tool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
     CalculatorTool.toolSafe.flatMap { builtin =>
       Tool.of[CalculatorArgs, CalculatorResult]("calculator", builtin.description)(calculate)
+    }
+
+  /** The calculator's parameters as a named tuple: no case class to declare, each parameter described by its name. */
+  type CalculatorTuple = (operation: Operation, a: Double, b: Option[Double])
+
+  /** The same calculator, its arguments a named tuple. */
+  val namedTupleTool: Result[ToolFunction[CalculatorTuple, CalculatorResult]] =
+    CalculatorTool.toolSafe.flatMap { builtin =>
+      Tool.of[CalculatorTuple, CalculatorResult]("calculator", builtin.description) { args =>
+        calculate(CalculatorArgs(args.operation, args.a, args.b))
+      }
+    }
+
+  /** The same calculator as a scoped tool: it returns the result, and ends the call early with `reject` or `?`. */
+  val scopedTool: Result[ToolFunction[CalculatorArgs, CalculatorResult]] =
+    CalculatorTool.toolSafe.flatMap { builtin =>
+      Tool.scoped[CalculatorArgs, CalculatorResult]("calculator", builtin.description) { args =>
+        val a         = args.a
+        def b: Double = args.b.toRight(s"Operation '${args.operation}' requires two operands (a and b)").?
+
+        val r = args.operation match {
+          case Operation.add      => a + b
+          case Operation.subtract => a - b
+          case Operation.multiply => a * b
+          case Operation.divide =>
+            val divisor = b
+            if (divisor == 0) reject("Division by zero") else a / divisor
+          case Operation.power => math.pow(a, b)
+          case Operation.sqrt =>
+            ensure(a >= 0, "Cannot compute square root of negative number")
+            math.sqrt(a)
+          case Operation.percentage => a / 100.0 * b
+          case Operation.abs        => math.abs(a)
+          case Operation.min        => math.min(a, b)
+          case Operation.max        => math.max(a, b)
+          case Operation.modulo =>
+            val divisor = b
+            if (divisor == 0) reject("Modulo by zero") else a % divisor
+        }
+        ensure(!r.isNaN && !r.isInfinite, "Result is not a finite number (overflow or an undefined operation)")
+        CalculatorResult(expression(args), r, formatted(r))
+      }
     }
 
   private def calculate(args: CalculatorArgs): Either[String, CalculatorResult] = {

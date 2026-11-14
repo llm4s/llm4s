@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -8,7 +9,7 @@ import scala.concurrent.duration._
 /** `EmbeddingProviderConfig`, `EmbeddingModelConfig` and `LocalEmbeddingModels` as growth-prone types (#2346). */
 class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
 
-  private val provider = EmbeddingProviderConfig("https://api.example.invalid/v1", "embed-small", "sk-secret")
+  private val provider = EmbeddingProviderConfig("https://api.example.invalid/v1", "embed-small", Secret("sk-secret"))
 
   test("EmbeddingProviderConfig(...) defaults timeouts") {
     provider.timeouts shouldBe ProviderTimeouts.default
@@ -19,14 +20,14 @@ class GrowthSafeEmbeddingConfigsSpec extends AnyFunSuite with Matchers {
     val adjusted = provider
       .withBaseUrl("https://other.invalid/v2")
       .withModel("embed-large")
-      .withApiKey("sk-other")
+      .withApiKey(Secret("sk-other"))
       .withTimeouts(timeouts)
 
-    adjusted shouldBe EmbeddingProviderConfig("https://other.invalid/v2", "embed-large", "sk-other", timeouts)
+    adjusted shouldBe EmbeddingProviderConfig("https://other.invalid/v2", "embed-large", Secret("sk-other"), timeouts)
   }
 
   test("EmbeddingProviderConfig still redacts the API key") {
-    (provider.withApiKey("sk-very-secret-value").toString should not).include("sk-very-secret-value")
+    (provider.withApiKey(Secret("sk-very-secret-value")).toString should not).include("sk-very-secret-value")
   }
 
   test("EmbeddingProviderConfig keeps its constructor and copy private") {

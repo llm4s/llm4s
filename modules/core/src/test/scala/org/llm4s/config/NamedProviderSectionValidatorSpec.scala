@@ -42,7 +42,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     apiKey: Option[String] = None,
     extras: Map[String, String] = Map.empty
   ): RawNamedProviderSection =
-    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey, extras = extras)
+    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey.map(ApiKey(_)), extras = extras)
 
   private def errorFrom(result: org.llm4s.types.Result[NamedProviderConfig]): String =
     result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
@@ -66,7 +66,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     val message =
       errorFrom(validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model")))
 
-    // the doctor's command names its package, org.llm4s.configpolicy: not a file
+    // the doctor's line names its command and page, not a file
     (TroubleshootingLinks.withoutDoctorLine(message) should not).include("llm4s.conf")
     (message should not).include(" providers.my-fixture")
     message should include("set apiKey under llm4s.providers.my-fixture in application.conf")

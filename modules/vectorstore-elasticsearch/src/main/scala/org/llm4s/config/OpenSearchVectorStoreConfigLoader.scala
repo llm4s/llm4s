@@ -2,6 +2,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.opensearch.{ OpenSearchAuth, OpenSearchConfig, OpenSearchEngine, OpenSearchSpaceType }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -102,8 +103,8 @@ object OpenSearchVectorStoreConfigLoader {
       auth <- (nonEmpty(s.token), nonEmpty(s.username), nonEmpty(s.password)) match {
         case (Some(_), Some(_), _) =>
           Left(ConfigurationError(s"$Section sets both token and username: choose one way to authenticate"))
-        case (Some(token), None, _)      => Right(OpenSearchAuth.BearerToken(token))
-        case (None, Some(user), Some(p)) => Right(OpenSearchAuth.Basic(user, p))
+        case (Some(token), None, _)      => Right(OpenSearchAuth.BearerToken(Secret(token)))
+        case (None, Some(user), Some(p)) => Right(OpenSearchAuth.Basic(user, Secret(p)))
         case (None, Some(_), None) =>
           Left(ConfigurationError(s"$Section.username is set without a password", List(s"$Section.password")))
         case (None, None, Some(_)) =>

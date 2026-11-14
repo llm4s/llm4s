@@ -81,6 +81,13 @@ class ClientBuildersSpec extends AnyFlatSpec with Matchers {
     azure.headers("api-key") shouldBe "azure-java-key"
   }
 
+  it should "register the key it was given for redaction, so no error or log can echo it" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val key = "java-key-0123456789"
+      Llm4s.openAi().apiKey(key).model("gpt-4o").build()
+      (org.llm4s.util.Redaction.safeBody(s"echo $key") should not).include(key)
+    }
+
   it should "send nothing until asked, and name a missing field as VALIDATION, read from Java" in {
     ClientBuilderCheck.whatIsMissing().asScala.toList shouldBe List(
       "VALIDATION: Field 'apiKey' is required",

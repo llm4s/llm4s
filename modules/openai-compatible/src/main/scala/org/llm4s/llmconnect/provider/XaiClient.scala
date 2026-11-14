@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ ProviderConfig, XaiConfig }
+import org.llm4s.llmconnect.config.XaiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -32,7 +33,8 @@ import scala.util.Try
 class XaiClient(
   config: XaiConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -40,7 +42,7 @@ class XaiClient(
         displayName = "xAI",
         model = config.model,
         baseUrl = config.baseUrl,
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -48,7 +50,8 @@ class XaiClient(
       ),
       XaiDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 @Experimental
@@ -63,11 +66,12 @@ object XaiClient {
   def apply(
     config: XaiConfig,
     metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[XaiClient] =
-    ProviderConfig
-      .nonEmpty("xAI", "apiKey", config.apiKey)
-      .flatMap(_ => Try(new XaiClient(config, metrics, exchangeLogging)).toResult)
+    OpenAICompatibleClient
+      .requireKey("xAI", config.apiKey, config.apiKeyProvider)
+      .flatMap(_ => Try(new XaiClient(config, metrics, exchangeLogging, httpClient)).toResult)
 }
 
 /**

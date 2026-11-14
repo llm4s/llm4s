@@ -1,6 +1,8 @@
 ---
 layout: page
 title: User Guide
+description: "The LLM4S user guide: providers, agents, tools, structured output, RAG, vector stores, Java, effect systems and observability for the Scala JVM."
+search_title: "LLM4S user guide: build LLM apps in Scala"
 nav_order: 3
 has_children: true
 ---
@@ -22,18 +24,26 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Java AI services](java-ai-services)** - Declare an annotated interface and let `llm4s-java-api` implement it: prompt templates, typed answers, memory and tools (experimental)
 - **[Java RAG](java-rag)** - Ingest documents and ask questions from Java with `llm4s-java-rag`: answers with their sources
+- **[Moving a Java app from LangChain4j or Spring AI](java-migration)** - Each LangChain4j and Spring AI concept in `llm4s-java-api` terms, with compiled before-and-after Java, provider configuration and the gaps
 - **[Java Reactor](java-reactor)** - Stream a reply as a Reactor `Flux<String>` with `llm4s-reactor`, for Spring WebFlux and other reactive pipelines
 - **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
+- **[Micronaut](micronaut)** - A `@Factory` bean for `JLlmClient` configured from `application.yml`, blocking and streamed endpoints, a health indicator and tests with `FakeLlmClient`
+- **[Helidon](helidon)** - Helidon SE 4: the client built from `application.yaml`, blocking and streamed routes on virtual threads, a health check and tests with `FakeLlmClient`
 - **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
+- **[Jupyter Notebooks](notebooks)** - Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks (completion, streaming, structured output, a typed tool, RAG) and configuration inside a notebook
 - **[Testing with the Testkit](testing-with-the-testkit)** - Script an `LLMClient` in your tests: canned replies, tool calls, injected errors, recorded requests
+- **[Typed Prompts](prompts)** - `prompt"..."` and `system"..."`: values rendered by a type class checked at compile time, and untrusted input fenced
 - **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
 - **[Comparing LLM4S](comparison)** - A sourced comparison with LangChain4j, Spring AI, Koog and Embabel, and a [migration guide](migrating-from-langchain4j)
+- **[Coming from sttp-ai or openai-scala-client](migrating-from-scala-llm-clients)** - Your Scala client code next to the same thing in LLM4S, compiled: completions, typed output, tools, streaming, providers, and when to stay on your client
 - **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
 - **[Multimodal Content](multimodal)** - Send images and documents in a user message or a tool result, and check before the request whether the provider takes them
-- **[JSON Libraries](json-libraries)** - Use circe, play-json or zio-json with LLM4S: converting at the boundary, structured output and tools
+- **[JSON Libraries](json-libraries)** - Use circe, play-json, zio-json or jsoniter-scala with LLM4S: converting at the boundary, structured output and tools
+- **[Replacing a Python Sidecar](replacing-a-python-sidecar)** - Move the LLM logic of a Python sidecar into your Scala service: Python-served models (vLLM, TGI, llama.cpp) as an OpenAI-compatible section, Python-only functions as agent tools over MCP, and a staged migration
 
 ### Agent Framework
 
@@ -46,6 +56,8 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
 - **[Build Your Own Tool](custom-tools)** - Write a tool with `ToolBuilder`: the `Schema` DSL, reading arguments, returning errors, registering it with an agent and testing it
 - **[Derived Schemas](derived-schemas)** - Write the type once: `llm4s-schema-derivation` builds the `completeStructured` schema from a case class with `derives`.
+- **[Your HTTP Client](http-transport)** - `llm4s-sttp` sends the provider clients' requests through the sttp backend your service already has, and lets a test assert on them with sttp's stub backend
+- **[Tapir Endpoints as Tools](tapir-tools)** - `llm4s-tapir` turns the tapir endpoints a service already has into tools, with each schema derived from its endpoint
 
 ### RAG & Semantic Search
 
@@ -78,10 +90,13 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 
 ### Effect Systems
 
+- **[Pick your stack](effect-systems)** - One program in plain `Result`, cats-effect, ZIO and Pekko side by side: the semantics every bridge shares, and the differences
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 - **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
 - **[Spark and Databricks](spark)** - enrich a DataFrame from a Spark job: a client per partition, `ReliableClient`, errors as data
+- **[Apache Flink](flink)** - enrich a Flink 2.x stream from Scala 3: `AsyncDataStream`, a client per task built in `open()`, dead letters as a side output
+- **[Kafka](kafka)** - enrich a Kafka topic with fs2-kafka: bounded concurrency, retries, a dead-letter topic, offsets committed after the produce
 
 ### Java
 

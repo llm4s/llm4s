@@ -1,6 +1,8 @@
 ---
 layout: page
 title: API Reference
+description: "API reference for LLM4S: where to find the Scaladoc, the API specifications and the design principles behind the Result-based, type-safe API."
+search_title: "LLM4S API reference and Scaladoc for Scala"
 nav_order: 6
 has_children: true
 ---

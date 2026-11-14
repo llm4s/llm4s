@@ -209,7 +209,122 @@ spec:
               value: "langfuse"
 ```
 
-For enterprise environments, consider HashiCorp Vault or AWS Secrets Manager with init containers or sidecar injection.
+An environment variable is read once, when the process starts, so a key passed this way changes only with
+a restart. For a key that rotates, mount it as a file and use `apiKeyFile`.
+
+### Secrets and key rotation
+
+A provider section's `apiKeyFile` names a file holding the key. The client checks the file before every
+request and re-reads it when it changes, so a key that the secret manager rotates is sent from the next
+request on - no restart, no client rebuild. Every built-in chat provider that takes a key rotates this way
+(`watsonx` exchanges the new key for a new IAM token). Embeddings blocks, the Cohere reranker and the shared
+`llm4s.credentials.<id>` take `apiKeyFile` too, and the embedding providers and the reranker re-read it per
+request, so RAG needs no environment-variable key either. Mount the file with mode `0400`: one readable by its
+group or by others is logged as a WARN. The
+full rules are in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
+
+```hocon
+llm4s.providers.openai-main {
+  provider   = "openai"
+  model      = "gpt-4o-mini"
+  apiKeyFile = "/vault/secrets/openai-api-key"   # instead of apiKey
+}
+```
+
+**Vault Agent Injector.** The agent renders the secret into `/vault/secrets/<name>` and rewrites it when
+the secret changes:
+
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "llm4s-app"
+        vault.hashicorp.com/agent-inject-secret-openai-api-key: "secret/data/llm4s/openai"
+        vault.hashicorp.com/agent-inject-template-openai-api-key: |
+          {% raw %}{{- with secret "secret/data/llm4s/openai" -}}{{ .Data.data.apiKey }}{{- end -}}{% endraw %}
+```
+
+**Secrets Store CSI driver** (AWS Secrets Manager, GCP Secret Manager, Azure Key Vault or Vault as the
+provider). Enable rotation in the driver (`enableSecretRotation`) and mount the volume; each object
+becomes a file:
+
+```yaml
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          volumeMounts:
+            - name: llm-keys
+              mountPath: /var/run/secrets/llm4s
+              readOnly: true
+      volumes:
+        - name: llm-keys
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: llm4s-keys    # maps the store's secret to the file openai-api-key
+```
+
+**External Secrets Operator.** The operator syncs the store's secret into a Kubernetes Secret every
+`refreshInterval`; mount that Secret as a volume (not as environment variables, and not with `subPath`,
+which the kubelet never updates) and point `apiKeyFile` at the file:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: llm4s-keys
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: llm4s-keys
+  data:
+    - secretKey: openai-api-key
+      remoteRef:
+        key: prod/llm4s/openai
+---
+# in the Deployment's pod spec
+volumes:
+  - name: llm-keys
+    secret:
+      secretName: llm4s-keys      # mounted at /var/run/secrets/llm4s, so apiKeyFile = ".../openai-api-key"
+```
+
+**Read from Vault by llm4s.** Without a sidecar or CSI driver, `llm4s-secrets-vault`'s `VaultApiKeyProvider` reads
+the key from Vault's KV secrets engine (v2 by default, v1 with `withKvVersion`) over Vault's HTTP API - no Vault SDK -
+caches it, and reads it again every `refreshInterval` (5 minutes by default), so a key rotated in Vault is sent from
+the first request after the interval. Its errors (`AuthenticationError` for a refused token, `NotFoundError` for a
+missing secret, `ConfigurationError` for a missing or blank field) never hold the key or the Vault token.
+
+```scala
+import org.llm4s.llmconnect.auth.vault.{ VaultApiKeyProvider, VaultSettings }
+import org.llm4s.security.Secret
+import scala.concurrent.duration.*
+
+for
+  keys <- VaultApiKeyProvider(
+            VaultSettings("https://vault.internal:8200", Secret(vaultToken), "llm4s/openai", "apiKey")
+              .withNamespace("admin")              // Vault Enterprise / HCP only
+              .withRefreshInterval(1.minute)
+          )
+  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  client <- LLMConnect.getClient(config)
+yield client
+```
+
+The Vault token is yours to obtain (Kubernetes or AppRole login); a token that expires needs a new provider.
+
+**Fetched by your code.** Without a file, implement `ApiKeyProvider` over your secret store's client
+(Vault's API, AWS Secrets Manager's `GetSecretValue`, ...) and set it with `withApiKeyProvider`; the client
+asks it for the key on every request. llm4s itself depends on no secret-manager SDK. A compiled example is
+in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
 ---
 
@@ -217,7 +332,9 @@ For enterprise environments, consider HashiCorp Vault or AWS Secrets Manager wit
 
 ### Rate Limits
 
-LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`:
+LLM providers enforce rate limits. In production, expect and handle `429 Too Many Requests`.
+`ReliableClient` ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)) retries a `429` with backoff, honouring the
+provider's `Retry-After`, and can rate-limit locally; by hand, the loop looks like this:
 
 ```scala
 import org.llm4s.error.{RateLimitError, LLMError}
@@ -243,35 +360,28 @@ def callWithBackoff(
 
 ### Timeout Configuration
 
-Set reasonable timeouts at multiple levels:
+Each provider section takes a `timeouts` block, which bounds how long one request and one stream may wait
+([Timeouts](getting-started/configuration#timeouts) lists each provider's defaults and what exactly they bound):
 
 ```hocon
-# application.conf
-akka.http.client {
-  connecting-timeout = 10s
-  idle-timeout = 60s
-}
-
-```
-
-### Provider Fallbacks (Planned)
-
-LLM4S doesn't yet have built-in provider fallback, but you can implement it:
-
-```scala
-def withFallback(
-  primary: LLMClient,
-  fallback: LLMClient,
-  conversation: Conversation
-): Result[Completion] = {
-  primary.complete(conversation) match {
-    case Left(_) => fallback.complete(conversation)
-    case success => success
-  }
+llm4s.providers.openai-main.timeouts {
+  request = 60s
+  stream  = 5m
 }
 ```
 
-Multi-provider resilience (circuit breakers, automatic failover) is planned for a future release.
+`ReliableClient`'s `deadline` (default 5 minutes) bounds a whole call, retries included.
+
+### Provider Fallbacks
+
+`ReliableClient` (`org.llm4s.reliability`) wraps any `LLMClient` with retries, a circuit breaker, a per-call
+deadline and an optional local rate limit ([Reliable LLM Calling](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md)). To fail over to a second
+provider or region, wrap each client once and ask the second only when the first still fails after its own
+retries: the cookbook's
+[fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala)
+does exactly that, and the [reference architecture](guide/reference-architecture#resilience) shows it with a second
+gateway section. LLM4S does not pick the fallback for you: which provider may stand in for which is your decision,
+written in code.
 
 ### Validate on Startup
 
@@ -562,37 +672,15 @@ Key considerations:
 
 ### Enterprise VPC
 
-For regulated industries or multi-tenant deployments:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Private VPC                          │
-│                                                         │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐ │
-│  │  App Tier   │───▶│  LLM Proxy  │───▶│  Audit Log  │ │
-│  │  (LLM4S)    │    │  (Rate Lim) │    │  (S3/ELK)   │ │
-│  └─────────────┘    └─────────────┘    └─────────────┘ │
-│         │                  │                           │
-│         │           ┌──────┴──────┐                    │
-│         │           ▼             ▼                    │
-│         │     ┌──────────┐  ┌──────────┐              │
-│         │     │  Vault   │  │ Langfuse │              │
-│         │     │ (Secrets)│  │ (Self-   │              │
-│         │     └──────────┘  │  hosted) │              │
-│         │                   └──────────┘              │
-│         ▼                                              │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │          Azure OpenAI (Private Endpoint)        │  │
-│  └─────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-Key considerations:
-
-- Use Azure OpenAI with Private Link or AWS Bedrock for data residency
-- Deploy self-hosted Langfuse within your VPC
-- Implement centralized audit logging for compliance
-- Use HashiCorp Vault for secrets rotation
+For regulated industries or multi-tenant deployments, the
+[Enterprise Reference Architecture](guide/reference-architecture) is the tested picture: the app behind an AI
+gateway (a LiteLLM proxy in the example) through the generic `openai-compatible` provider with tenant headers, its
+gateway key a rotating file from the External Secrets Operator, NetworkPolicies that let only the gateway leave the
+cluster, `ReliableClient` and a second section for failover, quotas and spend at the gateway and in-process, and
+self-hosted tracing. Its Kubernetes manifests are
+[`deploy/overlays/enterprise`](https://github.com/llm4s/llm4s/tree/main/deploy/overlays/enterprise), rendered and
+schema-validated in CI. Azure OpenAI behind a private endpoint and Bedrock behind a VPC endpoint are covered there as
+the no-gateway alternative.
 
 ---
 
@@ -741,18 +829,16 @@ Before deploying to production, verify:
 
 ---
 
-## Known Limitations (v0.1.x)
+## Known Limitations
 
 Current limitations to be aware of in production:
 
-- **No built-in circuit breaker** - Implement at application level or use Resilience4j
-- **No automatic provider fallback** - Must implement manually
-- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart and import saved messages with `history`; the in-memory runtime does not survive a restart (durable checkpointers are Stage 2 of the typed agent runtime)
-- **Advanced semantic/embedding caching not included** - Add Redis/vector cache for high-volume RAG
+- **Fallback between providers is code you write** - `ReliableClient` retries, opens a circuit breaker and bounds each call, but which provider stands in for which is yours to wire, as the [fallback recipe](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/FallbackRecipe.scala) shows
+- **`ReliableClient`'s rate limit is per client instance** - it counts one process's calls; a limit across replicas or tenants belongs in a gateway ([Reference Architecture](guide/reference-architecture#quotas-and-cost))
+- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart; a durable checkpointer ([SQLite or Postgres](guide/agents/durable-checkpointers)) keeps the threads, while the default in-memory store does not survive a restart
+- **Caches are per process** - the completion (semantic) cache is in memory; the embedding cache takes a store of your own ([Caching](guide/caching))
 
 These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap#production-readiness-pillars).
-
-This guide will evolve as LLM4S approaches v1.0.
 
 ---
 

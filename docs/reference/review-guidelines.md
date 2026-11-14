@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Master code review guidelines
+description: "The LLM4S code review policy for the CI review bot and human reviewers: severity rubric, comment format, repository map and low-noise rules."
 nav_order: 9
 redirect_from:
   - /reference/review-guidelines.main.backup

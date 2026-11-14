@@ -3,6 +3,7 @@ package org.llm4s.agent.memory
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 import org.postgresql.ds.PGSimpleDataSource
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -86,11 +87,24 @@ class PostgresMemoryStoreDataSourceIntegrationSpec extends AnyFlatSpec with Matc
     drop(pool, table)
   }
 
+  it should "store a batch with repeated ids over pgjdbc's reWriteBatchedInserts" in {
+    val ds = simpleDataSource()
+    ds.setReWriteBatchedInserts(true)
+    val table = s"rewrite_batch_memories_$suffix"
+    val store = PostgresMemoryStore.fromDataSource(ds, table).value
+    val batch = (1 to 50).map(i => Memory(MemoryId(s"m${i % 40}"), s"note $i", MemoryType.Knowledge))
+    store.storeAll(batch).isRight shouldBe true
+    store.count().value shouldBe 40L
+    store.get(MemoryId("m1")).value.map(_.content) shouldBe Some("note 41")
+    store.close()
+    drop(ds, table)
+  }
+
   "PostgresMemoryStore.apply" should "close the pool it created when the store closes" in {
     requirePg()
     val table = s"own_pool_memories_$suffix"
     val store = PostgresMemoryStore(
-      PostgresMemoryStore.Config(host, port, database, user, password, table, maxPoolSize = 2)
+      PostgresMemoryStore.Config(host, port, database, user, Secret(password), table, maxPoolSize = 2)
     ).value
     store.close()
     store.count().isLeft shouldBe true

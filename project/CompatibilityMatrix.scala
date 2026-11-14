@@ -32,6 +32,7 @@ object CompatibilityMatrix {
       find(ci, """(?m)^\s+java: \[([^\]]+)\]""".r, "`java:` matrix of the test job").split(',').map(_.trim).toSeq
     val boot3    = find(ci, """-Dllm4s\.springBootVersion=([0-9.]+)""".r, "Spring Boot 3.x (latest) version")
     val boot4    = find(ci, """-Dllm4s\.springBoot4Version=([0-9.]+)""".r, "Spring Boot 4.x version")
+    val springAi = find(ci, """-Dllm4s\.springAiVersion=([0-9.]+)""".r, "Spring AI 2.0.x (latest) version")
     val kotlinKt = base / "modules" / "kotlin-api" / "build.gradle.kts"
     val kotlin   = find(kotlinKt, """kotlin\("jvm"\) version "([^"]+)"""".r, "Kotlin plugin version")
     val coroutines =
@@ -56,11 +57,26 @@ object CompatibilityMatrix {
         Seq(Versions.springBoot4Baseline, boot4).distinct,
         s"The same artifact's Boot 4 health indicator, built against ${Versions.springBoot4Baseline}; CI also runs the specs on $boot4."
       ),
+      Stack(
+        "Spring AI",
+        "llm4s-spring-ai",
+        Seq(Versions.springAiBaseline, springAi).distinct,
+        s"Built against ${Versions.springAiBaseline}, with Spring Boot 4; CI also runs the module's specs on $springAi."
+      ),
       Stack("Cats Effect", "llm4s-effect", Seq(Versions.catsEffect), ""),
       Stack("fs2", "llm4s-effect", Seq(Versions.fs2), ""),
       Stack("ZIO", "llm4s-zio", Seq(Versions.zio), ""),
       Stack("Apache Pekko", "llm4s-pekko", Seq(Versions.pekko), ""),
+      Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
+      Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
+      Stack("sttp client 4", "llm4s-sttp", Seq(Versions.sttpClient4), "Any synchronous backend."),
+      Stack(
+        "Iron",
+        "llm4s-schema-iron",
+        Seq(Versions.iron),
+        s"Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the ${Common.scala3} compiler cannot read."
+      ),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",
@@ -71,6 +87,12 @@ object CompatibilityMatrix {
       Stack("http4s", "modules/examples-http (unpublished)", Seq(Versions.http4s), ""),
       Stack("Tapir", "modules/examples-http (unpublished)", Seq(Versions.tapir), ""),
       Stack("ZIO HTTP", "modules/examples-http (unpublished)", Seq(Versions.zioHttp), ""),
+      Stack(
+        "Play Framework",
+        "modules/examples-http (unpublished)",
+        Seq(Versions.play),
+        s"Play's Pekko artifacts pinned to llm4s-pekko's ${Versions.pekko}."
+      ),
       Stack("Micrometer", "llm4s-observability-micrometer", Seq(Versions.micrometer), ""),
       Stack("OpenTelemetry", "llm4s-observability-otel", Seq(Versions.opentelemetry), ""),
       Stack("Prometheus client", "llm4s-observability-prometheus", Seq(Versions.prometheus), ""),
@@ -82,6 +104,8 @@ object CompatibilityMatrix {
         Seq(Versions.zioJson),
         s"Pinned: later releases are built with a newer Scala 3 whose TASTy the ${Common.scala3} compiler cannot read."
       ),
+      Stack("jsoniter-scala", "docs/guide/json-libraries.md (tested recipe)", Seq(Versions.jsoniterScala), ""),
+      Stack("fs2-kafka", "docs/guide/kafka.md (tested pipeline)", Seq(Versions.fs2Kafka), ""),
       Stack("OpenAI Java SDK", "llm4s-openai", Seq(Versions.openaiJava), ""),
       Stack("Anthropic Java SDK", "llm4s-anthropic", Seq(Versions.anthropic), ""),
       Stack("AWS SDK", "llm4s-bedrock", Seq(Versions.awsSdk), "")

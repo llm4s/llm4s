@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Monitoring
+description: "Monitor LLM4S applications in production: logging, tracing with Langfuse or OpenTelemetry, metrics, token usage and cost, and provider reliability."
+search_title: "Monitor LLM apps in Scala: tracing, metrics and cost"
 nav_order: 21
 parent: User Guide
 has_children: true
@@ -184,6 +186,9 @@ val embeddings = EmbeddingClient.from("openai", embeddingConfig).map(_.withTraci
 | `chat <model>` (an agent's model call) | `CLIENT` | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, `llm4s.model_call.attempt`, `llm4s.model_call.tool_calls`, `cost.usd` |
 | `invoke_agent <agent>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.provider.name` (the run's first model call's), `gen_ai.agent.name`, `gen_ai.conversation.id`, `gen_ai.usage.*`, thread, run, status |
 | `execute_tool <tool>` | `INTERNAL` | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`; with `captureContent` (for `ToolExecuted`), `tool.input` and `tool.output` |
+
+Only model, embedding and image generation calls (and their failures) are `CLIENT` spans; every other span, such as cost,
+cache, RAG, a plain `Error` or a custom event, is `INTERNAL`.
 
 `gen_ai.provider.name` is the conventions' well-known value where there is one (`gemini` is `gcp.gemini`, `vertexai`
 `gcp.vertex_ai`, `bedrock` `aws.bedrock`, `azure` `azure.ai.openai`, `watsonx` `ibm.watsonx.ai`, `mistral`
@@ -987,7 +992,7 @@ These are tracked in the [Production Readiness Roadmap](../../reference/roadmap)
 ## Related Documentation
 
 - [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
-- [In-Process Tracing Use Cases](enhanced-tracing-use-cases.md) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
+- [In-Process Tracing Use Cases](enhanced-tracing-use-cases) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
 - [Configuration Guide](../../getting-started/configuration) - Complete configuration reference
 - [Roadmap](../../reference/roadmap) - Planned observability improvements

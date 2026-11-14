@@ -17,6 +17,10 @@ on:
       - 'modules/workspace/*/src/**'
       - '.github/workflows/pages.yml'
 
+  # Daily, so the GitHub numbers on the home page (scripts/update-site-stats.sh) are never more than a day old.
+  schedule:
+    - cron: '17 4 * * *'
+
   # Releases deploy by DISPATCHING this workflow on `main` from release.yml (scripts/dispatch-docs-deploy.sh), gated on
   # the Maven publish and the GitHub Release, with the release tag as `ref`.
   #
@@ -196,6 +200,31 @@ jobs:
           cp -r "$SCALADOC_DIR"/* docs/scaladoc/
           echo "Scaladoc copied successfully"
 
+      # The Scaladoc's source links point at the release tag being deployed (`main` for a snapshot), it links JDK and
+      # Scala library types, and every `{% include api.html t="..." %}` in the guides has its page (#2291). A release
+      # tag from before the scripts skips the step.
+      - name: Check the Scaladoc's cross-links and the guides' API links
+        run: |
+          if [ -f scripts/check-scaladoc-crosslinks.sh ]; then
+            REV=$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || echo main)
+            scripts/check-scaladoc-crosslinks.sh docs/scaladoc "$REV"
+            scripts/check-api-links.sh docs/scaladoc
+          else
+            echo "::notice::This ref predates scripts/check-scaladoc-crosslinks.sh: the cross-links are not checked."
+          fi
+
+      # The stars, forks, contributors, merged pull requests and releases in docs/_data/stats.yml, from the GitHub API on
+      # the day of the build. A failed call keeps the committed numbers. A release tag from before the script skips it.
+      - name: Refresh the GitHub numbers on the home page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f scripts/update-site-stats.sh ]; then
+            scripts/update-site-stats.sh "$GITHUB_REPOSITORY"
+          else
+            echo "::notice::This ref predates scripts/update-site-stats.sh: the committed numbers are used."
+          fi
+
       # llms.txt, llms-full.txt and llm4s-rules.md are generated from the pages, never kept by hand (#2287). They are
       # built for the latest release, and again under /llms/<major.minor>/ for it and the previous minor. The build
       # fails when a file is missing, llms.txt links a page that does not exist, or a Scala block of a page that is
@@ -217,6 +246,30 @@ jobs:
           bundle exec jekyll build --baseurl "${{ steps.pages.outputs.base_path }}"
         env:
           JEKYLL_ENV: production
+
+      # One search over guides and API (#2291): the Scaladoc's types join the index just-the-docs's search box loads, so
+      # a type name finds its API page next to the guide pages. The 20 queries in scripts/search-queries.tsv then run
+      # against it the way the search box runs them, and the deploy fails if one misses its expected page in the top 3.
+      # A release tag from before the scripts skips the step.
+      - name: Build and check the unified search index
+        run: |
+          if [ -f scripts/add-scaladoc-to-search.py ]; then
+            python3 scripts/add-scaladoc-to-search.py docs/_site
+            node scripts/check-site-search.cjs docs/_site
+          else
+            echo "::notice::This ref predates scripts/add-scaladoc-to-search.py: the search covers the guides only."
+          fi
+
+      # The <title>, og:title and description the pages are really served with: each page has its own, none is only
+      # `Home`, and none is the site-wide description (#2314).
+      - name: Check the pages' titles and descriptions
+        run: scripts/check-doc-seo.sh --site docs/_site
+
+      # Every page's share card (og:image with its alt text, twitter:image, a large twitter:card, a valid
+      # twitter:creator) and its JSON-LD: valid JSON with an @type, the home page's SoftwareSourceCode version equal to
+      # the latest release written into project.yml above, an Organization on /foundation/ (#2316).
+      - name: Check the pages' share cards and structured data
+        run: scripts/check-site-share-cards.sh docs/_site
 
       # sitemap.xml (jekyll-sitemap) lists the guide pages only; the Scaladoc, copied in above, gets its own file (#2318).
       # The check fails the deploy if sitemap.xml lists a /scaladoc/ URL, a PDF or too many URLs, or robots.txt omits one.

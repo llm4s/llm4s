@@ -42,7 +42,7 @@ class AzureSectionValidationSpec extends AnyFlatSpec with Matchers {
       Some("azure"),
       Some(model),
       None,
-      apiKey,
+      apiKey.map(ApiKey(_)),
       extras = extras ++ endpoint.map(AzureProvider.EndpointKey -> _)
     )
 

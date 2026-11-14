@@ -16,18 +16,21 @@ modules/agent/src/main/scala/org/llm4s/agent/graph/Checkpointer.scala           
 modules/agent/src/main/scala/org/llm4s/agent/harness/HostFileBackend.scala                         agent:org.llm4s.agent.harness.HostFileBackendSpec
 modules/agent/src/main/scala/org/llm4s/assistant/SessionManager.scala                              agent:org.llm4s.assistant.*
 modules/anthropic/src/main/scala/org/llm4s/llmconnect/config/AnthropicWorkloadIdentity.scala       anthropic:org.llm4s.llmconnect.provider.AnthropicWorkloadIdentitySpec
-modules/config-policy/src/main/scala/org/llm4s/configpolicy/Doctor.scala                           configPolicy:org.llm4s.configpolicy.DoctorSpec
 modules/core/src/main/scala/org/llm4s/config/NamedProviderConfigNormalizer.scala                   core:org.llm4s.config.ProviderAuthConfigSpec
 modules/core/src/main/scala/org/llm4s/config/ProviderExchangeLoggingConfigLoader.scala             core:org.llm4s.config.ProviderExchangeLoggingConfigLoaderSpec
 modules/core/src/main/scala/org/llm4s/http/Llm4sHttpClient.scala                                   core:org.llm4s.http.Llm4sHttpClientSpec
 modules/core/src/main/scala/org/llm4s/llmconnect/ProviderExchangeSink.scala                        core:org.llm4s.llmconnect.ProviderExchangeSinkSpec
+modules/core/src/main/scala/org/llm4s/llmconnect/auth/ApiKeyProvider.scala                         core:org.llm4s.llmconnect.auth.ApiKeyProviderSpec
 modules/core/src/main/scala/org/llm4s/llmconnect/auth/IdentityTokenSource.scala                    core:org.llm4s.llmconnect.auth.IdentityTokenSourceSpec
 modules/core/src/main/scala/org/llm4s/model/ModelRegistryService.scala                             core:org.llm4s.model.ModelRegistryServiceSpec
+modules/doctor/src/main/scala/org/llm4s/doctor/Doctor.scala                                        doctor:org.llm4s.doctor.DoctorSpec
 modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/GcloudAdcLocation.scala                  gemini:org.llm4s.llmconnect.provider.GcloudAdcLocationSpec
 modules/gemini/src/main/scala/org/llm4s/config/VertexAIAdcConfigLoader.scala                         gemini:org.llm4s.llmconnect.provider.GcloudAdcLocationSpec
 modules/gemini/src/main/scala/org/llm4s/llmconnect/provider/VertexAIAuthProvider.scala             gemini:org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec
 modules/knowledgegraph/src/main/scala/org/llm4s/knowledgegraph/storage/JsonGraphStore.scala        knowledgegraph:org.llm4s.knowledgegraph.storage.JsonGraphStoreSpec
 modules/mcp/src/main/scala/org/llm4s/mcp/MCPTransport.scala                                        mcp:org.llm4s.mcp.StdioTransportConcurrencySpec
 modules/openai-compatible/src/main/scala/org/llm4s/llmconnect/config/OpenAIWorkloadIdentity.scala  openaiCompatible:org.llm4s.llmconnect.provider.OpenAICompatibleWorkloadIdentitySpec
+modules/providers/jlama/src/main/scala/org/llm4s/llmconnect/config/JlamaConfig.scala               jlama:org.llm4s.llmconnect.provider.JlamaConfigSpec
+modules/providers/jlama/src/main/scala/org/llm4s/llmconnect/provider/JlamaProvider.scala           jlama:org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec
 modules/samples/                                                                                   none: unpublished examples, run by hand; the library code they call is tested in its own module
 modules/workspace/workspaceSamples/                                                                none: unpublished examples, run by hand; the workspace runner and client they drive run whole on Windows

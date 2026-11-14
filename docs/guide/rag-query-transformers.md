@@ -1,6 +1,8 @@
 ---
 layout: page
 title: RAG Query Transformers
+description: "Rewrite a user's query before it is embedded in an LLM4S RAG pipeline to improve retrieval for vague or conversational questions."
+search_title: "RAG query transformers for better retrieval in Scala"
 parent: User Guide
 nav_order: 23
 ---
@@ -19,6 +21,10 @@ Rewrite the user's query before it is embedded and sent to the vector store, imp
 ## Overview
 
 A RAG pipeline can rewrite the user's query before it is embedded: [`RAGConfig`](https://github.com/llm4s/llm4s/blob/main/modules/rag/src/main/scala/org/llm4s/rag/RAGConfig.scala) accepts a chain of `QueryTransformer`s, and `RAG` applies the chain before retrieval (`QueryTransformer.applyChain`).
+
+See the key-free, in-memory
+[`QueryTransformerExample`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/QueryTransformerExample.scala)
+for runnable abbreviation expansion, scripted LLM rewriting, chaining and error propagation.
 
 ```scala
 import org.llm4s.config.Llm4sConfig

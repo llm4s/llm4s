@@ -38,4 +38,4 @@ jobs:
       - name: Check the issues the comparison and enterprise evaluation pages cite
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/check-cited-issues.sh docs/guide/comparison.md docs/reference/enterprise-evaluation.md
+        run: scripts/check-cited-issues.sh docs/guide/comparison.md docs/guide/java-migration.md docs/reference/enterprise-evaluation.md

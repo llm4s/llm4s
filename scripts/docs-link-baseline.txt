@@ -28,7 +28,6 @@ docs/guide/image-generation.md -> /api/llm-client
 docs/guide/index.md -> /examples/#context-management-examples
 docs/guide/index.md -> /examples/#embeddings-examples
 docs/guide/observability/index.md -> ../../langfuse-workflow-patterns.md
-docs/guide/observability/index.md -> enhanced-tracing-use-cases.md
 docs/guide/patterns/production-monitoring.md -> ../issues/#11
 docs/guide/permission-based-rag.md -> /examples/#embeddings-examples
 docs/guide/providers.md -> ../MODEL_METADATA.md

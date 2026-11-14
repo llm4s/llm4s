@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Speech (STT/TTS)
+description: "Speech-to-text and text-to-speech in Scala with the LLM4S speech module: Vosk, Whisper, OpenAI, Azure and ElevenLabs, with configuration."
+search_title: "Speech-to-text and text-to-speech in Scala with LLM4S"
 parent: User Guide
 nav_order: 9
 ---

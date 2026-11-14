@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Performance Benchmarks
+description: "JMH benchmarks for LLM4S hot paths such as token counting, context compression, tool dispatch and keyword search, and how to run them."
 parent: Reference
 nav_order: 18
 ---

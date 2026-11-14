@@ -5,6 +5,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, NetworkError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.security.{ Secret, TokenGenerations }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -70,6 +71,10 @@ class VertexAIAuthProvider(
 
   @volatile private var cachedToken: Option[CachedToken] = None
   private val refreshLock                                = new Object
+  // Each access token and each signed JWT assertion is registered with KnownSecrets before it is sent, so an
+  // error body echoing one is scrubbed; the generation before the previous one is released.
+  private val accessTokens = new TokenGenerations
+  private val assertions   = new TokenGenerations
 
   /** Returns a valid OAuth2 access token, fetching or refreshing as needed. */
   def getAccessToken(): Result[String] =
@@ -86,6 +91,7 @@ class VertexAIAuthProvider(
 
   private def fetchAndCacheToken(): Result[String] =
     fetchToken().map { t =>
+      accessTokens.rotate(t.token)
       cachedToken = Some(t)
       t.token
     }
@@ -121,12 +127,12 @@ class VertexAIAuthProvider(
 
   private def refreshTokenFlow(json: ujson.Value): Result[CachedToken] = {
     val clientId     = json("client_id").str
-    val clientSecret = json("client_secret").str
-    val refreshToken = json("refresh_token").str
+    val clientSecret = Secret(json("client_secret").str)
+    val refreshToken = Secret(json("refresh_token").str)
 
     val body =
-      s"client_id=${enc(clientId)}&client_secret=${enc(clientSecret)}" +
-        s"&grant_type=refresh_token&refresh_token=${enc(refreshToken)}"
+      s"client_id=${enc(clientId)}&client_secret=${enc(clientSecret.reveal)}" +
+        s"&grant_type=refresh_token&refresh_token=${enc(refreshToken.reveal)}"
 
     httpClient
       .post(
@@ -163,6 +169,7 @@ class VertexAIAuthProvider(
     for {
       privateKey <- parsePrivateKey(privateKeyPem)
       jwt = createJwt(clientEmail, privateKey, tokenUri)
+      _   = assertions.rotate(jwt)
       token <- exchangeJwtForToken(jwt, tokenUri)
     } yield token
   }

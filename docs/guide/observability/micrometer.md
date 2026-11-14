@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Micrometer metrics
+description: "Record LLM4S request, token, cost and error metrics in a Micrometer MeterRegistry, so a Spring Boot or Quarkus service shows them with its own metrics."
+search_title: "LLM metrics with Micrometer in Scala and Java"
 parent: Monitoring
 grand_parent: User Guide
 nav_order: 2

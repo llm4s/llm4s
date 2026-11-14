@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Production Monitoring
+description: "What to track when running LLM applications in production: performance, quality and cost metrics, alert rules, request tracing and debug logging."
+search_title: "Monitor LLM applications in production: metrics and alerts"
 parent: Real-World Application Patterns
 nav_order: 3
 ---

@@ -2,9 +2,11 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.AnthropicConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.config.AnthropicConfig
+import org.llm4s.llmconnect.auth.ApiKeyProvider
+import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{
   anthropicMessage,
   holdOpen,
@@ -113,12 +115,31 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       assertRefusesForeignConfig(AnthropicProvider)
     }
 
+    "declare that its SDK ignores a supplied HTTP client (#2341)" in {
+      AnthropicProvider.features.customHttpClient shouldBe false
+    }
+
     "declare a model lister" in {
       AnthropicProvider.modelLister shouldBe defined
     }
   }
 
+  /** A client whose config asks `keys` for the key, as a section's `apiKeyFile` makes it (#2313). */
+  private def rotatingClientAt(baseUrl: String, keys: ApiKeyProvider): LLMClient =
+    given ModelRegistryService  = ProviderModuleChecks.defaultModelRegistry
+    given ContextWindowResolver = ContextWindowResolver(summon[ModelRegistryService])
+    AnthropicProvider
+      .buildConfig("rotation", section.withBaseUrl(Some(BaseUrl(baseUrl))))
+      .flatMap(config => AnthropicProvider.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+      .fold(error => fail(error.message), identity)
+
   "a client built by the anthropic descriptor" should {
+
+    "send the key its ApiKeyProvider holds at each request (#2313)" in {
+      assertHonoursApiKeyProvider(sendJsonResponse(_, 200, anthropicMessage("done")), "/v1/messages")(
+        rotatingClientAt
+      )
+    }
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/v1/messages")(exchange => sendSseResponse(exchange, streamingBody)) { baseUrl =>

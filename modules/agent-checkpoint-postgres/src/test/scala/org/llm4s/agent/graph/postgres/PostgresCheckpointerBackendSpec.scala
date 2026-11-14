@@ -41,7 +41,7 @@ class PostgresCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eit
 
   "The reference.conf block" should "bind the connection to its variables and default to PostgresCheckpointerConfig.default" in {
     val c = connection("").value
-    (c.url, c.user, c.password) shouldBe ("jdbc:postgresql://db:5432/app", "agents", "hunter2")
+    (c.url, c.user, c.password.reveal) shouldBe ("jdbc:postgresql://db:5432/app", "agents", "hunter2")
     c.config shouldBe PostgresCheckpointerConfig.default
     (c.toString should not).include("hunter2")
     (settings("").toString should not).include("hunter2")
@@ -57,7 +57,7 @@ class PostgresCheckpointerBackendSpec extends AnyFlatSpec with Matchers with Eit
   }
 
   "A connection with no password" should "use an empty one" in {
-    connection("", Env - "LLM4S_CHECKPOINTER_POSTGRES_PASSWORD").value.password shouldBe ""
+    connection("", Env - "LLM4S_CHECKPOINTER_POSTGRES_PASSWORD").value.password.reveal shouldBe ""
   }
 
   "A missing url or user" should "fail the load naming the key and its variable" in {

@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -90,6 +91,18 @@ class PostgresMemoryStoreDataSourceSpec extends AnyFlatSpec with Matchers with E
     PostgresMemoryStore.fromDataSource(ds).left.value.message should include("connection refused")
     ds.closeCount shouldBe 0
   }
+
+  it should "keep a registered password out of the error when the driver's message quotes it (#1932)" in
+    KnownSecrets.isolated {
+      Secret("memory-password-0001")
+      val echoing = new StubDataSource() {
+        override def getConnection(): Connection =
+          throw new SQLException("FATAL: password authentication failed (password=memory-password-0001)")
+      }
+      val message = PostgresMemoryStore.fromDataSource(echoing).left.value.message
+      message should include("password authentication failed")
+      (message should not).include("memory-password-0001")
+    }
 
   "A store that owns its DataSource" should "close it exactly once" in {
     val ds    = new StubDataSource()

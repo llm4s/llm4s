@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Troubleshooting / FAQ
+description: "Fix common LLM4S errors: configuration and authentication errors, Scala version issues, agent, tool and streaming problems, and vector store errors."
+search_title: "LLM4S troubleshooting and FAQ"
 parent: Reference
 nav_order: 11
 ---
@@ -15,7 +17,7 @@ A configuration error, and a provider's 401, 403, 404 or 429, ends with a link t
 [First-Run Troubleshooting](/getting-started/troubleshooting), which has the symptom, cause and fix of each.
 
 **Q: Something is wrong with my setup and I do not know which part**
-A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config /path/to/application.conf --local"`. It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
+A: Run the [doctor](doctor). It checks the JDK, your `application.conf`, the default provider, its module, its API key, the other provider sections and (with `--local`, for a server on this machine) whether the server is running and has your model, and prints a fix for each step that fails: `sbt "Test/runMain org.llm4s.doctor.DoctorCli --local"` from your project, with `llm4s-doctor` as a test dependency (Maven, Gradle and Coursier commands are on its page). It contacts nothing unless you pass `--local` or `--live`, and does not print a key's value itself.
 
 **Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
 A: LLM4S does not read `LLM_MODEL`. Define a named provider section in your `application.conf` and select it as the default; its key comes from the vendor's variable, which the provider module binds:

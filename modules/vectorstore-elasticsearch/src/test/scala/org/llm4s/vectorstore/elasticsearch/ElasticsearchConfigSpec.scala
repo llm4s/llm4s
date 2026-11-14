@@ -1,6 +1,7 @@
 package org.llm4s.vectorstore.elasticsearch
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -33,7 +34,7 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
     val config = ElasticsearchConfig()
       .withBaseUrl("https://es.example.com/proxy/")
       .withIndex("docs")
-      .withAuth(ElasticsearchAuth.Basic("elastic", "pw"))
+      .withAuth(ElasticsearchAuth.Basic("elastic", Secret("pw")))
       .withSimilarity(ElasticsearchSimilarity.L2Norm)
       .withDimensions(8)
       .withNumCandidates(40)
@@ -47,7 +48,7 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   it should "refuse credentials over plain http to a remote host, and accept them for loopback or https" in {
-    val apiKey = ElasticsearchAuth.ApiKey("key")
+    val apiKey = ElasticsearchAuth.ApiKey(Secret("key"))
     refused(ElasticsearchConfig("http://es.example.com:9200", auth = apiKey)) should include("must be https")
     ElasticsearchConfig("http://127.0.0.1:9200", auth = apiKey).validate.isRight shouldBe true
     ElasticsearchConfig("http://[::1]:9200", auth = apiKey).validate.isRight shouldBe true
@@ -75,8 +76,8 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   it should "refuse unusable credentials and limits" in {
-    refused(ElasticsearchConfig(auth = ElasticsearchAuth.ApiKey(" "))) should include("apiKey")
-    refused(ElasticsearchConfig(auth = ElasticsearchAuth.Basic("a:b", "pw"))) should include("username")
+    refused(ElasticsearchConfig(auth = ElasticsearchAuth.ApiKey(Secret(" ")))) should include("apiKey")
+    refused(ElasticsearchConfig(auth = ElasticsearchAuth.Basic("a:b", Secret("pw")))) should include("username")
     refused(ElasticsearchConfig(dimensions = Some(0))) should include("dimensions")
     refused(ElasticsearchConfig(dimensions = Some(5000))) should include("dimensions")
     refused(ElasticsearchConfig(numCandidates = Some(0))) should include("numCandidates")
@@ -85,8 +86,8 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   "ElasticsearchAuth" should "never print a credential" in {
-    ElasticsearchAuth.ApiKey("secret-key").toString shouldBe "ApiKey(***)"
-    ElasticsearchAuth.Basic("elastic", "secret-pw").toString shouldBe "Basic(elastic, ***)"
+    ElasticsearchAuth.ApiKey(Secret("secret-key")).toString shouldBe "ApiKey(***)"
+    ElasticsearchAuth.Basic("elastic", Secret("secret-pw")).toString shouldBe "Basic(elastic, ***)"
     ElasticsearchAuth.NoAuth.headers shouldBe empty
     ElasticsearchAuth.NoAuth.secrets shouldBe empty
   }
@@ -98,4 +99,12 @@ class ElasticsearchConfigSpec extends AnyFlatSpec with Matchers with EitherValue
     ElasticsearchSimilarity.fromString("max_inner_product") shouldBe Some(ElasticsearchSimilarity.MaxInnerProduct)
     ElasticsearchSimilarity.fromString("euclid") shouldBe None
   }
+
+  it should "register the derived basic token so an error body echoing it is scrubbed" in
+    org.llm4s.security.KnownSecrets.isolated {
+      val b64  = java.util.Base64.getEncoder.encodeToString("elastic:basic-pw-register-1".getBytes("UTF-8"))
+      val auth = ElasticsearchAuth.Basic("elastic", Secret("basic-pw-register-1"))
+      auth.headers("Authorization") shouldBe s"Basic $b64"
+      (org.llm4s.util.Redaction.safeBody(s"Basic $b64") should not).include(b64)
+    }
 }

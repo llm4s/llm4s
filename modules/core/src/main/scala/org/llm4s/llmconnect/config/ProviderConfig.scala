@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.llmconnect.auth.IdentitySource
+import org.llm4s.llmconnect.auth.{ ApiKeyProvider, IdentitySource }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -102,6 +102,25 @@ trait ProviderConfig {
    * setting ignores it. A config that does overrides this with its own return type.
    */
   def withNetwork(network: HttpNetworkSettings): ProviderConfig = this
+
+  /**
+   * Where the client gets the API key it sends with each request, when not from the key this config holds:
+   * a section's `apiKeyFile`, or a provider set with [[withApiKeyProvider]] (#2313).
+   *
+   * The default is `None`, and so is the value of a config that does not support a provider.
+   */
+  def apiKeyProvider: Option[ApiKeyProvider] = None
+
+  /**
+   * The same config, its client asking `provider` for the key on each request, so a rotated key is used
+   * without rebuilding the client.
+   *
+   * The loader calls this for a section that sets `apiKeyFile`. The default returns `this`: a config whose
+   * client cannot take a provider ignores it, and its [[apiKeyProvider]] stays `None` - which the loader
+   * reports as an error for `apiKeyFile` and code setting a provider should check. A config that supports
+   * it overrides this with its own return type.
+   */
+  def withApiKeyProvider(provider: ApiKeyProvider): ProviderConfig = this
 }
 
 object ProviderConfig {

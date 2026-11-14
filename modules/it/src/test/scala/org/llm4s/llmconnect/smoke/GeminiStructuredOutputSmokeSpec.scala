@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
+
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig }
@@ -28,7 +30,7 @@ class GeminiStructuredOutputSmokeSpec extends AnyFlatSpec with Matchers with Eit
     val config = GeminiConfig
       .fromValues(
         modelName = "gemini-2.5-flash",
-        apiKey = apiKey.get,
+        apiKey = Secret(apiKey.get),
         baseUrl = "https://generativelanguage.googleapis.com/v1beta"
       )
       .value

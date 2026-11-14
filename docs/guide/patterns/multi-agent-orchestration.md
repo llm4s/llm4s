@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Multi-Agent Orchestration
+description: "Design multi-agent systems in Scala: sequential and parallel delegation, with use cases, implementation sketches and the trade-offs of each pattern."
+search_title: "Multi-agent orchestration patterns for Scala LLM apps"
 parent: Real-World Application Patterns
 nav_order: 1
 ---

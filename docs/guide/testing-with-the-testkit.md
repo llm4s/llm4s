@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Testing with the Testkit
+description: "Test code that calls an LLM with llm4s-testkit: a scriptable fake LLMClient that records what you sent and never touches the network."
+search_title: "Test LLM code in Scala with the LLM4S testkit"
 parent: User Guide
 nav_order: 29
 ---

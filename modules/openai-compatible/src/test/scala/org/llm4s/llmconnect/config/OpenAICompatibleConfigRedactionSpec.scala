@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.security.Secret
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -19,7 +20,7 @@ class OpenAICompatibleConfigRedactionSpec extends AnyFlatSpec with Matchers with
     val openai = OpenAIConfig
       .fromValues(
         modelName = "gpt-4",
-        apiKey = secret,
+        apiKey = Secret(secret),
         organization = Some("org"),
         baseUrl = "https://example.invalid/v1"
       )
@@ -30,7 +31,7 @@ class OpenAICompatibleConfigRedactionSpec extends AnyFlatSpec with Matchers with
     val zai = ZaiConfig
       .fromValues(
         modelName = "glm-4.5",
-        apiKey = secret,
+        apiKey = Secret(secret),
         baseUrl = "https://example.invalid"
       )
       .value

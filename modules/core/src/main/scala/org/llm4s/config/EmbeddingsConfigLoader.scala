@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.spi.{
   EmbeddingConfigSpec,
@@ -8,6 +9,7 @@ import org.llm4s.llmconnect.spi.{
   EmbeddingProviderSection,
   ProviderRegistry
 }
+import org.llm4s.security.Secret
 import org.llm4s.types.Result
 import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -45,6 +47,10 @@ private[config] object EmbeddingsConfigLoader {
   implicit private val embeddingsRootReader: PureConfigReader[EmbeddingsRoot] =
     PureConfigReader.forProduct1("embeddings")(EmbeddingsRoot.apply)
 
+  /** A key as written, trimmed and registered for redaction where it is read. */
+  implicit private val secretReader: PureConfigReader[Secret] =
+    PureConfigReader[String].map(raw => Secret(raw.trim))
+
   /** The uniform `llm4s.embeddings.<id>` shape, read for whichever provider was selected. */
   implicit private val providerSectionReader: PureConfigReader[EmbeddingProviderSection] =
     PureConfigReader.fromCursor { cursor =>
@@ -52,7 +58,7 @@ private[config] object EmbeddingsConfigLoader {
         objCursor <- cursor.asObjectCursor
         fields <- PureConfigReader
           .forProduct3("apiKey", "baseUrl", "model")(
-            (apiKey: Option[String], baseUrl: Option[String], model: Option[String]) =>
+            (apiKey: Option[Secret], baseUrl: Option[String], model: Option[String]) =>
               EmbeddingProviderSection(apiKey, baseUrl, model)
           )
           .from(objCursor)
@@ -134,14 +140,20 @@ private[config] object EmbeddingsConfigLoader {
       descriptor <- resolve(selected, registry)
       id = descriptor.id.asString
       section  <- readSection(source, descriptor)
-      resolved <- resolveApiKey(section, descriptor, source)
+      keyFile  <- readApiKeyFile(source, descriptor)
+      resolved <- resolveApiKey(section, keyFile, descriptor, source)
       config   <- descriptor.buildConfig(section.withApiKey(resolved.map(_.value)), selected.modelOverride)
       network  <- HttpNetworkReader.load(source)
       // The timeouts block is read once, for every provider, as a chat section's is; the proxy and TLS
       // settings are `llm4s.http`'s.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
-      id -> config.withTimeouts(section.timeouts).withNetwork(network)
+      // A key read from a file - the block's own `apiKeyFile` or the vendor's shared one - is read again per
+      // request, so a key the secret manager rotates is used without reloading (#2478).
+      id -> config
+        .withTimeouts(section.timeouts)
+        .withNetwork(network)
+        .withApiKeyProvider(resolved.flatMap(_.file).map(ApiKeyProvider.file))
     }
 
   private val UnifiedModelPath   = "llm4s.embeddings.model"
@@ -224,13 +236,40 @@ private[config] object EmbeddingsConfigLoader {
    */
   private def resolveApiKey(
     section: EmbeddingProviderSection,
+    keyFile: Option[java.nio.file.Path],
     descriptor: EmbeddingProviderDescriptor,
     source: ConfigSource
   ): Result[Option[SharedCredentials.Resolved]] =
     // An unreadable credentials entry fails only a section that falls back to it.
     SharedCredentials
       .read(source)
-      .resolve(section.apiKey, EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"), descriptor.id)
+      .resolve(
+        section.apiKey.map(_.reveal),
+        EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"),
+        descriptor.id,
+        keyFile
+      )
+
+  /**
+   * The block's `apiKeyFile`, made absolute: a file holding the key (#2478). Read beside the section rather than
+   * into [[org.llm4s.llmconnect.spi.EmbeddingProviderSection]], since a descriptor is handed the key the file holds
+   * and never needs the path. A `null` or an unset `${?VAR}` is absent.
+   */
+  private def readApiKeyFile(
+    source: ConfigSource,
+    descriptor: EmbeddingProviderDescriptor
+  ): Result[Option[java.nio.file.Path]] = {
+    val path = EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKeyFile")
+    val at   = source.at(path)
+    if (at.value().isLeft) Right(None)
+    else
+      at.load[Option[String]]
+        .left
+        .map(failures =>
+          ConfigurationError(s"Failed to read $path: ${failures.toList.map(_.description).mkString("; ")}")
+        )
+        .flatMap(SharedCredentials.keyFilePath(_, path))
+  }
 
   private def trimmed(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)

@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.security.Secret
 import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.testutil.{ RecordingProxy, TestTls }
 import org.scalatest.EitherValues
@@ -110,7 +111,7 @@ class ClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "take the URL's credentials unless proxyCredentials sets them, and nonProxyHosts as given" in {
     val fromUrl = ClientBuilds.network(ClientNetwork.EMPTY.proxy("http://u:p@proxy:3128")).value.proxy.get
-    fromUrl.credentials shouldBe Some(("u", "p"))
+    fromUrl.credentials shouldBe Some(("u", Secret("p")))
     fromUrl.nonProxyHosts shouldBe org.llm4s.http.HttpProxy.DefaultNonProxyHosts
     val set = ClientBuilds
       .network(
@@ -119,7 +120,7 @@ class ClientNetworkSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value
       .proxy
       .get
-    set.credentials shouldBe Some(("alice", "s3cret"))
+    set.credentials shouldBe Some(("alice", Secret("s3cret")))
     set.nonProxyHosts shouldBe Seq("a")
     ClientBuilds
       .network(ClientNetwork.EMPTY.proxy("proxy:1").proxyCredentials(" ", null))

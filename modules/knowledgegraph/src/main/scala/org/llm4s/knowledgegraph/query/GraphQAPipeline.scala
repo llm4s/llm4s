@@ -146,7 +146,7 @@ class GraphQAPipeline(
    */
   private def applyRanking(queryResult: GraphQueryResult): GraphQueryResult =
     if (!config.useRanking || queryResult.nodes.size <= config.maxContextNodes) {
-      queryResult
+      queryResult.copy(edges = queryResult.edges.take(config.maxContextEdges))
     } else {
       // Build a subgraph from the query result for ranking
       val subgraph = Graph(

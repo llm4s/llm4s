@@ -3,11 +3,13 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
+import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.security.TokenGenerations
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -162,17 +164,35 @@ class WatsonXClient(
   /** How long a streamed call may take: the section's `timeouts.stream`, else [[WatsonXClient.DefaultStreamTimeout]]. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
-  final private case class IamToken(value: String, expiresAt: Long)
+  /** An IAM token, and the API key it was exchanged for: a token from a key since rotated away is not reused. */
+  final private case class IamToken(value: String, expiresAt: Long, apiKey: String)
 
   private val tokenCache = new AtomicReference[Option[IamToken]](None)
+
+  // Each IAM token is registered with KnownSecrets before it is cached and sent, so an error body echoing it is
+  // scrubbed; the generation before the previous one is released.
+  private val iamTokens = new TokenGenerations
 
   // Single-flight: concurrent first calls (or calls racing a refresh) wait for one IAM exchange
   // instead of each making their own. A ReentrantLock, not `synchronized`, so a virtual thread
   // blocked here does not pin its carrier and an interrupted waiter wakes with the interrupt.
   private val tokenLock = new ReentrantLock()
 
-  private def freshCached(): Option[String] =
-    tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
+  private def freshCached(apiKey: String): Option[String] =
+    tokenCache
+      .get()
+      .filter(token => token.apiKey == apiKey && nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS)
+      .map(_.value)
+
+  /**
+   * The API key to exchange: asked of the config's `ApiKeyProvider` on every request when it has one (a section's
+   * `apiKeyFile`), so a rotated key is exchanged for a new IAM token without rebuilding the client (#2477);
+   * otherwise `apiKey`. A provider that throws fails the request with an `AuthenticationError`.
+   */
+  private def currentApiKey(): Result[String] =
+    config.apiKeyProvider.fold[Result[String]](Right(config.apiKey.reveal))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(_.asKey)
+    )
 
   /**
    * The cached IAM token, or a fresh one when none is cached or it expires within the buffer.
@@ -181,22 +201,24 @@ class WatsonXClient(
    * gets `Left(CancelledError)` with its interrupt flag set again, never a thrown `InterruptedException`.
    */
   private[provider] def bearerToken(): Result[String] =
-    freshCached() match {
-      case Some(token) => Right(token)
-      case None =>
-        CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
-          case Left(interrupted) =>
-            Thread.currentThread().interrupt()
-            Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
-          case Right(()) =>
-            Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
-              freshCached() match {
-                case Some(token) => Right(token)
-                case None        => fetchToken()
+    currentApiKey().flatMap(apiKey =>
+      freshCached(apiKey) match {
+        case Some(token) => Right(token)
+        case None =>
+          CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
+            case Left(interrupted) =>
+              Thread.currentThread().interrupt()
+              Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
+            case Right(()) =>
+              Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+                freshCached(apiKey) match {
+                  case Some(token) => Right(token)
+                  case None        => fetchToken(apiKey)
+                }
               }
-            }
-        }
-    }
+          }
+      }
+    )
 
   /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
   private def invalidate(token: String): Unit =
@@ -206,34 +228,31 @@ class WatsonXClient(
   private def noteStatus(status: Int, token: String): Unit =
     if (status == 401) invalidate(token)
 
-  /** `text` with the API key and `token` blanked, for a body that goes into an error message. */
-  private def scrub(text: String, token: String): String =
-    Seq(config.apiKey, token).filter(_.nonEmpty).foldLeft(text)(_.replace(_, "[REDACTED]"))
-
-  private def fetchToken(): Result[String] = {
+  private def fetchToken(apiKey: String): Result[String] = {
     val body =
-      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey, "UTF-8")}"
+      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(apiKey, "UTF-8")}"
     val headers = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
     http.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
-      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body)
+      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body, apiKey)
       else
         Left(
           AuthenticationError(
             providerName,
-            s"IAM token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(scrub(response.body, ""), 256)}"
+            s"IAM token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body, 256)}"
           )
         )
     }
   }
 
-  private def parseToken(body: String): Result[String] =
+  private def parseToken(body: String, apiKey: String): Result[String] =
     Try(ujson.read(body)).toResult.flatMap { json =>
       val fields = json.objOpt
       fields.flatMap(_.get("access_token")).flatMap(_.strOpt).filter(_.nonEmpty) match {
         case Some(token) =>
           val ttl =
             fields.flatMap(_.get("expires_in")).flatMap(_.numOpt).map(_.toLong).getOrElse(DEFAULT_TOKEN_TTL_SECONDS)
-          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl)))
+          iamTokens.rotate(token)
+          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl, apiKey)))
           Right(token)
         case None =>
           Left(AuthenticationError(providerName, "IAM response contained no access_token"))
@@ -260,7 +279,7 @@ class WatsonXClient(
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
-                  scrub(response.body, token),
+                  Redaction.scrubRemote(response.body),
                   providerName,
                   response.headers
                 )
@@ -290,7 +309,8 @@ class WatsonXClient(
             val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
             raw.append(err)
             noteStatus(response.statusCode, token)
-            HttpErrorMapper.mapHttpError(response.statusCode, scrub(err, token), providerName, response.headers)
+            HttpErrorMapper
+              .mapHttpError(response.statusCode, Redaction.scrubRemote(err), providerName, response.headers)
           }
         }
       recordExchange(startedAt, requestText, raw.result(), result)
@@ -439,7 +459,7 @@ class WatsonXClient(
       case (None, None, Some(body)) => s"$prefix: $body"
       case _                        => s"$prefix: ${Seq(code, text).flatten.mkString(": ")}"
     }
-    val safe = Redaction.safeBody(scrub(detail, token), 512)
+    val safe = Redaction.safeBody(detail, 512)
     status.foreach(noteStatus(_, token))
     status match {
       case Some(s) =>
@@ -592,7 +612,8 @@ class WatsonXClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override protected def releaseResources(): Unit = http.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object WatsonXClient {
@@ -812,7 +833,8 @@ object WatsonXClient {
   def apply(
     config: WatsonXConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[WatsonXClient] =
-    Try(new WatsonXClient(config, metrics, exchangeLogging)).toResult
+    Try(new WatsonXClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

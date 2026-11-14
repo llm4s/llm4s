@@ -2,7 +2,8 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ LLMError, ProcessingError }
-import org.llm4s.util.SqlIdentifier
+import org.llm4s.util.{ SqlIdentifier, Redaction }
+import org.llm4s.security.Secret
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import java.sql.{ Connection, PreparedStatement, ResultSet }
@@ -121,11 +122,13 @@ final class PgKeywordIndex private (
             case scala.util.Failure(e) =>
               conn.rollback()
               conn.setAutoCommit(true)
-              Left(ProcessingError("pg-keyword-index", s"Index batch failed: ${e.getMessage}"))
+              Left(ProcessingError("pg-keyword-index", s"Index batch failed: ${Redaction.scrubKnown(e.getMessage)}"))
           }
         }
       }.toEither.left
-        .map[LLMError](e => ProcessingError("pg-keyword-index", s"Index batch failed: ${e.getMessage}"))
+        .map[LLMError](e =>
+          ProcessingError("pg-keyword-index", s"Index batch failed: ${Redaction.scrubKnown(e.getMessage)}")
+        )
         .flatMap(identity)
 
   override def search(
@@ -164,7 +167,9 @@ final class PgKeywordIndex private (
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Search failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Search failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def searchWithHighlights(
     query: String,
@@ -211,7 +216,9 @@ final class PgKeywordIndex private (
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Search with highlights failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Search with highlights failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def get(id: String): Result[Option[KeywordDocument]] =
     Try {
@@ -232,7 +239,7 @@ final class PgKeywordIndex private (
             }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Get failed: ${e.getMessage}"))
+    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Get failed: ${Redaction.scrubKnown(e.getMessage)}"))
 
   override def delete(id: String): Result[Unit] =
     deleteBatch(Seq(id))
@@ -251,7 +258,9 @@ final class PgKeywordIndex private (
             ()
           }
         }
-      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Delete batch failed: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("pg-keyword-index", s"Delete batch failed: ${Redaction.scrubKnown(e.getMessage)}")
+      )
 
   override def deleteByPrefix(prefix: String): Result[Long] =
     Try {
@@ -263,7 +272,9 @@ final class PgKeywordIndex private (
           stmt.executeUpdate().toLong
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Delete by prefix failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Delete by prefix failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def count(): Result[Long] =
     Try {
@@ -275,7 +286,9 @@ final class PgKeywordIndex private (
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Count failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Count failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   override def clear(): Result[Unit] =
     Try {
@@ -285,7 +298,9 @@ final class PgKeywordIndex private (
           ()
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Clear failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Clear failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   private val closed = new AtomicBoolean(false)
 
@@ -332,7 +347,9 @@ final class PgKeywordIndex private (
           )
         }
       }
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Stats failed: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("pg-keyword-index", s"Stats failed: ${Redaction.scrubKnown(e.getMessage)}")
+    )
 
   // ============================================================
   // Helper Methods
@@ -495,7 +512,7 @@ object PgKeywordIndex {
     port: Int = 5432,
     database: String = "postgres",
     user: String = "postgres",
-    password: String = "",
+    password: Secret = Secret(""),
     tableName: String = "documents",
     maxPoolSize: Int = 10,
     language: String = "english"
@@ -508,7 +525,7 @@ object PgKeywordIndex {
     def withHost(h: String): Config                   = copy(host = h)
     def withPort(p: Int): Config                      = copy(port = p)
     def withDatabase(db: String): Config              = copy(database = db)
-    def withCredentials(u: String, p: String): Config = copy(user = u, password = p)
+    def withCredentials(u: String, p: Secret): Config = copy(user = u, password = p)
   }
 
   object Config {
@@ -517,7 +534,8 @@ object PgKeywordIndex {
     def local(tableName: String = "documents"): Config =
       Config(tableName = tableName)
 
-    def fromJdbc(jdbcUrl: String, user: String, password: String, tableName: String = "documents"): Config = {
+    def fromJdbc(jdbcUrl: String, user: String, password: Secret, tableName: String = "documents"): Config = {
+      JdbcUrlCredentials.register(jdbcUrl)
       val pattern = """jdbc:postgresql://([^:/]+):?(\d+)?/(.+)""".r
       jdbcUrl match {
         case pattern(host, portStr, database) =>
@@ -550,7 +568,7 @@ object PgKeywordIndex {
           val hikariConfig = new HikariConfig()
           hikariConfig.setJdbcUrl(config.jdbcUrl)
           hikariConfig.setUsername(config.user)
-          hikariConfig.setPassword(config.password)
+          hikariConfig.setPassword(config.password.reveal)
           hikariConfig.setMaximumPoolSize(config.maxPoolSize)
           hikariConfig.setMinimumIdle(1)
           hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
@@ -572,7 +590,7 @@ object PgKeywordIndex {
     }
 
   private def createFailure(e: Throwable): LLMError =
-    ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}")
+    ProcessingError("pg-keyword-index", s"Failed to create index: ${Redaction.scrubKnown(e.getMessage)}")
 
   /**
    * Create a PgKeywordIndex with an existing `javax.sql.DataSource`.
@@ -625,7 +643,7 @@ object PgKeywordIndex {
   def apply(
     connectionString: String,
     user: String,
-    password: String,
+    password: Secret,
     tableName: String
   ): Result[PgKeywordIndex] =
     apply(Config.fromJdbc(connectionString, user, password, tableName))

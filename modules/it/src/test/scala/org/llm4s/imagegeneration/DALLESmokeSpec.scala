@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.security.Secret
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.scalatest.EitherValues
@@ -32,7 +33,7 @@ class DALLESmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     val result = ImageGeneration.generateImage(
       prompt = "a blue circle on a white background",
-      config = OpenAIConfig(apiKey = apiKey.get, model = "gpt-image-1"),
+      config = OpenAIConfig(apiKey = Secret(apiKey.get), model = "gpt-image-1"),
       // Lowest quality and the smallest size: the cheapest call that still proves the path.
       options = ImageGenerationOptions(size = ImageSize.Square1024, quality = Some("low"))
     )
@@ -52,7 +53,7 @@ class DALLESmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "reject an invalid API key with ImageAuthenticationError" in {
     val result = ImageGeneration.generateImage(
       prompt = "a blue circle on a white background",
-      config = OpenAIConfig(apiKey = "sk-invalid-key-for-testing", model = "gpt-image-1"),
+      config = OpenAIConfig(apiKey = Secret("sk-invalid-key-for-testing"), model = "gpt-image-1"),
       options = ImageGenerationOptions(size = ImageSize.Square1024, quality = Some("low"))
     )
 

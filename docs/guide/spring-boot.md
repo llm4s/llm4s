@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Spring Boot
+description: "Use LLM4S with Spring Boot: add llm4s-spring-boot-starter, configure it in application.properties and inject an LLM4STemplate with a health indicator."
+search_title: "Use LLM4S with Spring Boot: LLM client starter"
 parent: User Guide
 nav_order: 7
 ---
@@ -28,6 +30,13 @@ The starter is Spring Boot auto-configuration on top of the [Java API](java). Wh
 | `llm4sClient` | the `JLlmClient`, built from the `llm4s.*` properties; closed when the context closes | defining a bean of type `JLlmClient` |
 | `llm4sTaskExecutor` | the `ExecutorService` behind `completeAsync` and the health probe | defining a bean named `llm4sTaskExecutor` |
 | `llm4sTemplate` | the `LLM4STemplate` you inject | defining a bean of type `LLM4STemplate` |
+| `llm4sTools` | the `Llm4sTools`: every `@Tool` method of your beans (see [An agent with tools](#an-agent-with-tools)) | defining a bean of type `Llm4sTools` |
+| `llm4sAgent` | a `JAgent` over the client and those tools, configured by `llm4s.agent.*`; absent with `llm4s.agent.enabled=false` | defining a bean of type `JAgent` |
+| `llm4sCheckpointer` | the `Checkpointer` the agent keeps its threads in: an `InMemoryCheckpointer`; absent with `llm4s.agent.enabled=false` | defining a bean of type `Checkpointer` |
+| `llm4sEmbeddingClient` | a `JEmbeddingClient`, only when `llm4s.embeddings.model` is set (see [Embeddings](#embeddings)) | defining a bean of type `JEmbeddingClient` |
+| `llm4sTracing` | the `Tracing` the agent reports to, only when `llm4s.tracing.mode` is set (see [Tracing](#tracing)) | defining a bean of type `Tracing` |
+| `llm4sReactiveTemplate` | a `ReactiveLLM4STemplate`, replies as a Reactor `Flux`, only when Reactor and `llm4s-reactor` are on the classpath (see [Streaming to a browser](#streaming-to-a-browser)) | defining a bean of type `ReactiveLLM4STemplate` |
+| `llm4sSseTemplate` | an `SseLLM4STemplate`, replies as a Spring MVC `SseEmitter`, only when Spring MVC is on the classpath | defining a bean of type `SseLLM4STemplate` |
 | `llmHealthIndicator` | an Actuator `HealthIndicator`, only when Spring Boot Actuator is on the classpath | defining a bean of type `LlmHealthIndicator` (`LlmBoot4HealthIndicator` on Spring Boot 4) |
 | `llm4sMetricsCollector` | a `MicrometerMetrics` over your `MeterRegistry`, only when `llm4s-observability-micrometer` is on the classpath and there is a `MeterRegistry` bean; the client reports every call to it (see [Metrics](#metrics)) | defining a bean of type `MetricsCollector` |
 
@@ -59,6 +68,12 @@ Maven and Gradle need it spelled out.
     <artifactId>llm4s-spring-boot-starter_3</artifactId>
     <version>{{ site.data.project.latest_release }}</version>
 </dependency>
+<!-- and the provider module you call: llm4s-ollama_3, llm4s-anthropic_3, llm4s-gemini_3, ... -->
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>llm4s-openai_3</artifactId>
+    <version>{{ site.data.project.latest_release }}</version>
+</dependency>
 ```
 
 **Gradle (Kotlin DSL)**
@@ -66,11 +81,13 @@ Maven and Gradle need it spelled out.
 ```kotlin
 dependencies {
     implementation("org.llm4s:llm4s-spring-boot-starter_3:{{ site.data.project.latest_release }}")
+    implementation("org.llm4s:llm4s-openai_3:{{ site.data.project.latest_release }}")   // the provider you call
 }
 ```
 
-It brings the Java API, so the [dependency notes of the Java guide](java#add-the-dependency) apply: the provider modules,
-Scala's standard library, and no logging backend. For the health indicator, add `spring-boot-starter-actuator` yourself:
+It brings the Java API, so the [dependency notes of the Java guide](java#add-the-dependency) apply: no provider module
+(declare the ones your configuration names, at the same version), Scala's standard library, and no logging backend. A
+provider whose module is missing fails the client with a `CONFIGURATION` error naming the artifact to add. For the health indicator, add `spring-boot-starter-actuator` yourself:
 the starter declares it as `provided`, so it is not on your classpath unless you add it.
 
 ## Configure it
@@ -115,6 +132,11 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | `llm4s.health.probe` | `false` | opt in to a real provider call per health check |
 | `llm4s.health.probe-ttl` | `60s` | how long a probe result is reused |
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports `DOWN` |
+| `llm4s.agent.enabled` | `true` | `false` registers no `llm4sAgent` (the `llm4sTools` bean stays) |
+| `llm4s.agent.id` | `assistant` | the agent's id, as its runs and traces name it |
+| `llm4s.agent.system-prompt` | empty | sent first on every model call of the agent; none when empty |
+| `llm4s.agent.streaming` | `false` | the agent's model calls stream, so `JAgent.stream` carries text deltas |
+| `llm4s.agent.max-steps` | `50` | the most model calls and tool rounds one turn may take; then it ends `STEP_LIMIT_REACHED` |
 
 The starter ships Spring Boot configuration metadata (`META-INF/spring-configuration-metadata.json`), so IntelliJ
 IDEA and the Spring tools for VS Code and Eclipse complete these keys, show their defaults and flag a misspelt one in
@@ -295,6 +317,168 @@ class SummaryController {
 }
 ```
 
+## An agent with tools
+
+Annotate a public method of any bean with the Java API's `@Tool`, and the starter's agent offers it to the model: the
+`llm4sTools` bean collects the `@Tool` methods of every singleton bean, as
+[`JTool.fromAnnotated`](java#tools) reads them, and the `llm4sAgent` bean is a `JAgent` over
+the client and those tools.
+
+```java
+import org.llm4s.javaapi.Param;
+import org.llm4s.javaapi.Tool;
+import org.springframework.stereotype.Component;
+
+@Component
+public class WeatherTools {
+
+    @Tool(description = "The current weather in a city")
+    public String weather(@Param(name = "city", description = "City name") String city) {
+        return "Sunny in " + city;
+    }
+}
+```
+
+Inject the agent where you need it. `run` blocks until the turn ends; `runAsync` runs the turn on the `llm4sTaskExecutor`.
+
+```java
+import org.llm4s.javaapi.JAgent;
+import org.springframework.stereotype.Service;
+
+@Service
+public class AssistantService {
+
+    private final JAgent agent;
+
+    public AssistantService(JAgent agent) {
+        this.agent = agent;
+    }
+
+    public String ask(String question) {
+        return agent.run(question).get().answer().orElse("");
+    }
+}
+```
+
+Its system prompt, id, streaming and step limit are the `llm4s.agent.*` [properties](#properties). It keeps its
+threads in the `llm4sCheckpointer` bean, in memory; define a `Checkpointer` bean of your own, such as
+`llm4s-agent-checkpoint-sqlite`'s `SqliteCheckpointer` or `llm4s-agent-checkpoint-postgres`'s `PostgresCheckpointer`, and
+the agent keeps them there instead.
+
+The application fails to start, naming the bean, when a bean's `@Tool` methods cannot be read (a parameter type a tool
+cannot take, say), when two tools have the same name, or when a tool bean is an AOP proxy: the proxy would be bypassed,
+and with it advice such as `@Transactional`, so keep tools on a bean that is not proxied. For guardrails, a context
+window or several agents, build them with [`Llm4s.agentBuilder`](java#an-agent-with-a-system-prompt-guardrails-and-a-context-window) and inject `Llm4sTools` for the tools.
+
+## Embeddings
+
+Set `llm4s.embeddings.model`, as `provider/model`, and the starter registers a `JEmbeddingClient` bean,
+`llm4sEmbeddingClient`. The provider's own keys go under `llm4s.embeddings.<provider>`, as in the HOCON block of the
+same name; without an `api-key` there, the client uses `llm4s.credentials.<provider>.api-key` or the vendor's variable,
+such as `OPENAI_API_KEY`.
+
+```properties
+llm4s.embeddings.model=openai/text-embedding-3-small
+llm4s.embeddings.openai.api-key=${OPENAI_API_KEY}
+```
+
+```java
+import java.util.List;
+import org.llm4s.javaapi.JEmbeddingClient;
+import org.springframework.stereotype.Service;
+
+@Service
+public class SearchIndexer {
+
+    private final JEmbeddingClient embeddings;
+
+    public SearchIndexer(JEmbeddingClient embeddings) {
+        this.embeddings = embeddings;
+    }
+
+    public List<float[]> vectors(List<String> passages) {
+        return embeddings.embed(passages).get().vectors();
+    }
+}
+```
+
+Its `embedAsync` runs on the `llm4sTaskExecutor`. The provider's module must be on the classpath; a missing key or an
+unknown provider stops the context from starting, with a message that names what to set.
+
+## Streaming to a browser
+
+Two beans stream a reply as the model writes it, each piece one server-sent event.
+
+With Spring WebFlux, add `llm4s-reactor` and return the `Flux` of the `llm4sReactiveTemplate` bean:
+
+```java
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+
+@RestController
+public class ChatStreamController {
+
+    private final ReactiveLLM4STemplate llm;
+
+    public ChatStreamController(ReactiveLLM4STemplate llm) {
+        this.llm = llm;
+    }
+
+    @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> stream(@RequestParam("q") String question) {
+        return llm.stream(question);
+    }
+}
+```
+
+With Spring MVC, return the `SseEmitter` of the `llm4sSseTemplate` bean:
+
+```java
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+@RestController
+public class ChatSseController {
+
+    private final SseLLM4STemplate llm;
+
+    public ChatSseController(SseLLM4STemplate llm) {
+        this.llm = llm;
+    }
+
+    @GetMapping("/chat/sse")
+    public SseEmitter stream(@RequestParam("q") String question) {
+        return llm.stream(question);
+    }
+}
+```
+
+Both take a `Conversation` as well as a question. The provider call runs on a thread of its own, not the request's. A
+failed call ends the stream with its `LlmException`; a client that disconnects interrupts the provider call. The
+templates are classes of their own, not methods of `LLM4STemplate`, so an application without Reactor or Spring MVC
+loads none of their types.
+
+## Tracing
+
+Set `llm4s.tracing.mode` and the starter registers a `Tracing` bean, `llm4sTracing`, which the `llm4sAgent` reports its
+runs, model calls and tool calls to. The mode is `console`, `none`, or that of a tracing backend on the classpath:
+`opentelemetry` with `llm4s-observability-otel`, `langfuse` with `llm4s-observability`. The backend's settings go under
+`llm4s.tracing.<mode>`, as in the HOCON block of the same name:
+
+```properties
+llm4s.tracing.mode=opentelemetry
+llm4s.tracing.opentelemetry.endpoint=http://localhost:4317
+llm4s.tracing.opentelemetry.service-name=orders-service
+```
+
+A mode no backend on the classpath serves stops the context from starting, naming the module to add. The tracer is shut
+down, flushing what it holds, when the context closes.
+
 ## Health
 
 With Actuator on the classpath the starter adds a health indicator, the bean `llmHealthIndicator`. By default it makes **no
@@ -334,13 +518,17 @@ in the context, so a cost tracker can run next to it. The meters, their tags and
 
 ## Testing code that uses the template
 
-There is no supported fake client for tests yet ([#1497](https://github.com/llm4s/llm4s/issues/1497)). What works today: a test
-that does not need the model can run with `llm4s.enabled=false`, so no client is built and no key is needed; put the template
-behind an interface of your own, which that test replaces. And because the starter's beans back off for a bean of the same
-type, a test configuration can supply its own `JLlmClient`.
+Because the starter's beans back off for a bean of the same type, a test configuration can supply its own `JLlmClient`:
+`FakeLlmClient.replying("...").client()` from `llm4s-java-api` answers from a script and records the prompts it was sent,
+with no network or key ([Java: testing your code](java#testing-your-code)). A test that does not need the model can
+instead run with `llm4s.enabled=false`, so no client is built and no key is needed.
 
 ## Where next
 
+- [Moving a Java app from LangChain4j or Spring AI](java-migration): Spring AI and LangChain4j starter properties and
+  beans mapped to this starter, with a compiled controller.
+- [Using LLM4S with Spring AI](spring-ai): with `llm4s-spring-ai`, the starter's client is also a Spring AI `ChatModel`
+  bean, for an application that keeps its `ChatClient` code.
 - [Java](java): the client, conversations and failures the template is built on.
 - [Providers](providers) and [configuration](../getting-started/configuration): every provider, for the HOCON route.
 - The starter's own [README](https://github.com/llm4s/llm4s/blob/main/modules/spring-boot-starter/README.md).

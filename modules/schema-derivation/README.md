@@ -28,20 +28,25 @@ val invoice = client.completeStructuredOf[Invoice](conversation)   // Result[Inv
 | `SchemaOf[A].definition` | the same schema as core's `SchemaDefinition`, which `ToolBuilder` takes as a tool's parameters (not for a sum type with fields, which core cannot express) |
 | `@description("...")` | the description the model sees, on a field or a type |
 | `client.completeStructuredOf[A](conversation, options)` | `completeStructured` with the derived schema; for a sum type, its `anyOf` wrapped in a `value` property and unwrapped from the reply |
+| `client.streamStructuredOf[A](conversation, options)(onPartial)` | `completeStructuredOf` streamed: `onPartial` sees `PartialOf[A]`'s typed partial value (a named tuple of `Option`s with `A`'s field names) as the reply arrives; see the [guide](../../docs/guide/structured-output.md#10-streaming-structured-output) |
+| `PartialJson.parse(text)` | the value a prefix of a JSON document describes, closing what is still open |
+| `import org.llm4s.schema.namedtuples.given` | a uPickle `ReadWriter` for named tuples, so `(sentiment: Sentiment, confidence: Double)` works wherever a case class does |
 | `SchemaOf.string`, `SchemaOf.stringEnum` | schemas for types you write as strings yourself |
 | `Tool.of[A, R](name, description)(a => Either[String, R])` | a `ToolFunction` from a function over a case class: the schema derived from `A`, the arguments decoded into it, argument errors as `SafeParameterExtractor`'s `ToolParameterError`s |
+| `Tool.scoped[A, R](name, description)(a => R)` | the same tool from a function that returns `R` and ends the call early with `reject`, `ensure` or `.?`, reading `ToolScope.idempotencyKey`; these compile only inside it |
+| `Tool.fromMethod(service.method)`, `Tools.derive[S](service)` | a `ToolFunction` from one method, or one per public method of a trait or class: parameters from its parameter list, name from `@toolName` or `snake_case`, description from `@description` or Scaladoc; unsupported methods refused at compile time |
 
 ## Supported and not
 
 Supported: `String`, `Int`, `Long`, `Double`, `Float`, `Boolean`, `BigDecimal`, `BigInt`, `Option`, `List`, `Seq`,
 `Vector`, `Set`, case classes (nested, generic, with `@upickle.implicits.key`), enums and sealed hierarchies of
 singletons (with `@upickle.implicits.key` on a case, too), and sum types whose cases have fields: an `anyOf` of one
-object per case, tagged with uPickle's discriminator (`"$type"` or the trait's `@upickle.implicits.key`).
+object per case, tagged with uPickle's discriminator (`"$type"` or the trait's `@upickle.implicits.key`), and named
+tuples, described as the case class with the same fields.
 
 Refused at compile time, naming the type: `Map` (`llm4s-core`'s schema model has a fixed set of properties), recursive
 types (they need a `$ref`), and a sealed hierarchy nested in another or with a generic case. Also refused:
-`Option` directly inside `Option` and tuples, which uPickle writes as JSON arrays, and named tuples, which it cannot
-read. A type with a hand-written `given SchemaOf` is taken as that given describes it, even one that would otherwise be
+`Option` directly inside `Option` and tuples without names, which uPickle writes as JSON arrays. A type with a hand-written `given SchemaOf` is taken as that given describes it, even one that would otherwise be
 refused. A recursion that runs through a hand-written given which itself derives its type is not visible at compile
 time: building that schema throws an `IllegalStateException` naming the type, on first use, and never hangs.
 
@@ -56,4 +61,5 @@ schema of `StructuredOutputExample`; `RoundTripSpec` validates what uPickle writ
 schema-conformant documents back, and reads every sample `SchemaSamples` generates from each golden schema; `CompileErrorsSpec` pins the refusals (including a recursive type whose type arguments grow, which must still
 terminate); `RecursionGuardSpec` pins the run-time refusal of a recursion through hand-written givens, under a
 timeout so that a deadlock fails it instead of hanging the build; `ExternalUseSpec` derives from a package outside `org.llm4s`, as user code does;
-`TypedToolSpec` checks that a typed tool sends the hand-built calculator's and `add` tool's schemas and reports the argument errors a hand-written tool does; `DerivedSchemasGuideSpec` compiles the guide.
+`TypedToolSpec` checks that a typed tool sends the hand-built calculator's and `add` tool's schemas and reports the argument errors a hand-written tool does; `DerivedToolsSpec`, `DerivedToolArgumentsSpec` and `DerivedToolsCompileErrorsSpec` check tools made from methods (names, descriptions from Scaladoc, the same argument errors as `Tool.of`, the compile-time refusals); `DerivedSchemasGuideSpec` compiles the guide; `PartialJsonSpec` checks every prefix of golden and random documents, `StreamStructuredSpec` streams a reply in chunks of every size and `PartialTypesSpec` pins the partial types, with `StreamingStructuredOutputGuideSpec` compiling the streaming section of the structured-output guide.
+

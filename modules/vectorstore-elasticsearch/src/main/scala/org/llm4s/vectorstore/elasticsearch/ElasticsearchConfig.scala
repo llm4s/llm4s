@@ -14,7 +14,7 @@ import scala.concurrent.duration.*
  * {{{
  * val config = ElasticsearchConfig("https://es.example.com:9200")
  *   .withIndex("docs")
- *   .withAuth(ElasticsearchAuth.ApiKey(encodedKey))
+ *   .withAuth(ElasticsearchAuth.ApiKey(Secret(encodedKey)))
  * }}}
  *
  * The store checks it with [[ElasticsearchConfig#validate]] when it is built.
@@ -62,7 +62,8 @@ final case class ElasticsearchConfig private (
       _ <- SearchConfigChecks.checkBaseUrl("Elasticsearch", baseUrl, auth != ElasticsearchAuth.NoAuth)
       _ <- SearchConfigChecks.checkIndex("Elasticsearch", index)
       _ <- auth match {
-        case ElasticsearchAuth.ApiKey(key) if key.trim.isEmpty || key.exists(c => c.isWhitespace || c.isControl) =>
+        case ElasticsearchAuth.ApiKey(key)
+            if key.reveal.trim.isEmpty || key.reveal.exists(c => c.isWhitespace || c.isControl) =>
           Left(ConfigurationError("The Elasticsearch apiKey is blank or contains whitespace"))
         case ElasticsearchAuth.Basic(user, _) if user.trim.isEmpty || user.contains(':') =>
           Left(ConfigurationError("The Elasticsearch username is blank or contains ':'"))

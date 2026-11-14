@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.security.{ KnownSecrets, Secret }
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
@@ -15,6 +16,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.file.{ Files, Path }
 import java.util.concurrent.CompletionException
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 class OpenAIWorkloadIdentitySpec
@@ -41,12 +43,12 @@ class OpenAIWorkloadIdentitySpec
     "build an OpenAIConfig carrying the workload identity and no key" in {
       val config = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$section\n}").value
       val openai = config.asInstanceOf[OpenAIConfig]
-      openai.apiKey shouldBe ""
+      openai.apiKey.reveal shouldBe ""
       openai.workloadIdentity.value shouldBe OpenAIWorkloadIdentity(
         IdentitySource.File(Path.of("/var/run/svid").toAbsolutePath),
         "idp_1",
         "sa_1",
-        Some("c_1")
+        Some(Secret("c_1"))
       )
       openai.toString should include("workloadIdentity=Some(OpenAIWorkloadIdentity(")
       for id <- Seq("idp_1", "sa_1", "c_1") do (openai.toString should not).include(id)
@@ -60,7 +62,7 @@ class OpenAIWorkloadIdentitySpec
       val file = Files.createTempFile("svid", ".jwt")
       Files.writeString(file, "eyJ.svid.sig\n")
       val sdk = OpenAIClientTransport.sdkWorkloadIdentity(
-        OpenAIWorkloadIdentity(IdentitySource.File(file), "idp_1", "sa_1", Some("c_1"))
+        OpenAIWorkloadIdentity(IdentitySource.File(file), "idp_1", "sa_1", Some(Secret("c_1")))
       )
       sdk.identityProviderId() shouldBe "idp_1"
       sdk.serviceAccountId() shouldBe "sa_1"
@@ -103,20 +105,26 @@ class OpenAIWorkloadIdentitySpec
         an[AuthenticationError]
     }
 
-    "redact the token exchange's reply, and the configured ids, from an SDK error" in {
-      val config = OpenAIConfig(
-        apiKey = "",
-        model = "gpt-4o-mini",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1",
-        contextWindow = 8192,
-        reserveCompletion = 1024,
-        workloadIdentity = Some(
-          OpenAIWorkloadIdentity(IdentitySource.Literal("opaque-svid-literal-7"), "idp_secret_1", "sa_secret_1")
-            .withClientId("client_secret_id_1")
+    "redact the token exchange's reply, and the registered ids, from an SDK error" in KnownSecrets.isolated {
+      // Registered as a client registers them (#1932): the ids at construction, the subject token as the SDK reads it.
+      val wi = OpenAIWorkloadIdentity(
+        IdentitySource.Literal("opaque-svid-literal-7"),
+        "idp_secret_1",
+        "sa_secret_1",
+        Some(Secret("client_secret_id_1"))
+      )
+      OpenAIClient.registerCredentials(
+        OpenAIConfig(
+          Secret(""),
+          "gpt-4o-mini",
+          None,
+          "https://api.openai.com/v1",
+          128000,
+          4096,
+          workloadIdentity = Some(wi)
         )
       )
-      val secrets = OpenAIClient.credentialSecrets(config)
+      OpenAIClientTransport.sdkWorkloadIdentity(wi).provider().getToken(null, null) shouldBe "opaque-svid-literal-7"
       val sdkMessages = Seq(
         // What the SDK's exchange reports for a reply without an access token.
         "Token exchange response missing 'access_token' field. Response: " +
@@ -125,7 +133,7 @@ class OpenAIWorkloadIdentitySpec
           """"refresh_token":"opaque-refresh-token-1"}"""
       )
       for message <- sdkMessages do
-        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai", secrets)
+        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai")
         error.message should include("Token exchange response")
         for secret <- Seq(
             "client_secret_id_1",
@@ -137,27 +145,87 @@ class OpenAIWorkloadIdentitySpec
         do (error.message should not).include(secret)
     }
 
-    "scrub a short literal identity token, but not short ids that would garble every error body" in {
-      val config = OpenAIConfig(
-        apiKey = "",
-        model = "gpt-4o-mini",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1",
-        contextWindow = 8192,
-        reserveCompletion = 1024,
-        workloadIdentity = Some(
-          OpenAIWorkloadIdentity(IdentitySource.Literal("tok"), "idp", "prod").withClientId("app")
+    "mask each subject token it hands the SDK when the exchange's error echoes it bare, keeping two generations (#1932)" in
+      KnownSecrets.isolated {
+        val file = Files.createTempFile("svid", ".jwt")
+        file.toFile.deleteOnExit()
+        val provider = OpenAIClientTransport
+          .sdkWorkloadIdentity(OpenAIWorkloadIdentity(IdentitySource.File(file), "i", "s"))
+          .provider()
+        val subjects = Seq("opaqueSvidGen000001", "opaqueSvidGen000002", "opaqueSvidGen000003")
+        for t <- subjects do
+          Files.writeString(file, t)
+          provider.getToken(null, null) shouldBe t
+          val message = OpenAIClient
+            .mapError(
+              new com.openai.errors.OpenAIInvalidDataException(s"Token exchange failed for subject $t"),
+              "openai"
+            )
+            .message
+          message should include("Token exchange failed")
+          (message should not).include(t)
+        KnownSecrets.scrub(subjects.head, "[X]") shouldBe subjects.head
+      }
+
+    "mask the access token the SDK obtained when the API's error body echoes it bare, on complete and stream (#1932)" in
+      KnownSecrets.isolated {
+        // The SDK posts the exchange to a fixed https://auth.openai.com/oauth/token, so no local server can answer
+        // it: the SDK runs for real over an in-memory HTTP client, which answers the exchange and the API call.
+        import com.openai.core.http.{ Headers, HttpClient as SdkHttp, HttpRequest, HttpResponse as SdkResponse }
+        val token = "opaqueOpenAIAccess0001"
+        val seen  = new java.util.concurrent.ConcurrentLinkedQueue[String]()
+        def response(status: Int, text: String): SdkResponse = new SdkResponse {
+          def statusCode(): Int = status
+          def headers(): Headers =
+            Headers.builder().put("Content-Type", "application/json").build()
+          def body(): java.io.InputStream =
+            new java.io.ByteArrayInputStream(text.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+          def close(): Unit = ()
+        }
+        val base = new SdkHttp {
+          def execute(request: HttpRequest, options: com.openai.core.RequestOptions): SdkResponse =
+            if request.url().startsWith("https://auth.openai.com/") then
+              response(
+                200,
+                s"""{"access_token":"$token","issued_token_type":"urn:ietf:params:oauth:token-type:access_token",""" +
+                  """"token_type":"Bearer","expires_in":3600}"""
+              )
+            else
+              seen.add(request.headers().values("Authorization").asScala.mkString(","))
+              response(403, s"""{"error":{"message":"request with $token is denied","type":"permission_error"}}""")
+          def executeAsync(
+            request: HttpRequest,
+            options: com.openai.core.RequestOptions
+          ): java.util.concurrent.CompletableFuture[SdkResponse] =
+            java.util.concurrent.CompletableFuture.completedFuture(execute(request, options))
+          def close(): Unit = ()
+        }
+        val wi = OpenAIWorkloadIdentity(IdentitySource.Literal("eyJ.svid.sig"), "idp_1", "sa_1")
+        val config = OpenAIConfig(
+          Secret(""),
+          "gpt-4o-mini",
+          None,
+          "https://api.openai.com/v1",
+          128000,
+          4096,
+          workloadIdentity = Some(wi)
         )
-      )
-      OpenAIClient.credentialSecrets(config) shouldBe Seq("tok")
-      val error = OpenAIClient.mapError(
-        new com.openai.errors.OpenAIInvalidDataException("app in prod rejected tok"),
-        "openai",
-        OpenAIClient.credentialSecrets(config)
-      )
-      error.message should include("app in prod rejected")
-      (error.message should not).include("tok")
-    }
+        val transport = OpenAIClientTransport.sdk(OpenAIClientTransport.workloadIdentitySdk(config, wi, base))
+        val client = OpenAIClient.forTest("gpt-4o-mini", transport, config)(using
+          org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        )
+        val conversation = Conversation(Seq(UserMessage("hi")))
+        for result <- Seq(
+            client.complete(conversation, CompletionOptions()),
+            client.streamComplete(conversation, CompletionOptions(), _ => ())
+          )
+        do
+          val message = result.left.value.message
+          message should include("denied")
+          (message should not).include(token)
+        seen.asScala.toSeq.distinct shouldBe Seq(s"Bearer $token")
+        client.close()
+      }
 
     "read the identity token for the async path off the common pool" in {
       val file = Files.createTempFile("svid", ".jwt")
@@ -192,7 +260,7 @@ class OpenAIWorkloadIdentitySpec
           a[ConfigurationError]
         // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
         val byHand = OpenAIConfig(
-          "",
+          Secret(""),
           "gpt-4o-mini",
           None,
           baseUrl,
@@ -258,7 +326,7 @@ class OpenAIWorkloadIdentitySpec
       baseUrl: String = OpenAIProvider.DEFAULT_BASE_URL,
       providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = None
     ) =
-      OpenAIConfig.fromValues("gpt-4o-mini", apiKey, None, baseUrl, providerId, Some(identity))
+      OpenAIConfig.fromValues("gpt-4o-mini", Secret(apiKey), None, baseUrl, providerId, Some(identity))
 
     "be accepted by fromValues for openai, with no key" in {
       fromValues().value.workloadIdentity.value shouldBe identity
@@ -318,7 +386,7 @@ class OpenAIWorkloadIdentitySpec
       do
         withClue(url) {
           OpenAIConfig(
-            "",
+            Secret(""),
             "gpt-4o-mini",
             None,
             url,
@@ -334,13 +402,13 @@ class OpenAIWorkloadIdentitySpec
     }
 
     "leave a custom baseUrl alone with an apiKey" in {
-      OpenAIConfig.fromValues("gpt-4o-mini", "sk-x", None, "http://proxy.example/v1").isRight shouldBe true
+      OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-x"), None, "http://proxy.example/v1").isRight shouldBe true
     }
 
     "be refused by OpenAIClient and OpenRouterClient when built with apply or changed with a with* setter" in {
       val valid = fromValues().value
       val bad = Seq(
-        valid.withApiKey("sk-x"),
+        valid.withApiKey(Secret("sk-x")),
         valid.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
         valid.withBaseUrl("https://openrouter.ai/api/v1"),
         valid.withBaseUrl("https://attacker.example/v1"),
@@ -366,14 +434,14 @@ class OpenAIWorkloadIdentitySpec
       val blanks = Seq(
         "workloadIdentity.identityProviderId" -> identity.withIdentityProviderId(" "),
         "workloadIdentity.serviceAccountId"   -> identity.withServiceAccountId(""),
-        "workloadIdentity.clientId"           -> identity.withClientId(" "),
+        "workloadIdentity.clientId"           -> identity.withClientId(Secret(" ")),
         "workloadIdentity.identityToken"      -> identity.withIdentityToken(IdentitySource.Literal("")),
         "workloadIdentity.identityTokenFile"  -> identity.withIdentityToken(IdentitySource.File(Path.of("")))
       )
       for (field, blank) <- blanks do
         withClue(field) {
           val error = OpenAIConfig
-            .fromValues("gpt-4o-mini", "", None, OpenAIProvider.DEFAULT_BASE_URL, None, Some(blank))
+            .fromValues("gpt-4o-mini", Secret(""), None, OpenAIProvider.DEFAULT_BASE_URL, None, Some(blank))
             .left
             .value
           error shouldBe a[ConfigurationError]
@@ -388,11 +456,11 @@ class OpenAIWorkloadIdentitySpec
     "leave OpenAIClient refusing a blank apiKey once the identity is removed, rather than send an empty bearer" in {
       val keyless = fromValues().value.withWorkloadIdentity(None)
       Seq("", "   ").foreach { key =>
-        val error = OpenAIClient(keyless.withApiKey(key)).left.value
+        val error = OpenAIClient(keyless.withApiKey(Secret(key))).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
         an[IllegalArgumentException] should be thrownBy new OpenAIClient(
-          keyless.withApiKey(key),
+          keyless.withApiKey(Secret(key)),
           org.llm4s.metrics.MetricsCollector.noop
         )
       }
@@ -401,16 +469,16 @@ class OpenAIWorkloadIdentitySpec
     "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
       // the short apply with a blank key and no identity would send an empty bearer
       Seq("", "  ").foreach { key =>
-        OpenAIClient(OpenAIConfig(key, "gpt-4o-mini")).left.value.message should include("apiKey")
+        OpenAIClient(OpenAIConfig(Secret(key), "gpt-4o-mini")).left.value.message should include("apiKey")
       }
       // the short apply's default base URL is an OpenAI host, so a keyless config with an identity is valid
-      val federated = OpenAIConfig("", "gpt-4o-mini").withWorkloadIdentity(identity)
+      val federated = OpenAIConfig(Secret(""), "gpt-4o-mini").withWorkloadIdentity(identity)
       OpenAIConfig.validate(federated) shouldBe Right(federated)
       OpenAIClient(federated).value.close()
       val bad = Seq(
-        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(identity),
-        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
-        federated.withApiKey("sk-x"),
+        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(identity),
+        OpenAIConfig(Secret("sk-x"), "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey(Secret("sk-x")),
         federated.withBaseUrl("https://proxy.example/v1"),
         federated.withExplicitProviderId(org.llm4s.types.ProviderModelTypes.ProviderId("requesty")),
         federated.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("openrouter"))),

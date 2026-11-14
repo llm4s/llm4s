@@ -533,7 +533,7 @@ class OpenAIClient private (private val model: String, private val client: Azure
 val client = LLM.client(
   provider = LLMProvider.OpenAI,
   config = OpenAIConfig(
-    apiKey = "sk-..."
+    apiKey = Secret("sk-...")
   )
 )
 

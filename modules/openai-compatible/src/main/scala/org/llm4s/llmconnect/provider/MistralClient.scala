@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ MistralConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model.{ ContentPart, ThinkingBlock }
 import org.llm4s.media.{ MediaSource, MediaType }
 import org.llm4s.metrics.MetricsCollector
@@ -34,7 +35,8 @@ import scala.util.Try
 class MistralClient(
   config: MistralConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using ModelRegistryService)
     extends OpenAICompatibleClient(
       OpenAICompatibleClient.Settings(
@@ -42,7 +44,7 @@ class MistralClient(
         displayName = "Mistral",
         model = config.model,
         baseUrl = MistralConfig.apiBaseUrl(config.baseUrl),
-        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
+        credential = OpenAICompatibleClient.keyCredential(config.apiKey, config.apiKeyProvider),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts,
@@ -50,28 +52,32 @@ class MistralClient(
       ),
       MistralDialect,
       metrics,
-      exchangeLogging
+      exchangeLogging,
+      httpClient
     )
 
 @Experimental
 object MistralClient {
 
   def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig.nonEmpty("Mistral", "apiKey", config.apiKey).flatMap(_ => Try(new MistralClient(config)).toResult)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
+      .flatMap(_ => Try(new MistralClient(config)).toResult)
 
   def apply(config: MistralConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
       .flatMap(_ => Try(new MistralClient(config, metrics)).toResult)
 
   def apply(
     config: MistralConfig,
     metrics: MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[MistralClient] =
-    ProviderConfig
-      .nonEmpty("Mistral", "apiKey", config.apiKey)
-      .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging)).toResult)
+    OpenAICompatibleClient
+      .requireKey("Mistral", config.apiKey, config.apiKeyProvider)
+      .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging, httpClient)).toResult)
 }
 
 /**

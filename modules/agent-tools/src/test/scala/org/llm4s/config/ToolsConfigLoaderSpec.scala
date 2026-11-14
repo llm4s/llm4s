@@ -27,7 +27,7 @@ class ToolsConfigLoaderSpec extends AnyFunSuite {
 
       assert(result.isRight)
       result.foreach { exaConfig =>
-        assert(exaConfig.apiKey == apiKey)
+        assert(exaConfig.apiKey.reveal == apiKey)
         assert(exaConfig.apiUrl == apiUrl)
         assert(exaConfig.numResults == numResults)
         assert(exaConfig.searchType == searchType)

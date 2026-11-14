@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.security.Secret
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAGConfig, GraphRAGMode }
 import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
@@ -418,7 +419,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = "test-key",
+            apiKey = Secret("test-key"),
             baseUrl = "http://localhost",
             model = "test-model"
           )
@@ -435,7 +436,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
       resolveEmbeddingProvider = _ =>
         Right(
           EmbeddingProviderConfig(
-            apiKey = "test-key",
+            apiKey = Secret("test-key"),
             baseUrl = "http://localhost",
             model = "test-model"
           )

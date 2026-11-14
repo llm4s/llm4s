@@ -1,10 +1,11 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 
 /**
@@ -35,30 +36,35 @@ import org.slf4j.LoggerFactory
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
  *                 value keeps the client's own default ([[ProviderTimeouts]])
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2477): a section's `apiKeyFile` sets one
  */
 @Experimental
 final case class CohereConfig private (
-  apiKey: String,
+  apiKey: Secret,
   model: String,
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("cohere")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): CohereConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): CohereConfig = copy(network = network)
+  override val providerId: ProviderId                                     = ProviderId("cohere")
+  override def endpointUrl: Option[String]                                = Some(baseUrl)
+  override def withModel(model: String): CohereConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): CohereConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): CohereConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): CohereConfig  = copy(apiKeyProvider = provider)
 
-  def withApiKey(apiKey: String): CohereConfig                    = copy(apiKey = apiKey)
+  def withApiKey(apiKey: Secret): CohereConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): CohereConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): CohereConfig         = copy(contextWindow = contextWindow)
   def withReserveCompletion(reserveCompletion: Int): CohereConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
-    s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+    s"CohereConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion${apiKeyProvider.fold("")(p => s", apiKeyProvider=$p")})"
 
 @Experimental
 object CohereConfig {
@@ -84,7 +90,7 @@ object CohereConfig {
    * from the model. Every field after `model` has a default.
    */
   def apply(
-    apiKey: String,
+    apiKey: Secret,
     model: String,
     baseUrl: String = DEFAULT_BASE_URL,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
@@ -98,14 +104,15 @@ object CohereConfig {
       contextWindow,
       reserveCompletion,
       timeouts,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,
    * which do not see Scala default arguments. Set the rest with the `with*` setters.
    */
-  def apply(apiKey: String, model: String): CohereConfig =
+  def apply(apiKey: Secret, model: String): CohereConfig =
     apply(apiKey, model, baseUrl = DEFAULT_BASE_URL)
 
   private val cohereFallback: String => (Int, Int) = _ => (DEFAULT_CONTEXT_WINDOW, DEFAULT_RESERVE_COMPLETION)
@@ -137,11 +144,11 @@ object CohereConfig {
    */
   def fromValues(
     modelName: String,
-    apiKey: String,
+    apiKey: Secret,
     baseUrl: String
   )(using resolver: ContextWindowResolver): Result[CohereConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey.reveal)
       _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(

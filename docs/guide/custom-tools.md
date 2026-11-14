@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Custom Tools
+description: "Write a tool for an LLM4S agent with ToolBuilder: declare parameters, read arguments safely, return a result or error, and test it without a model."
+search_title: "Build custom LLM tools in Scala with ToolBuilder"
 parent: User Guide
 nav_order: 34
 ---
@@ -8,7 +10,7 @@ nav_order: 34
 # Build Your Own Tool
 {: .no_toc }
 
-Write a tool with `ToolBuilder`: declare its parameters, read them safely, return a result or an error, and test it without a model.
+Write a tool with {% include api.html t="org.llm4s.toolapi.ToolBuilder" %}: declare its parameters, read them safely, return a result or an error, and test it without a model.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -25,7 +27,7 @@ the tool in an agent needs `llm4s-agent`.
 
 ## 1. Anatomy of a tool
 
-A tool is a `ToolFunction` with four parts, and `ToolBuilder` assembles them:
+A tool is a {% include api.html t="org.llm4s.toolapi.ToolFunction" %} with four parts, and `ToolBuilder` assembles them:
 
 - a **name**, which is how the model calls it (`convert_temperature`);
 - a **description**, which is the model's only guide to when to call it;
@@ -155,7 +157,7 @@ missing record, a refused action. The model never sees a stack trace:
   `Left(HandlerError(toolName, message))`.
 - Run through an agent, the model is shown `error.getFormattedMessage`, which here reads
   `Tool call 'convert_temperature' failed with error: unit must be 'celsius' or 'fahrenheit', not 'kelvin'`.
-- An exception your handler throws is not a `Left` you chose. A `ToolRegistry` catches it and reports a
+- An exception your handler throws is not a `Left` you chose. A {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} catches it and reports a
   `ToolCallError.ExecutionError` with the exception's message; calling `tool.execute` directly lets it escape.
   Keep expected failures in the `Left`.
 

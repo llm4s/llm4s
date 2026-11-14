@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.http.{ HttpNetworkSettings, HttpProxy, HttpTls }
 import org.llm4s.llmconnect.config.BedrockConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -46,7 +47,7 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
   it should "answer an authenticating proxy's challenge with Basic credentials" in {
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")), body = converseResponse("auth"))) {
       proxy =>
-        val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword("s3cret"))
+        val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword(Secret("s3cret")))
         Using.resource(client(Endpoint, settings)) { bedrock =>
           bedrock.complete(hello, CompletionOptions()).value.content shouldBe "auth"
           proxy.authorized.map(_.target) shouldBe Vector(s"$Endpoint/model/$Model/converse")
@@ -68,7 +69,7 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
 
   it should "send ConverseStream through it" in {
     Using.resource(RecordingProxy.start(credentials = Some(("alice", "s3cret")))) { proxy =>
-      val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword("s3cret"))
+      val settings = via(HttpProxy("127.0.0.1", proxy.port).withUsername("alice").withPassword(Secret("s3cret")))
       Using.resource(client(Endpoint, settings)) { bedrock =>
         // The proxy answers with JSON, not an event stream, so the stream fails; the request reached the proxy.
         bedrock.streamComplete(hello, CompletionOptions(), _ => ()): Unit
@@ -88,12 +89,17 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
 
   it should "build clients carrying a trust store and a client certificate" in {
     val tls =
-      HttpTls(Some(TestTls.trustStore), Some(TestTls.Password), Some(TestTls.clientStore), Some(TestTls.Password))
+      HttpTls(
+        Some(TestTls.trustStore),
+        Some(Secret(TestTls.Password)),
+        Some(TestTls.clientStore),
+        Some(Secret(TestTls.Password))
+      )
     val withTls: BedrockConfig = config("https://bedrock.aws.test").withNetwork(HttpNetworkSettings(tls = tls))
     BedrockNetwork.syncHttpClient(withTls) should not be empty
     BedrockNetwork.asyncHttpClient(withTls) should not be empty
     val trustOnly = config("https://bedrock.aws.test").withNetwork(
-      HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(TestTls.Password)))
+      HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password))))
     )
     BedrockNetwork.syncHttpClient(trustOnly) should not be empty
     BedrockNetwork.asyncHttpClient(trustOnly) should not be empty
@@ -105,7 +111,7 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
     Using.resource(client(endpoint, HttpNetworkSettings.default)) { plain =>
       plain.complete(hello, CompletionOptions()).isLeft shouldBe true
     }
-    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(TestTls.Password)))
+    val trusting = HttpNetworkSettings(tls = HttpTls(Some(TestTls.trustStore), Some(Secret(TestTls.Password))))
     Using.resource(client(endpoint, trusting)) { bedrock =>
       bedrock.complete(hello, CompletionOptions()).value.content shouldBe "over tls"
     }
@@ -113,7 +119,7 @@ final class BedrockClientNetworkSpec extends AnyFlatSpec with Matchers with Eith
   }
 
   "BedrockClient with a trust store it cannot read" should "refuse to build, never naming the password" in {
-    val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some("never-printed")))
+    val broken = HttpNetworkSettings(tls = HttpTls(Some(Path.of("missing.p12")), Some(Secret("never-printed"))))
     val error  = Try(client(Endpoint, broken)).failed.get
     error.getMessage should (include("tls.trustStore").and(not).include("never-printed"))
   }

@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Evaluate an answer with a judge
+description: "Grade an LLM answer against a reference with a judge model from 1 to 5, to check whether a prompt or model change made answers better."
+search_title: "Evaluate LLM answers with an LLM judge in Scala"
 parent: Cookbook
 grand_parent: Examples
 nav_order: 10

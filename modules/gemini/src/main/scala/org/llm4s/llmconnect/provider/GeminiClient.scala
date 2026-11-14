@@ -10,6 +10,7 @@ import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -79,6 +80,16 @@ class GeminiClient(
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /**
+   * The key for the next request: asked of the config's `ApiKeyProvider` each time when it has one (a section's
+   * `apiKeyFile`), so a rotated key is sent without rebuilding the client (#2477); otherwise `apiKey`. A provider
+   * that throws fails the request with an `AuthenticationError` rather than escaping it.
+   */
+  private def requestKey(): Result[String] =
+    config.apiKeyProvider.fold[Result[String]](Right(config.apiKey.reveal))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(_.asKey)
+    )
+
   /** How long a non-streaming call may take: the section's `timeouts.request`, else GeminiClient.DefaultRequestTimeout. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
 
@@ -114,11 +125,12 @@ class GeminiClient(
           .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
-      .flatMap { transformed =>
+      .flatMap(transformed => requestKey().map(transformed -> _))
+      .flatMap { (transformed, key) =>
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=$key"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
@@ -164,11 +176,12 @@ class GeminiClient(
           .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
-      .flatMap { transformed =>
+      .flatMap(transformed => requestKey().map(transformed -> _))
+      .flatMap { (transformed, key) =>
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
+        val url                     = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=$key&alt=sse"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
@@ -574,11 +587,8 @@ class GeminiClient(
       .tapRight(c => recordExchange(startedAt, requestBody, successResponse, Right(c)))
       .tapLeft(e => recordExchange(startedAt, requestBody, failureResponse, Left(e)))
 
-  override protected def releaseResources(): Unit =
-    (http: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object GeminiClient {
@@ -601,7 +611,8 @@ object GeminiClient {
   def apply(
     config: GeminiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[GeminiClient] =
-    Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
+    Try(new GeminiClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

@@ -43,7 +43,7 @@ getting-started/installation.md | ae34e42f15 | skip | sbt build definition, not 
 getting-started/installation.md | 9aef71a790 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 975f60b158 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 99cfae3041 | skip | sbt build definition, not Scala source
-getting-started/installation.md | 870bda0003 | skip | sbt build definition, not Scala source
+getting-started/installation.md | e081f41bf6 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 425f37584b | skip | sbt build definition, not Scala source
 getting-started/installation.md | 6b26cf14c7 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 4f8485e651 | skip | sbt build definition, not Scala source
@@ -53,7 +53,8 @@ getting-started/installation.md | 362b0b0114 | skip | sbt build definition, not 
 getting-started/installation.md | b85df8a9fb | skip | sbt build definition, not Scala source
 getting-started/installation.md | 0b97b6dcc7 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 373158eeb7 | skip | sbt build definition, not Scala source
-getting-started/installation.md | f9b67cd50f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 58ca6f7b3f | skip | sbt build definition, not Scala source
+getting-started/installation.md | 0ab7f851fd | skip | sbt build definition, not Scala source
 getting-started/installation.md | 26688d4223 | skip | sbt build definition, not Scala source
 getting-started/installation.md | 975cc0444f | skip | sbt build definition, not Scala source
 getting-started/installation.md | 5c8e7dda9b | skip | sbt build definition, not Scala source
@@ -67,6 +68,7 @@ guide/providers.md | 5b738f4a9e | skip | sbt build definition, not Scala source
 guide/providers.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
 guide/providers.md | 212673b3ef | skip | sbt build definition, not Scala source
 guide/providers.md | 3aaf5d6233 | skip | uses ConfigPolicy from llm4s-config-policy, the unpublished config-check CLI module, which samples does not depend on
+guide/providers.md | 21b6f45251 | skip | sbt build definition, not Scala source
 guide/basic-usage.md | 26fea8f0c8 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
 guide/basic-usage.md | 54302bfb43 | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
 guide/basic-usage.md | ef5e8e7dfe | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.{ LLMClient, LLMConnect }; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService; import org.llm4s.types.Result
@@ -82,6 +84,7 @@ guide/error-handling.md | 3924ea54e4 | with | import org.llm4s.error.LLMError
 getting-started/installation.md | acebca2c40 | skip | sbt build definition, not Scala source
 getting-started/installation.md | f178be64a2 | skip | sbt build definition, not Scala source
 getting-started/installation.md | ec5eaa078c | skip | sbt build definition, not Scala source
+getting-started/installation.md | 49823275db | skip | sbt build definition, not Scala source
 guide/vector-store.md | 82d7940cc0 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 1ec60e6ed3 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 0c5a836dc4 | with | import org.llm4s.vectorstore.elasticsearch._
@@ -93,7 +96,7 @@ guide/vector-store.md | 6d038549b2 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | 81578bed66 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | dd3f42e9a1 | with | import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | 15dd88908d | with | import org.llm4s.vectorstore.MetadataFilter._
-guide/vector-store.md | 84a5714593 | with | import org.llm4s.vectorstore._
+guide/vector-store.md | 7cfa35e8f5 | with | import org.llm4s.vectorstore._
 guide/vector-store.md | e3b73b6495 | with | import org.llm4s.vectorstore._; import org.llm4s.vectorstore.MetadataFilter._
 guide/vector-store.md | df1066d8ee | with | import org.llm4s.types.Result; import org.llm4s.vectorstore._
 reliability-guide.md | eba4e8740f | skip | the constructor's signature, with parameter types in place of arguments; the call is in the next block
@@ -137,3 +140,27 @@ guide/agents/handoffs.md | 7fdebf1862 | with | import org.llm4s.agent.Handoff
 guide/agents/handoffs.md | 325a7ae427 | skip | agent stands for the specialist builder being described
 guide/agents/handoffs.md | 60975716bb | with | import org.llm4s.agent.Agent
 guide/agents/handoffs.md | 91dac2740e | skip | the withHandoffs calls shown on their own, without the builder they continue
+getting-started/installation.md | 631ae22c61 | skip | sbt build definition, not Scala source
+getting-started/installation.md | fcc67c6b63 | skip | sbt build definition, not Scala source
+reference/doctor.md | ac763e3c9e | skip | sbt build definition, not Scala source
+guide/direct-style.md | 0b61c4d844 | skip | sbt build definition, not Scala source
+scala-ai/agents.md | 825dc005dd | skip | sbt build definition, not Scala source
+scala-ai/llm-framework.md | f41ac720c4 | skip | sbt build definition, not Scala source
+scala-ai/providers.md | 6bfa1a8590 | skip | sbt build definition, not Scala source
+scala-ai/rag.md | e66ecd7f53 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 2d79f3f834 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 21b6f45251 | skip | sbt build definition, not Scala source
+guide/prompts.md | 2d79f3f834 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 79c0e24407 | skip | sbt build definition, not Scala source
+guide/tapir-tools.md | 79c0e24407 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 0d09a75d93 | skip | sbt build definition, not Scala source
+guide/http-transport.md | 0d09a75d93 | skip | sbt build definition, not Scala source
+getting-started/installation.md | 5668a267bd | skip | sbt build definition, not Scala source
+getting-started/local-jlama.md | 8d860f48e1 | skip | sbt build definition, not Scala source
+tutorials/support-assistant/part-1-first-call.md | f191562fc0 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.llmconnect.model.CompletionOptions; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part1FirstCall.conversationFor
+tutorials/support-assistant/part-1-first-call.md | 243847ae3c | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result
+tutorials/support-assistant/part-2-typed-answers.md | 8e136f7a09 | with | import org.llm4s.schema.*; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.Ticket
+tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part2TypedAnswers.{ Ticket, classify }
+tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
+tutorials/support-assistant/part-3-tools.md | 41049c3fc7 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
+guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask

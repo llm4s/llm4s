@@ -89,7 +89,7 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       )
       loaded match
         case Right(config: WatsonXConfig) =>
-          config.apiKey shouldBe "env-key"
+          config.apiKey.reveal shouldBe "env-key"
           config.projectId shouldBe "p-1"
           config.baseUrl shouldBe WatsonXConfig.DEFAULT_BASE_URL
           config.apiVersion shouldBe WatsonXConfig.DEFAULT_API_VERSION
@@ -112,6 +112,10 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
   }
 
   "a client built by the watsonx descriptor" should {
+
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      assertUsesSuppliedHttpClient(WatsonXProvider, section("http://localhost:1"))
+    }
 
     "complete through the IAM exchange and the chat endpoint" in {
       val body =

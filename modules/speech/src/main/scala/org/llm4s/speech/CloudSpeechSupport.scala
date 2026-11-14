@@ -1,5 +1,6 @@
 package org.llm4s.speech
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse }
 import org.llm4s.llmconnect.config.ProviderConfig
@@ -28,16 +29,16 @@ private[speech] object CloudSpeechSupport {
    * every provider's (an Azure subscription key is 32 hex digits), so the configured key itself is
    * scrubbed before the body can reach an error message.
    */
-  private def scrub(body: String, secret: String): String =
-    if (secret.isEmpty) body else body.replace(secret, "[REDACTED]")
+  private def scrub(body: String, secret: Secret): String =
+    if (secret.reveal.isEmpty) body else body.replace(secret.reveal, "[REDACTED]")
 
   /** The body of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
-  def textBody(provider: String, response: HttpResponse, secret: String): Result[String] =
+  def textBody(provider: String, response: HttpResponse, secret: Secret): Result[String] =
     if (success(response.statusCode)) Right(response.body)
     else HttpErrorMapper.mapHttpError(response.statusCode, scrub(response.body, secret), provider, response.headers)
 
   /** The bytes of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
-  def rawBody(provider: String, response: HttpRawResponse, secret: String): Result[Array[Byte]] =
+  def rawBody(provider: String, response: HttpRawResponse, secret: Secret): Result[Array[Byte]] =
     if (success(response.statusCode)) Right(response.body)
     else
       HttpErrorMapper.mapHttpError(
@@ -48,8 +49,8 @@ private[speech] object CloudSpeechSupport {
       )
 
   /** `apiKey` unless it is blank, which would be sent as an empty credential (`Authorization: Bearer `). */
-  def requireApiKey(provider: String, apiKey: String): Result[Unit] =
-    ProviderConfig.nonEmpty(provider, "apiKey", apiKey)
+  def requireApiKey(provider: String, apiKey: Secret): Result[Unit] =
+    ProviderConfig.nonEmpty(provider, "apiKey", apiKey.reveal)
 
   def requireText(text: String): Result[String] =
     if (text.trim.isEmpty) Left(ValidationError("text", "must not be empty")) else Right(text)

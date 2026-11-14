@@ -1,6 +1,7 @@
 ---
 layout: page
 title: Next Steps
+description: "Where to go after your first LLM4S program: learning paths for agents, tool integration, conversational AI, RAG and production systems."
 parent: Getting Started
 nav_order: 4
 ---

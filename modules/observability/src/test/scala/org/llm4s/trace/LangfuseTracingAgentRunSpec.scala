@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.security.Secret
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMClient
@@ -32,8 +33,8 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
   private class RecordingLangfuseTracing(http: MockHttpClient)
       extends LangfuseTracing(
         langfuseUrl = "https://langfuse.example.com",
-        publicKey = "pk-lf-test",
-        secretKey = "sk-lf-test",
+        publicKey = Secret("pk-lf-test"),
+        secretKey = Secret("sk-lf-test"),
         environment = "test",
         release = "v0.0.0",
         version = "1.0.0",

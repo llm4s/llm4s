@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Permission-Based RAG
+description: "Add access control to RAG in LLM4S: organise documents in collections, grant principals access, and retrieve only what a user may read."
+search_title: "Permission-based RAG with access control in Scala"
 parent: User Guide
 nav_order: 4
 ---
@@ -63,6 +65,7 @@ import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
+import org.llm4s.security.Secret
 
 // build needs the extension import above and a model registry; ProviderRegistry.default is a given.
 given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
@@ -71,7 +74,7 @@ given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
 val searchIndex = PgSearchIndex.fromJdbcUrl(
   jdbcUrl = "jdbc:postgresql://localhost:5432/postgres",
   user = "postgres",
-  password = "postgres",
+  password = Secret("postgres"),
   vectorTableName = "rag_vectors"
 ).getOrElse(throw new RuntimeException("Failed to create SearchIndex"))
 
@@ -584,10 +587,12 @@ principals.count("group")
 The schema must be initialized before use:
 
 ```scala
+import org.llm4s.security.Secret
+
 val searchIndex = PgSearchIndex.fromJdbcUrl(
   jdbcUrl = "jdbc:postgresql://localhost:5432/postgres",
   user = "postgres",
-  password = "postgres",
+  password = Secret("postgres"),
   vectorTableName = "rag_vectors"
 ).getOrElse(???)
 

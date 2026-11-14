@@ -10,6 +10,7 @@ import java.util.UUID
 import scala.util.Try
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Docker
+import org.llm4s.security.Secret
 
 /**
  * Integration tests for PostgresMemoryStore.
@@ -41,7 +42,7 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     port = sys.env.getOrElse("POSTGRES_PORT", "5432").toInt,
     database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
     user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
-    password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
+    password = Secret(sys.env.getOrElse("POSTGRES_PASSWORD", "password")),
     tableName = tableName,
     maxPoolSize = 4
   )
@@ -237,5 +238,30 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
 
     store.storeAll(batch(3)).isRight shouldBe true
     store.count(MemoryFilter.All) shouldBe Right(3L)
+  }
+
+  it should "store a batch larger than one JDBC batch whole, in one transaction" in skipIfDisabled {
+    val size = PostgresMemoryStore.WriteBatchSize * 2 + 7
+    store.storeAll(batch(size)).isRight shouldBe true
+    store.count(MemoryFilter.All) shouldBe Right(size.toLong)
+    store.get(MemoryId(s"batch-$size")).map(_.map(_.content)) shouldBe Right(Some(s"batch note $size"))
+  }
+
+  it should "store nothing when a row of a later JDBC batch fails" in skipIfDisabled {
+    val size = PostgresMemoryStore.WriteBatchSize + 3
+    val bad  = batch(size).updated(size - 1, batch(size)(size - 1).copy(content = null))
+
+    store.storeAll(bad).fold(e => e.message should include("content"), _ => fail("expected the batch to fail"))
+    store.count(MemoryFilter.All) shouldBe Right(0L)
+  }
+
+  it should "store a repeated id as its last occurrence and update an existing memory" in skipIfDisabled {
+    store.store(Memory(MemoryId("batch-1"), "before", MemoryType.Knowledge)).isRight shouldBe true
+    val repeated = batch(2) :+ Memory(MemoryId("batch-2"), "last", MemoryType.Knowledge)
+
+    store.storeAll(repeated).isRight shouldBe true
+    store.count(MemoryFilter.All) shouldBe Right(2L)
+    store.get(MemoryId("batch-1")).map(_.map(_.content)) shouldBe Right(Some("batch note 1"))
+    store.get(MemoryId("batch-2")).map(_.map(_.content)) shouldBe Right(Some("last"))
   }
 }

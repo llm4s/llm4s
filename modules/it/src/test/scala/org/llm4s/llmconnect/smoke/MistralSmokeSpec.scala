@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.llm4s.security.Secret
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
@@ -49,7 +50,7 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     MistralConfig
       .fromValues(
         modelName = model,
-        apiKey = key,
+        apiKey = Secret(key),
         baseUrl = MistralConfig.DEFAULT_BASE_URL
       )
       .value

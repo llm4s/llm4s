@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.speech.config
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ConfigurationError
 import org.llm4s.speech.SpeechProviderSelector
 import org.llm4s.types.Result
@@ -94,7 +95,7 @@ object SpeechConfigLoader {
               provider,
               model = id,
               voice = voice.getOrElse(TTSConfig.DEFAULT_OPENAI_VOICE),
-              apiKey = key,
+              apiKey = Secret(key),
               baseUrl = stripSlash(section.getOrElse("baseUrl", TTSConfig.DEFAULT_OPENAI_BASE_URL))
             )
           )
@@ -105,7 +106,7 @@ object SpeechConfigLoader {
               provider,
               model = nonBlank(section, "modelId").getOrElse(TTSConfig.DEFAULT_ELEVENLABS_MODEL_ID),
               voice = voice.getOrElse(id),
-              apiKey = key,
+              apiKey = Secret(key),
               baseUrl = stripSlash(section.getOrElse("baseUrl", TTSConfig.DEFAULT_ELEVENLABS_BASE_URL))
             )
           )
@@ -118,7 +119,7 @@ object SpeechConfigLoader {
             provider,
             model = id,
             voice = voice.getOrElse(id),
-            apiKey = key,
+            apiKey = Secret(key),
             baseUrl = azureBase(section, "ttsBaseUrl", "tts", region),
             region = Some(region)
           )
@@ -159,7 +160,7 @@ object SpeechConfigLoader {
             STTConfig(
               provider,
               model = id,
-              apiKey = key,
+              apiKey = Secret(key),
               baseUrl = stripSlash(section.getOrElse("baseUrl", STTConfig.DEFAULT_OPENAI_BASE_URL))
             )
           )
@@ -171,7 +172,7 @@ object SpeechConfigLoader {
           } yield STTConfig(
             provider,
             model = id,
-            apiKey = key,
+            apiKey = Secret(key),
             baseUrl = azureBase(section, "sttBaseUrl", "stt", region),
             region = Some(region)
           )

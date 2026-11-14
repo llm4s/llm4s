@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Image Generation
+description: "Generate images from Scala with LLM4S using Stable Diffusion through a local WebUI or the Hugging Face Inference API, with setup and options."
+search_title: "Generate images in Scala with LLM4S"
 parent: User Guide
 nav_order: 8
 ---

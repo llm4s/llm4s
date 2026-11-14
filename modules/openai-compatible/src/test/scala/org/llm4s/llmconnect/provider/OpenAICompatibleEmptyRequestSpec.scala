@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAIConfig, ZaiConfig }
 import org.llm4s.llmconnect.model._
@@ -49,7 +50,10 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
   }
 
   private def mistral(baseUrl: String, logging: ProviderExchangeLogging): LLMClient =
-    new MistralClient(MistralConfig("k", "mistral-small-latest", baseUrl, 128000, 4096), exchangeLogging = logging)
+    new MistralClient(
+      MistralConfig(Secret("k"), "mistral-small-latest", baseUrl, 128000, 4096),
+      exchangeLogging = logging
+    )
 
   "a Mistral complete" should "fail locally when every message would be dropped, without a request" in {
     val (result, hits, recorded) =
@@ -96,14 +100,14 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
     // provider send such a turn (as {"role":"assistant"}), so the conversation is not empty.
     val clients: Seq[(String, (String, ProviderExchangeLogging) => LLMClient)] = Seq(
       "deepseek" -> ((url, logging) =>
-        new DeepSeekClient(DeepSeekConfig("k", "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
+        new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
       ),
       "zai" -> ((url, logging) =>
-        new ZaiClient(ZaiConfig("k", "GLM-4.7", url, 128000, 4096), exchangeLogging = logging)
+        new ZaiClient(ZaiConfig(Secret("k"), "GLM-4.7", url, 128000, 4096), exchangeLogging = logging)
       ),
       "openrouter" -> ((url, logging) =>
         new OpenRouterClient(
-          OpenAIConfig("k", "openai/gpt-4o-mini", None, url, 128000, 4096),
+          OpenAIConfig(Secret("k"), "openai/gpt-4o-mini", None, url, 128000, 4096),
           exchangeLogging = logging
         )
       )
@@ -123,7 +127,8 @@ class OpenAICompatibleEmptyRequestSpec extends AnyFlatSpec with Matchers with Ei
   "any dialect" should "fail an empty conversation locally, on both paths" in {
     val (results, hits, _) =
       against("/chat/completions", sendJsonResponse(_, 200, openAICompletion("never"))) { (url, logging) =>
-        val c = new DeepSeekClient(DeepSeekConfig("k", "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
+        val c =
+          new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-chat", url, 128000, 8192), exchangeLogging = logging)
         (
           c.complete(Conversation(Seq.empty), CompletionOptions()),
           c.streamComplete(Conversation(Seq.empty), CompletionOptions(), _ => ())

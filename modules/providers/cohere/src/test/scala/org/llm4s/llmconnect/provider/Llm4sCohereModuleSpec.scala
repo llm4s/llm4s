@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.llm4s.config.CohereEmbeddingConfigKeys
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -31,8 +32,23 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
       LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
-        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = "test-key")
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
+      }
+    }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(
+          _,
+          200,
+          """{"id":"abc","embeddings":{"float":[[0.1,0.2]]},"texts":[],"response_type":"embeddings_by_type"}"""
+        )
+      ) { (baseUrl, keys) =>
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }
   }
@@ -55,7 +71,7 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
         .fold(error => fail(error.message), identity)
 
       config.model shouldBe "embed-english-v3.0"
-      config.apiKey shouldBe "cohere-test"
+      config.apiKey.reveal shouldBe "cohere-test"
       config.baseUrl shouldBe "https://api.cohere.com"
       assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config)
     }

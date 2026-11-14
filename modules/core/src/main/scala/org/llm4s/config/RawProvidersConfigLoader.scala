@@ -2,6 +2,8 @@ package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, TroubleshootingLinks }
 import org.llm4s.llmconnect.spi.ProviderConfigSpec
+import org.llm4s.security.KnownSecrets
+import org.llm4s.types.ProviderModelTypes.ApiKey
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
 import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
@@ -13,14 +15,27 @@ import scala.jdk.CollectionConverters.*
 /** Reads the raw providers configuration block from a PureConfig source without validation. */
 private[config] object RawProvidersConfigLoader:
 
+  /** A key as written, trimmed, wrapped at the point it is read so that it is registered for redaction. */
+  private given PureConfigReader[ApiKey] = PureConfigReader[String].map(raw => ApiKey(raw.trim))
+
+  /**
+   * The built-in fields. A header with a credential name (`Authorization`, `x-api-key`, ...) is registered for
+   * redaction here, as the key is, so it is masked whether or not a chat client is ever built from the section (a
+   * model lister sends the same headers).
+   */
   private val builtinFieldsReader: PureConfigReader[RawNamedProviderSection] =
-    PureConfigReader.forProduct5(
-      "provider",
-      "model",
-      "baseUrl",
-      "apiKey",
-      "headers"
-    )(RawNamedProviderSection(_, _, _, _, _))
+    PureConfigReader
+      .forProduct5(
+        "provider",
+        "model",
+        "baseUrl",
+        "apiKey",
+        "headers"
+      )(RawNamedProviderSection(_, _, _, _, _))
+      .map { section =>
+        section.headers.foreach(KnownSecrets.registerHeaders)
+        section
+      }
 
   /**
    * The `auth` block, if there is one, as strings: scalars (strings, numbers, booleans) are read as
@@ -57,6 +72,11 @@ private[config] object RawProvidersConfigLoader:
           }
           .map(Some(_))
       }
+
+  /** The section's `apiKeyFile`, a path; a `null` or an unset `${?VAR}` is absent. */
+  private def readApiKeyFile(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[String]] =
+    val cursor = objCursor.atKeyOrUndefined("apiKeyFile")
+    if cursor.isUndefined || cursor.isNull then Right(None) else PureConfigReader[String].from(cursor).map(Some(_))
 
   /** The section's `http` block as read; [[HttpNetworkReader]] checks its keys when the section is loaded. */
   private def readHttp(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[ConfigObject]] =
@@ -105,9 +125,10 @@ private[config] object RawProvidersConfigLoader:
                     )
             yield value.fold(acc)(acc.updated(key, _))
         }
-        auth <- readAuth(objCursor)
-        http <- readHttp(objCursor)
-      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http)
+        auth       <- readAuth(objCursor)
+        http       <- readHttp(objCursor)
+        apiKeyFile <- readApiKeyFile(objCursor)
+      yield builtins.copy(extras = extras, timeouts = timeouts, auth = auth, http = http, apiKeyFile = apiKeyFile)
     }
 
   /** The block as read, each section's read failure kept to that section. */

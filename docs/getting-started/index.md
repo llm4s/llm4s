@@ -1,6 +1,8 @@
 ---
 layout: page
 title: Getting Started
+description: "Get started with LLM4S: install it, run a first program, configure a provider, and pick a quick start for sbt, Scala CLI, Maven, Gradle, Mill or JBang."
+search_title: "Get started with LLM4S: Scala LLM framework for the JVM"
 nav_order: 2
 has_children: true
 ---
@@ -8,6 +10,12 @@ has_children: true
 # Getting Started
 
 Get up and running with LLM4S in minutes.
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/llm4s/llm4s?quickstart=1)
+Nothing to install: the [playground](playground) runs the samples in your browser against a small local model.
+
+No API key and nothing to install? **[First answer, no key, no server](local-jlama)** runs a small model inside your
+JVM with `llm4s-jlama`: one file, one command.
 
 This section will guide you through:
 
@@ -26,6 +34,10 @@ This section will guide you through:
     {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
 12. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
 13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
+14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
+15. **[Try llm4s in the REPL](repl)** - `ask`, `extract` and `chat()` behind one import, in the Scala CLI REPL, a worksheet or a script
+16. **[First Answer, No Key, No Server](local-jlama)** - A small model run inside your JVM by Jlama: no API key, no model server
+17. **[Coming from Python?](../guide/for-python-developers)** - OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3, one Scala concept at a time
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 
@@ -76,6 +88,9 @@ Before starting, you should have:
 
 - **Quick Start**: ~5 minutes (with starter kit)
 - **Full Tutorial**: ~30 minutes
+
+When you have made a first call, [Build a support assistant](../tutorials/support-assistant/) takes one application
+from a first call to typed answers, tools and an agent, a part at a time, with exercises a test suite checks.
 
 ## Need Help?
 

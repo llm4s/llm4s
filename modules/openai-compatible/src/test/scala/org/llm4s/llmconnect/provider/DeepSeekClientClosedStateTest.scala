@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.security.Secret
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -19,7 +20,7 @@ class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: DeepSeekConfig = DeepSeekConfig(
-    apiKey = "test-api-key-for-closed-state-testing",
+    apiKey = Secret("test-api-key-for-closed-state-testing"),
     model = "deepseek-chat",
     baseUrl = "https://example.invalid/v1",
     contextWindow = 65536,
