@@ -2604,66 +2604,68 @@ lazy val docs = (project in file("modules/docs"))
     ),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
-    Compile / sources := {
-      (media / Compile / sources).value ++
-        (core / Compile / sources).value ++
-        (rag / Compile / sources).value ++
-        (vectorstoreElasticsearch / Compile / sources).value ++
-        (vectorstoreRedis / Compile / sources).value ++
-        (knowledgegraph / Compile / sources).value ++
-        (memory / Compile / sources).value ++
-        (memoryPostgres / Compile / sources).value ++
-        (mcp / Compile / sources).value ++
-        (image / Compile / sources).value ++
-        (speech / Compile / sources).value ++
-        (ollama / Compile / sources).value ++
-        (gemini / Compile / sources).value ++
-        (anthropic / Compile / sources).value ++
-        (openai / Compile / sources).value ++
-        (azureIdentity / Compile / sources).value ++
-        (secretsVault / Compile / sources).value ++
-        (openaiCompatible / Compile / sources).value ++
-        (voyage / Compile / sources).value ++
-        (bedrock / Compile / sources).value ++
-        (jina / Compile / sources).value ++
-        (jev / Compile / sources).value ++
-        (cohere / Compile / sources).value ++
-        (watsonx / Compile / sources).value ++
-        (perplexity / Compile / sources).value ++
-        (jlama / Compile / sources).value ++
-        (providerTestkit / Compile / sources).value ++
-        (schemaDerivation / Compile / sources).value ++
-        (schemaIron / Compile / sources).value ++
-        (prompt / Compile / sources).value ++
-        (testkit / Compile / sources).value ++
-        (capabilities / Compile / sources).value ++
-        (doctor / Compile / sources).value ++
-        (repl / Compile / sources).value ++
-        (workspaceShared / Compile / sources).value ++
-        (workspaceClient / Compile / sources).value ++
-        (observability / Compile / sources).value ++
-        (observabilityPrometheus / Compile / sources).value ++
-        (observabilityMicrometer / Compile / sources).value ++
-        (traceOpentelemetry / Compile / sources).value ++
-        (agent / Compile / sources).value ++
-        (agentTestkit / Compile / sources).value ++
-        (agentCheckpointSqlite / Compile / sources).value ++
-        (agentCheckpointPostgres / Compile / sources).value ++
-        (agentMemory / Compile / sources).value ++
-        (agentTools / Compile / sources).value ++
-        (llm4sTapir / Compile / sources).value ++
-        (llm4sSttp / Compile / sources).value ++
-        (knowledgegraphNeo4j / Compile / sources).value ++
-        (llm4sEffect / Compile / sources).value ++
-        (llm4sZio / Compile / sources).value ++
-        (llm4sPekko / Compile / sources).value ++
-        (llm4sOx / Compile / sources).value ++
-        (javaApi / Compile / sources).value ++
-        (javaRag / Compile / sources).value ++
-        (reactor / Compile / sources).value ++
-        (springBootStarter / Compile / sources).value ++
-        (springAi / Compile / sources).value
-    },
+    // A flat Seq, not a chain of `++`: each `++` nests the tree one level deeper, and at 57 modules the chain overflowed
+    // scalac's stack while sbt compiled the build on CI's runners.
+    Compile / sources := Seq(
+      (media / Compile / sources).value,
+      (core / Compile / sources).value,
+      (rag / Compile / sources).value,
+      (vectorstoreElasticsearch / Compile / sources).value,
+      (vectorstoreRedis / Compile / sources).value,
+      (knowledgegraph / Compile / sources).value,
+      (memory / Compile / sources).value,
+      (memoryPostgres / Compile / sources).value,
+      (mcp / Compile / sources).value,
+      (image / Compile / sources).value,
+      (speech / Compile / sources).value,
+      (ollama / Compile / sources).value,
+      (gemini / Compile / sources).value,
+      (anthropic / Compile / sources).value,
+      (openai / Compile / sources).value,
+      (azureIdentity / Compile / sources).value,
+      (secretsVault / Compile / sources).value,
+      (openaiCompatible / Compile / sources).value,
+      (voyage / Compile / sources).value,
+      (bedrock / Compile / sources).value,
+      (jina / Compile / sources).value,
+      (jev / Compile / sources).value,
+      (cohere / Compile / sources).value,
+      (watsonx / Compile / sources).value,
+      (perplexity / Compile / sources).value,
+      (jlama / Compile / sources).value,
+      (providerTestkit / Compile / sources).value,
+      (schemaDerivation / Compile / sources).value,
+      (schemaIron / Compile / sources).value,
+      (prompt / Compile / sources).value,
+      (testkit / Compile / sources).value,
+      (capabilities / Compile / sources).value,
+      (doctor / Compile / sources).value,
+      (repl / Compile / sources).value,
+      (workspaceShared / Compile / sources).value,
+      (workspaceClient / Compile / sources).value,
+      (observability / Compile / sources).value,
+      (observabilityPrometheus / Compile / sources).value,
+      (observabilityMicrometer / Compile / sources).value,
+      (traceOpentelemetry / Compile / sources).value,
+      (agent / Compile / sources).value,
+      (agentTestkit / Compile / sources).value,
+      (agentCheckpointSqlite / Compile / sources).value,
+      (agentCheckpointPostgres / Compile / sources).value,
+      (agentMemory / Compile / sources).value,
+      (agentTools / Compile / sources).value,
+      (llm4sTapir / Compile / sources).value,
+      (llm4sSttp / Compile / sources).value,
+      (knowledgegraphNeo4j / Compile / sources).value,
+      (llm4sEffect / Compile / sources).value,
+      (llm4sZio / Compile / sources).value,
+      (llm4sPekko / Compile / sources).value,
+      (llm4sOx / Compile / sources).value,
+      (javaApi / Compile / sources).value,
+      (javaRag / Compile / sources).value,
+      (reactor / Compile / sources).value,
+      (springBootStarter / Compile / sources).value,
+      (springAi / Compile / sources).value
+    ).flatten,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     // Cross-links (#2291): a source link on every member, to the release tag (`main` for a snapshot); links out to
