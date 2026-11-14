@@ -128,7 +128,9 @@ class ProviderDescriptorHelpersSpec extends AnyFlatSpec with Matchers:
   // ---------------------------------------------------------------------------------------------
 
   "requireApiKey" should "return the section's api key when it is set" in {
-    ProviderDescriptor.requireApiKey(providerName, section(apiKey = Some("secret"))) shouldBe Right("secret")
+    ProviderDescriptor
+      .requireApiKey(providerName, section(apiKey = Some("secret")))
+      .map(_.reveal) shouldBe Right("secret")
   }
 
   it should "fail naming both the section's own apiKey path and the vendor's shared credential path" in {
