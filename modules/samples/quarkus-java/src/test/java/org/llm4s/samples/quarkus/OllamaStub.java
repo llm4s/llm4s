@@ -13,7 +13,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * A loopback server that answers Ollama's {@code POST /api/chat} with a canned reply, started before Quarkus and
- * handed to it as {@code llm4s.base-url}, so the test runs the real client over HTTP with no model and no key. A
+ * handed to it as {@code llm4s.providers.main.base-url}, so the test runs the real client over HTTP with no model and no key. A
  * request whose body contains {@code "please fail"} gets an HTTP 500 instead.
  */
 public class OllamaStub implements QuarkusTestResourceLifecycleManager {
@@ -48,9 +48,8 @@ public class OllamaStub implements QuarkusTestResourceLifecycleManager {
         });
         server.start();
         return Map.of(
-            "llm4s.provider", "ollama",
-            "llm4s.model", "stub-model",
-            "llm4s.base-url", "http://127.0.0.1:" + server.getAddress().getPort());
+            "llm4s.providers.main.model", "stub-model",
+            "llm4s.providers.main.base-url", "http://127.0.0.1:" + server.getAddress().getPort());
     }
 
     @Override
