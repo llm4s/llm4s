@@ -34,7 +34,7 @@ object WorkspaceRunnerDocker {
   // Note: This is the existing behaviour moved out of build.sbt for clarity.
   val devToolingCommands: Seq[CmdLike] = Seq(
     Cmd("USER", "root"),
-    Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip acl"),
+    Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip acl git"),
     gnuCoreutils,
     // Use the modern signed-by keyring approach. `apt-key` was deprecated long ago and
     // is no longer present in recent base images (Ubuntu 24.04+/temurin), so piping the

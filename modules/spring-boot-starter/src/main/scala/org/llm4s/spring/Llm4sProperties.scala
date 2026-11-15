@@ -42,6 +42,9 @@ class AgentProperties {
 
   /** Whether the agent's model calls stream, so `JAgent.stream` carries the answer's text deltas. */
   @BeanProperty var streaming: Boolean = false
+
+  /** The most model calls and tool rounds one turn may take before it ends `STEP_LIMIT_REACHED`; at least 1. */
+  @BeanProperty var maxSteps: Int = 50
 }
 
 @ConfigurationProperties(prefix = "llm4s")

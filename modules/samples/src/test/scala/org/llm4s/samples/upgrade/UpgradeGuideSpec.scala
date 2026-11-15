@@ -49,6 +49,7 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     "Llm4sBedrockModule"    -> (Set("bedrock"), Set.empty[String]),
     "Llm4sWatsonXModule"    -> (Set("watsonx"), Set.empty[String]),
     "Llm4sPerplexityModule" -> (Set("perplexity"), Set.empty[String]),
+    "Llm4sJlamaModule"      -> (Set("jlama"), Set.empty[String]),
     "Llm4sVoyageModule"     -> (Set.empty[String], Set("voyage")),
     "Llm4sJinaModule"       -> (Set.empty[String], Set("jina")),
     "Llm4sCohereModule"     -> (Set.empty[String], Set("cohere"))
