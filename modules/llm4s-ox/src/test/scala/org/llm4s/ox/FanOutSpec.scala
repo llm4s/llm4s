@@ -73,6 +73,8 @@ class FanOutSpec extends AnyFlatSpec with Matchers with TimeLimitedTests {
       case Some(Left(_: CancelledError)) => succeed
       case other                         => fail(s"the losing call was not cancelled: $other")
     }
+    // `ended` counts down on the loser's own thread, just before it returns: give the thread a deadline to exit (#2636)
+    loser.thread.get().foreach(_.join(TimeUnit.SECONDS.toMillis(DeadlineSeconds)))
     loser.thread.get().exists(_.isAlive) shouldBe false
   }
 
