@@ -483,7 +483,7 @@ src/test/scala/
 
 - [Configuration Guide](configuration) - Configure test environments
 - [Examples](/examples/) - See tests in action
-- [CI/CD Best Practices](/advanced/ci-cd) - Production testing strategies
+- [Tests in CI](/reference/testing-guide#10-tests-in-ci) - How the test suites run in CI
 
 ---
 
