@@ -1,0 +1,16 @@
+# LiteLLM config for LiteLLMGatewaySpec (#2315): deploy/overlays/enterprise/litellm-config.yaml with the vendor
+# replaced by the suite's fake upstream, which listens on the CI runner at port 18089. The container reaches the
+# runner as host.docker.internal (`docker run --add-host=host.docker.internal:host-gateway`).
+model_list:
+  - model_name: gpt-4o-mini
+    litellm_params:
+      # A different upstream model name, so the suite can see the gateway map the app's model to the vendor's.
+      model: openai/upstream-model-v1
+      api_base: http://host.docker.internal:18089/v1
+      api_key: os.environ/UPSTREAM_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Forward the client's x-* headers (the app's X-Tenant-Id and X-Cost-Centre) to the upstream, so the suite can
+  # prove they crossed the gateway.
+  forward_client_headers_to_llm_api: true

@@ -90,6 +90,29 @@ class EffectSystemsGuideSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     }
   }
 
+  they should "start the agent turn only after the streamed reply has ended, in every stack" in {
+    // Each program's first call is the greeting's stream; it waits up to a second for any other call to begin.
+    // A stack that starts the agent turn early (Pekko's concatLazy materializes both sources at once) is caught here.
+    Seq[(String, LLMClient => String)](
+      "plain" -> (c => Plain.plainProgram(c, Generous)),
+      "cats-effect" -> { c =>
+        import cats.effect.unsafe.implicits.global
+        CatsEffect.catsProgram(c, Generous).unsafeRunSync()
+      },
+      "zio" -> { c =>
+        Unsafe.unsafe(implicit u => Runtime.default.unsafe.run(Zio.zioProgram(c, Generous)).getOrThrowFiberFailure())
+      },
+      "pekko" -> (c => Await.result(Pekko.pekkoProgram(c, Generous), 60.seconds))
+    ).foreach { case (stack, program) =>
+      val client = new Sequenced(happyScript())
+      val result = program(client)
+      withClue(s"$stack:") {
+        client.overlapped.get() shouldBe false
+        result shouldBe "Hello from a scripted model | It is 21 degrees in Oslo: pack light layers."
+      }
+    }
+  }
+
   they should "take the error branch with the provider's message when the streamed completion fails" in {
     val results = runAll(() => ScriptedLLMClient.sequence(Reply.failure(SimpleError("provider refused"))), Generous)
     results.values.toSet shouldBe Set("failed: provider refused")
@@ -195,4 +218,38 @@ final private class Parked extends LLMClient {
   ): Result[Completion] = park()
   def getContextWindow(): Int     = 8192
   def getReserveCompletion(): Int = 512
+}
+
+/**
+ * Forwards to `underlying`, holding the first call open for up to a second until another call begins. `overlapped`
+ * is set when one does: the program started its second call before its first had returned.
+ */
+final private class Sequenced(underlying: LLMClient) extends LLMClient {
+  val overlapped: AtomicBoolean       = new AtomicBoolean(false)
+  private val first: AtomicBoolean    = new AtomicBoolean(true)
+  private val inFirst: AtomicBoolean  = new AtomicBoolean(false)
+  private val another: CountDownLatch = new CountDownLatch(1)
+
+  private def call(body: => Result[Completion]): Result[Completion] =
+    if (first.getAndSet(false)) {
+      inFirst.set(true)
+      another.await(1, TimeUnit.SECONDS)
+      val result = body
+      inFirst.set(false)
+      result
+    } else {
+      if (inFirst.get()) overlapped.set(true)
+      another.countDown()
+      body
+    }
+
+  def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+    call(underlying.complete(conversation, options))
+  def streamComplete(
+    conversation: Conversation,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = call(underlying.streamComplete(conversation, options, onChunk))
+  def getContextWindow(): Int     = underlying.getContextWindow()
+  def getReserveCompletion(): Int = underlying.getReserveCompletion()
 }

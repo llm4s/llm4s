@@ -7,8 +7,8 @@ import com.typesafe.config.ConfigValueFactory
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.http.HttpNetworkSettings
-import org.llm4s.javaapi.LlmResult
-import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.javaapi.{ FacadeInternals, JEmbeddingClient, LlmResult }
+import org.llm4s.llmconnect.config.{ ProviderConfig, TracingSettings }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.security.Secret
 import org.springframework.core.env.{ ConfigurableEnvironment, EnumerablePropertySource }
@@ -44,17 +44,20 @@ import scala.util.Try
  */
 private[spring] object SpringProviderSource {
 
-  final val ProvidersPrefix   = "llm4s.providers"
-  final val CredentialsPrefix = "llm4s.credentials"
-  final val HttpPrefix        = "llm4s.http"
-  private val DefaultPointer  = List("llm4s", "providers", "provider")
+  final val ProvidersPrefix    = "llm4s.providers"
+  final val CredentialsPrefix  = "llm4s.credentials"
+  final val HttpPrefix         = "llm4s.http"
+  final val EmbeddingsPrefix   = "llm4s.embeddings"
+  final val TracingPrefix      = "llm4s.tracing"
+  private val ProviderPrefixes = Seq(ProvidersPrefix, CredentialsPrefix, HttpPrefix)
+  private val DefaultPointer   = List("llm4s", "providers", "provider")
 
   /** The provider llm4s resolved from the properties, and the secret values to keep out of reports: those the properties held and the resolved config's own. */
   final case class Resolved(config: ProviderConfig, secrets: Seq[String])
 
   /** True when the environment holds at least one `llm4s.providers.*` property, which selects this path. */
   def usesProvidersBlock(env: ConfigurableEnvironment): Boolean =
-    propertyNames(env).exists(_.startsWith(ProvidersPrefix + "."))
+    propertyNames(env, ProviderPrefixes).exists(_.startsWith(ProvidersPrefix + "."))
 
   /**
    * Resolves the default section of `llm4s.providers`. When the properties name no default but the flat
@@ -62,7 +65,7 @@ private[spring] object SpringProviderSource {
    */
   def resolve(env: ConfigurableEnvironment, flatProvider: String): LlmResult[Resolved] = {
     val outcome: Either[LLMError, Resolved] = for {
-      entries <- collect(env).map(joinIndexed)
+      entries <- collect(env, ProviderPrefixes, hoconPath).map(joinIndexed)
       prepared = withDefaultPointer(entries, flatProvider)
       source <- toSource(prepared)
       config <- Llm4sConfig.providerFrom(source)(using ProviderRegistry.default)
@@ -71,13 +74,54 @@ private[spring] object SpringProviderSource {
   }
 
   /**
+   * The embedding client the `llm4s.embeddings.*` properties configure (#2279), as the HOCON block of that name does:
+   * `llm4s.embeddings.model` (`provider/model`) and the provider's own `llm4s.embeddings.<provider>.*` keys (`api-key`,
+   * `base-url`), with a key from `llm4s.credentials.<provider>.api-key` or the vendor's variable when the block has none.
+   */
+  def embeddings(env: ConfigurableEnvironment): LlmResult[JEmbeddingClient] = {
+    val outcome = for {
+      entries <- collect(env, Seq(EmbeddingsPrefix, CredentialsPrefix, HttpPrefix), blockPath).map(joinIndexed)
+      source  <- toSource(entries)
+      client  <- FacadeInternals.embeddingClient(Llm4sConfig.embeddings(source)(using ProviderRegistry.default))
+    } yield client
+    outcome.fold(error => LlmResult.failure[JEmbeddingClient](error), client => LlmResult.success(client))
+  }
+
+  /**
+   * The tracing settings the `llm4s.tracing.*` properties configure (#2279), as the HOCON block of that name does:
+   * `llm4s.tracing.mode` and the selected backend's own `llm4s.tracing.<mode>.*` keys, whose `headers` keep their names.
+   */
+  def tracing(env: ConfigurableEnvironment): Either[LLMError, TracingSettings] =
+    for {
+      entries  <- collect(env, Seq(TracingPrefix), blockPath).map(joinIndexed)
+      source   <- toSource(entries)
+      settings <- Llm4sConfig.tracing(source)
+    } yield settings
+
+  /**
+   * The HOCON path of an `llm4s.embeddings.*` or `llm4s.tracing.*` property: the block's name (a provider id or a
+   * tracing mode) as written, the keys inside it in camelCase except under `headers`; any other property as
+   * [[hoconPath]] reads it.
+   */
+  private[spring] def blockPath(key: String): Either[LLMError, List[String]] =
+    key.split("\\.").toList match {
+      case "llm4s" :: (block @ ("embeddings" | "tracing")) :: first :: rest =>
+        val inner = rest match {
+          case "headers" :: names => "headers" :: names
+          case other              => other.map(camel)
+        }
+        Right(List("llm4s", block, first) ++ inner)
+      case _ => hoconPath(key)
+    }
+
+  /**
    * The proxy and TLS settings of the `llm4s.http.*` properties, laid over llm4s's defaults (so `HTTPS_PROXY` and the
    * other variables `reference.conf` binds still apply): what the flat `llm4s.provider` form's client uses. The
    * `llm4s.providers.*` form reads them with its section, as HOCON's `llm4s.http` is.
    */
   def network(env: ConfigurableEnvironment): Either[LLMError, HttpNetworkSettings] =
     for {
-      entries <- collect(env).map(all => joinIndexed(all.filter(_._1.take(2) == HttpPath)))
+      entries <- collect(env, ProviderPrefixes, hoconPath).map(all => joinIndexed(all.filter(_._1.take(2) == HttpPath)))
       source  <- toSource(entries)
       network <- Llm4sConfig.httpNetwork(source)
     } yield network
@@ -133,16 +177,13 @@ private[spring] object SpringProviderSource {
         )
     }
 
-  private def propertyNames(env: ConfigurableEnvironment): Vector[String] =
+  private def propertyNames(env: ConfigurableEnvironment, prefixes: Seq[String]): Vector[String] =
     env.getPropertySources.asScala.toVector
       .flatMap {
         case source: EnumerablePropertySource[_] => source.getPropertyNames.toVector
         case _                                   => Vector.empty
       }
-      .filter(name =>
-        name.startsWith(ProvidersPrefix + ".") || name.startsWith(CredentialsPrefix + ".") ||
-          name.startsWith(HttpPrefix + ".")
-      )
+      .filter(name => prefixes.exists(prefix => name.startsWith(prefix + ".")))
       .distinct
 
   /**
@@ -152,13 +193,17 @@ private[spring] object SpringProviderSource {
    * (`apiKey` in `application.yml`, `api-key` on the command line) the first spelling seen is the one
    * Spring would use, and a later spelling of the same path is skipped rather than allowed to overwrite it.
    */
-  private def collect(env: ConfigurableEnvironment): Either[LLMError, Vector[(List[String], String)]] =
-    propertyNames(env)
+  private def collect(
+    env: ConfigurableEnvironment,
+    prefixes: Seq[String],
+    pathOf: String => Either[LLMError, List[String]]
+  ): Either[LLMError, Vector[(List[String], String)]] =
+    propertyNames(env, prefixes)
       .foldLeft[Either[LLMError, (Vector[(List[String], String)], Set[List[String]])]](
         Right((Vector.empty, Set.empty))
       ) { (acc, key) =>
         acc.flatMap { case (soFar, seen) =>
-          hoconPath(key).flatMap { path =>
+          pathOf(key).flatMap { path =>
             if (seen.contains(path)) Right((soFar, seen))
             else
               Try(Option(env.getProperty(key))).toEither.left

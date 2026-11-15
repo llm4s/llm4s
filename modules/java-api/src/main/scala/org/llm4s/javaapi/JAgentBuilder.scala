@@ -1,6 +1,8 @@
 package org.llm4s.javaapi
 
+import org.llm4s.agent.graph.Checkpointer
 import org.llm4s.error.ValidationError
+import org.llm4s.trace.Tracing
 
 /**
  * An agent under construction, from [[Llm4s.agentBuilder]] (#2476): its system prompt, tools, guardrails, context window
@@ -59,6 +61,20 @@ final class JAgentBuilder private[javaapi] (token: FacadeToken, spec: AgentBuild
    * (`AgentEvents.TextDelta()`). Off by default.
    */
   def streaming(streaming: Boolean): JAgentBuilder = next(spec.copy(streaming = streaming))
+
+  /** The most model calls and tool rounds one turn may take before it ends `STEP_LIMIT_REACHED`; at least 1, 50 unset. */
+  def maxSteps(maxSteps: Int): JAgentBuilder = next(spec.copy(maxSteps = Some(maxSteps)))
+
+  /**
+   * Where the agent keeps its threads between turns: an `InMemoryCheckpointer` unless set, or a durable store such as
+   * `llm4s-agent-checkpoint-sqlite`'s or `-postgres`'s.
+   */
+  def checkpointer(checkpointer: Checkpointer): JAgentBuilder =
+    next(spec.copy(checkpointer = Option(checkpointer).toRight(ValidationError.required("checkpointer")).map(Some(_))))
+
+  /** Where the agent reports its runs, model calls and tool calls; none unless set. */
+  def tracing(tracing: Tracing): JAgentBuilder =
+    next(spec.copy(tracing = Option(tracing).toRight(ValidationError.required("tracing")).map(Some(_))))
 
   /**
    * The agent, or a failed result naming the first problem: a `null` id, client or setting, a blank or invalid id, a

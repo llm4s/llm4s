@@ -60,10 +60,13 @@ import org.llm4s.testkit.Reply
 val fromConfig = Session.fromConfig()
 // A named section, llm4s.providers.openai-main
 val named = Session.named("openai-main")
+// A local Ollama server, no config section: needs llm4s-ollama, and `ollama pull llama3` first
+val local = Session.ollama("llama3")
 // No key and no network: the first call gets the first reply, and so on
 given Session = Session.offline(Reply.text("Covariance lets a List[Cat] be used where a List[Animal] is expected."))
 ```
 
+`Session.ollama(model, baseUrl)` points at an Ollama server other than `http://localhost:11434`.
 `Session.of(client)` wraps a client you built yourself. A session whose configuration does not load is still a
 session: `session.failure` holds the error, and every helper prints it. `withSystemPrompt`, `withOptions` (any
 `CompletionOptions`) and `withMaxToolSteps` return a new session with an empty history.

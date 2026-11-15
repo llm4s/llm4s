@@ -23,7 +23,7 @@ Low-level vector storage abstraction for RAG and semantic search.
 
 ## Overview
 
-The `VectorStore` trait provides a backend-agnostic interface for storing and searching vector embeddings. This is the foundation layer for building RAG (Retrieval-Augmented Generation) applications.
+The {% include api.html t="org.llm4s.vectorstore.VectorStore" %} trait provides a backend-agnostic interface for storing and searching vector embeddings. This is the foundation layer for building RAG (Retrieval-Augmented Generation) applications.
 
 **Key Features:**
 - Backend-agnostic API supporting multiple vector databases

@@ -1,0 +1,13 @@
+# The client the sample builds (see Llm4sSettings). The default is a local Ollama server at http://localhost:11434,
+# which needs no key: `ollama pull llama3.2` first. Override any key with an environment variable; Helidon reads `_` as
+# `.` and `_DASH_` as `-`, so `base-url` is LLM4S_BASE_DASH_URL, for example
+#   LLM4S_PROVIDER=openai-compatible LLM4S_BASE_DASH_URL=https://api.openai.com/v1 LLM4S_MODEL=gpt-4o-mini \
+#   LLM4S_API_DASH_KEY=sk-... gradle run
+# A system property (-Dllm4s.model=...) works on the application's JVM, but `gradle run` does not forward -D options.
+server:
+  port: 8080
+llm4s:
+  provider: ollama
+  model: llama3.2
+  # base-url: http://localhost:11434
+  # api-key:

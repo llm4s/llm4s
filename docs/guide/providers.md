@@ -43,6 +43,7 @@ CI, so this table does not repeat it:
 | **Cohere** | `cohere` | Cloud | Command models | Easy |
 | **xAI** | `xai` | Cloud | Grok models | Easy |
 | **Ollama** | `ollama` | Local | Open models on your machine, no API key | Easy |
+| **Jlama** | `jlama` | In-process | A small open model run inside your JVM: no API key, no server (`llm4s-jlama`, Experimental) | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 | **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
 | **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
@@ -460,6 +461,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 | Perplexity | `webSearch`, `contextWindow`, `reserveCompletion` |
+| Jlama | `modelDir`, `threads` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
 key that is neither built-in nor declared by the section's provider is ignored with a warning
@@ -1693,6 +1695,36 @@ Free! Just compute (CPU or GPU needed).
 - Works offline (no internet needed)
 - Use GPU for faster inference
 - Ideal for sensitive data (runs locally)
+
+---
+
+## Jlama (in-process)
+
+`llm4s-jlama` (Experimental) runs a small model inside your own JVM with [Jlama](https://github.com/tjake/Jlama), a
+pure-Java inference engine: no API key, no server to install. It is for learning, offline tests and demos; for real
+workloads use [Ollama](#ollama-local-models) or a cloud provider.
+[First answer, no key, no server](../getting-started/local-jlama) is the walk-through.
+
+```hocon
+llm4s.providers.local {
+  provider = "jlama"
+  model    = "tjake/Llama-3.2-1B-Instruct-JQ4"   # a Hugging Face model id, owner/name
+}
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A Hugging Face model id Jlama can load, `owner/name`; the `tjake/*-Jlama-*` and `*-JQ4` models are pre-quantised for it |
+| `modelDir` | no | Where models are downloaded to and loaded from; default `~/.cache/llm4s/jlama` |
+| `threads` | no | How many threads Jlama computes with; default the physical core count. Jlama's pool is JVM-wide, so the first model loaded sets it |
+
+- **JVM flags.** Jlama uses the JDK's incubating Vector API: run the JVM with
+  `--add-modules=jdk.incubator.vector --enable-preview` (in sbt, `run / fork := true` and
+  `run / javaOptions ++= Seq(...)`). Without them Jlama logs a warning and runs much slower.
+- **First call.** The model is downloaded on the first call, not when the client is built, then loaded from
+  `modelDir` on every later run; one model stays in memory per client until `close()`.
+- **Supported:** `complete` and `streamComplete`, text only. **Not supported:** tool calling (a request with tools
+  is refused), images and other media parts, and `responseFormat`, which is not read.
 
 ---
 
