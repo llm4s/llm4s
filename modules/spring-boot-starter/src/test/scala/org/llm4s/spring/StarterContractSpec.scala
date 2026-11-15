@@ -154,7 +154,9 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
       "org.llm4s.spring.Llm4sAutoConfiguration",
       "org.llm4s.spring.LlmActuatorAutoConfiguration",
       "org.llm4s.spring.LlmBoot4ActuatorAutoConfiguration",
-      "org.llm4s.spring.LlmMetricsAutoConfiguration"
+      "org.llm4s.spring.LlmMetricsAutoConfiguration",
+      "org.llm4s.spring.Llm4sReactiveAutoConfiguration",
+      "org.llm4s.spring.Llm4sSseAutoConfiguration"
     )
   }
 
@@ -221,7 +223,12 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
     val environmentRead = Set(
       SpringProviderSource.ProvidersPrefix,
       s"${SpringProviderSource.ProvidersPrefix}.provider",
-      SpringProviderSource.CredentialsPrefix
+      SpringProviderSource.CredentialsPrefix,
+      // the embedding client's and the tracer's, read the same way (#2279)
+      SpringProviderSource.EmbeddingsPrefix,
+      s"${SpringProviderSource.EmbeddingsPrefix}.model",
+      SpringProviderSource.TracingPrefix,
+      s"${SpringProviderSource.TracingPrefix}.mode"
     ) ++ Set(
       "llm4s.http.proxy.url",
       "llm4s.http.proxy.username",

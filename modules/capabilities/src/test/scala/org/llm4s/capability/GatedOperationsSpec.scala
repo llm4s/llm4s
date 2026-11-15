@@ -2,6 +2,7 @@ package org.llm4s.capability
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, ContentPart, Conversation, UserMessage }
 import org.llm4s.media.{ MediaSource, MediaType }
+import org.llm4s.schema.SchemaOf
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.scalatest.{ EitherValues, OptionValues }
@@ -9,6 +10,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.net.URI
+
+final case class Caption(text: String, objects: List[String]) derives SchemaOf, upickle.default.ReadWriter
 
 /** Each gated operation sends what the core call it stands for sends, and returns its answer. */
 class GatedOperationsSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
@@ -63,5 +66,29 @@ class GatedOperationsSpec extends AnyFlatSpec with Matchers with EitherValues wi
       .completeWithTools(Conversation(Seq(UserMessage("hi"))), Nil)
       .left
       .value shouldBe failure
+  }
+
+  "completeStructuredOf" should "send what llm4s-schema-derivation's completeStructuredOf sends, and read the reply" in {
+    val reply        = Reply.text("""{"text":"A cat","objects":["cat","mat"]}""")
+    val gated        = ScriptedLLMClient.always(reply)
+    val direct       = ScriptedLLMClient.always(reply)
+    val conversation = Conversation(Seq(UserMessage("Caption the picture")))
+    val options      = CompletionOptions().withMaxTokens(50)
+
+    val answer = Capable.assume[StructuredOutput](gated).completeStructuredOf[Caption](conversation, options).value
+    org.llm4s.schema.completeStructuredOf(direct)[Caption](conversation, options).value shouldBe answer
+
+    answer shouldBe Caption("A cat", List("cat", "mat"))
+    gated.calls shouldBe direct.calls
+    gated.lastCall.value.options.responseFormat should not be empty
+  }
+
+  it should "use the default options when none are given" in {
+    val gated        = ScriptedLLMClient.always(Reply.text("""{"text":"A cat","objects":[]}"""))
+    val direct       = ScriptedLLMClient.always(Reply.text("""{"text":"A cat","objects":[]}"""))
+    val conversation = Conversation(Seq(UserMessage("Caption the picture")))
+    Capable.assume[StructuredOutput & Vision](gated).completeStructuredOf[Caption](conversation).value
+    org.llm4s.schema.completeStructuredOf(direct)[Caption](conversation)
+    gated.calls shouldBe direct.calls
   }
 }

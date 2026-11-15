@@ -17,7 +17,7 @@ Print each piece of the reply as the model produces it, and get the whole comple
 ## The problem
 
 A long answer can take seconds to generate. Streaming shows the user the first words at once.
-`streamComplete` calls your function with each `StreamedChunk` as it arrives, and returns the whole `Completion`
+`streamComplete` calls your function with each {% include api.html t="org.llm4s.llmconnect.model.StreamedChunk" %} as it arrives, and returns the whole {% include api.html t="org.llm4s.llmconnect.model.Completion" %}
 when the reply ends, so you print as you go and still get the full text and usage afterwards.
 
 ## The program

@@ -1,0 +1,67 @@
+name: Portable spike (JVM, Scala.js, Scala Native)
+
+# Builds and tests the portable-llm4s spike (#2338, docs/design/portable-spike.md) on all three platforms: its own
+# sbt build under docs/design/portable-spike/build compiles llm4s-core's data-type files unchanged for the JVM,
+# Scala.js and Scala Native, runs the cross-platform specs on each, and links both demos. The llm4s build never
+# loads that build, so no published module's build or CI changes.
+#
+# It runs only when the spike or this workflow changes (and by hand), not on every change to core: until the
+# design record's recommendation is accepted, a core change must not fail on a platform llm4s does not ship.
+# A by-hand run on main shows whether core has drifted from what the spike measured.
+
+on:
+  pull_request:
+    paths:
+      - docs/design/portable-spike/**
+      - .github/workflows/portable-spike.yml
+  push:
+    branches: [main]
+    paths:
+      - docs/design/portable-spike/**
+      - .github/workflows/portable-spike.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    name: Portable spike (JVM, JS, Native)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: docs/design/portable-spike/build
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      # Scala Native links sttp's libcurl and libidn2; clang and Node (for the Scala.js tests) are on the image.
+      - name: Install the native libraries sttp links
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libidn2-dev
+
+      - name: Test on the JVM, Scala.js and Scala Native, and link both demos
+        run: sbt -batch test laminarDemo/fullLinkJS cliDemo/nativeLink
+
+      - name: Report the artifact sizes
+        run: |
+          js=demos/laminar/target/scala-3.7.1/laminardemo-opt/main.js
+          bin=demos/cli/target/scala-3.7.1/clidemo
+          {
+            echo "| Artifact | Bytes | gzip |"
+            echo "|---|---|---|"
+            echo "| Laminar demo, fullLinkJS | $(wc -c < "$js") | $(gzip -c "$js" | wc -c) |"
+            echo "| Native CLI, release-fast | $(wc -c < "$bin") | $(gzip -c "$bin" | wc -c) |"
+          } >> "$GITHUB_STEP_SUMMARY"

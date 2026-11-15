@@ -1,0 +1,12 @@
+{%- comment -%}
+  A link to a type's page in the Scaladoc at /scaladoc/ (#2291). In a page:
+    include api.html t="org.llm4s.llmconnect.LLMClient"            renders LLMClient, linked to its page
+    include api.html t="org.llm4s.config.Llm4sConfig$"             an object with no class: its page ends in $
+    include api.html t="org.llm4s.llmconnect.LLMClient" text="x"   renders x instead of the simple name
+  each inside a Liquid tag. Every `t` must name a page the `docs/doc` build generates:
+  scripts/check-api-links.sh fails CI's ScalaDoc job and the deploy otherwise.
+{%- endcomment -%}
+{%- assign api_name = include.t | split: "." | last | remove: "$" -%}
+{%- assign api_path = include.t | replace: ".", "/" -%}
+<a href="{{ '/scaladoc/' | append: api_path | append: '.html' | relative_url }}" title="{{ include.t | remove: '$' }} (API reference)"><code>{{ include.text | default: api_name }}</code></a>
+{%- comment -%}No newline after the link, so punctuation after the include stays next to it.{%- endcomment -%}
