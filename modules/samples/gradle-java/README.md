@@ -59,7 +59,11 @@ chat provider has one: with Anthropic for chat, point it at another, such as `ol
 build `CompletionOptions` with `Option.empty()` and `Nil$.MODULE$`, and pass the model registry around yourself.
 `llm4s-java-api` hides all of that behind `Llm4s`, `JLlmClient`, `ConversationBuilder`, `JCompletionOptions` and
 `LlmResult`, and its
-POM brings the provider modules and the Scala 3 library at the right version, so this project pins none of them.
+POM brings `llm4s-core`, `llm4s-agent` and the Scala 3 library at the right version, so this project pins none of them.
+It brings no provider module: `build.gradle.kts` declares `llm4s-openai`, the provider `application.conf` names. With
+another provider, swap it for that provider's module (`llm4s-ollama`, `llm4s-anthropic`, ...), so the OpenAI SDK and
+its OkHttp, Jackson and Kotlin standard library stay off the classpath
+([#1496](https://github.com/llm4s/llm4s/issues/1496)).
 
 CI builds this project against the library on every pull request (the `Kotlin API` job does both), so it does
 not drift from the API it demonstrates.

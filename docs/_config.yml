@@ -5,12 +5,17 @@ description: >-
   for building LLM-powered applications with multi-provider support, agents,
   tools, and observability.
 baseurl: ""
+# Post dates and their /news/YYYY/MM/DD/ URLs are read in UTC, whatever the build machine's time zone (#2319).
+timezone: Etc/UTC
 url: "https://llm4s.org"
 logo: "/image_assets/llm4s_logo.png"
 
-# Author
+# Author: jekyll-seo-tag's `author` meta tag, twitter:creator (a handle, so `twitter` is set) and the JSON-LD author (#2316)
 author:
-  name: LLM4S Team
+  name: LLM4S Foundation
+  type: Organization
+  url: https://llm4s.org/foundation/
+  twitter: llm4sfoundation
   email: hello@llm4s.org
 
 # Build settings
@@ -21,6 +26,11 @@ plugins:
   - jekyll-sitemap
   - jekyll-seo-tag
   - jekyll-redirect-from
+
+# jekyll-feed (#2319): /feed.xml carries every post in docs/_posts, newest first; `tags: true` adds one feed per tag a
+# post uses, at /feed/by_tag/<tag>.xml (release, community, guides), and none for a tag no post has yet.
+feed:
+  tags: true
 
 # Code block settings
 enable_copy_code_button: true
@@ -50,10 +60,81 @@ collections:
 
 # Defaults
 defaults:
+  # The share card (og:image, twitter:image) of every page, and one per landing page and docs section below: rendered
+  # by scripts/render-social-images.sh from docs/image_assets/social/ (#2316). The alt text says what the card says.
   - scope:
       path: ""
     values:
       layout: "default"
+      image:
+        path: /image_assets/social/default.png
+        width: 1200
+        height: 630
+        alt: "LLM4S: LLM framework for Scala and the JVM. llm4s.org"
+  - scope:
+      path: "why-llm4s.md"
+    values:
+      image:
+        path: /image_assets/social/why-llm4s.png
+        width: 1200
+        height: 630
+        alt: "Why LLM4S: LLM applications in Scala, on the JVM you already run. llm4s.org"
+  - scope:
+      path: "learn.md"
+    values:
+      image:
+        path: /image_assets/social/learn.png
+        width: 1200
+        height: 630
+        alt: "Learn LLM4S: from your first LLM call to agents, RAG, tools and MCP. llm4s.org"
+  - scope:
+      path: "showcase.md"
+    values:
+      image:
+        path: /image_assets/social/showcase.png
+        width: 1200
+        height: 630
+        alt: "LLM4S Showcase: open-source projects built with LLM4S. llm4s.org"
+  - scope:
+      path: "foundation.md"
+    values:
+      image:
+        path: /image_assets/social/foundation.png
+        width: 1200
+        height: 630
+        alt: "LLM4S Foundation: support the foundation that stewards LLM4S. llm4s.org"
+  - scope:
+      path: "getting-started"
+    values:
+      image:
+        path: /image_assets/social/getting-started.png
+        width: 1200
+        height: 630
+        alt: "LLM4S Getting Started: install LLM4S and run your first program. llm4s.org"
+  - scope:
+      path: "guide"
+    values:
+      image:
+        path: /image_assets/social/guide.png
+        width: 1200
+        height: 630
+        alt: "LLM4S User Guide: providers, agents, tools, RAG and observability. llm4s.org"
+  - scope:
+      path: "examples"
+    values:
+      image:
+        path: /image_assets/social/examples.png
+        width: 1200
+        height: 630
+        alt: "LLM4S Examples: runnable Scala samples, from a first LLM call to agents. llm4s.org"
+  - scope:
+      path: "reference"
+    values:
+      image:
+        path: /image_assets/social/reference.png
+        width: 1200
+        height: 630
+        alt: "LLM4S Reference: API stability, compatibility, security and the roadmap. llm4s.org"
   # Keep the generated API docs and the slide decks out of sitemap.xml (#2318). The Scaladoc has its own
   # scaladoc-sitemap.xml, written by scripts/generate-scaladoc-sitemap.sh in the Pages workflow.
   - scope:
@@ -64,6 +145,14 @@ defaults:
       path: "image_assets"
     values:
       sitemap: false
+  # News posts (#2319): docs/_posts/YYYY-MM-DD-<slug>.md, served at /news/YYYY/MM/DD/<slug>/ and listed on /news/
+  # and in feed.xml. scripts/check-docs-site-links.sh resolves post URLs with this same pattern.
+  - scope:
+      path: ""
+      type: "posts"
+    values:
+      layout: "post"
+      permalink: /news/:year/:month/:day/:title/
   - scope:
       path: ""
       type: "guide"

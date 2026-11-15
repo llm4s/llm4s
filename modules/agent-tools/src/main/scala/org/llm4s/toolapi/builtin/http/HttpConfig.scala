@@ -15,8 +15,8 @@ import scala.concurrent.duration.*
  *  - Cloud metadata endpoints are blocked (169.254.169.254)
  *  - Localhost and loopback addresses are blocked
  *
- * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed.
- * @param blockedDomains List of domains that are always blocked.
+ * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed. A leading `www.` is ignored.
+ * @param blockedDomains List of domains that are always blocked. A leading `www.` is ignored.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
  *                        result's `truncated` is `true`.
@@ -60,7 +60,7 @@ case class HttpConfig(
    * Check if a domain is allowed based on blocklist/allowlist configuration.
    *
    * This method performs hostname-based checks only:
-   * 1. Hostname-based blocklist check
+   * 1. Hostname-based blocklist check, ignoring a leading `www.` in both the domain and configured entries
    * 2. Allowlist check (if configured)
    *
    * Note: IP-based SSRF protection (DNS resolution + IP range validation) is performed
@@ -71,7 +71,7 @@ case class HttpConfig(
 
     // Check blocked domains first
     val isBlocked = blockedDomains.exists { blocked =>
-      val b = blocked.toLowerCase(Locale.ROOT)
+      val b = blocked.toLowerCase(Locale.ROOT).stripPrefix("www.")
       normalizedDomain == b || normalizedDomain.endsWith(s".$b")
     }
 

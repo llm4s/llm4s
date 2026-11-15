@@ -161,10 +161,15 @@ object MediaType {
   def fromExtension(extension: String): Option[MediaType] =
     byExtension.get(extension.trim.toLowerCase.stripPrefix("."))
 
-  /** The media type named by the extension of a file path or URL. */
+  /**
+   * The media type named by the extension of a file path or URL.
+   *
+   * A URL's query string and fragment are ignored.
+   */
   def fromPath(path: String): Option[MediaType] = {
-    val trimmed = path.trim
-    val name    = trimmed.substring(trimmed.lastIndexOf('/') + 1)
+    val trimmed  = path.trim
+    val pathOnly = if (trimmed.contains("://")) trimmed.takeWhile(char => char != '?' && char != '#') else trimmed
+    val name     = pathOnly.substring(pathOnly.lastIndexOf('/') + 1)
     if (name.contains('.')) fromExtension(name.substring(name.lastIndexOf('.') + 1)) else None
   }
 

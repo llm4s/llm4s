@@ -197,6 +197,13 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      assertUsesSuppliedHttpClient(GeminiProvider, section(GeminiProvider))
+      // Vertex's `apiKey` is a credential-file path; with none, its token comes from the metadata server, through the
+      // supplied client too.
+      assertUsesSuppliedHttpClient(VertexAIProvider, section(VertexAIProvider).withApiKey(None))
+    }
+
     "declare a model lister for Gemini only" in {
       GeminiProvider.modelLister shouldBe defined
       VertexAIProvider.modelLister shouldBe None

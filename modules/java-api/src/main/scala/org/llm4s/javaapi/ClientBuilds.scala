@@ -47,17 +47,36 @@ private[javaapi] object ClientBuilds {
   /** The section name an OpenAI-compatible builder's config is made under, as a named section's would be. */
   private val SectionName: String = "openAiCompatible"
 
-  def openAi(s: ClientSettings): LlmResult[JLlmClient] = client(openAiConfig(s), s)
+  // Each build first checks that its provider module is on the classpath: the provider modules are optional
+  // dependencies of llm4s-java-api (#1496), and the config methods below load the module's classes.
+  def openAi(s: ClientSettings): LlmResult[JLlmClient] =
+    client(ProviderModules.require(ProviderModules.OpenAI, "OpenAiClientBuilder").flatMap(_ => openAiConfig(s)), s)
 
-  def anthropic(s: ClientSettings): LlmResult[JLlmClient] = client(anthropicConfig(s), s)
+  def anthropic(s: ClientSettings): LlmResult[JLlmClient] =
+    client(
+      ProviderModules.require(ProviderModules.Anthropic, "AnthropicClientBuilder").flatMap(_ => anthropicConfig(s)),
+      s
+    )
 
-  def gemini(s: ClientSettings): LlmResult[JLlmClient] = client(geminiConfig(s), s)
+  def gemini(s: ClientSettings): LlmResult[JLlmClient] =
+    client(ProviderModules.require(ProviderModules.Gemini, "GeminiClientBuilder").flatMap(_ => geminiConfig(s)), s)
 
-  def ollama(s: ClientSettings): LlmResult[JLlmClient] = client(ollamaConfig(s), s)
+  def ollama(s: ClientSettings): LlmResult[JLlmClient] =
+    client(ProviderModules.require(ProviderModules.Ollama, "OllamaClientBuilder").flatMap(_ => ollamaConfig(s)), s)
 
-  def openAiCompatible(s: ClientSettings): LlmResult[JLlmClient] = client(openAiCompatibleConfig(s), s)
+  def openAiCompatible(s: ClientSettings): LlmResult[JLlmClient] =
+    client(
+      ProviderModules
+        .require(ProviderModules.OpenAICompatible, "OpenAiCompatibleClientBuilder")
+        .flatMap(_ => openAiCompatibleConfig(s)),
+      s
+    )
 
-  def azureOpenAi(s: ClientSettings): LlmResult[JLlmClient] = client(azureOpenAiConfig(s), s)
+  def azureOpenAi(s: ClientSettings): LlmResult[JLlmClient] =
+    client(
+      ProviderModules.require(ProviderModules.OpenAI, "AzureOpenAiClientBuilder").flatMap(_ => azureOpenAiConfig(s)),
+      s
+    )
 
   def openAiConfig(s: ClientSettings): Result[ProviderConfig] =
     for {

@@ -1,0 +1,4 @@
+# The MCP Python SDK (https://github.com/modelcontextprotocol/python-sdk), for sentiment_tool.py.
+# Pinned so the sample and its CI run do not change under us; 2.x names the server class MCPServer
+# (it was FastMCP in 1.x). Needs Python 3.10 or later.
+mcp==2.3.0

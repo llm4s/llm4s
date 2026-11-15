@@ -1,6 +1,7 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21
 //DEPS org.llm4s:llm4s-java-api_3:0.5.1
+//DEPS org.llm4s:llm4s-ollama_3:0.5.1
 //DEPS ch.qos.logback:logback-classic:1.5.34
 //FILES application.conf
 //FILES logback.xml

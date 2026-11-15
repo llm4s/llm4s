@@ -26,8 +26,5 @@ Sign your commits as for any contribution (`git commit -s`, see [CONTRIBUTING.md
 
 | Name | Link | Use case | Since | Modules |
 |------|------|----------|-------|---------|
-<!-- Add rows above this line, in alphabetical order by name. Example row (delete it when you add the first real one):
-| Example Corp | https://example.com | Internal support assistant | 2026-10 | llm4s-core, llm4s-openai |
--->
-
-_No entries yet. Be the first._
+| Scala Teams | https://scalateams.com | Multi-provider LLM layer for Spec Manager, an AI spec-authoring and code-generation tool | 2026-11 | llm4s-core, llm4s-anthropic |
+<!-- Add rows above this line, in alphabetical order by name. -->

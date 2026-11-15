@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="630" viewBox="0 0 1200 630">
+  <!--
+    The llm4s.org share card (#2316): 1200x630, the size Open Graph and Twitter/X large cards use.
+    scripts/render-social-images.sh fills in the placeholders from cards.tsv beside this file and writes one PNG per
+    card. Opened directly, the placeholders show as text and the logo loads from ../llm4s_logo.png.
+    The colours are the landing pages' (docs/_sass/custom/custom.scss): ink #16181d, accent #e8382c.
+  -->
+  <defs>
+    <radialGradient id="glow-top" cx="0.85" cy="0.1" r="0.7">
+      <stop offset="0" stop-color="#e8382c" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#e8382c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-bottom" cx="0" cy="1" r="0.6">
+      <stop offset="0" stop-color="#e8382c" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#e8382c" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.04" stroke-width="1"/>
+    </pattern>
+    <clipPath id="logo-clip">
+      <rect x="800" y="135" width="320" height="320" rx="36"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1200" height="630" fill="#16181d"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect width="1200" height="630" fill="url(#glow-top)"/>
+  <rect width="1200" height="630" fill="url(#glow-bottom)"/>
+
+  <g font-family="Inter, 'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif">
+    <text x="80" y="118" fill="#ffffff" font-size="34" font-weight="800" letter-spacing="1">LLM4S</text>
+    <rect x="80" y="140" width="72" height="6" rx="3" fill="#e8382c"/>
+
+    <text x="80" y="290" fill="#ffffff" font-size="68" font-weight="800">@@HEADING@@</text>
+    <text fill="#c9ccd3" font-size="34" font-weight="500">
+      <tspan x="80" y="360">@@LINE1@@</tspan>
+      <tspan x="80" y="408">@@LINE2@@</tspan>
+    </text>
+
+    <text x="80" y="550" fill="#ffffff" font-size="30" font-weight="700">llm4s.org</text>
+    <text x="1120" y="550" fill="#9da1ab" font-size="26" font-weight="500" text-anchor="end">Scala 3 · JDK 21 · MIT licensed</text>
+  </g>
+
+  <rect x="800" y="135" width="320" height="320" rx="36" fill="#efede8"/>
+  <image x="800" y="135" width="320" height="320" clip-path="url(#logo-clip)" xlink:href="../llm4s_logo.png" href="../llm4s_logo.png"/>
+</svg>

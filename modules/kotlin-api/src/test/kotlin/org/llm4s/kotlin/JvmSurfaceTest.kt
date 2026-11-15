@@ -26,6 +26,8 @@ class JvmSurfaceTest {
         LLMException::class.java,
         Class.forName("org.llm4s.kotlin.ToolDslKt"),
         Class.forName("org.llm4s.kotlin.CompletionOptionsDslKt"),
+        Class.forName("org.llm4s.kotlin.AgentDslKt"),
+        AgentSpec::class.java,
         ToolsSpec::class.java,
         ToolSpec::class.java,
         ToolArgs::class.java,

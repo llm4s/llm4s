@@ -61,7 +61,8 @@ sealed interface AgentStreamItem {
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
  *
- * Obtain instances via [Llm4s.createAgent] or [Llm4s.wrapAgent].
+ * Obtain instances via [agent] (a system prompt, guardrails, a context window), [Llm4s.createAgent] or
+ * [Llm4s.wrapAgent].
  *
  * ```kotlin
  * val agent  = Llm4s.createAgent(client)

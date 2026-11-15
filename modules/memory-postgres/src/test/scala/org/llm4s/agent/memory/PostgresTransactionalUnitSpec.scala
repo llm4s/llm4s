@@ -107,7 +107,8 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
     }
 
     private def prepared(sql: String): PreparedStatement = {
-      val params = mutable.Map.empty[Int, Any]
+      val params  = mutable.Map.empty[Int, Any]
+      val batched = mutable.ArrayBuffer.empty[mutable.Map[Int, Any]]
       proxy(classOf[PreparedStatement]) {
         case ("setString", a) => params(a(0).asInstanceOf[Integer]) = a(1); null
         case ("setLong", a)   => params(a(0).asInstanceOf[Integer]) = a(1).asInstanceOf[java.lang.Long].longValue; null
@@ -117,8 +118,13 @@ class PostgresTransactionalUnitSpec extends AnyFlatSpec with Matchers with Eithe
         case ("setNull", a)       => params.remove(a(0).asInstanceOf[Integer]); null
         case ("executeQuery", _)  => query(sql, params)
         case ("executeUpdate", _) => Integer.valueOf(update(sql, params))
-        case ("close", _)         => null
-        case (other, _)           => throw new UnsupportedOperationException(other)
+        case ("addBatch", _)      => batched += params.clone(); null
+        case ("executeBatch", _) =>
+          val counts = batched.map(update(sql, _)).toArray
+          batched.clear()
+          counts
+        case ("close", _) => null
+        case (other, _)   => throw new UnsupportedOperationException(other)
       }
     }
 

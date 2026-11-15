@@ -1,0 +1,56 @@
+name: Flink sample
+
+# Tests the Flink sample (modules/samples/flink, docs/guide/flink.md, #2298) against the llm4s release it pins: the
+# job runs on Flink's MiniCluster with a scripted model, so no API key and no network beyond Maven Central. sbt never
+# builds the sample, so without this a Flink or llm4s release it no longer works with goes unnoticed until a reader
+# copies it. It needs the network, so it runs weekly and when the sample or its guide changes, not on every pull
+# request; ci.yml runs the offline part (the guide's snippets are the sample's, and it pins latest_release).
+
+on:
+  schedule:
+    - cron: "57 4 * * 1"  # 04:57 UTC every Monday
+  push:
+    branches: [main]
+    paths:
+      - modules/samples/flink/**
+      - docs/guide/flink.md
+      - docs/_data/project.yml
+      - scripts/check-flink-guide-snippets.sh
+      - .github/workflows/flink-sample.yml
+  pull_request:
+    paths:
+      - modules/samples/flink/**
+      - docs/guide/flink.md
+      - scripts/check-flink-guide-snippets.sh
+      - .github/workflows/flink-sample.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flink:
+    name: Test the Flink sample on a MiniCluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - uses: VirtusLab/scala-cli-setup@3f5bf11a33bb88343238780c18257c8fa43789e1 # v1.18.0
+
+      - name: Check the guide's snippets are the sample's
+        run: scripts/check-flink-guide-snippets.sh
+
+      - name: Run the sample's MiniCluster test
+        working-directory: modules/samples/flink
+        run: scala-cli test . --server=false

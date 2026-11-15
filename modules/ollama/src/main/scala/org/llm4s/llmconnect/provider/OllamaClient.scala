@@ -401,11 +401,8 @@ class OllamaClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override protected def releaseResources(): Unit =
-    (http: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object OllamaClient {
@@ -586,7 +583,8 @@ object OllamaClient {
   def apply(
     config: OllamaConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[OllamaClient] =
-    Try(new OllamaClient(config, metrics, exchangeLogging)).toResult
+    Try(new OllamaClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

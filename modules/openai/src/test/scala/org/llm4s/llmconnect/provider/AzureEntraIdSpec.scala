@@ -212,6 +212,22 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey.reveal shouldBe ""
   }
 
+  "AzureConfig.withApiKeyProvider" should "authenticate one way: it clears the token provider, and a token provider clears it" in {
+    val keyed  = AzureConfig("https://r.openai.azure.com", Secret("k"), "gpt-4o")
+    val keys   = org.llm4s.llmconnect.auth.ApiKeyProvider.static(org.llm4s.types.ProviderModelTypes.ApiKey("k2"))
+    val tokens = new CountingTokens
+    keyed.apiKeyProvider shouldBe None
+    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(keys)
+    rotating.apiKeyProvider shouldBe Some(keys)
+    rotating.tokenProvider shouldBe None
+    rotating.toString should include("apiKeyProvider=ApiKeyProvider.static(***)")
+    rotating.withApiKeyProvider(None).apiKeyProvider shouldBe None
+    val entra = rotating.withTokenProvider(tokens)
+    entra.apiKeyProvider shouldBe None
+    entra.tokenProvider shouldBe Some(tokens)
+    entra.withTokenProvider(None).apiKeyProvider shouldBe None
+  }
+
   "OpenAIEmbeddingProvider with a token provider" should "send each token as the bearer and drop a rejected one" in {
     val authorizations = new ConcurrentLinkedQueue[String]()
     val reply          = """{"data":[{"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":1,"total_tokens":1}}"""

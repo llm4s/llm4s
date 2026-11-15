@@ -72,6 +72,10 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       assertRefusesForeignConfig(BedrockProvider)
     }
 
+    "declare that its SDK ignores a supplied HTTP client (#2341)" in {
+      BedrockProvider.features.customHttpClient shouldBe false
+    }
+
     "bind no vendor API key, so its credential round trip is vacuous but must still pass" in {
       BedrockProvider.configSpec.apiKeyEnv shouldBe empty
       assertCredentialBindings(BedrockProvider, extraFields = """region = "us-east-1"""")

@@ -1,0 +1,7 @@
+org.llm4s.scalafix.Llm4sMigrate_0_5
+org.llm4s.scalafix.CopyToWithSetters
+org.llm4s.scalafix.MillisToFiniteDuration
+org.llm4s.scalafix.IsRecoverableToTotal
+org.llm4s.scalafix.MovedConfigLoaders
+org.llm4s.scalafix.MessageExtractorToTypePattern
+org.llm4s.scalafix.RemovedApis

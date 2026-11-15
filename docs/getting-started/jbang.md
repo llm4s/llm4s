@@ -43,6 +43,7 @@ Make a directory with these three files. The same files are in
 ///usr/bin/env jbang "$0" "$@" ; exit $?
 //JAVA 21
 //DEPS org.llm4s:llm4s-java-api_3:{{ site.data.project.latest_release }}
+//DEPS org.llm4s:llm4s-ollama_3:{{ site.data.project.latest_release }}
 //DEPS ch.qos.logback:logback-classic:1.5.34
 //FILES application.conf
 //FILES logback.xml
@@ -75,9 +76,11 @@ public class HelloLlm4s {
 }
 ```
 
-The `//DEPS` line is the whole dependency: Maven does not add the Scala suffix, so the artifact is
-`llm4s-java-api_3`, and its POM brings `llm4s-core`, `llm4s-agent` and the provider modules, including Ollama.
-The second `//DEPS` line is the logging backend: llm4s logs through SLF4J and ships none, so without it SLF4J prints
+The first `//DEPS` line is llm4s: Maven does not add the Scala suffix, so the artifact is `llm4s-java-api_3`, and its
+POM brings `llm4s-core` and `llm4s-agent`. The second is the provider module the file calls, `llm4s-ollama_3`; for
+another provider, name its module instead (`llm4s-openai_3`, `llm4s-anthropic_3`, ...). Up to 0.5.x the facade brought
+every provider module ([#1496](https://github.com/llm4s/llm4s/issues/1496)).
+The third `//DEPS` line is the logging backend: llm4s logs through SLF4J and ships none, so without it SLF4J prints
 a "no SLF4J providers were found" warning and drops the logs. `//FILES` puts a file on the classpath.
 
 `application.conf` names the provider, as a named section; the
@@ -136,7 +139,7 @@ For OpenAI instead of Ollama, change the section in `application.conf` to `provi
 **A wall of `DEBUG` lines before the answer**: `logback.xml` is not beside the file, or `//FILES logback.xml` is
 missing.
 
-**The version**: change the number in the `//DEPS org.llm4s` line to move to another release.
+**The version**: change the number in both `//DEPS org.llm4s` lines to move to another release.
 
 ## Trying the code on `main`
 
@@ -148,7 +151,7 @@ does:
 sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 ```
 
-Then change the `//DEPS` line to version `0.1.0-SNAPSHOT` and add `//REPOS mavenlocal,mavencentral` above it.
+Then change the two `//DEPS org.llm4s` lines to version `0.1.0-SNAPSHOT` and add `//REPOS mavenlocal,mavencentral` above it.
 
 ## Next steps
 

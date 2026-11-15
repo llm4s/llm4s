@@ -115,6 +115,10 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       assertRefusesForeignConfig(AnthropicProvider)
     }
 
+    "declare that its SDK ignores a supplied HTTP client (#2341)" in {
+      AnthropicProvider.features.customHttpClient shouldBe false
+    }
+
     "declare a model lister" in {
       AnthropicProvider.modelLister shouldBe defined
     }
