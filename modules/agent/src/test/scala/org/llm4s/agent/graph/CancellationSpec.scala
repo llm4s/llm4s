@@ -565,4 +565,50 @@ class CancellationSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
     val tasks = (1 to 20).toVector.map(i => () => { Thread.sleep((20 - i).toLong); i })
     TaskExecutor.bounded(4).runAll(tasks) shouldBe (1 to 20).toVector
   }
+
+  it should "run a lone task on a thread of its own and return its result" in {
+    val caller = Thread.currentThread()
+    val ran    = new java.util.concurrent.atomic.AtomicReference[Thread]()
+    TaskExecutor
+      .bounded(4)
+      .runAll(Vector { () =>
+        ran.set(Thread.currentThread()); 7
+      }) shouldBe Vector(7)
+    ran.get should not be caller
+    ran.get.isVirtual shouldBe true
+  }
+
+  it should "rethrow a lone task's exception as it was thrown" in {
+    val boom = new IllegalStateException("boom")
+    val thrown = intercept[IllegalStateException] {
+      TaskExecutor.bounded(4).runAll(Vector[() => Int](() => throw boom))
+    }
+    thrown shouldBe theSameInstanceAs(boom)
+  }
+
+  it should "interrupt and join a lone task before an interrupted caller sees InterruptedException, even when the task swallows it" in {
+    val started = new CountDownLatch(1)
+    val taskSaw = new AtomicBoolean(false)
+    val joined  = new AtomicBoolean(false)
+    val outcome = new LinkedBlockingQueue[Either[Throwable, Vector[Int]]]()
+    // the task swallows its interrupt and returns normally: the caller must still be told it was interrupted
+    val task: () => Int = () => {
+      started.countDown()
+      val slept = DefaultRunHandle.guarded(Thread.sleep(30000))
+      taskSaw.set(slept.isLeft)
+      Thread.sleep(50)
+      joined.set(true)
+      1
+    }
+    val caller = Thread.ofVirtual().start { () =>
+      val result = DefaultRunHandle.guarded(TaskExecutor.bounded(4).runAll(Vector(task)))
+      // the task had ended by the time the caller's wait gave up
+      outcome.put(result.left.map(e => if joined.get then e else new AssertionError("task not joined", e)))
+    }
+    started.await(10, TimeUnit.SECONDS) shouldBe true
+    caller.interrupt()
+    val result = Option(outcome.poll(10, TimeUnit.SECONDS)).getOrElse(fail("the caller never returned"))
+    result.left.toOption.get shouldBe an[InterruptedException]
+    taskSaw.get shouldBe true
+  }
 }
