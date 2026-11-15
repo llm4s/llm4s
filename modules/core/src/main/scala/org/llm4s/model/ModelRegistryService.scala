@@ -16,12 +16,74 @@ import scala.util.{ Try, Using }
  */
 @Stable
 trait ModelRegistryService:
+  /**
+   * Finds models whose [[ModelMetadata.supports]] accepts `capability`.
+   *
+   * Capability names are case-insensitive but are not trimmed. Supported names include `vision`, `tools`,
+   * `reasoning` and their aliases documented by [[ModelMetadata.supports]]. Result order is unspecified.
+   *
+   * @param capability a capability name understood by [[ModelMetadata.supports]]
+   * @return matching models, or a [[org.llm4s.error.ValidationError]] on `capability` when none match,
+   *         including when the capability name is unknown
+   */
   def findByCapability(capability: String): Result[List[ModelMetadata]]
+
+  /**
+   * Lists distinct provider names in sorted order, preserving their stored spelling.
+   *
+   * @return `Right` with the names, or an empty list for an empty registry; no validation error is returned
+   */
   def listProviders(): Result[List[String]]
+
+  /**
+   * Finds models with exactly the given [[ModelMode]]. Result order is unspecified.
+   *
+   * @param mode the mode to match
+   * @return matching models, or a [[org.llm4s.error.ValidationError]] on `mode` when none match
+   */
   def listByMode(mode: ModelMode): Result[List[ModelMetadata]]
+
+  /**
+   * Finds models by a case-insensitive provider name, without trimming it. Result order is unspecified.
+   *
+   * @param provider the provider name to match
+   * @return matching models, or a [[org.llm4s.error.ValidationError]] on `provider` when none match
+   */
   def listByProvider(provider: String): Result[List[ModelMetadata]]
+
+  /**
+   * Returns snapshot counts under these keys: `totalModels`, `embeddedModels`, `customModels`, `providers`,
+   * `chatModels`, `embeddingModels`, `imageGenerationModels` and `deprecatedModels`.
+   *
+   * All values are integers. `embeddedModels` equals `totalModels` and `customModels` is zero, even for a
+   * registry loaded from an explicit source; these counts do not track the provenance of individual entries.
+   * `providers` counts distinct stored provider names, and `deprecatedModels` uses [[ModelMetadata.isDeprecated]].
+   *
+   * @return `Right` with the counts, including zero counts for an empty registry
+   */
   def statistics(): Result[Map[String, Any]]
+
+  /**
+   * Looks up a model after trimming `modelId`. Matching tries, in order: an exact registry key, a
+   * case-insensitive key, a case-insensitive key with the first `provider/` prefix removed from the query,
+   * and a unique case-insensitive substring match using the full trimmed query.
+   *
+   * @param modelId a registry identifier or a substring identifying a single model
+   * @return the model, or a [[org.llm4s.error.ValidationError]] on `modelId` when no key matches or the
+   *         substring matches multiple keys (an "Ambiguous model identifier" error)
+   */
   def lookup(modelId: String): Result[ModelMetadata]
+
+  /**
+   * Tries [[lookup(modelId:String)* lookup]] with `provider/modelName`, then with `modelName` alone.
+   * If both fail, tries a model whose stored provider and `modelId` equal the two arguments ignoring case,
+   * without trimming those arguments. The unprefixed fallback can resolve a model from another provider.
+   *
+   * @param provider the provider to try first
+   * @param modelName the model identifier to resolve
+   * @return the first successful match, or a [[org.llm4s.error.ValidationError]] on `modelId` saying
+   *         "Model not found" if all attempts fail, including ambiguous earlier attempts
+   */
   def lookup(provider: String, modelName: String): Result[ModelMetadata]
 
 final private[model] class DefaultModelRegistryService(
@@ -77,11 +139,11 @@ object ModelRegistryService:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * The registry of the model catalogue bundled with llm4s, read from the classpath: no
-   * configuration file is consulted. This is how code that builds a provider config from values
-   * satisfies the `using ModelRegistryService` of `LLMConnect.getClient` (and, through
-   * `ContextWindowResolver.fromModelRegistry`, a config's `fromValues`) without an
-   * `application.conf`:
+   * The registry of the model catalogue bundled with llm4s ([[ModelRegistryConfig.default]]), read from the
+   * classpath, with curated llm4s overrides taking precedence; missing or invalid overrides are logged and leave
+   * the base snapshot usable. No configuration file is consulted. This is how code that builds a provider config
+   * from values satisfies the `using ModelRegistryService` of `LLMConnect.getClient` (and, through
+   * `ContextWindowResolver.fromModelRegistry`, a config's `fromValues`) without an `application.conf`:
    *
    * {{{
    * for {
@@ -94,10 +156,21 @@ object ModelRegistryService:
    *
    * `Llm4sConfig.modelRegistryService()` reads the `llm4s.modelRegistry` block instead, for an
    * application that points the registry at its own catalogue.
+   *
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if the base resource cannot be read or parsed
    */
   def default(): Result[ModelRegistryService] =
     fromConfig(ModelRegistryConfig.default)
 
+  /**
+   * Loads exactly one metadata source from [[ModelRegistryConfig]]. Source strings are trimmed and blank
+   * strings count as absent. A file or URL does not implicitly replace a configured resource: clear the other
+   * source fields explicitly. The default classpath resource receives curated overrides as in [[fromResource]].
+   *
+   * @param config the resource, file or URL source
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if zero or multiple sources remain,
+   *         or the selected source cannot be loaded or parsed
+   */
   def fromConfig(config: ModelRegistryConfig): Result[ModelRegistryService] =
     val resourcePath = config.resourcePath.map(_.trim).filter(_.nonEmpty)
     val filePath     = config.filePath.map(_.trim).filter(_.nonEmpty)
@@ -115,12 +188,36 @@ object ModelRegistryService:
       case _ =>
         Left(ConfigurationError("ModelRegistryConfig must define exactly one of resourcePath, filePath, or url"))
 
+  /**
+   * Builds a snapshot directly from [[ModelMetadata]] values, keyed by `modelId`, without reading external data
+   * or applying overrides. For duplicate identifiers the last value wins; an empty iterable is valid.
+   *
+   * @param models the metadata to retain
+   * @return the registry directly, without additional metadata validation or a `Result` wrapper
+   */
   def fromModels(models: Iterable[ModelMetadata]): ModelRegistryService =
     DefaultModelRegistryService(models.iterator.map(model => model.modelId -> model).toMap)
 
+  /**
+   * Parses a JSON object mapping identifiers to [[ModelMetadata]] entries, without applying overrides.
+   * The `sample_spec` key is ignored. Invalid individual model entries are logged and skipped, so a parsed
+   * object can produce an empty registry.
+   *
+   * @param jsonContent the metadata JSON document
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if parsing the document as an object fails
+   */
   def fromJsonString(jsonContent: String): Result[ModelRegistryService] =
     parseMetadataJson(jsonContent).map(metadata => DefaultModelRegistryService(metadata))
 
+  /**
+   * Loads metadata JSON from a classpath resource. Curated llm4s overrides are applied only when the path
+   * exactly equals [[ModelRegistryConfig.DefaultResourcePath]]; other resources are loaded without overrides.
+   * Missing or invalid override resources are logged and ignored. The supplied path is not trimmed here.
+   *
+   * @param resourcePath the classpath resource path, resolved relative to this object's class
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] when the base resource is missing,
+   *         cannot be read or cannot be parsed as a metadata object
+   */
   def fromResource(resourcePath: String): Result[ModelRegistryService] =
     loadResource(resourcePath).flatMap(parseMetadataJson).map { base =>
       val metadata =
@@ -146,9 +243,23 @@ object ModelRegistryService:
         logger.warn(s"Skipping embedded model metadata overrides: ${error.message}")
         base
 
+  /**
+   * Reads a filesystem metadata JSON file and parses it as in [[fromJsonString]], without applying overrides.
+   * The supplied path is not trimmed here.
+   *
+   * @param filePath the file to read
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if reading or parsing the document fails
+   */
   def fromFile(filePath: String): Result[ModelRegistryService] =
     loadFile(filePath).flatMap(fromJsonString)
 
+  /**
+   * Reads metadata JSON synchronously from a URL and parses it as in [[fromJsonString]], without applying overrides.
+   * The supplied URL is not trimmed here.
+   *
+   * @param url the URL accepted by `scala.io.Source.fromURL`
+   * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if opening, reading or parsing the document fails
+   */
   def fromUrl(url: String): Result[ModelRegistryService] =
     loadUrl(url).flatMap(fromJsonString)
 
