@@ -401,6 +401,8 @@ lazy val llm4s = (project in file("."))
     scalafixInput,
     scalafixOutput,
     scalafixTests,
+    scalafixInput05,
+    scalafixTests05,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -3065,14 +3067,16 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // conflict with the Scala 3-only library policy (#1126). It is not published yet; publishing it with the release
 // workflow, and listing it in the BOM, are the rest of #2330.
 //
-// The other three projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
+// The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
-// output. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
+// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
+// input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
 // compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"
 lazy val scalafixVersion  = "0.12.1"
 lazy val scalafixOldLlm4s = "0.4.1"
+lazy val scalafix05Llm4s  = "0.5.1"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
   publish / skip       := true,
   mimaFailOnNoPrevious := false,
@@ -3114,8 +3118,17 @@ lazy val scalafixInput = (project in file("modules/scalafix-rules/input"))
   )
 
 lazy val scalafixOutput = (project in file("modules/scalafix-rules/output"))
-  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, anthropic, ollama)
+  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, openai, anthropic, ollama, gemini, agent)
   .settings(scalafixTestLayout)
+
+lazy val scalafixInput05 = (project in file("modules/scalafix-rules/input-0.5"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled := true,
+    libraryDependencies ++= Seq("core", "openai-compatible", "openai", "anthropic", "gemini", "rag", "agent").map(m =>
+      "org.llm4s" %% s"llm4s-$m" % scalafix05Llm4s
+    )
+  )
 
 lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
   .dependsOn(scalafixRules)
@@ -3137,6 +3150,27 @@ lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
     // The output must compile against this checkout: that is what proves a rewrite lands on the new API.
     Test / test     := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
     Test / testOnly := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
+  )
+
+lazy val scalafixTests05 = (project in file("modules/scalafix-rules/tests-0.5"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput05 / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput05 / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput05 / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput05 / Compile / scalaVersion).value,
+    Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )
 
 // ---- relocation stubs for the 0.4.0 artifact rename ----
