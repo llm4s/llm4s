@@ -2604,66 +2604,68 @@ lazy val docs = (project in file("modules/docs"))
     ),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
-    Compile / sources := {
-      (media / Compile / sources).value ++
-        (core / Compile / sources).value ++
-        (rag / Compile / sources).value ++
-        (vectorstoreElasticsearch / Compile / sources).value ++
-        (vectorstoreRedis / Compile / sources).value ++
-        (knowledgegraph / Compile / sources).value ++
-        (memory / Compile / sources).value ++
-        (memoryPostgres / Compile / sources).value ++
-        (mcp / Compile / sources).value ++
-        (image / Compile / sources).value ++
-        (speech / Compile / sources).value ++
-        (ollama / Compile / sources).value ++
-        (gemini / Compile / sources).value ++
-        (anthropic / Compile / sources).value ++
-        (openai / Compile / sources).value ++
-        (azureIdentity / Compile / sources).value ++
-        (secretsVault / Compile / sources).value ++
-        (openaiCompatible / Compile / sources).value ++
-        (voyage / Compile / sources).value ++
-        (bedrock / Compile / sources).value ++
-        (jina / Compile / sources).value ++
-        (jev / Compile / sources).value ++
-        (cohere / Compile / sources).value ++
-        (watsonx / Compile / sources).value ++
-        (perplexity / Compile / sources).value ++
-        (jlama / Compile / sources).value ++
-        (providerTestkit / Compile / sources).value ++
-        (schemaDerivation / Compile / sources).value ++
-        (schemaIron / Compile / sources).value ++
-        (prompt / Compile / sources).value ++
-        (testkit / Compile / sources).value ++
-        (capabilities / Compile / sources).value ++
-        (doctor / Compile / sources).value ++
-        (repl / Compile / sources).value ++
-        (workspaceShared / Compile / sources).value ++
-        (workspaceClient / Compile / sources).value ++
-        (observability / Compile / sources).value ++
-        (observabilityPrometheus / Compile / sources).value ++
-        (observabilityMicrometer / Compile / sources).value ++
-        (traceOpentelemetry / Compile / sources).value ++
-        (agent / Compile / sources).value ++
-        (agentTestkit / Compile / sources).value ++
-        (agentCheckpointSqlite / Compile / sources).value ++
-        (agentCheckpointPostgres / Compile / sources).value ++
-        (agentMemory / Compile / sources).value ++
-        (agentTools / Compile / sources).value ++
-        (llm4sTapir / Compile / sources).value ++
-        (llm4sSttp / Compile / sources).value ++
-        (knowledgegraphNeo4j / Compile / sources).value ++
-        (llm4sEffect / Compile / sources).value ++
-        (llm4sZio / Compile / sources).value ++
-        (llm4sPekko / Compile / sources).value ++
-        (llm4sOx / Compile / sources).value ++
-        (javaApi / Compile / sources).value ++
-        (javaRag / Compile / sources).value ++
-        (reactor / Compile / sources).value ++
-        (springBootStarter / Compile / sources).value ++
-        (springAi / Compile / sources).value
-    },
+    // A flat Seq, not a chain of `++`: each `++` nests the tree one level deeper, and at 57 modules the chain overflowed
+    // scalac's stack while sbt compiled the build on CI's runners.
+    Compile / sources := Seq(
+      (media / Compile / sources).value,
+      (core / Compile / sources).value,
+      (rag / Compile / sources).value,
+      (vectorstoreElasticsearch / Compile / sources).value,
+      (vectorstoreRedis / Compile / sources).value,
+      (knowledgegraph / Compile / sources).value,
+      (memory / Compile / sources).value,
+      (memoryPostgres / Compile / sources).value,
+      (mcp / Compile / sources).value,
+      (image / Compile / sources).value,
+      (speech / Compile / sources).value,
+      (ollama / Compile / sources).value,
+      (gemini / Compile / sources).value,
+      (anthropic / Compile / sources).value,
+      (openai / Compile / sources).value,
+      (azureIdentity / Compile / sources).value,
+      (secretsVault / Compile / sources).value,
+      (openaiCompatible / Compile / sources).value,
+      (voyage / Compile / sources).value,
+      (bedrock / Compile / sources).value,
+      (jina / Compile / sources).value,
+      (jev / Compile / sources).value,
+      (cohere / Compile / sources).value,
+      (watsonx / Compile / sources).value,
+      (perplexity / Compile / sources).value,
+      (jlama / Compile / sources).value,
+      (providerTestkit / Compile / sources).value,
+      (schemaDerivation / Compile / sources).value,
+      (schemaIron / Compile / sources).value,
+      (prompt / Compile / sources).value,
+      (testkit / Compile / sources).value,
+      (capabilities / Compile / sources).value,
+      (doctor / Compile / sources).value,
+      (repl / Compile / sources).value,
+      (workspaceShared / Compile / sources).value,
+      (workspaceClient / Compile / sources).value,
+      (observability / Compile / sources).value,
+      (observabilityPrometheus / Compile / sources).value,
+      (observabilityMicrometer / Compile / sources).value,
+      (traceOpentelemetry / Compile / sources).value,
+      (agent / Compile / sources).value,
+      (agentTestkit / Compile / sources).value,
+      (agentCheckpointSqlite / Compile / sources).value,
+      (agentCheckpointPostgres / Compile / sources).value,
+      (agentMemory / Compile / sources).value,
+      (agentTools / Compile / sources).value,
+      (llm4sTapir / Compile / sources).value,
+      (llm4sSttp / Compile / sources).value,
+      (knowledgegraphNeo4j / Compile / sources).value,
+      (llm4sEffect / Compile / sources).value,
+      (llm4sZio / Compile / sources).value,
+      (llm4sPekko / Compile / sources).value,
+      (llm4sOx / Compile / sources).value,
+      (javaApi / Compile / sources).value,
+      (javaRag / Compile / sources).value,
+      (reactor / Compile / sources).value,
+      (springBootStarter / Compile / sources).value,
+      (springAi / Compile / sources).value
+    ).flatten,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     // Cross-links (#2291): a source link on every member, to the release tag (`main` for a snapshot); links out to
@@ -2916,6 +2918,126 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
+  )
+
+// ---- comparative benchmarks (#2288) ----
+// llm4s, LangChain4j and Spring AI on the same scenarios, against one local mock OpenAI-compatible server (no API key,
+// no network). LangChain4j and Spring AI are dependencies of these projects only, and none of them is in the root
+// aggregate: `sbt test`, publishing and every published-module check (`frozenDependencyCheck`, `licenseCheck`) never
+// see them. One project per library, so each library's cold start and footprint are measured on its own classpath.
+// `sbt "benchmarksComparative/comparativeBenchmarks"` runs everything into target/comparative;
+// docs/reference/comparative-benchmarks.md has the method. Not measured for coverage: benchmark code, never tested.
+lazy val comparativeColdStart = taskKey[File](
+  "Time a fresh JVM's first chat call and count the jars, per compared library: target/comparative/coldstart.json"
+)
+lazy val comparativeColdStartRuns = settingKey[Int]("Fresh JVMs per library in comparativeColdStart")
+lazy val comparativeBenchmarks = inputKey[Unit](
+  "Cold start, the JMH scenarios (extra arguments go to JMH) and the results tables, into target/comparative"
+)
+
+// The Java projects carry no Scala library, so it is not counted in LangChain4j's or Spring AI's footprint.
+lazy val comparativeJavaSettings: Seq[Def.Setting[_]] = Seq(
+  publish / skip   := true,
+  crossPaths       := false,
+  autoScalaLibrary := false,
+  // `-parameters`: Spring AI and LangChain4j read tool parameter names by reflection.
+  javacOptions ++= Seq("--release", javaRelease, "-parameters"),
+  // No Scala sources; set for scripts/check-doc-support.sh, which checks every project's bytecode level.
+  scalacOptions ++= Seq("-java-output-version", javaRelease)
+) ++ coverageDisabled
+
+lazy val benchmarksComparativeHarness = (project in file("modules/benchmarks-comparative/harness"))
+  .settings(name := "benchmarks-comparative-harness", comparativeJavaSettings)
+
+lazy val benchmarksComparativeLlm4s = (project in file("modules/benchmarks-comparative/llm4s"))
+  .dependsOn(benchmarksComparativeHarness, openaiCompatible, agent)
+  .settings(
+    name := "benchmarks-comparative-llm4s",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled
+  )
+
+lazy val benchmarksComparativeLangchain4j = (project in file("modules/benchmarks-comparative/langchain4j"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-langchain4j",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.langchain4j, Deps.langchain4jOpenAi)
+  )
+
+lazy val benchmarksComparativeSpringAi = (project in file("modules/benchmarks-comparative/spring-ai"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-spring-ai",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.benchSpringAiOpenAi, Deps.benchSpringAiClientChat)
+  )
+
+lazy val benchmarksComparative = (project in file("modules/benchmarks-comparative/jmh"))
+  .dependsOn(
+    benchmarksComparativeHarness,
+    benchmarksComparativeLlm4s,
+    benchmarksComparativeLangchain4j,
+    benchmarksComparativeSpringAi
+  )
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name := "benchmarks-comparative",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled,
+    appLogging,
+    comparativeColdStartRuns := 10,
+    comparativeColdStart := {
+      val java       = javaHome.value.getOrElse(file(sys.props("java.home"))) / "bin" / "java"
+      val harnessJar = (benchmarksComparativeHarness / Compile / packageBin).value
+      def library(name: String, version: String, mainClass: String, cp: Classpath, own: File) = {
+        val jars = cp.map(_.data)
+        // The footprint is the library and what it pulls in: not the harness, not the adapter's own few classes.
+        ComparativeColdStart.Library(name, version, mainClass, jars, jars.filterNot(j => j == harnessJar || j == own))
+      }
+      ComparativeColdStart.run(
+        java,
+        Seq(harnessJar),
+        Seq(
+          library(
+            "llm4s",
+            (ThisBuild / version).value,
+            "org.llm4s.benchcmp.llm4s.Llm4sColdStart",
+            (benchmarksComparativeLlm4s / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLlm4s / Compile / packageBin).value
+          ),
+          library(
+            "langchain4j",
+            Versions.langchain4j,
+            "org.llm4s.benchcmp.langchain4j.LangChain4jColdStart",
+            (benchmarksComparativeLangchain4j / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLangchain4j / Compile / packageBin).value
+          ),
+          library(
+            "spring-ai",
+            Versions.springAiBenchmark,
+            "org.llm4s.benchcmp.springai.SpringAiColdStart",
+            (benchmarksComparativeSpringAi / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeSpringAi / Compile / packageBin).value
+          )
+        ),
+        comparativeColdStartRuns.value,
+        (ThisBuild / baseDirectory).value / "target" / "comparative" / "coldstart.json",
+        streams.value.log
+      )
+    },
+    comparativeBenchmarks := Def.inputTaskDyn {
+      val extra   = Def.spaceDelimited("<jmh arguments>").parsed
+      val out     = (ThisBuild / baseDirectory).value / "target" / "comparative"
+      val jmhArgs = Seq("-prof", "gc", "-rf", "json", "-rff", (out / "jmh.json").getAbsolutePath) ++ extra
+      Def.sequential(
+        comparativeColdStart,
+        (Jmh / run).toTask(jmhArgs.mkString(" ", " ", "")),
+        (Compile / runMain).toTask(s" org.llm4s.benchcmp.Report ${out.getAbsolutePath}")
+      )
+    }.evaluated
   )
 
 lazy val gradleDemo = (project in file("modules/gradle-demo"))
