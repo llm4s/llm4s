@@ -83,6 +83,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
           <li>Type-checked request and answer shapes instead of dictionaries.</li>
           <li>The same build, dependency scanning (SBOMs per module) and deployment pipeline as the rest of your code.</li>
         </ul>
+        <p>Coming from Python? <a href="{{ '/guide/for-python-developers' | relative_url }}">Coming from Python</a> puts OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3.</p>
       </div>
       <div class="lp-card lp-card--flat">
         <h3>Versus other JVM libraries</h3>

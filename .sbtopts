@@ -1,3 +1,5 @@
 -J-Xmx2g
 -J-Xms512m
 -J-XX:+UseG1GC
+# Compiling the build definition recurses once per level of a nested expression; CI's default thread stack overflowed it.
+-J-Xss4m

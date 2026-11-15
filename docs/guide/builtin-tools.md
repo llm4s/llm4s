@@ -23,8 +23,8 @@ Ready-made tools for agents: a calculator, the date and time, UUIDs, JSON, files
 
 The built-in tools live in the `llm4s-agent-tools` module (see
 [installation](../getting-started/installation#for-built-in-tools-web-search-http-filesystem-shell)). They depend
-on `llm4s-core` only, not on the agent runtime, so they work with plain tool calling through a `ToolRegistry` as well
-as with an `Agent`. Some of them can read your files, call your network or run programs, so decide which ones a model
+on `llm4s-core` only, not on the agent runtime, so they work with plain tool calling through a {% include api.html t="org.llm4s.toolapi.ToolRegistry" %} as well
+as with an {% include api.html t="org.llm4s.agent.Agent" %}. Some of them can read your files, call your network or run programs, so decide which ones a model
 gets before you register anything: [section 6](#6-safety-what-each-tool-can-do) says what each can do.
 
 What this page says is checked by tests. The bundle tables, the parameter table, the defaults and the safety section
@@ -38,7 +38,7 @@ the specs.
 
 ## 1. Pick a bundle
 
-`BuiltinTools` builds a set of tools for you. Every method returns a `Result`, because building a tool can fail.
+{% include api.html t="org.llm4s.toolapi.builtin.BuiltinTools$" %} builds a set of tools for you. Every method returns a `Result`, because building a tool can fail.
 
 | Bundle | Tools it contains | Reach |
 |--------|-------------------|-------|
@@ -134,7 +134,7 @@ a call without it comes back as a `Left` naming it. The others have defaults.
 ## 4. Web search
 
 Three search tools are not in any bundle, because each calls a third party and two of them need a key. Their settings
-are read from `llm4s.tools.*` with `ToolsConfigLoader`, then passed to the tool:
+are read from `llm4s.tools.*` with {% include api.html t="org.llm4s.config.ToolsConfigLoader$" %}, then passed to the tool:
 
 ```scala
 import org.llm4s.config.ToolsConfigLoader

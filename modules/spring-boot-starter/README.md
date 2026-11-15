@@ -95,7 +95,12 @@ llm4s.providers.local.headers.X-Team-Id=team-7
 | `llm4sTaskExecutor` (`ExecutorService`) | defined by name: a bean called `llm4sTaskExecutor` replaces it |
 | `llm4sTemplate` (`LLM4STemplate`) | |
 | `llm4sTools` (`Llm4sTools`) | the `@Tool` (`org.llm4s.javaapi.Tool`) methods of every singleton bean; a tool bean must not be an AOP proxy |
-| `llm4sAgent` (`JAgent`) | over the client and `llm4sTools`; `llm4s.agent.system-prompt`, `.id`, `.streaming`; off with `llm4s.agent.enabled=false` |
+| `llm4sAgent` (`JAgent`) | over the client and `llm4sTools`; `llm4s.agent.system-prompt`, `.id`, `.streaming`, `.max-steps`; off with `llm4s.agent.enabled=false` |
+| `llm4sCheckpointer` (`Checkpointer`) | where the agent keeps its threads: in memory; off with `llm4s.agent.enabled=false` |
+| `llm4sEmbeddingClient` (`JEmbeddingClient`, only with `llm4s.embeddings.model`) | `llm4s.embeddings.<provider>.api-key`, `.base-url` as in HOCON |
+| `llm4sTracing` (`Tracing`, only with `llm4s.tracing.mode`) | `console`, `none` or a `TracingBackend`'s mode (`opentelemetry`, `langfuse`), its settings under `llm4s.tracing.<mode>`; the agent reports to it |
+| `llm4sReactiveTemplate` (`ReactiveLLM4STemplate`, only with `llm4s-reactor`) | `stream(...)` returns a Reactor `Flux<String>`, for WebFlux |
+| `llm4sSseTemplate` (`SseLLM4STemplate`, only with Spring MVC) | `stream(...)` returns an `SseEmitter` |
 | `llmHealthIndicator` (`LlmHealthIndicator`, or `LlmBoot4HealthIndicator` on Spring Boot 4; only with Spring Boot Actuator) | |
 | `llm4sMetricsCollector` (`MicrometerMetrics`, only with `llm4s-observability-micrometer` and a `MeterRegistry` bean) | any `MetricsCollector` bean; the client reports to all of them |
 
