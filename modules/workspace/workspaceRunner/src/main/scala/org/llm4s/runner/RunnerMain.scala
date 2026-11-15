@@ -109,6 +109,11 @@ object RunnerMain extends cask.MainRoutes {
             "are not granted /tmp: JVM tools that write there (sbt) fail confined. Start the runner with both flags " +
             "and java.io.tmpdir outside /tmp (the image does) (design §4.39)"
         )
+      // whether each command gets a cgroup of its own, so a daemon it starts cannot outlive it (#2008)
+      CommandCgroups.platform match {
+        case Right(_) => logger.info(CommandCgroups.report(CommandCgroups.platform))
+        case Left(_)  => logger.warn(CommandCgroups.report(CommandCgroups.platform))
+      }
     case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
   }
 

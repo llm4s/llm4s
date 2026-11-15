@@ -24,7 +24,9 @@ final private[runner] case class RunningCommand(
   // every one of them has exited too
   tree: java.util.Set[ProcessHandle] = java.util.concurrent.ConcurrentHashMap.newKeySet[ProcessHandle](),
   // completed when the registry releases it: the parent and everything it left running have exited
-  released: java.util.concurrent.CompletableFuture[Unit] = new java.util.concurrent.CompletableFuture[Unit]()
+  released: java.util.concurrent.CompletableFuture[Unit] = new java.util.concurrent.CompletableFuture[Unit](),
+  // the command's own cgroup, where commands get one (#2008): killed whole with it, removed once it is empty
+  cgroup: Option[CommandCgroup] = None
 )
 
 /**
@@ -85,7 +87,8 @@ final private[runner] class ProcessRegistry(
     owner: AnyRef,
     commandId: String,
     builder: java.lang.ProcessBuilder,
-    proceed: () => Boolean = () => true
+    proceed: () => Boolean = () => true,
+    cgroup: Option[CommandCgroup] = None
   ): Either[WorkspaceAgentException, RunningCommand] =
     if (!gate.tryAcquire(gateWait.toMillis, TimeUnit.MILLISECONDS)) Left(busy("A file change"))
     else {
@@ -105,7 +108,8 @@ final private[runner] class ProcessRegistry(
               process,
               new AtomicBoolean(false),
               System.currentTimeMillis(),
-              new AtomicBoolean(false)
+              new AtomicBoolean(false),
+              cgroup = cgroup
             )
             running.put((owner, commandId), entry)
             entry
@@ -138,6 +142,10 @@ final private[runner] class ProcessRegistry(
               (entry.tree.asScala.toList ++ groupOf(entry)).distinct.filter(_.isAlive)
             leftovers.foreach(h => Try(h.destroyForcibly()): Unit)
             def done(): Unit = {
+              // its cgroup is empty by now (every member found has exited): removed, so none is left behind
+              entry.cgroup
+                .filterNot(_.remove())
+                .foreach(cg => logger.warn(s"Command $commandId: could not remove ${cg.dir}"))
               running.remove((owner, commandId), entry)
               gate.release()
               entry.released.complete(()): Unit
@@ -186,13 +194,18 @@ final private[runner] class ProcessRegistry(
    * and killed; the group of a command is never another's (Linux reuses no PID still a process group's id). Without
    * `setsid` or `/proc` (macOS, Windows) only the descendants a kill finds are known: there the container is the
    * boundary.
+   *
+   * Where the command has a cgroup of its own (#2008), that is killed whole (`cgroup.kill`) and its members are
+   * returned too: a daemon has left the process group, but never the cgroup.
    */
-  private def groupOf(entry: RunningCommand): List[ProcessHandle] =
-    Try(entry.process.pid()).toOption.toList.flatMap { pid =>
-      val members = ProcessRegistry.group(pid)
-      members.foreach(h => Try(h.destroyForcibly()): Unit)
-      members
-    }
+  private def groupOf(entry: RunningCommand): List[ProcessHandle] = {
+    entry.cgroup.foreach(_.kill())
+    val members =
+      (Try(entry.process.pid()).toOption.toList.flatMap(ProcessRegistry.group) ++
+        entry.cgroup.toList.flatMap(_.members)).distinct
+    members.foreach(h => Try(h.destroyForcibly()): Unit)
+    members
+  }
 
   /** The owner's process `commandId`, while it runs. */
   def find(owner: AnyRef, commandId: String): Option[RunningCommand] = Option(running.get((owner, commandId)))
@@ -212,6 +225,11 @@ final private[runner] class ProcessRegistry(
     Try(entry.process.descendants().toList.asScala).getOrElse(Nil).foreach(entry.tree.add(_): Unit)
     // and its process group: a process it started that has already been re-parented is still in it
     Try(entry.process.pid()).toOption.toList.flatMap(ProcessRegistry.group).foreach(entry.tree.add(_): Unit)
+    // and its cgroup, killed whole (#2008): a daemon it started, which has left the group, is still in it
+    entry.cgroup.foreach { cg =>
+      cg.kill()
+      cg.members.filterNot(_.pid() == Try(entry.process.pid()).getOrElse(-1L)).foreach(entry.tree.add(_): Unit)
+    }
     // every descendant ever found, this kill's and an earlier one's: a repeated kill still waits for a survivor
     val tree = entry.tree.asScala.toList.filter(_.isAlive)
     tree.foreach(d => Try(d.destroyForcibly()): Unit)
