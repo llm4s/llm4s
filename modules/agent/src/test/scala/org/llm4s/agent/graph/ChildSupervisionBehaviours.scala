@@ -869,6 +869,8 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     val entered = new CountDownLatch(1)
     val release = new CountDownLatch(1)
     val calls   = new AtomicInteger(0)
+    // the thread of the first, timed-out child run: it holds the child's claim until `stubborn` is released
+    val firstRunner = new AtomicReference[Thread]()
     // ignores its interrupt until released, holding the child's claim past AgentRun.Drain
     val stubborn = SpecTools.tool("stubborn") { (_, _) =>
       if (calls.getAndIncrement() == 0) {
@@ -893,6 +895,7 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
       val runner = new Thread(() =>
         ended.set(ChildRunner.run(child, origin, AgentInput(args.text, Vector.empty), RunConfig(), ctx, true))
       )
+      firstRunner.compareAndSet(null, runner)
       runner.start()
       var relayed = false
       while (runner.isAlive)
@@ -923,6 +926,11 @@ trait ChildSupervisionBehaviours extends AnyFlatSpecLike with Matchers {
     // ends once the call's timeout has cancelled the child and waited AgentRun.Drain for it: `stubborn` outlasts that
     val failed = run.await()
     release.countDown()
+    // A recover that starts while the first run still holds the child's claim finds the child busy and answers
+    // without settling it (#2635): let the first run let go before recovering.
+    val first = firstRunner.get()
+    first.join(TimeUnit.SECONDS.toMillis(30))
+    withClue("the first child run did not end after its release:")(first.isAlive shouldBe false)
     // the timed-out call committed nothing: its child is still unsettled, for recover to reattach
     failed.isLeft shouldBe true
     failed.left.toOption.get.message should include("busy")
