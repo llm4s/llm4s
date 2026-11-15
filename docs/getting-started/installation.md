@@ -482,7 +482,7 @@ One SDK-free client for the OpenAI `/chat/completions` API, and the providers th
 DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`), Mistral
 (`"mistral"`), Cohere (`"cohere"`, through Cohere's OpenAI-compatibility API), xAI (`"xai"`), and a generic
 `"openai-compatible"` provider for any other endpoint that speaks the API - Groq, Together,
-Fireworks, NVIDIA NIM, OrcaRouter, a vLLM, LM Studio or llama.cpp server, an internal
+Fireworks, NVIDIA NIM, OrcaRouter, UberLLM, a vLLM, LM Studio or llama.cpp server, an internal
 gateway - configured with a `baseUrl` and a `model`, and no code. See
 [OpenAI-compatible endpoints](../guide/providers#openai-compatible-endpoints) for a
 configuration recipe per provider. The module

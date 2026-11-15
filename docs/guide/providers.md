@@ -38,7 +38,7 @@ CI, so this table does not repeat it:
 | **DeepSeek** | `deepseek` | Cloud | DeepSeek models | Easy |
 | **OpenRouter** | `openrouter` | Cloud gateway | Many vendors' models behind one key | Easy |
 | **Z.ai** | `zai` | Cloud | GLM models | Easy |
-| **OpenAI-compatible** | `openai-compatible` | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
+| **OpenAI-compatible** | `openai-compatible` | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter, UberLLM; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
 | **Mistral** | `mistral` | Cloud | Mistral and Magistral models | Easy |
 | **Cohere** | `cohere` | Cloud | Command models | Easy |
 | **xAI** | `xai` | Cloud | Grok models | Easy |
@@ -1165,6 +1165,30 @@ orcarouter-main {
   `-max`), and since `model` is sent as-is, that is the one way to choose an effort through the
   generic path. The `reasoning_content` it passes through is not read.
 
+#### UberLLM
+
+[UberLLM](https://uberllm.dev) is an OpenAI-compatible gateway in front of several vendors'
+models:
+
+```hocon
+uberllm-main {
+  provider = "openai-compatible"
+  baseUrl = "https://api.uberllm.dev/v1"
+  model = "openai/gpt-4o-mini"
+  apiKey = ${?UBERLLM_API_KEY}   # keys start with ull_
+  contextWindow = 128000         # the model's context_length in GET /v1/models
+}
+```
+
+- Keep `contextWindow`: `api.uberllm.dev` is not one of the hosts the model registry provider is
+  inferred from, so without it the provider would use 8192. `GET /v1/models` lists every model
+  id with its `context_length`; set the one of the model you pick.
+- UberLLM documents no environment variable name; `UBERLLM_API_KEY` is only this guide's choice.
+- Model ids are provider-prefixed (`openai/`, `anthropic/`, `deepseek/`, `z-ai/`, ...), as in that
+  list. A reasoning model's reasoning output is not read, and the effort cannot be set.
+- UberLLM puts a `usage` object on the last chunk of a stream, so streamed token usage is
+  reported.
+
 ### Local servers
 
 A local server usually takes no API key: leave `apiKey` out and no `Authorization` header is
@@ -1421,6 +1445,10 @@ The sources for the values above:
   [Orchestrator models](https://docs.perplexity.ai/docs/router/models)
 - OrcaRouter: [quickstart](https://docs.orcarouter.ai/getting-started/quickstart),
   [reasoning](https://docs.orcarouter.ai/advanced/reasoning)
+- UberLLM: [quickstart](https://uberllm.dev/docs/quickstart),
+  [authentication](https://uberllm.dev/docs/authentication),
+  [models and routing](https://uberllm.dev/docs/models-and-routing),
+  [streaming](https://uberllm.dev/docs/streaming)
 - vLLM: [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/),
   [`vllm serve`](https://docs.vllm.ai/en/latest/cli/serve/),
   [tool calling](https://docs.vllm.ai/en/latest/features/tool_calling/)

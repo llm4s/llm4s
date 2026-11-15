@@ -51,7 +51,7 @@ providers:
     models: "GLM models"
   - name: "OpenAI-compatible (generic)"
     status: "beta"
-    models: "Any /chat/completions endpoint by config: Groq, Together, Fireworks, xAI, NVIDIA NIM, OrcaRouter, vLLM, LM Studio, llama.cpp"
+    models: "Any /chat/completions endpoint by config: Groq, Together, Fireworks, xAI, NVIDIA NIM, OrcaRouter, UberLLM, vLLM, LM Studio, llama.cpp"
 
 # Repository info
 repo_url: "https://github.com/llm4s/llm4s"
