@@ -139,8 +139,23 @@ object ModelRegistryService:
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Loads the bundled model metadata snapshot using [[ModelRegistryConfig.default]], with curated llm4s
-   * overrides taking precedence. Missing or invalid overrides are logged and leave the base snapshot usable.
+   * The registry of the model catalogue bundled with llm4s ([[ModelRegistryConfig.default]]), read from the
+   * classpath, with curated llm4s overrides taking precedence; missing or invalid overrides are logged and leave
+   * the base snapshot usable. No configuration file is consulted. This is how code that builds a provider config
+   * from values satisfies the `using ModelRegistryService` of `LLMConnect.getClient` (and, through
+   * `ContextWindowResolver.fromModelRegistry`, a config's `fromValues`) without an `application.conf`:
+   *
+   * {{{
+   * for {
+   *   registry <- ModelRegistryService.default()
+   *   given ModelRegistryService = registry
+   *   config <- OllamaConfig.fromValues("llama3", "http://localhost:11434")
+   *   client <- LLMConnect.getClient(config)
+   * } yield client
+   * }}}
+   *
+   * `Llm4sConfig.modelRegistryService()` reads the `llm4s.modelRegistry` block instead, for an
+   * application that points the registry at its own catalogue.
    *
    * @return the registry, or a [[org.llm4s.error.ConfigurationError]] if the base resource cannot be read or parsed
    */

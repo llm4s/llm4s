@@ -103,7 +103,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "gpt-4o"))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val config = AzureConfig.fromTokenProvider("my-deploy", baseUrl, tokens, AzureConfig.DEFAULT_API_VERSION).value
+      val config = AzureConfig.fromTokenProvider("my-deploy", tokens, baseUrl, AzureConfig.DEFAULT_API_VERSION).value
       config.apiKey.reveal shouldBe ""
       config.toString should include("auth=entra-id")
       val client = OpenAIClient(config).value

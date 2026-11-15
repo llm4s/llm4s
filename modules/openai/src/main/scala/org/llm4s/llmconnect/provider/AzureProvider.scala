@@ -116,7 +116,7 @@ object AzureProvider extends ProviderDescriptor:
         if mode == EntraIdAuthentication then
           AzureEntraIdSupport
             .tokenProvider(clientId)
-            .flatMap(AzureConfig.fromTokenProvider(model, endpoint, _, apiVersion))
+            .flatMap(AzureConfig.fromTokenProvider(model, _, endpoint, apiVersion))
         else if clientId.isDefined then
           Left(
             ConfigurationError(
@@ -127,7 +127,7 @@ object AzureProvider extends ProviderDescriptor:
         else
           ProviderDescriptor
             .requireApiKey(providerName, section)
-            .flatMap(AzureConfig.fromValues(model, endpoint, _, apiVersion))
+            .flatMap(AzureConfig.fromValues(model, _, endpoint, apiVersion))
     yield config
 
   /** The section's `authentication`, normalised: [[ApiKeyAuthentication]] or [[EntraIdAuthentication]]. */

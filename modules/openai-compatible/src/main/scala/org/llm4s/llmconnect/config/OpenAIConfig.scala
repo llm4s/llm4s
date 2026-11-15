@@ -244,9 +244,9 @@ object OpenAIConfig {
    * @param modelName    Model identifier, e.g. `"gpt-4o"`.
    * @param apiKey       OpenAI API key; must be non-empty, except that it is empty exactly when
    *                     `workloadIdentity` is set.
-   * @param organization Optional OpenAI organisation ID.
    * @param baseUrl      API base URL; must be non-empty. Pass a URL containing
    *                     `"openrouter.ai"` to route through OpenRouter.
+   * @param organization Optional OpenAI organisation ID.
    * @param providerId   the provider the config belongs to, e.g. `ProviderId("requesty")`;
    *                     `None` infers it from `baseUrl`, as [[OpenAIConfig.providerId]] describes.
    * @param workloadIdentity OpenAI workload identity federation instead of `apiKey`; only for a
@@ -258,8 +258,8 @@ object OpenAIConfig {
   def fromValues(
     modelName: String,
     apiKey: Secret,
-    organization: Option[String],
     baseUrl: String,
+    organization: Option[String] = None,
     providerId: Option[ProviderId] = None,
     workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =

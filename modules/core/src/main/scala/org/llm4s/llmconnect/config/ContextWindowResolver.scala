@@ -76,3 +76,21 @@ class ContextWindowResolver(service: ModelRegistryService):
 
 object ContextWindowResolver:
   private val logger = LoggerFactory.getLogger(classOf[ContextWindowResolver])
+
+  /**
+   * The resolver of the [[org.llm4s.model.ModelRegistryService]] in scope, so a provider config's
+   * `fromValues` needs only the registry that `LLMConnect.getClient` needs too (#2340):
+   *
+   * {{{
+   * for {
+   *   registry <- ModelRegistryService.default()
+   *   given ModelRegistryService = registry
+   *   config <- OpenAIConfig.fromValues("gpt-4o-mini", apiKey, OpenAIConfig.DEFAULT_BASE_URL)
+   *   client <- LLMConnect.getClient(config)
+   * } yield client
+   * }}}
+   *
+   * A `ContextWindowResolver` given in lexical scope still takes precedence.
+   */
+  given fromModelRegistry(using service: ModelRegistryService): ContextWindowResolver =
+    ContextWindowResolver(service)

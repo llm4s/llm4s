@@ -20,7 +20,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
   // ============================ fromValues VALIDATION ============================
 
   test("fromValues names the provider and the field, and reports the field as missing") {
-    val error = OpenAIConfig.fromValues("gpt-4o", Secret("   "), None, "https://api.openai.com/v1").left.value
+    val error = OpenAIConfig.fromValues("gpt-4o", Secret("   "), "https://api.openai.com/v1").left.value
 
     error.message shouldBe "OpenAI apiKey must be non-empty"
     error match {
@@ -193,7 +193,7 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
 
   test("All config types implement ProviderConfig trait") {
     val openai: ProviderConfig =
-      OpenAIConfig.fromValues("gpt-4o", Secret("key"), None, "https://api.openai.com/v1").value
+      OpenAIConfig.fromValues("gpt-4o", Secret("key"), "https://api.openai.com/v1").value
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", Secret("key"), "https://api.z.ai/api/paas/v4").value
 
