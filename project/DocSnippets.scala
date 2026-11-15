@@ -63,7 +63,9 @@ object DocSnippets {
     "scala-ai/rag.md",
     "tutorials/support-assistant/part-1-first-call.md",
     "tutorials/support-assistant/part-2-typed-answers.md",
-    "tutorials/support-assistant/part-3-tools.md"
+    "tutorials/support-assistant/part-3-tools.md",
+    "tutorials/support-assistant/part-4-help-centre.md",
+    "tutorials/support-assistant/part-5-safety-memory.md"
   )
 
   val packageName = "org.llm4s.docsnippets"
