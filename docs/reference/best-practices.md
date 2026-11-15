@@ -82,7 +82,7 @@ The unmet criteria and the other things to fix are in [Follow-ups](#follow-ups).
 
 | Criterion | Level | Status | Evidence and justification |
 |---|---|---|---|
-| `build` | MUST | Met | sbt rebuilds every module from source (`sbt buildAll`); see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md). |
+| `build` | MUST | Met | `sbt buildAll` rebuilds every module from source; see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md). |
 | `build_common_tools` | SUGGESTED | Met | sbt, the standard Scala build tool. |
 | `build_floss_tools` | SHOULD | Met | sbt, the Scala 3 compiler and an OpenJDK 21 build are all FLOSS. |
 | `test` | MUST | Met | A ScalaTest suite in every module, run by `sbt test`; see the [Testing Guide](testing-guide). |
