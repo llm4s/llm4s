@@ -198,4 +198,17 @@ class AzureConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     )
     adjusted.endpointUrl shouldBe Some("https://y.openai.azure.com")
   }
+
+  test("fromValues and fromTokenProvider default the API version when it is omitted (#2340)") {
+    val keyed = AzureConfig.fromValues("gpt-4o", Secret("test-key"), "https://x.openai.azure.com").value
+    keyed.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
+
+    val tokens = new org.llm4s.llmconnect.auth.AccessTokenProvider {
+      def token(): org.llm4s.types.Result[String] = Right("t")
+      def invalidate(rejected: String): Unit      = ()
+    }
+    val keyless = AzureConfig.fromTokenProvider("gpt-4o", tokens, "https://x.openai.azure.com").value
+    keyless.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
+    keyless.tokenProvider shouldBe Some(tokens)
+  }
 }

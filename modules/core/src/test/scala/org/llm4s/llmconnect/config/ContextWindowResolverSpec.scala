@@ -194,3 +194,19 @@ class ContextWindowResolverSpec extends AnyFlatSpec with Matchers:
     r.strictContextWindow("perplexity", "sonar-pro") shouldBe Some(200000)
     r.strictContextWindow("groq", "model-that-does-not-exist") shouldBe None
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // fromModelRegistry: the given a ModelRegistryService in scope supplies (#2340)
+  // ---------------------------------------------------------------------------------------------
+
+  "ContextWindowResolver.fromModelRegistry" should "resolve from the ModelRegistryService given in scope" in {
+    given ModelRegistryService = ModelRegistryService.fromModels(List(entry("in-scope-model", "scoped", Some(54321))))
+    summon[ContextWindowResolver].strictContextWindow("scoped", "in-scope-model") shouldBe Some(54321)
+  }
+
+  it should "give way to a ContextWindowResolver given in lexical scope" in {
+    given ModelRegistryService  = ModelRegistryService.fromModels(List(entry("m", "p", Some(1000))))
+    given ContextWindowResolver = strict(entry("m", "p", Some(2000)))
+    ContextWindowResolver.fromModelRegistry.strictContextWindow("p", "m") shouldBe Some(1000)
+    summon[ContextWindowResolver].strictContextWindow("p", "m") shouldBe Some(2000)
+  }
