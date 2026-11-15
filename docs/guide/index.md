@@ -69,6 +69,8 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
   - **Reranking**: Cohere cross-encoder for result refinement
   - **Document Chunking**: Sentence-aware + simple chunking strategies
 
+- **[Document Loaders](document-loaders)** - Load text, files, directories, URLs, a web crawl or S3 into RAG; compose loaders; `ingest`, `sync` and `refresh`; SSRF protection and robots.txt
+
 - **[Query Transformers](rag-query-transformers)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
 
 - **[RAG Evaluation](rag-evaluation)** - Measure and improve RAG quality
