@@ -5,7 +5,7 @@ description: "Map LangChain4j and Spring AI concepts to llm4s-java-api, with com
 parent: User Guide
 nav_order: 39
 # Issues this page links, by how it cites them; scripts/check-cited-issues.sh fails when one of them closes.
-cites_open_issues: [2277, 2278]
+cites_open_issues: [2277]
 ---
 
 # Moving a Java app from LangChain4j or Spring AI
@@ -406,8 +406,6 @@ Plainly, as of this page's sources:
   ([Java AI services](java-ai-services#memory)).
 - **Guardrails written in Java.** `JGuardrails` offers the built-in ones (length, profanity, regex, JSON); a guardrail
   of your own needs the Scala `Agent.builder` and `Llm4s.wrapAgent`.
-- **Spring AI interoperability.** An llm4s client cannot be used as a Spring AI `ChatModel`, nor the reverse
-  ([#2278](https://github.com/llm4s/llm4s/issues/2278)).
 - **Other vector stores from Java.** `JRag` keeps its index in memory or in SQLite; the pgvector, Qdrant,
   Elasticsearch, OpenSearch and Redis stores of `llm4s-rag` are Scala APIs ([vector stores](vector-store)).
 - **Automatic retries.** Spring AI retries transient failures for you [S5]; an llm4s Java client reports them
