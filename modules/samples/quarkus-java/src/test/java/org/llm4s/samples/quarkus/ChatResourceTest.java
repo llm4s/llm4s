@@ -45,7 +45,13 @@ class ChatResourceTest {
     }
 
     @Test
-    void injectsTheProducedClient() {
+    void injectsTheExtensionsClient() {
         assertTrue(client.complete("Hi").isSuccess());
+    }
+
+    @Test
+    void isReadyOnceTheClientIsBuilt() {
+        given().when().get("/q/health/ready")
+            .then().statusCode(200).body("checks[0].name", equalTo("llm4s"));
     }
 }

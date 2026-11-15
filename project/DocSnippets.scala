@@ -41,6 +41,7 @@ object DocSnippets {
     "guide/custom-tools.md",
     "guide/data-protection.md",
     "guide/direct-style.md",
+    "guide/document-loaders.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/for-python-developers.md",

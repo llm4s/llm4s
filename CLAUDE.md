@@ -139,6 +139,7 @@ llm4s/
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
+│   ├── benchmarks-comparative/ # llm4s vs LangChain4j and Spring AI on a mock server; outside the aggregate (unpublished)
 │   ├── docs/                  # Unified Scaladoc of the published modules: the `docs` project, its rootdoc.md (not published)
 │   ├── scalafix-rules/        # Scalafix rules migrating user code across breaking changes (a scalac 2.13 build-tool module; unpublished)
 │   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
