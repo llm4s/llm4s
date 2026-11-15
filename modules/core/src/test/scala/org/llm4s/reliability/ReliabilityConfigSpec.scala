@@ -6,6 +6,26 @@ import scala.concurrent.duration._
 
 class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
 
+  // RetryPolicy compares by reference, so the configs compared whole below share one policy.
+  private val policy = RetryPolicy.noRetry
+
+  // A config with no field at its default, so a setter that resets another field is caught.
+  private def reliability(
+    rateLimit: RateLimitConfig = RateLimitConfig.default,
+    deadline: Option[FiniteDuration] = Some(1.minute),
+    enabled: Boolean = false
+  ): ReliabilityConfig =
+    ReliabilityConfig(
+      retryPolicy = policy,
+      circuitBreaker = CircuitBreakerConfig.aggressive,
+      rateLimit = rateLimit,
+      deadline = deadline,
+      enabled = enabled
+    )
+
+  // A rate limit with no field at its default, so a setter that resets another field is caught.
+  private val rateLimit = RateLimitConfig(enabled = true, requestsPerMinute = 30, burstCapacity = 10)
+
   // ==========================================================================
   // ReliabilityConfig defaults and presets
   // ==========================================================================
@@ -67,6 +87,21 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
   it should "support withoutDeadline" in {
     val config = ReliabilityConfig.default.withoutDeadline
     config.deadline shouldBe None
+  }
+
+  it should "support withEnabled" in {
+    reliability().withEnabled(true) shouldBe reliability(enabled = true)
+    reliability(enabled = true).withEnabled(false) shouldBe reliability()
+  }
+
+  it should "support withDeadline with an Option" in {
+    reliability().withDeadline(None) shouldBe reliability(deadline = None)
+    reliability(deadline = None).withDeadline(Some(2.minutes)) shouldBe reliability(deadline = Some(2.minutes))
+  }
+
+  it should "support withRateLimit" in {
+    ReliabilityConfig.default.withRateLimit(RateLimitConfig.default).rateLimit shouldBe RateLimitConfig.default
+    reliability().withRateLimit(RateLimitConfig.disabled) shouldBe reliability(rateLimit = RateLimitConfig.disabled)
   }
 
   it should "support chaining" in {
@@ -143,5 +178,49 @@ class ReliabilityConfigSpec extends AnyFlatSpec with Matchers {
     config.failureThreshold shouldBe 7
     config.recoveryTimeout shouldBe 45.seconds
     config.successThreshold shouldBe 3
+  }
+
+  // ==========================================================================
+  // RateLimitConfig defaults and presets
+  // ==========================================================================
+
+  "RateLimitConfig()" should "be disabled, 60 requests per minute, burst 60" in {
+    val config = RateLimitConfig()
+    config.enabled shouldBe false
+    config.requestsPerMinute shouldBe 60
+    config.burstCapacity shouldBe 60
+  }
+
+  "RateLimitConfig.default" should "be enabled, 60 requests per minute, burst 60" in {
+    RateLimitConfig.default shouldBe RateLimitConfig(enabled = true, requestsPerMinute = 60, burstCapacity = 60)
+  }
+
+  "RateLimitConfig.disabled" should "be disabled, 60 requests per minute, burst 60" in {
+    RateLimitConfig.disabled shouldBe RateLimitConfig(enabled = false, requestsPerMinute = 60, burstCapacity = 60)
+  }
+
+  "ReliabilityConfig.default" should "not rate limit" in {
+    ReliabilityConfig.default.rateLimit shouldBe RateLimitConfig.disabled
+  }
+
+  // ==========================================================================
+  // RateLimitConfig fluent API
+  // ==========================================================================
+
+  "RateLimitConfig fluent API" should "support withRequestsPerMinute" in {
+    rateLimit.withRequestsPerMinute(120) shouldBe RateLimitConfig(
+      enabled = true,
+      requestsPerMinute = 120,
+      burstCapacity = 10
+    )
+  }
+
+  it should "support withBurstCapacity" in {
+    rateLimit.withBurstCapacity(5) shouldBe RateLimitConfig(enabled = true, requestsPerMinute = 30, burstCapacity = 5)
+  }
+
+  it should "support withEnabled" in {
+    rateLimit.withEnabled(false) shouldBe RateLimitConfig(enabled = false, requestsPerMinute = 30, burstCapacity = 10)
+    rateLimit.withEnabled(false).withEnabled(true) shouldBe rateLimit
   }
 }
