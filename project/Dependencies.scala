@@ -154,9 +154,21 @@ object Versions {
   // `-Dllm4s.springAiVersion=<latest 2.0.x>`, so the range docs/guide/spring-ai.md states is tested at both ends.
   val springAiBaseline = "2.0.0"
   val springAi         = sys.props.getOrElse("llm4s.springAiVersion", springAiBaseline)
+
+  // The libraries the comparative benchmarks measure llm4s against (#2288, modules/benchmarks-comparative). Pinned, and
+  // printed with the results. Only the unpublished comparative projects depend on them, and those are not in the root
+  // aggregate.
+  val langchain4j       = "1.23.0"
+  val springAiBenchmark = "2.0.2"
 }
 
 object Deps {
+
+  // Comparative benchmarks only (#2288): never a dependency of a published module.
+  val langchain4j             = "dev.langchain4j"        % "langchain4j"           % Versions.langchain4j
+  val langchain4jOpenAi       = "dev.langchain4j"        % "langchain4j-open-ai"   % Versions.langchain4j
+  val benchSpringAiOpenAi     = "org.springframework.ai" % "spring-ai-openai"      % Versions.springAiBenchmark
+  val benchSpringAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAiBenchmark
 
   val cats                    = "org.typelevel"           %% "cats-core"       % Versions.cats
   val upickle                 = "com.lihaoyi"             %% "upickle"         % Versions.upickle
