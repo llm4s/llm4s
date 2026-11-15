@@ -461,7 +461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers, tools and an agent), with exercises; `Part1Spec` to `Part3Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
-  and the release workflow check; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+  and the release workflow check, linked from every release post; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
 - **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
   unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per
