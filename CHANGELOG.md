@@ -240,6 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Fixed** the per-step cost of hex-encoding effect keys and trace ids: `KeyDigest` and `TraceContext` used one `String.format` per byte; their digests are unchanged [#2633](https://github.com/llm4s/llm4s/issues/2633).
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
