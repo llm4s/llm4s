@@ -101,6 +101,7 @@ llm4s/
 │   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
+│   ├── secrets-aws/           # AwsSecretsManagerApiKeyProvider: an API key read from AWS Secrets Manager, SigV4, no SDK (published)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
