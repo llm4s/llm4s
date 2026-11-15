@@ -5,6 +5,8 @@ import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.ConcurrentHashMap
+
 import scala.io.Source
 import scala.util.{ Try, Using }
 
@@ -122,18 +124,35 @@ final private[model] class DefaultModelRegistryService(
       )
     )
 
+  // The snapshot never changes, so an id that is not an exact key resolves the same way every time: a client asks
+  // for its one model on every reply, and an unknown one would otherwise rescan the registry each time (#2632).
+  // Bounded, because the ids come from callers: past the bound a lookup is computed and not kept.
+  private val resolved = new ConcurrentHashMap[String, Result[ModelMetadata]]()
+
+  private def memoized(key: String)(compute: => Result[ModelMetadata]): Result[ModelMetadata] =
+    val known = resolved.get(key)
+    if known != null then known
+    else
+      val result = compute
+      if resolved.size < DefaultModelRegistryService.MaxMemoized then resolved.putIfAbsent(key, result): Unit
+      result
+
   override def lookup(modelId: String): Result[ModelMetadata] =
-    DefaultModelRegistryService.findModel(metadata, modelId)
+    metadata.get(modelId.trim) match
+      case Some(modelMetadata) => Right(modelMetadata)
+      case None                => memoized(modelId)(DefaultModelRegistryService.findModel(metadata, modelId))
 
   override def lookup(provider: String, modelName: String): Result[ModelMetadata] =
-    DefaultModelRegistryService
-      .findModel(metadata, s"$provider/$modelName")
-      .orElse(DefaultModelRegistryService.findModel(metadata, modelName))
-      .orElse(
-        metadata.values
-          .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
-          .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
-      )
+    memoized(s"$provider\u0000$modelName") {
+      DefaultModelRegistryService
+        .findModel(metadata, s"$provider/$modelName")
+        .orElse(DefaultModelRegistryService.findModel(metadata, modelName))
+        .orElse(
+          metadata.values
+            .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
+            .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
+        )
+    }
 
 object ModelRegistryService:
   private val logger = LoggerFactory.getLogger(getClass)
@@ -299,6 +318,10 @@ object ModelRegistryService:
     }.toEither.left.map(e => ConfigurationError(s"Failed to parse metadata JSON: ${e.getMessage}"))
 
 private object DefaultModelRegistryService:
+
+  /** The most lookups of ids that are not exact keys one registry remembers (#2632). */
+  val MaxMemoized: Int = 1024
+
   def findModel(
     metadata: Map[String, ModelMetadata],
     modelId: String
