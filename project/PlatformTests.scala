@@ -92,7 +92,12 @@ object PlatformTests {
       "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec",
       "org.llm4s.llmconnect.provider.GeminiApiKeyFileSpec"
     ),
-    "watsonx"      -> Seq("org.llm4s.llmconnect.provider.WatsonXApiKeyFileSpec"),
+    "watsonx" -> Seq("org.llm4s.llmconnect.provider.WatsonXApiKeyFileSpec"),
+    // The default model directory under the user's home, and a `~` in a section's modelDir (#2284).
+    "jlama" -> Seq(
+      "org.llm4s.llmconnect.provider.JlamaConfigSpec",
+      "org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec"
+    ),
     "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
     "doctor" -> Seq(
       "org.llm4s.doctor.DoctorSpec",

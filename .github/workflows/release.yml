@@ -16,8 +16,23 @@ jobs:
     permissions:
       contents: read
 
+  # A release tag must be the `latest` line of docs/_data/support.yml, the Support Policy's table, before anything is
+  # published (#2289): the table is updated by hand in the release pull request (docs/reference/release.md).
+  support-table:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the tag is in the support table
+        run: scripts/check-support-table.sh --tag "$TAG"
+        env:
+          TAG: ${{ github.ref_name }}
+
   publish:
-    needs: ci
+    needs: [ci, support-table]
     runs-on: ubuntu-latest
     permissions:
       contents: read

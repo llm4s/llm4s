@@ -1,6 +1,7 @@
 package org.llm4s.capabilityusage
 
-import org.llm4s.capability.{ requireCapabilities, Capable, Vision }
+import org.llm4s.capability.{ model, requireCapabilities, Capability, Capable, ModelRef, Vision }
+import org.llm4s.capability.{ ParallelTools, PromptCaching, StructuredOutput, SystemMessages, Tools }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.ContentPart
 import org.llm4s.media.{ MediaSource, MediaType }
@@ -38,6 +39,18 @@ class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       } yield alt
   }
 
+  // ---- A model named at compile time
+
+  object Literal {
+    import org.llm4s.capability.*
+
+    val gpt4o =
+      model"openai/gpt-4o" // ModelRef[Vision & Tools & ParallelTools & StructuredOutput & PromptCaching & SystemMessages]
+
+    def structured(client: LLMClient)(using ModelRegistryService): Result[Capable[Vision & StructuredOutput]] =
+      client.requireCapabilities[Vision & StructuredOutput](gpt4o) // checked again, at run time
+  }
+
   // ---- Models the registry does not know
 
   object Unknown {
@@ -72,7 +85,7 @@ class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "The guide's Scala blocks" should "all appear in this spec word for word" in {
     val scalaBlocks = blocks("scala")
-    scalaBlocks should have size 2
+    scalaBlocks should have size 3
     scalaBlocks.foreach(block =>
       withClue(s"This block of the guide is not in the code the spec compiles:\n$block\n") {
         squash(thisSource) should include(squash(block))
@@ -98,6 +111,27 @@ class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       "does not support Vision"
     )
     client.callCount shouldBe 0
+  }
+
+  "The model literal of the guide" should "be typed as the guide says and checked again at run time" in {
+    summon[
+      Literal.gpt4o.type <:<
+        ModelRef[
+          Vision & Tools & ParallelTools & StructuredOutput & PromptCaching & SystemMessages
+        ]
+    ]
+    val client = ScriptedLLMClient.always(Reply.text("unused"))
+    Literal.structured(client).value.capabilities shouldBe List(Capability.Vision, Capability.StructuredOutput)
+  }
+
+  it should "fail to compile for a mistyped id and a model without the capability, as the guide says" in {
+    scala.compiletime.testing
+      .typeCheckErrors("model\"openai/gpt-4oo\"")
+      .map(_.message)
+      .mkString should include(
+      "unknown model openai/gpt-4oo in the bundled model data; did you mean openai/gpt-4o?"
+    )
+    scala.compiletime.testing.typeCheckErrors("val r: ModelRef[Vision] = model\"openai/o3-mini\"") should not be empty
   }
 
   "The unknown model of the guide" should "be assumed, with no metadata" in {

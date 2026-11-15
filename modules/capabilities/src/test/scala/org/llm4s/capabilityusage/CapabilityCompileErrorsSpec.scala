@@ -4,7 +4,8 @@ package org.llm4s.capabilityusage
 
 import org.llm4s.capability.*
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.ContentPart
+import org.llm4s.llmconnect.model.{ ContentPart, Conversation, UserMessage }
+import org.llm4s.testkit.{ Reply, ScriptedLLMClient }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -39,6 +40,26 @@ class CapabilityCompileErrorsSpec extends AnyFlatSpec with Matchers {
     scala.compiletime.testing.typeCheckErrors(
       "def f(c: Capable[Vision], conversation: org.llm4s.llmconnect.model.Conversation) = c.completeWithTools(conversation, Nil)"
     ) should not be empty
+  }
+
+  it should "not have completeStructuredOf unless checked for StructuredOutput" in {
+    scala.compiletime.testing.typeCheckErrors(
+      "def f(c: Capable[Vision], conversation: Conversation) = c.completeStructuredOf[org.llm4s.capability.Caption](conversation)"
+    ) should not be empty
+    scala.compiletime.testing.typeCheckErrors(
+      "def f(c: Capable[Vision & StructuredOutput], conversation: Conversation) = c.completeStructuredOf[org.llm4s.capability.Caption](conversation)"
+    ) shouldBe Nil
+  }
+
+  it should "keep completeStructuredOf usable with llm4s-schema-derivation's own extension imported too" in {
+    import org.llm4s.schema.*
+    def onCapable(c: Capable[StructuredOutput], conversation: Conversation) =
+      c.completeStructuredOf[org.llm4s.capability.Caption](conversation)
+    def onClient(client: LLMClient, conversation: Conversation) =
+      client.completeStructuredOf[org.llm4s.capability.Caption](conversation)
+    val client       = ScriptedLLMClient.always(Reply.text("""{"text":"t","objects":[]}"""))
+    val conversation = Conversation(Seq(UserMessage("hi")))
+    onCapable(Capable.assume[StructuredOutput](client), conversation) shouldBe onClient(client, conversation)
   }
 
   "A Capable[Vision & Tools]" should "be accepted where a Capable[Vision] or a Capable[Tools] is needed" in {

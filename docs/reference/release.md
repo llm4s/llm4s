@@ -36,7 +36,9 @@ git push origin v0.3.2
 
 Add the new version to `docs/_data/support.yml` (version, release date, status `latest`) and set the status of the line
 it replaces, in the same pull request that prepares the release. The table is rendered on the
-[Support Policy](support-policy). Nothing checks it yet, so a release tag missing from it is not caught by CI.
+[Support Policy](support-policy). `scripts/check-support-table.sh` checks it: Quick Checks fails when the table lacks
+the newest CHANGELOG release, and the release workflow's `support-table` job fails a tag that is not the table's
+`latest` line, before `publish` runs. A pre-release tag (`v1.0.0-RC1`) is not a support line and is not checked.
 
 ### Write the News post
 
@@ -279,6 +281,9 @@ it never overwrites. Write whatever the release deserves once it exists.
   `modules/samples/flink/project.scala` with `docs/_data/project.yml` in the prepare commit (ci.yml's
   `scripts/check-flink-guide-snippets.sh` fails otherwise); the workflow runs the sample's MiniCluster test, and also
   runs weekly. Locally: `cd modules/samples/flink && scala-cli test .`.
+- Run the Almond notebooks: `gh workflow run notebooks.yml`. Bump the `org.llm4s::llm4s-*` versions in the
+  `//> using dep` cells of `modules/samples/notebooks/*.ipynb` with `docs/_data/project.yml` in the prepare commit
+  (ci.yml's `scripts/check-notebooks.sh` fails otherwise); the workflow executes both notebooks in the Almond kernel.
 
 - After the docs deploy, look at the page-indexing and sitemap reports in Google Search Console and Bing Webmaster
   Tools (both sitemaps, `sitemap.xml` and `scaladoc-sitemap.xml`, should read without errors, and the new release's
