@@ -43,6 +43,11 @@ private[graph] object KeyDigest:
     ujson.write(sorted(json), escapeUnicode = true)
 
   def encoded(text: String): Array[Byte] =
+    // text with no surrogate cannot hold an unpaired one, and `getBytes` gives the same UTF-8 without a new encoder
+    if !text.exists(Character.isSurrogate) then text.getBytes(StandardCharsets.UTF_8)
+    else strictlyEncoded(text)
+
+  private def strictlyEncoded(text: String): Array[Byte] =
     val encoder = StandardCharsets.UTF_8
       .newEncoder()
       .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
@@ -55,7 +60,10 @@ private[graph] object KeyDigest:
       // each UTF-16 code unit as is: a charset would replace an unpaired surrogate too
       case None => Array(0xff.toByte) ++ text.toArray.flatMap(c => Array((c >> 8).toByte, c.toByte))
 
-  def hex(bytes: Array[Byte]): String = bytes.map(b => f"${b & 0xff}%02x").mkString
+  // lower case, like the per-byte `%02x` it replaced, without a String.format per byte (#2633)
+  private val lowerHex = java.util.HexFormat.of()
+
+  def hex(bytes: Array[Byte]): String = lowerHex.formatHex(bytes)
 
 /**
  * One external effect, the identity its replay evidence is kept under (design §4.24): the SHA-256 of
