@@ -160,7 +160,7 @@ private[llm4s] object ThinkingReplay {
     digest.update(bytes)
   }
 
-  private def hex(digest: MessageDigest): String = digest.digest().map(b => f"$b%02x").mkString
+  private def hex(digest: MessageDigest): String = org.llm4s.util.Hex.of(digest.digest())
 }
 
 /**
