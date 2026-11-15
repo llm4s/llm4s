@@ -4,7 +4,7 @@ title: Configuration in Code
 description: "Configure LLM4S from the config your app already has: a Typesafe Config (Play, Pekko, tests), plain values, ciris or zio-config, no application.conf."
 search_title: "Configure LLM4S from ciris, zio-config or plain values"
 parent: Getting Started
-nav_order: 17
+nav_order: 18
 ---
 
 # Configuration in Code
