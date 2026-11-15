@@ -30,6 +30,7 @@ Start here if you want to contribute to the project.
 - **[Protecting main (merge queue)](merge-queue)** - Why two green PRs can break `main` together, and how maintainers enable the merge queue that prevents it
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 - **[Security Reference](security)** - Threat model, trust boundaries, known risks and mitigations
+- **[Verifying Releases](verifying-releases)** - Checking a jar's PGP signature and the build provenance of the jars, SBOMs and container image
 - **[Workspace Sandbox](workspace-sandbox)** - Configuring the containerised workspace's limits
 - **[Performance Benchmarks](benchmarks)** - Baseline JMH results for the hot paths
 - **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions

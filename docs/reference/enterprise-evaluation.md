@@ -63,7 +63,7 @@ linked to its open issue.
 |---|---|
 | Is there an SBOM? | Yes: a CycloneDX SBOM per published module on each GitHub Release, also built and validated on every pull request. See [Software Bill of Materials](sbom). |
 | Are dependencies scanned? | OSV-Scanner scans the SBOMs weekly and on pull requests that change dependencies; a pull request that adds a HIGH or CRITICAL advisory fails. See [Vulnerability scanning](sbom#vulnerability-scanning). |
-| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`). There is no build provenance attestation, the SBOMs are not signed, and there is no guide to verifying a release yet: see [Known gaps](#known-gaps). |
+| Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`); the key's fingerprint and the commands to check a signature are in [Verifying Releases](verifying-releases). From the first release after 0.5.1 the workflow also attests SLSA build provenance for the jars, SBOMs and container image; no release has shipped one yet: see [Known gaps](#known-gaps). |
 | OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet: see [Known gaps](#known-gaps). |
 
 ## Data protection
@@ -115,7 +115,7 @@ closes, so this list is updated when the gap is.
 | No binary-compatibility baseline yet: MiMa checks nothing until a pre-1.0 release sets one, then 1.0 | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
 | GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
 | Support policy published, but release cadence, supported lines after 1.0, long-term support and end-of-support notice period are not yet decided (see [Support Policy](support-policy)) | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
-| No build provenance or signed SBOMs, and no guide to verifying a release | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
+| Build provenance is attested from the next release, but no release has yet been verified with `gh attestation verify` | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
 | Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
@@ -147,9 +147,9 @@ Security: SECURITY.md; reports handled by the Security Committee and maintainers
   No published advisories. Private vulnerability reporting not yet
   enabled (https://github.com/llm4s/llm4s/issues/1465).
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
-  dependency changes. Maven Central artifacts PGP-signed. OpenSSF Scorecard on every push to
-  main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). No build provenance
-  (https://github.com/llm4s/llm4s/issues/2305) or Best Practices badge
+  dependency changes. Maven Central artifacts PGP-signed (https://llm4s.org/reference/verifying-releases).
+  OpenSSF Scorecard on every push to main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). Build
+  provenance from the next release (https://github.com/llm4s/llm4s/issues/2305); no Best Practices badge
   (https://github.com/llm4s/llm4s/issues/2307).
 Data protection: no telemetry; data goes only to the providers and stores you configure;
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).

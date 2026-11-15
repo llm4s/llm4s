@@ -75,11 +75,11 @@ ci → publish → publish-kotlin → github-release → docs
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Checks the Scaladoc it will package (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list), then signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
-| `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
+| `publish` | Checks the Scaladoc it will package (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list), then signs and stages the sbt artifacts (`sbt ci-release`), attests their build provenance and uploads them to Maven Central (`sbt sonaRelease`) |
+| `publish-kotlin` | Builds, signs, checks, attests and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Warns when the tag has no [News post](#write-the-news-post), then deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
-| `docker` | Builds and pushes the container image |
+| `docker` | Builds and pushes the container image, and attests its provenance by digest |
 
 ### The docs deploy runs from `main`, built from the tag
 
@@ -228,6 +228,9 @@ it never overwrites. Write whatever the release deserves once it exists.
 ### 5. Verify Release
 
 - Check GitHub Actions: https://github.com/llm4s/llm4s/actions/workflows/release.yml
+- Check the attestations: https://github.com/llm4s/llm4s/attestations lists the provenance of every jar, POM, SBOM
+  and the image, and `scripts/verify-release.sh <version> --attestations` runs `gh attestation verify` on each
+  published artifact and the image ([Verifying Releases](verifying-releases)).
 - Check Docker images: https://github.com/llm4s/llm4s/pkgs/container/workspace-runner
 - Verify Maven Central, with the script rather than by eye:
 

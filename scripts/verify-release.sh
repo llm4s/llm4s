@@ -4,6 +4,7 @@
 #   scripts/verify-release.sh 0.5.0
 #   scripts/verify-release.sh v0.5.0                       # a leading v is accepted
 #   scripts/verify-release.sh 0.5.0 --list expected.txt    # use a saved list instead of asking sbt
+#   scripts/verify-release.sh 0.5.0 --attestations         # also check each artifact's build provenance
 #
 # The expected coordinates come from the build (`sbt -error listPublishedArtifacts`), not from a list kept
 # here, so a module added to the build is checked the day it is added. For each real artifact the POM and
@@ -17,19 +18,33 @@
 # Maven Central's index can lag a successful publish by a while. A 404 straight after the release job
 # finishes is not proof of a miss: re-run before concluding one.
 #
+# With --attestations each resolved artifact is also downloaded (the jar, or the POM of the BOM and of a stub) and
+# checked with `gh attestation verify <file> -R llm4s/llm4s --signer-workflow <release.yml>`, and so is the container
+# image, oci://ghcr.io/llm4s/workspace-runner:<version> (#2305, docs/reference/verifying-releases.md). It needs the
+# GitHub CLI, logged in. Releases up to 0.5.1 predate the attestations and fail this mode.
+#   GH        the gh executable (default: gh)
+#   IMAGE     the image to check (default: ghcr.io/llm4s/workspace-runner)
+#
 # Exit code 0 = everything resolves. 1 = something is missing. 2 = usage or a failure to get the list.
 set -uo pipefail
 
 BASE="${MAVEN_CENTRAL_URL:-https://repo1.maven.org/maven2}/org/llm4s"
 
-usage() { echo "usage: $0 <version> [--list <file>]" >&2; exit 2; }
+REPO=llm4s/llm4s
+SIGNER_WORKFLOW="$REPO/.github/workflows/release.yml"
+GH="${GH:-gh}"
+IMAGE="${IMAGE:-ghcr.io/llm4s/workspace-runner}"
+
+usage() { echo "usage: $0 <version> [--list <file>] [--attestations]" >&2; exit 2; }
 
 [ $# -ge 1 ] || usage
 VERSION="${1#v}"; shift
 LIST_FILE=""
+ATTEST=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list) [ $# -ge 2 ] || usage; LIST_FILE="$2"; shift 2 ;;
+    --attestations) ATTEST=1; shift ;;
     *) usage ;;
   esac
 done
@@ -45,6 +60,20 @@ fi
 [ -n "$LIST" ] || { echo "No artifacts listed: sbt printed nothing. Is 'listPublishedArtifacts' defined?" >&2; exit 2; }
 
 status() { curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$1" || echo 000; }
+
+if [ "$ATTEST" = 1 ]; then
+  command -v "$GH" >/dev/null 2>&1 || { echo "--attestations needs the GitHub CLI ('$GH' not found)." >&2; exit 2; }
+  DL="$(mktemp -d)"
+  trap 'rm -rf "$DL"' EXIT
+fi
+
+# attested <file or oci:// reference>: does `gh attestation verify` accept it as built by this repository's release
+# workflow? The reason is left in ATTEST_ERR.
+attested() {
+  ATTEST_ERR="$("$GH" attestation verify "$1" -R "$REPO" --signer-workflow "$SIGNER_WORKFLOW" 2>&1 >/dev/null)" && return 0
+  ATTEST_ERR="$(printf '%s' "$ATTEST_ERR" | tail -1)"
+  return 1
+}
 
 missing=0; checked=0
 while read -r kind id; do
@@ -71,6 +100,14 @@ while read -r kind id; do
     jcode="$(status "$BASE/$id/$VERSION/$id-$VERSION.jar")"
     [ "$jcode" = 200 ] || problems="jar HTTP $jcode"
   fi
+  if [ "$ATTEST" = 1 ] && [ -z "$problems" ]; then
+    case "$kind" in artifact | gradle) file="$id-$VERSION.jar" ;; *) file="$id-$VERSION.pom" ;; esac
+    if ! curl -s --max-time 120 "$BASE/$id/$VERSION/$file" > "$DL/$file"; then
+      problems="could not download $file"
+    elif ! attested "$DL/$file"; then
+      problems="no build provenance for $file: $ATTEST_ERR"
+    fi
+  fi
   if [ -n "$problems" ]; then
     printf '  MISSING  %-8s %-40s %s\n' "$kind" "$id" "$problems"
     missing=$((missing + 1))
@@ -79,10 +116,28 @@ while read -r kind id; do
   fi
 done <<< "$LIST"
 
+if [ "$ATTEST" = 1 ]; then
+  checked=$((checked + 1))
+  if attested "oci://$IMAGE:$VERSION"; then
+    printf '  ok       %-8s %s\n' image "$IMAGE:$VERSION"
+  else
+    printf '  MISSING  %-8s %-40s %s\n' image "$IMAGE:$VERSION" "no build provenance: $ATTEST_ERR"
+    missing=$((missing + 1))
+  fi
+fi
+
 echo
 if [ "$missing" -gt 0 ]; then
-  echo "$missing of $checked coordinates do not resolve at $VERSION on Maven Central."
+  if [ "$ATTEST" = 1 ]; then
+    echo "$missing of $checked coordinates do not resolve at $VERSION on Maven Central, or have no build provenance."
+  else
+    echo "$missing of $checked coordinates do not resolve at $VERSION on Maven Central."
+  fi
   echo "If the release job finished minutes ago, the index may still be catching up: re-run before concluding."
   exit 1
 fi
-echo "All $checked coordinates resolve at $VERSION."
+if [ "$ATTEST" = 1 ]; then
+  echo "All $checked coordinates resolve at $VERSION, each with build provenance from $SIGNER_WORKFLOW."
+else
+  echo "All $checked coordinates resolve at $VERSION."
+fi

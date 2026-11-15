@@ -82,3 +82,10 @@ For secure-coding expectations on contributions, see the security checklist in t
 Each GitHub Release carries a CycloneDX SBOM for every published module, and the dependencies are scanned for known
 advisories with OSV-Scanner every week and on each pull request that changes them; a pull request that adds a HIGH or
 CRITICAL advisory fails. See [Software Bill of Materials](docs/reference/sbom.md).
+
+## Verifying releases
+
+The Maven Central artifacts are PGP-signed with the release key
+`2246 615C FDEA D8F4 50C0 8555 2550 305A 740B C5E3` (on keyserver.ubuntu.com and keys.openpgp.org). The release
+workflow also attests the build provenance of the jars, the SBOMs and the `workspace-runner` image, checked with
+`gh attestation verify <file> -R llm4s/llm4s`. See [Verifying Releases](docs/reference/verifying-releases.md).

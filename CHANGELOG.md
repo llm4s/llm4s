@@ -659,6 +659,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** SLSA build provenance for every release's jars, POMs, SBOMs and `workspace-runner` image, `verify-release.sh --attestations`,
+  and a guide with the PGP key fingerprint [#2305](https://github.com/llm4s/llm4s/issues/2305); [Verifying Releases](docs/reference/verifying-releases.md).
 - **Added** comparative benchmarks (unpublished, outside the aggregate): llm4s, LangChain4j and Spring AI against a local mock
   OpenAI-compatible server, `sbt "benchmarksComparative/comparativeBenchmarks"` and a manual/per-release workflow [#2288](https://github.com/llm4s/llm4s/issues/2288); [Comparative Benchmarks](docs/reference/comparative-benchmarks.md).
 - **Added** Scalafix migration rules (`modules/scalafix-rules`, not yet published): `Llm4sMigrate_0_5` rewrites `.copy`
