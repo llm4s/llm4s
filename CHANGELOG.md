@@ -272,6 +272,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
