@@ -1,0 +1,69 @@
+name: Comparative Benchmarks
+
+# llm4s, LangChain4j and Spring AI on the same scenarios against a local mock OpenAI-compatible server (#2288):
+# docs/reference/comparative-benchmarks.md. Its own workflow, on demand and per release tag, so it never slows CI.
+# No API key and no network beyond the runner's loopback; library versions are pinned in project/Dependencies.scala.
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      jmh_args:
+        description: "Extra JMH arguments, e.g. '-f 1 -wi 1 -i 1' for a quick run (empty: the benchmarks' own settings)"
+        required: false
+        default: ""
+
+concurrency:
+  group: comparative-benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+# Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
+permissions:
+  contents: read
+
+jobs:
+  comparative:
+    name: Comparative benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Run the comparative benchmarks
+        env:
+          JMH_ARGS: ${{ inputs.jmh_args }}
+        run: |
+          set -o pipefail
+          mkdir -p target/comparative
+          sbt "benchmarksComparative/comparativeBenchmarks ${JMH_ARGS}" 2>&1 | tee target/comparative/output.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: comparative-benchmarks-${{ github.sha }}
+          path: |
+            target/comparative/jmh.json
+            target/comparative/coldstart.json
+            target/comparative/results.md
+            target/comparative/output.txt
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Comparative benchmarks"
+            echo
+            cat target/comparative/results.md
+          } >> "$GITHUB_STEP_SUMMARY"

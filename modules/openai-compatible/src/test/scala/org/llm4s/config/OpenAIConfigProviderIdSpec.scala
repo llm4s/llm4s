@@ -25,7 +25,7 @@ class OpenAIConfigProviderIdSpec extends AnyWordSpec with Matchers with EitherVa
   private given ContextWindowResolver = ContextWindowResolver(summon[ModelRegistryService])
 
   private def config(baseUrl: String, providerId: Option[ProviderId] = None) =
-    OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-test"), None, baseUrl, providerId).value
+    OpenAIConfig.fromValues("gpt-4o-mini", Secret("sk-test"), baseUrl, providerId = providerId).value
 
   "OpenAIConfig.providerId" should {
 

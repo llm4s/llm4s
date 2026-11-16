@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `PgVectorStore.apply(dataSource, tableName)`, and `PgKeywordIndex.apply(dataSource, ...)`. Source-compatible for
   callers passing a Hikari pool; recompile against the new signatures. `PgSearchIndex.close()` no longer closes a pool it
   did not create; [migration](docs/reference/migration.md#postgres-stores-take-a-javaxsqldatasource-2300).
+- `OpenAIConfig.fromValues` takes `baseUrl` before `organization` (now defaulted to `None`), and `AzureConfig.fromValues` and
+  `fromTokenProvider` take the key (or token provider) before `endpoint`; [migration](docs/reference/migration.md#provider-fromvalues-take-model-key-then-base-url-2340).
 - The default console tracer prints metadata only: queries, completion content, tool input/output, custom event data
   and error messages are withheld unless `llm4s.tracing.console.captureContent = true`
   (`LLM4S_TRACING_CONSOLE_CAPTURE_CONTENT`) or `new ConsoleTracing(captureContent = true)`; see the new
@@ -241,6 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
+- **Fixed** the per-step cost of hex-encoding effect keys, trace ids and other digests (one `String.format` per byte), of `KeyDigest.canonical`'s sorted copy of the JSON, and of an Ox scope for a superstep with one task (it gets one virtual thread); every digest is unchanged [#2633](https://github.com/llm4s/llm4s/issues/2633), [#2642](https://github.com/llm4s/llm4s/issues/2642).
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
@@ -256,7 +259,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Configuration
 
 - **Added** `Llm4sConfig.from(config)` (experimental): an `Llm4sSettings` with `Llm4sConfig`'s methods, reading a `Config` the app already
-  has (Play, Pekko, per tenant or test) in place of `application.conf` [#2340](https://github.com/llm4s/llm4s/issues/2340).
+  has (Play, Pekko, per tenant or test) in place of `application.conf`, or set up in code: a `ModelRegistryService` in scope
+  supplies `fromValues`' `ContextWindowResolver`; guide `docs/getting-started/configuration-in-code.md` with ciris and
+  zio-config examples [#2340](https://github.com/llm4s/llm4s/issues/2340).
 - **Fixed** `CheckPolicies` CLI now rejects unknown `--env` arguments with exit code 2 before loading any
   configuration, and maps aliases such as `dev-sandbox` and `prod-safe` to their canonical environment [#2260](https://github.com/llm4s/llm4s/issues/2260).
 - **Fixed** `EnvCheckPolicies` exits with 2, not 0, when every policy in the preset is skipped for the chosen `--env`
@@ -280,6 +285,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each was dropped silently. An empty list means nothing was reported, not that every option was sent: other
   omissions follow under RFC 0008. Both types are promoted from the `@Experimental` tier RFC 0008 first gave them,
   because the `@Stable` `Completion` exposes them (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
+- **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
@@ -344,6 +351,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Java & Kotlin APIs
 
+- **Added** `quarkus-llm4s` (`modules/quarkus`, Maven, not yet published): `@Named` `JLlmClient` beans per
+  `llm4s.providers` section and a `JEmbeddingClient` from `application.properties` in the Spring starter's spelling,
+  checked at build time, and a SmallRye Health readiness check; JVM mode, Quarkus 3.40.1. Part of [#2280](https://github.com/llm4s/llm4s/issues/2280); see the [Quarkus guide](docs/guide/quarkus.md).
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
   streaming, and a step limit, checkpointer and tracer (`maxSteps`, `checkpointer`, `tracing`, #2279) [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
@@ -463,7 +473,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers, tools and an agent), with exercises; `Part1Spec` to `Part3Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
-  and the release workflow check; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+  and the release workflow check, linked from every release post; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
 - **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
   unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per
@@ -483,7 +493,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the comparison page is refreshed and a weekly check fails when an issue it cites as open closes (#2290).
 - **Added** [Enterprise Evaluation](docs/reference/enterprise-evaluation.md): intake-questionnaire answers linked to
   their evidence, a paste-ready answer set and a dated known-gaps list the cited-issues check keeps current ([#2317](https://github.com/llm4s/llm4s/issues/2317)).
-- **Added** [Legal and IP FAQ](docs/reference/legal-faq.md): licence, copyright, DCO, patents, third-party licences and provider terms, with what the project has not decided ([#2309](https://github.com/llm4s/llm4s/issues/2309)).
+- **Added** [Legal and IP FAQ](docs/reference/legal-faq.md): licence, copyright, DCO, patents, third-party licences, provider terms and the cryptography llm4s uses (for export review), with what the project has not decided ([#2309](https://github.com/llm4s/llm4s/issues/2309)).
 - **Changed** the reliability guide (`docs/reliability-guide.md`) and the vector store guide
   (`docs/guide/vector-store.md`) to compile: their `???` placeholders are real code (a `ScriptedLLMClient` from
   `llm4s-testkit` where a test needs a client, `Result` for-comprehensions where a store or searcher is built), and
@@ -504,13 +514,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   projects in `docs/_data/showcase.yml`; ADOPTERS.md is unchanged. The home page's Scala sample is compiled with the
   other documentation snippets (`index.md` joins `DocSnippets.pages`). Existing permalinks are unchanged.
 - **Added** a Quarkus guide ([docs/guide/quarkus.md](docs/guide/quarkus.md)) and a runnable Maven sample,
-  `modules/samples/quarkus-java`: a `@Produces @ApplicationScoped JLlmClient` built with the Java API's builders from
-  a `@ConfigMapping` of `llm4s.provider`, `model`, `base-url` and `api-key`, closed by a `@Disposes` method, and a
-  `@Blocking` `POST /chat` resource; `mvn quarkus:dev` answers from a local Ollama. Its `@QuarkusTest` runs against a
-  stub Ollama server on a loopback port, and CI builds and tests it against the published snapshot and checks that
-  the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`). The guide covers the `_3`
-  suffix, logging, threading, what is not supported (native image, #1463) and what an extension would add
-  [#1468](https://github.com/llm4s/llm4s/issues/1468).
+  `modules/samples/quarkus-java`, on the `quarkus-llm4s` extension: a `@Blocking` `POST /chat` resource; `mvn quarkus:dev`
+  answers from a local Ollama. Its `@QuarkusTest` runs against a stub Ollama server on a loopback port, and CI builds and
+  tests it and checks that the guide's snippets are excerpts of it (`scripts/check-quarkus-guide-snippets.sh`)
+  [#1468](https://github.com/llm4s/llm4s/issues/1468), [#2280](https://github.com/llm4s/llm4s/issues/2280).
 - **Added** Micronaut 4 and Helidon SE 4 guides ([micronaut](docs/guide/micronaut.md), [helidon](docs/guide/helidon.md))
   with runnable Gradle samples, tested in CI with `FakeLlmClient` [#2281](https://github.com/llm4s/llm4s/issues/2281).
 - **Added** `DocumentExtractionInspector`, an offline sample that runs `TikaDocumentExtractor` over a file or a
@@ -664,6 +671,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** comparative benchmarks (unpublished, outside the aggregate): llm4s, LangChain4j and Spring AI against a local mock
+  OpenAI-compatible server, `sbt "benchmarksComparative/comparativeBenchmarks"` and a manual/per-release workflow [#2288](https://github.com/llm4s/llm4s/issues/2288); [Comparative Benchmarks](docs/reference/comparative-benchmarks.md).
 - **Added** Scalafix migration rules (`modules/scalafix-rules`, not yet published): `Llm4sMigrate_0_5` rewrites `.copy`
   to `with*` setters, millisecond fields to `FiniteDuration`, `isRecoverable`, moved config loaders and message
   extractors, and lints removed APIs; tested with scalafix-testkit against 0.4.1 [#2330](https://github.com/llm4s/llm4s/issues/2330); [Scalafix](docs/reference/scalafix.md#migration-rules).

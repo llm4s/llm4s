@@ -59,7 +59,7 @@ class AgentOpenAIStreamingToolsSpec extends AnyFlatSpec with TestTimeLimit with 
   private val answerTurn = LocalProviderTestServer.openAISseBody(Seq("17 * 23", " = ", "391."), model)
 
   private def client(baseUrl: String): OpenAIClient =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), None, baseUrl).flatMap(OpenAIClient(_)) match
+    OpenAIConfig.fromValues(model, Secret("sk-test"), baseUrl).flatMap(OpenAIClient(_)) match
       case Right(c)    => c
       case Left(error) => fail(s"could not build an OpenAIClient: ${error.message}")
 

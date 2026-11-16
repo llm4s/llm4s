@@ -26,7 +26,7 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
 
   private val model = "gpt-4o"
   private val config =
-    OpenAIConfig.fromValues(model, Secret("test-api-key"), None, "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(model, Secret("test-api-key"), "https://example.invalid/v1").value
 
   /** A chunk whose delta carries the given `tool_calls` entries. */
   private def toolDelta(calls: String*): String =

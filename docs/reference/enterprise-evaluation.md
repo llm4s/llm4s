@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310]
+cites_open_issues: [1281, 1465, 2289, 2305, 2307, 2310]
 ---
 
 # Enterprise Evaluation
@@ -116,7 +116,6 @@ closes, so this list is updated when the gap is.
 | GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
 | Support policy published, but release cadence, supported lines after 1.0, long-term support and end-of-support notice period are not yet decided (see [Support Policy](support-policy)) | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
 | No build provenance or signed SBOMs, and no guide to verifying a release | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
-| Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
 

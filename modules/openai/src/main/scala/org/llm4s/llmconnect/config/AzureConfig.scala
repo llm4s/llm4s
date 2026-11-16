@@ -172,9 +172,9 @@ object AzureConfig {
    */
   def fromTokenProvider(
     modelName: String,
-    endpoint: String,
     tokenProvider: AccessTokenProvider,
-    apiVersion: String
+    endpoint: String,
+    apiVersion: String = DEFAULT_API_VERSION
   )(using ContextWindowResolver): Result[AzureConfig] =
     resolved(modelName, endpoint, None, apiVersion).map(_.withTokenProvider(tokenProvider))
 
@@ -196,15 +196,15 @@ object AzureConfig {
    * before falling back to name-pattern matching.
    *
    * @param modelName  Deployment name used as the model identifier.
-   * @param endpoint   Azure deployment endpoint URL; must be non-empty.
    * @param apiKey     Azure API key; must be non-empty.
-   * @param apiVersion Azure OpenAI API version string.
+   * @param endpoint   Azure deployment endpoint URL (the base URL); must be non-empty.
+   * @param apiVersion Azure OpenAI API version string; [[DEFAULT_API_VERSION]] when omitted.
    */
   def fromValues(
     modelName: String,
-    endpoint: String,
     apiKey: Secret,
-    apiVersion: String
+    endpoint: String,
+    apiVersion: String = DEFAULT_API_VERSION
   )(using ContextWindowResolver): Result[AzureConfig] =
     resolved(modelName, endpoint, Some(apiKey), apiVersion)
 

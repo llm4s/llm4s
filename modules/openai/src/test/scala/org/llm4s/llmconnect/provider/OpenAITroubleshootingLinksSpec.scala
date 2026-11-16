@@ -42,7 +42,7 @@ final class OpenAITroubleshootingLinksSpec extends AnyWordSpec with Matchers {
 
   private def call(baseUrl: String): Result[org.llm4s.llmconnect.model.Completion] = {
     val client = OpenAIClient(
-      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).toOption.get
+      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).toOption.get
     ).toOption.get
     val result = client.complete(hello, CompletionOptions())
     client.close()

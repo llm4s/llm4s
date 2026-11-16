@@ -1,5 +1,6 @@
 ignore:
   - "modules/benchmarks/**"
+  - "modules/benchmarks-comparative/**"
 
 coverage:
   status:

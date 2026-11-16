@@ -140,7 +140,8 @@ class GeminiClient(
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
+        // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+        if (logger.isDebugEnabled) logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
 
         val headers = Map("Content-Type" -> "application/json")
 

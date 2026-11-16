@@ -127,7 +127,8 @@ class OpenAICompatibleClient(
           .flatMap { response =>
             val body = response.body
             logger.debug(s"Response status: ${response.statusCode}")
-            logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
+            // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+            if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
                 Try(parseCompletion(readReply(body))).toResult
@@ -369,7 +370,7 @@ class OpenAICompatibleClient(
       .tapRight { (requestText, adjustments) =>
         adjustmentLog.record(settings.model, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
-        logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
+        if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
       .tapLeft(error => recordExchange(Instant.now(), "", None, Left(error)))
 

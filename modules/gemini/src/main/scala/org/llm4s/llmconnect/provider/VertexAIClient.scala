@@ -124,7 +124,9 @@ class VertexAIClient(
         val url                     = modelUrl("generateContent")
 
         logger.debug(s"[VertexAI] Sending request to $url")
-        logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
+        // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+        if (logger.isDebugEnabled)
+          logger.debug(s"[VertexAI] Request body: ${org.llm4s.util.Redaction.redactForLogging(requestText)}")
 
         for {
           token <- authProvider.getAccessToken()

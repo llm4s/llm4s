@@ -214,6 +214,9 @@
   location: Singapore 🇸🇬
   speakers: [Kannupriya Kalra]
   url: https://luma.com/ossg
+  slides:
+    - label: Slides
+      url: /image_assets/talks/Open_Source_Singapore_2026/LLM4S_1.0_From_Idea_to_Production_AI_in_Scala_JVM_Open_Source_Singapore_2026_Kannupriya_Kalra.pdf
 
 - start: 2026-11-25
   event: London Scala Users Group
