@@ -31,6 +31,28 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
 
+## Changes since 0.5.1 that no rule automates
+
+The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
+below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
+order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
+`loadTextEmbeddingModel`. It reports the removed APIs it cannot replace. These need a hand edit:
+
+- Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
+  (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
+  kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
+  Spring Boot starter no longer bring (#1496).
+- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
+  `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
+  a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
+  `deleteThread`).
+- Types that changed: `LLMClientPekko.streamComplete`'s `Future[Done]` (#1848), `LLM4STemplate.completeAsync`'s
+  failure (#2276), `new X(...)` and a positional `copy` on a growth-safe type (reported), `MemoryManagerConfig`
+  (was a class with no `copy`), and a key passed by position or another credential that is now a `Secret` (Langfuse,
+  search-tool and store keys, `VectorStoreFactory.Config.withSecret`).
+- Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
+  `llm4s-rag` (#2358).
+
 ## Provider fromValues take model, key, then base URL (#2340)
 
 Every provider config's `fromValues` now takes its common parameters in one order - model, then API key, then base
