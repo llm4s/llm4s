@@ -8,7 +8,7 @@
 # The draft is built from `## [<version>] - <date>` in CHANGELOG.md, and the post is dated with that date:
 #   - front matter: title, description (the share card is the site default), tags: [release] and version;
 #   - the section's `### Highlights` paragraph as the summary, or else its entries under "What is new";
-#   - its `### Breaking changes` entries under "Upgrading", with the migration guide;
+#   - its `### Breaking changes` entries under "Upgrading", with the migration guide and the support policy (#2289);
 #   - the dependency line, from `maven_group` in docs/_data/project.yml and <version>;
 #   - links to the CHANGELOG section and the GitHub release of the tag.
 # Relative links in the CHANGELOG point at repository files; the draft links them on GitHub at the tag instead.
@@ -137,7 +137,8 @@ if breaking:
 lines += [
     "Until the 1.0 binary-compatibility baseline is set, any release may break, patch releases included "
     "([compatibility policy](/reference/compatibility-policy#versions)). Every change to act on is in the "
-    "[migration guide](/reference/migration).",
+    "[migration guide](/reference/migration). Which releases get fixes, and for how long, is in the "
+    "[support policy](/reference/support-policy).",
     "",
     "## Install",
     "",

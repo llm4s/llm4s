@@ -241,4 +241,40 @@ class CommandConfinementSpec extends AnyFlatSpec with Matchers {
     val dir = GitSandbox.emptyDirectory.toOption.get
     GitSandbox.checkedEmptyDirectory(dir.getParent).left.toOption.get should include("inside the workspace")
   }
+
+  "Confiner.Protections" should "read the helper's report of a kernel with scopes (ABI v6 or later)" in {
+    val p = Confiner.Protections.parse("landlock-abi=8 scopes=abstract-unix-socket,signal\n")
+    p shouldBe Some(Confiner.Protections(8, Set("abstract-unix-socket", "signal")))
+    p.map(_.scoped) shouldBe Some(true)
+    p.map(_.describe) shouldBe Some(
+      "Landlock ABI 8: filesystem rights, and abstract Unix sockets and signals scoped to the command"
+    )
+  }
+
+  it should "read the report of a kernel below ABI v6 as filesystem rights only" in {
+    val p = Confiner.Protections.parse("landlock-abi=5 scopes=none")
+    p shouldBe Some(Confiner.Protections(5, Set.empty))
+    p.map(_.scoped) shouldBe Some(false)
+    p.map(_.describe).getOrElse("") should (include("filesystem rights only").and(include("ABI 6, kernel 6.12")))
+  }
+
+  it should "not count a report naming only one scope as scoped" in {
+    Confiner.Protections.parse("landlock-abi=6 scopes=signal").map(_.scoped) shouldBe Some(false)
+  }
+
+  it should "refuse anything that is not a report line" in {
+    List(
+      "",
+      "landlock-abi= scopes=none",
+      "landlock-abi=8",
+      "llm4s-confine: unavailable: Landlock ABI 2",
+      "abi=8 scopes=none"
+    )
+      .flatMap(Confiner.Protections.parse) shouldBe empty
+  }
+
+  "Confiner.protections" should "say why when the helper cannot be run" in {
+    val missing = Files.createTempDirectory("confine-missing").resolve("llm4s-confine")
+    Confiner(missing, sharedTmp = false).protections().left.map(_.contains(missing.toString)) shouldBe Left(true)
+  }
 }

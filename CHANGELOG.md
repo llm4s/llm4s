@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `org.llm4s.types.typeclass` (`Encoder`, `EncoderOps`, `LLMCapable`) and `CompletionChunk`/`ChunkDelta` are removed
   from `llm4s-core`: nothing used them, and streaming uses `StreamedChunk`;
   [migration](docs/reference/migration.md#unused-speculative-core-types-removed-2345).
+- `OpenAICompatibleDialect.addReasoning` returns the `List[RequestAdjustment]` it could not send, not `Unit`; the
+  standard dialect reports a set `reasoning` as `Dropped` (RFC 0008, PR 1); recompile a dialect that overrides it;
+  [migration](docs/reference/migration.md#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115).
 - Tier hygiene before the baseline: `org.llm4s.trace.AnsiColors` is `private[llm4s]`; `org.llm4s.core.safety.UsingOps`
   moved to `llm4s-agent-tools` and `org.llm4s.llmconnect.utils.ModelSelector` to `llm4s-rag`, their only consumers,
   with packages unchanged; the `org.llm4s.assistant` types are `@Experimental`, matching their Beta tier;
@@ -216,7 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `HostFileBackend`, a `FileBackend` over a host directory with one writer per root: `open` locks the root
   against any overlapping open, in any process [#1964](https://github.com/llm4s/llm4s/issues/1964); [design §4.40](docs/design/typed-agent-runtime/4.40-host-file-backend.md).
 - **Changed** on Linux workspace commands run under Landlock and seccomp: `readOnlyPaths`/`allowedPaths` bind them, and
-  **commands have no network unless `networkAllowed = true`** [#1983](https://github.com/llm4s/llm4s/issues/1983).
+  **commands have no network unless `networkAllowed = true`** [#1983](https://github.com/llm4s/llm4s/issues/1983); from
+  Landlock ABI v6 they cannot signal the runner nor reach abstract Unix sockets outside them [#2009](https://github.com/llm4s/llm4s/issues/2009).
 - **Fixed** the workspace runner's `git` accepts a workspace owned by another user (a Linux host's bind mount), naming the
   workspace root as `safe.directory` [#2014](https://github.com/llm4s/llm4s/issues/2014).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
@@ -240,7 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Agent runtime
 
-- **Fixed** the per-step cost of hex-encoding effect keys, trace ids and other digests (one `String.format` per byte) and of `KeyDigest.canonical`'s sorted copy of the JSON; every digest is unchanged [#2633](https://github.com/llm4s/llm4s/issues/2633), [#2642](https://github.com/llm4s/llm4s/issues/2642).
+- **Fixed** the per-step cost of hex-encoding effect keys, trace ids and other digests (one `String.format` per byte), of `KeyDigest.canonical`'s sorted copy of the JSON, and of an Ox scope for a superstep with one task (it gets one virtual thread); every digest is unchanged [#2633](https://github.com/llm4s/llm4s/issues/2633), [#2642](https://github.com/llm4s/llm4s/issues/2642).
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
@@ -273,6 +277,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Providers
 
+- **Added** `Completion.adjustments`: each requested option a provider or model could not honour, as an
+  `@Stable` `RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`) naming a `@Stable` `RequestOption`, also on
+  `TransformationResult`, and on each agent call's `ModelCallCompleted` (an event stored before reads with none);
+  logged at WARN once per client, model and option, where it was DEBUG. Gemini, Vertex AI,
+  Bedrock, Ollama and the standard OpenAI-compatible dialect (Mistral, Cohere, DeepSeek, generic) report a requested
+  `reasoning` they do not send as `Dropped`, and OpenAI reports the `temperature`, `top_p` and penalties set away
+  from their defaults that a reasoning model's request leaves out, and xAI the penalties it leaves out of one, where
+  each was dropped silently. An empty list means nothing was reported, not that every option was sent: other
+  omissions follow under RFC 0008. Both types are promoted from the `@Experimental` tier RFC 0008 first gave them,
+  because the `@Stable` `Completion` exposes them (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
@@ -457,12 +471,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** [OpenSSF Best Practices](docs/reference/best-practices.md): each passing criterion marked Met, Unmet or N/A with
+  its evidence, and the follow-ups before the badge ([#2307](https://github.com/llm4s/llm4s/issues/2307)).
 - **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md), parts 1-5 (first call, typed
   answers, tools and an agent, help-centre answers with RAG, safety and memory), with exercises; `Part1Spec` to
   `Part5Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
-  and the release workflow check; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
+  and the release workflow check, linked from every release post; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
 - **Added** `JavaOfflineExample`: a ticket classifier tested with `FakeLlmClient`, demonstrating scripted replies,
   unknown-label fallback, rate-limit errors and recorded prompts [#2247](https://github.com/llm4s/llm4s/issues/2247).
 - **Added** `llms.txt`, `llms-full.txt` and a rules file (`llm4s-rules.md`), built from the docs by the Pages workflow, per

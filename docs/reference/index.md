@@ -45,6 +45,7 @@ Start here if you want to contribute to the project.
 - **[API Stability](api-stability)** - How binary compatibility is checked with MiMa, which modules are covered, and how to add a filter
 - **[Compatibility and Deprecation Policy](compatibility-policy)** - What you can rely on when you upgrade, and how an API is deprecated and removed
 - **[Enterprise Evaluation](enterprise-evaluation)** - Answers to an open-source intake questionnaire (licence, governance, support, security, supply chain, data protection), each linked to its evidence, with the known gaps
+- **[OpenSSF Best Practices](best-practices)** - Each passing criterion of the OpenSSF Best Practices badge, marked Met, Unmet or N/A with its evidence, and the follow-ups
 - **[Compatibility Matrix](compatibility-matrix)** - What each provider supports with LLM4S, and the versions of the stack around it LLM4S is tested with, generated from the code
 - **[Design Documents](https://github.com/llm4s/llm4s/tree/main/docs/design)** - Detailed architecture docs
 
