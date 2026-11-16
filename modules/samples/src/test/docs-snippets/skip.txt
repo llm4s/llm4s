@@ -164,3 +164,8 @@ tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import
 tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
 tutorials/support-assistant/part-3-tools.md | 41049c3fc7 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
 guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
+tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
+tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
+tutorials/support-assistant/part-4-help-centre.md | 5b9ef47be8 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-5-safety-memory.md | fdc857af96 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }

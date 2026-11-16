@@ -131,5 +131,4 @@ For a bonus, add your tool to `supportAgent` and ask "When will A-1002 arrive?" 
 [`solutions`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/tutorial/supportassistant/solutions/Solutions.scala)
 package.
 
-Previous: [Part 2, typed answers](part-2-typed-answers). The next parts (help-centre answers with RAG, safety and
-memory, testing, serving) are tracked in [#2292](https://github.com/llm4s/llm4s/issues/2292).
+Previous: [Part 2, typed answers](part-2-typed-answers). Next: [Part 4, help-centre answers](part-4-help-centre).

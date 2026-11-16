@@ -473,8 +473,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Added** [OpenSSF Best Practices](docs/reference/best-practices.md): each passing criterion marked Met, Unmet or N/A with
   its evidence, and the follow-ups before the badge ([#2307](https://github.com/llm4s/llm4s/issues/2307)).
-- **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md), parts 1-3 (first call, typed
-  answers, tools and an agent), with exercises; `Part1Spec` to `Part3Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
+- **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md), parts 1-5 (first call, typed
+  answers, tools and an agent, help-centre answers with RAG, safety and memory), with exercises; `Part1Spec` to
+  `Part5Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
 - **Added** the [support policy](docs/reference/support-policy.md) and its table of lines (`docs/_data/support.yml`), which CI
   and the release workflow check, linked from every release post; cadence and post-1.0 lines are to be decided ([#2289](https://github.com/llm4s/llm4s/issues/2289)).
