@@ -144,9 +144,18 @@ _(Community projects will be featured here)_
 spec-authoring and code-generation tool, on `llm4s-core` and `llm4s-anthropic` (since November 2026). It is the first
 organisation in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md).
 
-Its engineers also build LLM4S itself. Qasim Nadeem ([@q-nadeem](https://github.com/q-nadeem)) is implementing
-[RFC 0008: Generation controls and reported adjustments](../rfcs/0008-generation-controls) for 1.0, the
-provider-neutral cost controls of [#2115](https://github.com/llm4s/llm4s/issues/2115):
+Its team also builds LLM4S itself:
+
+- **[Gordon Cooke](https://www.linkedin.com/in/gordoncooke/)** ([@jwgcooke](https://github.com/jwgcooke)), founder
+  of Scala Teams, proposed the provider-neutral cost controls of [#2115](https://github.com/llm4s/llm4s/issues/2115)
+  and wrote [RFC 0008: Generation controls and reported adjustments](../rfcs/0008-generation-controls)
+  ([#2445](https://github.com/llm4s/llm4s/pull/2445)), accepted for 1.0. He also fixed streamed Anthropic usage, so
+  input and cache token counts are read from `message_start` ([#2428](https://github.com/llm4s/llm4s/pull/2428)).
+- **Qasim Nadeem** ([@q-nadeem](https://github.com/q-nadeem)) is implementing RFC 0008, one stacked pull request at
+  a time.
+- **Shakeeb** works with them on the Scala Teams side of the RFC 0008 work.
+
+What RFC 0008 has delivered so far:
 
 - **Merged:** every `Completion` reports the options a provider could not honour, as `Completion.adjustments`
   ([#2532](https://github.com/llm4s/llm4s/pull/2532)), and agent runs see them on each call's `ModelCallCompleted`
