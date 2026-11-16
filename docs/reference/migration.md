@@ -42,7 +42,8 @@ order, `Completion.created`, positional patterns on types that gained fields, th
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
   Spring Boot starter no longer bring (#1496).
-- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), and
+- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
+  `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
   a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
   `deleteThread`).
 - Types that changed: `LLMClientPekko.streamComplete`'s `Future[Done]` (#1848), `LLM4STemplate.completeAsync`'s
