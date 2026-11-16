@@ -180,6 +180,20 @@ val ticket: Result[Ticket] = for {
   </div>
 </section>
 
+<section class="lp-section" aria-labelledby="adopters-heading">
+  <div class="lp-wrap">
+    <header class="lp-section__head lp-section__head--row">
+      <div>
+        <p class="lp-eyebrow">Adopters</p>
+        <h2 id="adopters-heading">Who uses LLM4S</h2>
+        <p>Organisations that build on LLM4S, in their own words. Some help build it too. Listing is not an endorsement.</p>
+      </div>
+      <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/community/#success-stories' | relative_url }}">Success stories</a> <a class="lp-btn lp-btn--primary" href="https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md#how-to-add-yourself">Add your organisation</a></p>
+    </header>
+    {% include adopters-grid.html %}
+  </div>
+</section>
+
 <section class="lp-section" aria-labelledby="showcase-heading">
   <div class="lp-wrap">
     <header class="lp-section__head lp-section__head--row">

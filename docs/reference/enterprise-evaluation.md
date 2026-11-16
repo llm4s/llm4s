@@ -98,7 +98,7 @@ linked to its open issue.
 
 | Question | Answer and evidence |
 |---|---|
-| Who uses it? | Organisations list themselves by pull request in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md), which has no entries yet. Public projects are on the [Showcase](../showcase/). |
+| Who uses it? | Organisations list themselves by pull request in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md); each entry says only what its authors wrote. The first is [Scala Teams](https://scalateams.com) (since November 2026), which uses LLM4S as the multi-provider LLM layer of Spec Manager, an AI spec-authoring and code-generation tool, on `llm4s-core` and `llm4s-anthropic`, and whose team wrote and is implementing [RFC 0008](../rfcs/0008-generation-controls) ([Success Stories](../community/#success-stories)). Public projects are on the [Showcase](../showcase/). |
 | Where is the community? | [Discord](https://discord.gg/4uvTPn6qww), [GitHub issues](https://github.com/llm4s/llm4s/issues) and the [Community](../community/) pages. |
 | Where do we get help? | [SUPPORT.md](https://github.com/llm4s/llm4s/blob/main/SUPPORT.md). The maintainers are volunteers: replies are best effort and there is no service-level agreement. |
 | Is commercial support available? | No paid support is offered. Questions about sponsoring or partnering with the project go to the contact on the [Foundation](../foundation/) page. |
@@ -154,6 +154,7 @@ Data protection: no telemetry; data goes only to the providers and stores you co
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).
 Platform: Scala 3 (3.7.1), JDK 21. Java and Kotlin APIs; Spring Boot, Quarkus, cats-effect,
   ZIO and Pekko integrations.
-Adopters: ADOPTERS.md (by pull request).
+Adopters: ADOPTERS.md (by pull request); first entry Scala Teams (Spec Manager, since
+  2026-11).
 Full answers with evidence: https://llm4s.org/reference/enterprise-evaluation
 ```
