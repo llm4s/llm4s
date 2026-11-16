@@ -200,17 +200,24 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---- penalties ----
 
-  "xAI on a reasoning model" should "leave out the penalties it rejects, with a warning once" in {
-    XaiDialect.warnedPenaltiesDropped.set(false)
+  "xAI on a reasoning model" should "leave out the penalties it rejects, and report each as dropped" in {
     val options = CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.3)
     Seq("grok-4.7", "grok-4", "grok-3-mini", "grok-4.20-0309-reasoning", "grok-code-fast-1").foreach { model =>
       withClue(s"$model: ") {
         sentBodies(model, options).foreach { body =>
           body.obj.keySet should contain noneOf ("presence_penalty", "frequency_penalty")
         }
+        val body = ujson.Obj("presence_penalty" -> 0.5, "frequency_penalty" -> 0.3)
+        XaiDialect.addReasoning(body, model, options) shouldBe List(
+          RequestAdjustment
+            .Dropped(RequestOption.PresencePenalty, s"$model is a reasoning model, which rejects presence_penalty"),
+          RequestAdjustment.Dropped(
+            RequestOption.FrequencyPenalty,
+            s"$model is a reasoning model, which rejects frequency_penalty"
+          )
+        )
       }
     }
-    XaiDialect.warnedPenaltiesDropped.get shouldBe true
   }
 
   "xAI on a non-reasoning model" should "send the penalties as given" in {
