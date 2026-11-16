@@ -1,0 +1,22 @@
+# Organisations that use LLM4S, shown on the home page ("Who uses LLM4S", _includes/adopters-grid.html).
+# Mirrors ADOPTERS.md, where organisations list themselves by pull request: keep the two in step, in the same order,
+# and use only what the entry's authors wrote there. A listing is not an endorsement either way, and carries no logo.
+# Fields: name, url, use_case (ADOPTERS.md's words), since (YYYY-MM), modules, story (site-relative, optional),
+# team (optional: people of the organisation who contribute to LLM4S; name, url, role).
+
+- name: Scala Teams
+  url: https://scalateams.com
+  use_case: Multi-provider LLM layer for Spec Manager, an AI spec-authoring and code-generation tool
+  since: 2026-11
+  modules: [llm4s-core, llm4s-anthropic]
+  story: /community/#scala-teams-an-adopter-that-builds-llm4s-too
+  contribution: Its team wrote RFC 0008, generation controls and reported adjustments, and is implementing it for 1.0.
+  team:
+    - name: Gordon Cooke
+      url: https://www.linkedin.com/in/gordoncooke/
+      role: Founder; author of RFC 0008
+    - name: Qasim Nadeem
+      url: https://github.com/q-nadeem
+      role: Implementing RFC 0008
+    - name: Shakeeb
+      role: RFC 0008
