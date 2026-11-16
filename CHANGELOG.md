@@ -219,7 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `HostFileBackend`, a `FileBackend` over a host directory with one writer per root: `open` locks the root
   against any overlapping open, in any process [#1964](https://github.com/llm4s/llm4s/issues/1964); [design §4.40](docs/design/typed-agent-runtime/4.40-host-file-backend.md).
 - **Changed** on Linux workspace commands run under Landlock and seccomp: `readOnlyPaths`/`allowedPaths` bind them, and
-  **commands have no network unless `networkAllowed = true`** [#1983](https://github.com/llm4s/llm4s/issues/1983).
+  **commands have no network unless `networkAllowed = true`** [#1983](https://github.com/llm4s/llm4s/issues/1983); from
+  Landlock ABI v6 they cannot signal the runner nor reach abstract Unix sockets outside them [#2009](https://github.com/llm4s/llm4s/issues/2009).
 - **Fixed** the workspace runner's `git` accepts a workspace owned by another user (a Linux host's bind mount), naming the
   workspace root as `safe.directory` [#2014](https://github.com/llm4s/llm4s/issues/2014).
 - **Added** the exit examples, `DeepResearchExample` and `CodingWorkspaceExample` with acceptance suites on a scripted model, and
