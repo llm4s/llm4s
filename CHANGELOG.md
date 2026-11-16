@@ -471,6 +471,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation & samples
 
+- **Added** [OpenSSF Best Practices](docs/reference/best-practices.md): each passing criterion marked Met, Unmet or N/A with
+  its evidence, and the follow-ups before the badge ([#2307](https://github.com/llm4s/llm4s/issues/2307)).
 - **Added** the [support-assistant tutorial](docs/tutorials/support-assistant/index.md), parts 1-3 (first call, typed
   answers, tools and an agent), with exercises; `Part1Spec` to `Part3Spec` run every block and solution offline ([#2292](https://github.com/llm4s/llm4s/issues/2292)).
 - **Added** an offline evaluation dataset sample covering validation, selection, snapshots and JSONL import/export [#2234](https://github.com/llm4s/llm4s/issues/2234).
