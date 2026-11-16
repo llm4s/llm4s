@@ -562,6 +562,9 @@ adjustments, `adjustOptions`, is `private[llm4s]`, so only llm4s's own transform
 `t.adjustments`; with yours the list is empty, and a `Left` from your `transformOptions` still fails the
 request. Report what your request mapping drops as above.
 
+An agent stores each call's adjustments in its durable `ModelCallCompleted` event, so a `reason`,
+`requested` or `sent` string names an option, a model or a value, never request or response content.
+
 The transform never logs. llm4s's own clients log each adjustment at WARN once per model and option.
 
 ### `EmbeddingProvider`
