@@ -708,6 +708,7 @@ The [Events page on llm4s.org](https://llm4s.org/events/) shows what's coming up
   <img src="docs/image_assets/talks/VIPS_TC_2026/Banner_VIPS_TC_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png" alt="E-Cell Orientation & Pitch Please, VIPS-TC – LLM4S Foundation: A Retrospective" width="400" style="margin-right: 10px;"/>
   <img src="docs/image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png" alt="DataverseHub 2026 – LLM4S Foundation: A Retrospective" width="400" style="margin-right: 10px;"/>
   <img src="docs/image_assets/talks/Open_Source_Singapore_2026/Banner_LLM4S_1.0_From_Idea_to_Production_AI_in_Scala_JVM_Open_Source_Singapore_2026_Kannupriya_Kalra.png" alt="Open Source Singapore Meetup 2026 – LLM4S 1.0: From Idea to Production AI in Scala/JVM (Kannupriya Kalra)" width="400" style="margin-right: 10px;"/>
+  <img src="docs/image_assets/talks/AWS_User_Group_Singapore_2026/Banner_AWS_User_Group_Singapore_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0_2026_Kannupriya_Kalra_Event_1600x900@2x.jpg" alt="AWS User Group Singapore 2026 – Building Agentic AI on Amazon Bedrock with LLM4S 1.0 (Kannupriya Kalra)" width="400" style="margin-right: 10px;"/>
 
 </p>
 <p align="center">
