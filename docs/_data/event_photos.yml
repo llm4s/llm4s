@@ -72,6 +72,9 @@
 - date: 2026-11-17
   src: /image_assets/talks/Open_Source_Singapore_2026/Banner_LLM4S_1.0_From_Idea_to_Production_AI_in_Scala_JVM_Open_Source_Singapore_2026_Kannupriya_Kalra.png
   caption: "Open Source Singapore Meetup 2026 – LLM4S 1.0: From Idea to Production AI in Scala/JVM"
+- date: 2026-11-18
+  src: /image_assets/talks/AWS_User_Group_Singapore_2026/Banner_AWS_User_Group_Singapore_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0_2026_Kannupriya_Kalra_Event_1600x900%402x.jpg
+  caption: "AWS User Group Singapore 2026 – Building Agentic AI on Amazon Bedrock with LLM4S 1.0"
 - date: 2025-08-13
   src: /image_assets/talks/LondonScalaTalks_2025_Banner.jpg
   caption: London Scala Users Group 2025 – banner

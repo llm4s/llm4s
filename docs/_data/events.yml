@@ -206,6 +206,7 @@
   location: Apple India, Gachibowli, Hyderabad, India 🇮🇳
   speakers: [Kannupriya Kalra]
   url: https://dataversehub.in/events/llm4s-foundation-a-retrospective
+  recording: https://www.youtube.com/watch?v=Jbav_Gl8LaU
   image: /image_assets/talks/DataverseHub_2026/Banner_DataverseHub_LLM4S_Foundation_A_Retrospective_2026_Kannupriya_Kalra.png
 
 - start: 2026-11-17
@@ -216,6 +217,7 @@
   location: 5 Temasek Blvd, Level 17, Singapore 🇸🇬
   speakers: [Kannupriya Kalra]
   url: https://luma.com/rbz02r24
+  recording: https://www.youtube.com/live/h05Ld8awlQo?t=2770
   image: /image_assets/talks/Open_Source_Singapore_2026/Banner_LLM4S_1.0_From_Idea_to_Production_AI_in_Scala_JVM_Open_Source_Singapore_2026_Kannupriya_Kalra.png
   slides:
     - label: Slides
@@ -243,6 +245,22 @@
       url: "https://www.reddit.com/r/scala/s/fUbAzGEd43"
     - label: "Instagram"
       url: "https://www.instagram.com/p/DfxLw8SxSEp/"
+
+- start: 2026-11-18
+  starts_at: "2026-11-18T18:30:00+08:00"
+  time: "18:30-21:00 SGT"
+  event: AWS User Group Singapore
+  title: "Building Agentic AI on Amazon Bedrock with LLM4S 1.0"
+  location: IOI Central Boulevard Towers, Level 5 (hosted at AWS), Singapore 🇸🇬
+  speakers: [Kannupriya Kalra]
+  url: https://www.meetup.com/aws-sg/events/316829731/
+  image: /image_assets/talks/AWS_User_Group_Singapore_2026/Banner_AWS_User_Group_Singapore_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0_2026_Kannupriya_Kalra_Event_1600x900%402x.jpg
+  slides:
+    - label: Slides
+      url: /image_assets/talks/AWS_User_Group_Singapore_2026/Kannupriya_Kalra_AWS_User_Group_Singapore_2026_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0.pdf
+  links:
+    - label: "LinkedIn post"
+      url: "https://lnkd.in/p/gp6EiXgk"
 
 - start: 2026-11-25
   event: London Scala Users Group
