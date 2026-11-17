@@ -255,6 +255,9 @@
   speakers: [Kannupriya Kalra]
   url: https://www.meetup.com/aws-sg/events/316829731/
   image: /image_assets/talks/AWS_User_Group_Singapore_2026/Banner_AWS_User_Group_Singapore_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0_2026_Kannupriya_Kalra_Event_1600x900%402x.jpg
+  slides:
+    - label: Slides
+      url: /image_assets/talks/AWS_User_Group_Singapore_2026/Kannupriya_Kalra_AWS_User_Group_Singapore_2026_Building_Agentic_AI_on_Amazon_Bedrock_with_LLM4S_1.0.pdf
   links:
     - label: "LinkedIn post"
       url: "https://lnkd.in/p/gp6EiXgk"
