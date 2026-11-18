@@ -237,7 +237,8 @@ object Result {
   /**
    * Runs `operation` and returns its value as a `Right`. A non-fatal exception it throws becomes a `Left`,
    * mapped by [[org.llm4s.core.safety.DefaultErrorMapper DefaultErrorMapper]] to a typed error such as
-   * `AuthenticationError`, `RateLimitError`, `CancelledError` or, for anything else, `UnknownError`.
+   * `CancelledError`, `NetworkError` (a connection failure or timeout), `AuthenticationError`,
+   * `RateLimitError` or, for anything else, `UnknownError`.
    */
   def safely[A](operation: => A): Result[A] = Try(operation).toResult
 
