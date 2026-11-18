@@ -12,6 +12,7 @@ nav_order: 9
 - **Author(s):** @Somay-kousis
 - **Tracking issue:** [#2613](https://github.com/llm4s/llm4s/issues/2613)
 - **Pull request:** [#2614](https://github.com/llm4s/llm4s/pull/2614)
+- **Line references:** `file:line` citations are to main at `d928be4f4` (2026-11-10), when this was written.
 
 ## Summary
 
@@ -438,12 +439,12 @@ Under this RFC, each PR with its own review:
    `docs/guide/writing-a-provider.md` documents it.
 6. **PR 6 (agent).** `ModelCallCompleted.finishReason`.
 
-**Sequencing with RFC 0008.** #2532 (RFC 0008 PR 1, merged) added `Completion.adjustments` and
-`ModelCallCompleted.adjustments`. PR 1 here adds another field to `Completion`, keeping one forwarding `apply`
+**Sequencing with RFC 0008.** #2532 (RFC 0008 PR 1) added `Completion.adjustments` and #2617 (PR 2)
+`ModelCallCompleted.adjustments`, both merged. PR 1 here adds another field to `Completion`, keeping one forwarding `apply`
 overload per the growth pattern, and PR 6 one to `ModelCallCompleted` beside `adjustments`. The two fit together: RFC 0008 reports what was changed in the request, and this
 RFC reports how the reply ended. The Gemini case links them. A reply that ended on `Length` with empty content after
-531 thought tokens is the case where a caller wants both: `finishReason = Length` says the budget ran out, and #2115's
-`Thinking.Budget` and the `MaxTokens` adjustment say what to change. RFC 0008 is not blocked by this one, nor this one
+531 thought tokens is the case where a caller wants both: `finishReason = Length` says the budget ran out, and
+`Thinking.Budget` (RFC 0008, not merged yet) and the `MaxTokens` adjustment say what to change. RFC 0008 is not blocked by this one, nor this one
 by it.
 
 This RFC's own PR also adds its row to `docs/rfcs/README.md`.
