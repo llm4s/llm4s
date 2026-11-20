@@ -37,7 +37,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -48,4 +50,4 @@ jobs:
           key: jlama-tjake-Llama-3.2-1B-Instruct-JQ4-v1
 
       - name: Run LocalJlamaExample
-        run: sbt localJlamaDemo
+        run: scripts/retry-on-transient-network.sh sbt localJlamaDemo

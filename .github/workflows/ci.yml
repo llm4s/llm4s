@@ -32,6 +32,11 @@ concurrency:
 
 # Every job sets timeout-minutes, about twice its usual duration on main, so a hung job cannot hold a runner and the
 # merge queue for GitHub's six-hour default (#2370). Raising one: CONTRIBUTING.md#ci-time-limits.
+# Every job restores the sbt dependency cache that dependency-cache.yml saves on main, and none saves it: on 2026-11-20
+# setup-java's `cache: 'sbt'` held only what the first job to finish had resolved, the other jobs downloaded the rest
+# from Maven Central at once, and Quick Checks, Kotlin API and MiMa failed on HTTP 429 (.github/actions/restore-sbt-deps).
+# Each job's first sbt command, where dependencies resolve, runs under scripts/retry-on-transient-network.sh, which
+# retries a 429 after a minute: what a pull request adds to the build is still downloaded.
 # Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
 permissions:
   contents: read
@@ -51,14 +56,16 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # Smoke test: exercises CheckPolicies + dev policy against committed HOCON (no live Ollama).
       - name: Run policy check
         run: >-
-          sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies
+          scripts/retry-on-transient-network.sh sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies
           --env=dev
           --config config/examples/application-policy-smoke.conf"
 
@@ -110,7 +117,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
       
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -214,8 +223,15 @@ jobs:
       # Each check stays its own step, so a failure is reported under the step's name, and its exit status is the
       # command's. The server keeps its state between steps: compiled classes, the resolved dependencies, the loaded
       # build. Nothing here uses `set` or `reload`, so a later step sees the build exactly as a fresh sbt would.
+      #
+      # The dependencies are resolved first, by a plain sbt under the retry wrapper: the thin client prints a failed
+      # `update` as "stack trace is suppressed" with no cause, so a 429 there cannot be told from a missing artifact
+      # (`Write the build model` failed exactly so on 2026-11-20). `resolveAll` covers every project the steps below
+      # load, so none of them downloads.
       - name: Start the sbt server
-        run: sbt --client about
+        run: |
+          scripts/retry-on-transient-network.sh sbt resolveAll
+          sbt --client about
 
       # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
       # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
@@ -438,7 +454,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -455,7 +473,7 @@ jobs:
         run: |
           set -o pipefail
           scripts/test-check-scaladoc-warnings.sh
-          sbt doc docs/doc 2>&1 | tee scaladoc.log
+          scripts/retry-on-transient-network.sh sbt doc docs/doc 2>&1 | tee scaladoc.log
           scripts/check-scaladoc-warnings.sh scaladoc.log
 
       # The aggregate Scaladoc's cross-links (#2291): source links at the revision the build chose (the release tag on a
@@ -538,7 +556,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -554,7 +574,7 @@ jobs:
           args=()
           for m in $MODULES; do args+=("$m/test" "$m/coverageReport"); done
           echo "sbt coverage ${args[*]}"
-          sbt coverage "${args[@]}"
+          scripts/retry-on-transient-network.sh sbt coverage "${args[@]}"
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes a file to a flag whose
       # `paths` contain it, so a module uploaded under someone else's flag is worse than not uploaded. Flags are
@@ -1256,7 +1276,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1267,7 +1289,7 @@ jobs:
           merge-multiple: true
 
       - name: Aggregate the coverage report
-        run: sbt coverageAggregate
+        run: scripts/retry-on-transient-network.sh sbt coverageAggregate
 
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1309,7 +1331,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: ${{ matrix.java }}
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
       
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1327,7 +1351,9 @@ jobs:
       # .sbtopts' 2 GB heap (OutOfMemoryError in the launcher from 00a4d3e8 on). The flag comes after .sbtopts'
       # -J-Xmx2g, so it wins; local runs keep 2 GB.
       - name: Run tests
-        run: sbt ${{ runner.os == 'Windows' && 'testPlatform' || '-J-Xmx4g test' }}
+        # On Windows the step runs in PowerShell, which cannot run the bash retry wrapper; the one Windows leg is not part
+        # of the parallel burst that rate-limited the ubuntu jobs on 2026-11-20.
+        run: ${{ runner.os == 'Windows' && 'sbt testPlatform' || 'scripts/retry-on-transient-network.sh sbt -J-Xmx4g test' }}
       
       - name: Upload test reports
         if: failure()
@@ -1361,12 +1387,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Run performance tests
-        run: sbt testPerformance
+        run: scripts/retry-on-transient-network.sh sbt testPerformance
 
       - name: Upload test reports
         if: failure()
@@ -1486,7 +1514,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1569,7 +1599,7 @@ jobs:
             reports+=("$m/coverageReport")
           done
           echo "sbt ${settings[*]} testIntegration ${reports[*]}"
-          sbt "${settings[@]}" testIntegration "${reports[@]}"
+          scripts/retry-on-transient-network.sh sbt "${settings[@]}" testIntegration "${reports[@]}"
 
       # One upload per module in COVERAGE_MODULES, under the same flag as that module's coverage-leg upload.
       - name: Upload rag integration coverage to Codecov
@@ -1675,7 +1705,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1701,7 +1733,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1709,7 +1743,7 @@ jobs:
         # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
         # chasing dynver-generated versions. llm4s-java-api's POM depends on core, agent and the
         # provider modules, so all of them must be in the local repository, not just llm4s-java-api.
-        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+        run: scripts/retry-on-transient-network.sh sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
@@ -1809,12 +1843,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Publish the library modules to local Maven
-        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+        run: scripts/retry-on-transient-network.sh sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       # The extension's QuarkusUnitTest suites: the client beans from properties, a misconfigured provider failing the
       # build with a message naming the property, the readiness check UP and DOWN, a user's bean replacing the client.
@@ -1846,12 +1882,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Test the starter against the latest Spring Boot 3.x
-        run: sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
+        run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springBootVersion=3.5.16 springBootStarter/test
 
   # The same artifact supports Spring Boot 4 (#1467): springBootStarterBoot4 runs the starter's specs on a Boot 4
   # classpath, against the starter's classes as published (compiled against Boot 3). It runs on the 4.0 line
@@ -1870,12 +1908,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Test the starter against Spring Boot 4.0
-        run: sbt springBootStarterBoot4/test
+        run: scripts/retry-on-transient-network.sh sbt springBootStarterBoot4/test
 
       - name: Test the starter against the latest Spring Boot 4.x
         run: sbt -Dllm4s.springBoot4Version=4.1.1 springBootStarterBoot4/test
@@ -1896,7 +1936,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -1904,7 +1946,7 @@ jobs:
         run: scripts/check-framework-guide-snippets.sh
 
       - name: Publish the library modules to local Maven
-        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+        run: scripts/retry-on-transient-network.sh sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
@@ -1938,12 +1980,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Test llm4s-spring-ai against the latest Spring AI 2.0.x
-        run: sbt -Dllm4s.springAiVersion=2.0.2 springAi/test
+        run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springAiVersion=2.0.2 springAi/test
 
   # All tests must pass
   all-tests-pass:
@@ -2087,7 +2131,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -2120,7 +2166,7 @@ jobs:
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
           PGVECTOR_PASSWORD: postgres
-        run: sbt testOllama
+        run: scripts/retry-on-transient-network.sh sbt testOllama
 
   # Whether a pull request touches the workspace, so the workspace tier runs on it (#1982). The checkout is the PR's
   # merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's change; no PR context is read.
@@ -2176,12 +2222,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Build the workspace-runner image
-        run: sbt workspaceRunner/Docker/publishLocal
+        run: scripts/retry-on-transient-network.sh sbt workspaceRunner/Docker/publishLocal
 
       - name: Run containerised workspace tests
         env:
@@ -2221,7 +2269,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -2252,7 +2302,7 @@ jobs:
           # This job starts the server, so "not reachable" here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
           MCP_SERVER_URL: http://localhost:3001/mcp
-        run: sbt testMcpReference
+        run: scripts/retry-on-transient-network.sh sbt testMcpReference
 
       - name: Upload test reports
         if: failure()
@@ -2280,7 +2330,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -2373,4 +2425,4 @@ jobs:
           GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
           GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
           VERTEX_MODEL: ${{ secrets.VERTEX_MODEL }}
-        run: sbt testSmoke
+        run: scripts/retry-on-transient-network.sh sbt testSmoke

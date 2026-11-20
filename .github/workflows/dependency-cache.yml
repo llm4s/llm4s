@@ -1,0 +1,108 @@
+name: Dependency Cache
+
+# The one writer of the sbt dependency cache that every other job restores (.github/actions/restore-sbt-deps).
+#
+# Why (2026-11-20, PRs #2563 and #2564): setup-java's `cache: 'sbt'` was saved by whichever job finished first after a
+# build-file change, and holds only what that job resolved. Every other job then downloaded the rest from Maven Central
+# at once, and Quick Checks, Kotlin API and MiMa failed on HTTP 429 (pekko-stream_3 1.7.1, llm4s-rag_3 0.5.1,
+# scala2-sbt-bridge 2.13.14). Build files changed 46 times that month, so the partial cache was the usual case. This
+# workflow resolves everything CI needs, in one job per OS, and saves it once per build-file hash.
+#
+# Seeding: the first run after this workflow lands has nothing to restore. Run it on main once:
+#   gh workflow run dependency-cache.yml --ref main
+on:
+  push:
+    branches: [ main ]
+    # The cache key is the hash of these files (the same globs as setup-java's sbt cache).
+    paths:
+      - '**/*.sbt'
+      - '**/project/build.properties'
+      - '**/project/**.scala'
+      - '**/project/**.sbt'
+      - '.github/workflows/dependency-cache.yml'
+      - '.github/actions/restore-sbt-deps/**'
+  # GitHub evicts a cache entry not read for 7 days. CI on main reads it on most days, but a quiet week would lose it;
+  # the weekly run restores it (which counts as a read) and saves only when the key has changed.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+# Two pushes that both change the build files: the later one's cache is the one CI wants.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve and cache dependencies (${{ matrix.os }})
+    # Saves only from main: a cache saved on another ref is visible to that ref alone.
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows too: the `test` job's Windows leg restores a Windows cache (the Coursier cache is in a different place
+        # and the archive is per OS), and with no writer it would download everything on every run.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # A cold resolve takes a few minutes on ubuntu; Windows is slower.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      # Start from the last complete cache, so only what changed is downloaded.
+      - id: deps
+        uses: ./.github/actions/restore-sbt-deps
+
+      # `resolveAll` (build.sbt) runs `update` in every project, including those outside the root aggregate (`it`,
+      # `docs`, the scalafix projects, the benchmarks), plus every compiler bridge and MiMa baseline. Wrapped like the
+      # CI jobs, so a 429 here waits and retries rather than skipping the save.
+      - name: Resolve every project's dependencies (ubuntu)
+        id: resolve-linux
+        if: runner.os == 'Linux'
+        run: scripts/retry-on-transient-network.sh sbt resolveAll
+      - name: Resolve every project's dependencies (Windows)
+        id: resolve-windows
+        if: runner.os == 'Windows'
+        run: sbt resolveAll
+
+      # The Spring jobs in ci.yml resolve other versions, set by -D on their command lines; read them from there so
+      # this stays in step.
+      - name: Resolve the Spring version variants that ci.yml tests
+        if: runner.os == 'Linux'
+        run: |
+          grep -oE 'sbt -Dllm4s\.[A-Za-z0-9]+=[^ ]+ [A-Za-z0-9]+/test' .github/workflows/ci.yml | sort -u |
+            while read -r _ prop target; do
+              echo "sbt $prop ${target%/test}/update"
+              scripts/retry-on-transient-network.sh sbt "$prop" "${target%/test}/update" < /dev/null
+            done
+
+      # scalafmt and scalafix fetch their own tools through Coursier the first time they run (CI sets
+      # scalafixOnCompile, so every compile runs scalafix). Running the checks once fetches them. A formatting or lint
+      # failure here is the code's, not the cache's, and quick checks reports it, so it does not stop the save.
+      - name: Fetch scalafmt and scalafix
+        continue-on-error: true
+        run: sbt scalafmtCheckAll scalafmtSbtCheck "scalafixAll --check"
+
+      # Cache entries are immutable: when this exact key was restored there is nothing new to save.
+      - name: Save the dependency cache
+        if: >-
+          steps.deps.outputs.cache-hit != 'true'
+          && (steps.resolve-linux.outcome == 'success' || steps.resolve-windows.outcome == 'success')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.deps.outputs.paths }}
+          key: ${{ steps.deps.outputs.key }}
