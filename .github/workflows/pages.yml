@@ -114,22 +114,23 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # The sbt dependency cache that dependency-cache.yml saves, restored without saving (see
-      # .github/actions/restore-sbt-deps). Written out rather than through that local action because the checkout above
-      # may be an older release tag that does not have it; the paths must stay the action's ubuntu paths, or the
-      # restore misses.
+      # The sbt dependency cache that dependency-cache.yml saves, restored without saving. Written out rather than through
+      # .github/actions/restore-sbt-deps because the checkout above may be an older release tag that has neither that
+      # action nor scripts/sbt-deps-cache-key.sh. So it restores the newest entry by prefix (the key below never matches).
+      # The paths must be, string for string, the ones that script writes for ubuntu, or the restore misses.
       - name: Restore the sbt dependency cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
-            ~/.ivy2/cache
-            ~/.sbt
-            ~/.cache/coursier
-            !~/.sbt/*.lock
-            !~/**/ivydata-*.properties
-          key: sbt-deps-v1-${{ runner.os }}-${{ hashFiles('**/*.sbt', '**/project/build.properties', '**/project/**.scala', '**/project/**.sbt') }}
+            /home/runner/.ivy2/cache
+            /home/runner/.sbt
+            /home/runner/.cache/coursier
+            !/home/runner/.sbt/*.lock
+            !/home/runner/**/ivydata-*.properties
+          key: sbt-deps-v1-${{ runner.os }}-pages
           restore-keys: |
             sbt-deps-v1-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-sbt-
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13

@@ -3,24 +3,31 @@ name: Dependency Cache
 # The one writer of the sbt dependency cache that every other job restores (.github/actions/restore-sbt-deps).
 #
 # Why (2026-11-20, PRs #2563 and #2564): setup-java's `cache: 'sbt'` was saved by whichever job finished first after a
-# build-file change, and holds only what that job resolved. Every other job then downloaded the rest from Maven Central
+# build-file change, and held only what that job resolved. Every other job then downloaded the rest from Maven Central
 # at once, and Quick Checks, Kotlin API and MiMa failed on HTTP 429 (pekko-stream_3 1.7.1, llm4s-rag_3 0.5.1,
 # scala2-sbt-bridge 2.13.14). Build files changed 46 times that month, so the partial cache was the usual case. This
-# workflow resolves everything CI needs, in one job per OS, and saves it once per build-file hash.
+# workflow resolves everything CI needs, in one job per OS, and saves it once per key (scripts/sbt-deps-cache-key.sh).
 #
-# Seeding: the first run after this workflow lands has nothing to restore. Run it on main once:
-#   gh workflow run dependency-cache.yml --ref main
+# Size: the key carries the month, and this workflow restores only the current month's entry, so the first run of a
+# month starts empty and drops artifacts the build no longer uses. After a save, `prune` deletes this OS's older
+# entries, so the cache holds about one entry per OS (about 1 GB on ubuntu, 0.6 GB on Windows) of the repository's
+# 10 GB.
+#
+# Seeding: a push to main that touches the files below runs it; so does `gh workflow run dependency-cache.yml --ref main`.
 on:
   push:
     branches: [ main ]
-    # The cache key is the hash of these files (the same globs as setup-java's sbt cache).
+    # Every input of the cache key (scripts/sbt-deps-cache-key.sh). ci.yml is here for its Spring -D versions; when
+    # only the rest of ci.yml changed, the key is unchanged, the restore is an exact hit, and the run saves nothing.
     paths:
       - '**/*.sbt'
       - '**/project/build.properties'
       - '**/project/**.scala'
-      - '**/project/**.sbt'
+      - '.scalafmt.conf'
+      - '.github/workflows/ci.yml'
       - '.github/workflows/dependency-cache.yml'
       - '.github/actions/restore-sbt-deps/**'
+      - 'scripts/sbt-deps-cache-key.sh'
   # GitHub evicts a cache entry not read for 7 days. CI on main reads it on most days, but a quiet week would lose it;
   # the weekly run restores it (which counts as a read) and saves only when the key has changed.
   schedule:
@@ -63,9 +70,11 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
-      # Start from the last complete cache, so only what changed is downloaded.
+      # This month's cache only (see Size above): an older month's would carry its stale artifacts into the save.
       - id: deps
         uses: ./.github/actions/restore-sbt-deps
+        with:
+          mode: save
 
       # `resolveAll` (build.sbt) runs `update` in every project, including those outside the root aggregate (`it`,
       # `docs`, the scalafix projects, the benchmarks), plus every compiler bridge and MiMa baseline. Wrapped like the
@@ -80,9 +89,10 @@ jobs:
         run: sbt resolveAll
 
       # The Spring jobs in ci.yml resolve other versions, set by -D on their command lines; read them from there so
-      # this stays in step.
+      # this stays in step. Best effort: a miss costs those jobs a download, and must not cost the save.
       - name: Resolve the Spring version variants that ci.yml tests
         if: runner.os == 'Linux'
+        continue-on-error: true
         run: |
           grep -oE 'sbt -Dllm4s\.[A-Za-z0-9]+=[^ ]+ [A-Za-z0-9]+/test' .github/workflows/ci.yml | sort -u |
             while read -r _ prop target; do
@@ -97,12 +107,42 @@ jobs:
         continue-on-error: true
         run: sbt scalafmtCheckAll scalafmtSbtCheck "scalafixAll --check"
 
-      # Cache entries are immutable: when this exact key was restored there is nothing new to save.
+      # Cache entries are immutable: when this exact key was restored there is nothing new to save. `!cancelled()`
+      # keeps the save when a best-effort step above failed; `resolveAll` must have succeeded.
       - name: Save the dependency cache
         if: >-
-          steps.deps.outputs.cache-hit != 'true'
+          !cancelled()
+          && steps.deps.outputs.cache-hit != 'true'
           && (steps.resolve-linux.outcome == 'success' || steps.resolve-windows.outcome == 'success')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.deps.outputs.paths }}
           key: ${{ steps.deps.outputs.key }}
+
+  # Deletes every older sbt-deps entry on main, keeping the newest per OS, so the saves above never accumulate. Its own
+  # job, because deleting caches needs `actions: write`, which the job running the build's code does not get. The old
+  # setup-java-* entries are left alone: nothing writes them any more, LRU eviction removes them, and until then they
+  # are CI's last fallback.
+  prune:
+    name: Delete older dependency caches
+    needs: resolve
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete all but the newest sbt-deps entry per OS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          for os in Linux Windows; do
+            gh api --paginate "repos/$REPO/actions/caches?key=sbt-deps-v1-$os-&ref=refs/heads/main&per_page=100" \
+              --jq '.actions_caches[] | "\(.created_at) \(.id) \(.key)"' |
+              sort -r | tail -n +2 |
+              while read -r _ id key; do
+                echo "deleting $key ($id)"
+                gh api -X DELETE "repos/$REPO/actions/caches/$id"
+              done
+          done

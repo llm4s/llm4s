@@ -7,50 +7,46 @@ description: >-
 # restore-keys, and the first job to finish after a build-file change saved it. That job resolved only what it used, so
 # every other job downloaded the rest from Maven Central at the same moment, from shared runner IPs, and Quick Checks,
 # Kotlin API and MiMa failed on HTTP 429. dependency-cache.yml resolves every project, compiler bridge and tool once, and
-# is the only writer; every job restores that.
+# is the only writer of this cache; every job restores it. (setup-sbt still saves its own small launcher and disk
+# caches, about 50 MB each.)
 #
-# The key is the build files' hash. When it misses - a pull request that changes a dependency, or main before
-# dependency-cache.yml has run for the new build files - the restore key falls back to the newest saved cache, so the
-# job downloads only what changed. Caches are per OS and per branch scope; a pull request reads main's.
+# scripts/sbt-deps-cache-key.sh computes the key, the restore keys and the paths, for this restore and for the writer's
+# save alike. When the key misses - a pull request that changes a dependency, or main before dependency-cache.yml has
+# run for the new build files - a restore key falls back to the newest saved cache, so the job downloads only what
+# changed. Caches are per OS and per branch scope; a pull request reads main's.
+
+inputs:
+  mode:
+    description: >-
+      `ci` (the default) falls back to any month's cache and then to setup-java's old entries; `save`, for the writer
+      only, restores this month's cache alone, so the first save of each month starts empty and drops unused artifacts
+    default: ci
 
 outputs:
   cache-hit:
-    description: "'true' when the cache for exactly these build files was restored"
+    description: "'true' when the cache for exactly this key was restored"
     value: ${{ steps.restore.outputs.cache-hit }}
   key:
-    description: The key a complete cache for these build files is saved under (computed before sbt runs)
-    value: ${{ steps.restore.outputs.cache-primary-key }}
+    description: The key a complete cache is saved under (computed before sbt runs)
+    value: ${{ steps.key.outputs.key }}
   paths:
     description: The cached paths, for actions/cache/save; the save must name the same paths or the restore misses it
-    value: ${{ steps.paths.outputs.paths }}
+    value: ${{ steps.key.outputs.paths }}
 
 runs:
   using: composite
   steps:
-    # The same paths as setup-java's sbt cache. Never ~/.ivy2/local (publishLocal output would be restored into later
-    # builds as if it were a release) and never a target/ directory. Coursier's cache is in a different place per OS.
-    - id: paths
+    - id: key
       shell: bash
-      run: |
-        case "$RUNNER_OS" in
-          Windows) coursier='~/AppData/Local/Coursier/Cache' ;;
-          macOS)   coursier='~/Library/Caches/Coursier' ;;
-          *)       coursier='~/.cache/coursier' ;;
-        esac
-        {
-          echo 'paths<<EOF'
-          echo '~/.ivy2/cache'
-          echo '~/.sbt'
-          echo "$coursier"
-          echo '!~/.sbt/*.lock'
-          echo '!~/**/ivydata-*.properties'
-          echo 'EOF'
-        } >> "$GITHUB_OUTPUT"
+      # A workflow's `defaults.run.working-directory` (portable-spike.yml sets one) must not move the hash's inputs.
+      working-directory: ${{ github.workspace }}
+      env:
+        MODE: ${{ inputs.mode }}
+      run: scripts/sbt-deps-cache-key.sh "$MODE"
 
     - id: restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ steps.paths.outputs.paths }}
-        key: sbt-deps-v1-${{ runner.os }}-${{ hashFiles('**/*.sbt', '**/project/build.properties', '**/project/**.scala', '**/project/**.sbt') }}
-        restore-keys: |
-          sbt-deps-v1-${{ runner.os }}-
+        path: ${{ steps.key.outputs.paths }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.restore-keys }}

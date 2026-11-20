@@ -37,8 +37,11 @@
 # inside the same burst; 60 s + 120 s puts the last attempt three minutes after the first failure, and costs a passing
 # job nothing. The cache saved by .github/workflows/dependency-cache.yml is the fix; this is the safety net.
 #
-# The exit status is the last attempt's own: a retry that still fails fails the step, and nothing here can
-# turn a failing command into a passing one.
+# The exit status is the last attempt's own: a retry that still fails fails the step. A retry re-runs the whole
+# command, though, and CI wraps whole test runs (`test`, `coverage`, `testIntegration`, `testSmoke`). So a run whose
+# first attempt failed a flaky test AND printed a transient marker on an `[error]` line can pass on the retry, and the
+# flaky test goes unreported but for the warning annotation. Resolution failures come before any test runs, so this
+# needs both at once.
 set -uo pipefail
 
 if [ $# -eq 0 ]; then

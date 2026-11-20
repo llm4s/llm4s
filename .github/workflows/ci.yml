@@ -32,7 +32,8 @@ concurrency:
 
 # Every job sets timeout-minutes, about twice its usual duration on main, so a hung job cannot hold a runner and the
 # merge queue for GitHub's six-hour default (#2370). Raising one: CONTRIBUTING.md#ci-time-limits.
-# Every job restores the sbt dependency cache that dependency-cache.yml saves on main, and none saves it: on 2026-11-20
+# Every job restores the sbt dependency cache that dependency-cache.yml saves on main, and none saves it (setup-sbt
+# still saves its own launcher and disk caches, about 50 MB each): on 2026-11-20
 # setup-java's `cache: 'sbt'` held only what the first job to finish had resolved, the other jobs downloaded the rest
 # from Maven Central at once, and Quick Checks, Kotlin API and MiMa failed on HTTP 429 (.github/actions/restore-sbt-deps).
 # Each job's first sbt command, where dependencies resolve, runs under scripts/retry-on-transient-network.sh, which
@@ -1918,7 +1919,7 @@ jobs:
         run: scripts/retry-on-transient-network.sh sbt springBootStarterBoot4/test
 
       - name: Test the starter against the latest Spring Boot 4.x
-        run: sbt -Dllm4s.springBoot4Version=4.1.1 springBootStarterBoot4/test
+        run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springBoot4Version=4.1.1 springBootStarterBoot4/test
 
   # The Micronaut and Helidon samples (docs/guide/micronaut.md, docs/guide/helidon.md), built and tested against the
   # library just published. Their tests replace the client with FakeLlmClient, so they need no model and no key (#2281).
