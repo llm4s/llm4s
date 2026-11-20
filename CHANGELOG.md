@@ -291,6 +291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the `@Stable` `Completion` exposes them (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
+- **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
+  model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason [#2563](https://github.com/llm4s/llm4s/pull/2563).
 - **Fixed** cost for reasoning models counting thinking tokens once: OpenAI-format usage counts them inside
   `completion_tokens`, Gemini and xAI apart, and `TokenUsage.totalOutputTokens` now handles both [#2564](https://github.com/llm4s/llm4s/pull/2564).
 - **Fixed** `ReliableClient.streamComplete` no longer retries a stream once a chunk has reached the caller, so a failure
