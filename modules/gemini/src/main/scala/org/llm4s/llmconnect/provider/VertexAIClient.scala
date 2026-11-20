@@ -217,6 +217,9 @@ class VertexAIClient(
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
                       // (#1562); a chunk that is not JSON at all is skipped, as it always was
                       BoundedJson.read(jsonStr) match {
+                        case Right(json) if GeminiBlocked.error(json, "Vertex AI").isDefined =>
+                          // a blocked candidate or prompt ends the stream with its reason, as it fails `complete`
+                          refused = GeminiBlocked.error(json, "Vertex AI")
                         case Right(json) =>
                           parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
                             textLength += parsed.text.length
@@ -401,50 +404,52 @@ class VertexAIClient(
   // crosses: a reply nested more than 512 levels deep is refused before it is parsed (#1562, as GeminiClient)
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
-      Try {
-        val candidates = json("candidates").arr
-
-        if (candidates.isEmpty) {
-          Left(org.llm4s.error.ValidationError("response", "No candidates in Vertex AI response"))
-        } else {
-          val candidate = candidates.head
-          val content   = candidate("content")
-          val parts     = GeminiThoughtSignatures.partsOf(content) // none when the model wrote nothing
-
-          // Answer text, function calls (Vertex AI doesn't provide tool call IDs: each gets a generated one), the
-          // thought summary if one was requested, and the thought signatures, split by part
-          val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
-          val textContent = parsed.text
-          val toolCalls   = parsed.calls
-
-          val usageOpt = GeminiUsage.fromResponse(json)
-
-          // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
-          val thinking =
-            Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
-          val message = AssistantMessage(
-            contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
-            toolCalls = toolCalls,
-            thinking = thinking
-          )
-          val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-
-          Right(
-            Completion(
-              id = UUID.randomUUID().toString,
-              content = textContent,
-              model = config.model,
-              toolCalls = toolCalls.toList,
-              created = Instant.now(),
-              message = message,
-              usage = usageOpt,
-              estimatedCost = cost,
-              citations = GeminiGrounding.citations(candidate)
-            )
-          )
-        }
-      }.toEither.left.map(e => e.toLLMError).flatten
+      GeminiBlocked.error(json, "Vertex AI").toLeft(()).flatMap(_ => parseCandidate(json))
     }
+
+  private def parseCandidate(json: ujson.Value): Result[Completion] =
+    Try {
+      val candidates = json("candidates").arr
+
+      if (candidates.isEmpty) {
+        Left(org.llm4s.error.ValidationError("response", "No candidates in Vertex AI response"))
+      } else {
+        val candidate = candidates.head
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none when the model wrote nothing
+
+        // Answer text, function calls (Vertex AI doesn't provide tool call IDs: each gets a generated one), the
+        // thought summary if one was requested, and the thought signatures, split by part
+        val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
+        val textContent = parsed.text
+        val toolCalls   = parsed.calls
+
+        val usageOpt = GeminiUsage.fromResponse(json)
+
+        // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
+        val thinking =
+          Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
+        val message = AssistantMessage(
+          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          toolCalls = toolCalls,
+          thinking = thinking
+        )
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
+        Right(
+          Completion(
+            id = UUID.randomUUID().toString,
+            content = textContent,
+            model = config.model,
+            toolCalls = toolCalls.toList,
+            created = Instant.now(),
+            message = message,
+            usage = usageOpt,
+            estimatedCost = cost,
+            citations = GeminiGrounding.citations(candidate)
+          )
+        )
+      }
+    }.toEither.left.map(e => e.toLLMError).flatten
 
   /**
    * Parse a streaming chunk into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per function call
@@ -460,7 +465,7 @@ class VertexAIClient(
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
         val candidate = candidates.head
-        val parts     = GeminiThoughtSignatures.partsOf(candidate("content")) // none: the chunk still ends the stream
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none: the chunk still ends the stream
         val parsed =
           GeminiThoughtSignatures.parse(providerName, parts, textOffset, () => UUID.randomUUID().toString)
         val finishReason = Try(candidate("finishReason").str).toOption

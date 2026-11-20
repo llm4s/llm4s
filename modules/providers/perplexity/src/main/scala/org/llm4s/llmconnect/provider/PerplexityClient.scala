@@ -59,8 +59,8 @@ import scala.util.{ Try, Using }
  * `citedText`) whose URL is not already there: the answer's `[web:N]` markers point at those results. A response
  * whose `status` is `failed`, or anything but `completed` or `incomplete`, is an error; `incomplete` (a limit
  * reached) is returned as an answer cut short, with finish reason `length` on a stream. The usage's
- * `input_tokens_details` and `output_tokens_details.reasoning_tokens` fill the cached and thinking token counts,
- * and the cost Perplexity reports (`usage.cost.total_cost`, in USD) is the completion's `estimatedCost`.
+ * `input_tokens_details` and `output_tokens_details.reasoning_tokens` fill the cached and thinking token counts (the
+ * reasoning tokens, counted inside `output_tokens`, are taken out of `completionTokens`), and the cost Perplexity reports (`usage.cost.total_cost`, in USD) is the completion's `estimatedCost`.
  * The Agent API returns no reasoning text, so a completion has no thinking text.
  *
  * == Streaming ==
@@ -564,11 +564,13 @@ object PerplexityClient {
     } yield {
       val inputDetails  = usage.get("input_tokens_details").flatMap(_.objOpt)
       val outputDetails = usage.get("output_tokens_details").flatMap(_.objOpt)
+      val reasoning     = outputDetails.flatMap(count(_, "reasoning_tokens"))
       TokenUsage(
         promptTokens = input,
-        completionTokens = output,
+        // reasoning is counted inside output_tokens; TokenUsage.completionTokens never includes thinkingTokens
+        completionTokens = math.max(0, output - reasoning.fold(0)(math.max(0, _))),
         totalTokens = count(usage, "total_tokens").getOrElse(input + output),
-        thinkingTokens = outputDetails.flatMap(count(_, "reasoning_tokens")),
+        thinkingTokens = reasoning,
         cachedTokens = inputDetails.flatMap(d => count(d, "cached_tokens").orElse(count(d, "cache_read_input_tokens"))),
         cacheCreationTokens = inputDetails.flatMap(count(_, "cache_creation_input_tokens"))
       )

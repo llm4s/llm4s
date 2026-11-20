@@ -217,7 +217,7 @@ final class RAGPipeline private (
       val (answerText, usage) = answerWithUsage
       usage.foreach { u =>
         llmPromptTokens = Some(u.promptTokens)
-        llmCompletionTokens = Some(u.completionTokens)
+        llmCompletionTokens = Some(u.totalOutputTokens) // output spent, thinking included
       }
       RAGAnswer(
         question = question,

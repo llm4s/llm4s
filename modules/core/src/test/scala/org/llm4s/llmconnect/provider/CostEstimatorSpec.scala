@@ -305,9 +305,10 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
       deprecationDate = None
     )
 
+    // completionTokens never includes thinkingTokens: 300 answer tokens, 200 thinking
     val usage = TokenUsage(
       promptTokens = 1000,
-      completionTokens = 500,
+      completionTokens = 300,
       totalTokens = 1500,
       thinkingTokens = Some(200)
     )
@@ -318,7 +319,6 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     // Expected:
     // input = 1000 * 0.000001 = 0.001
-    // normalCompletion = 500 - 200 = 300
     // normalOutput = 300 * 0.000002 = 0.0006
     // reasoningOutput = 200 * 0.000004 = 0.0008
     // total = 0.0024

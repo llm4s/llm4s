@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking changes
 
+- `TokenUsage.completionTokens` no longer includes reasoning tokens for OpenAI, OpenAI-compatible and Perplexity replies,
+  and output token counts (`UsageSummary.outputTokens`, token budgets, metrics, OpenTelemetry, Langfuse, Spring AI) include
+  thinking for every provider; [migration](docs/reference/migration.md#completiontokens-no-longer-includes-thinking-tokens-2564).
 - A `Llm4sHttpClient` passed to an SDK-free provider client is no longer closed with it, and `LlmClientOptions` and
   `ProviderFeatures` gain a field; [migration](docs/reference/migration.md#a-supplied-http-client-is-the-callers-to-close-2341).
 - `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;
@@ -292,11 +295,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
-  model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason [#2563](https://github.com/llm4s/llm4s/pull/2563).
-- **Fixed** cost for reasoning models counting thinking tokens once: OpenAI-format usage counts them inside
-  `completion_tokens`, Gemini and xAI apart, and `TokenUsage.totalOutputTokens` now handles both [#2564](https://github.com/llm4s/llm4s/pull/2564).
+  model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason;
+  a candidate with no parts that a content filter stopped (`SAFETY` and the like) or a blocked prompt is the new `ContentFilteredError`,
+  which `ReliableClient`'s circuit breaker does not count, and another such finish a `ValidationError` naming it, in a stream too [#2563](https://github.com/llm4s/llm4s/pull/2563).
+- **Changed** `TokenUsage.completionTokens` never includes `thinkingTokens`: the OpenAI, OpenAI-compatible (not xAI) and
+  Perplexity clients take reasoning tokens out of it, so cost counts thinking once, and every output token count includes thinking [#2564](https://github.com/llm4s/llm4s/pull/2564).
 - **Fixed** `ReliableClient.streamComplete` no longer retries a stream once a chunk has reached the caller, so a failure
-  mid-reply is not delivered twice ("HelHello") or run and billed again [#2562](https://github.com/llm4s/llm4s/pull/2562).
+  mid-reply is not delivered twice ("HelHello") or run and billed again, and the caller's own `onChunk` failing does not
+  count against the circuit breaker [#2562](https://github.com/llm4s/llm4s/pull/2562).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
@@ -431,10 +437,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tools
 
-- **Fixed** HTTP tool blocklist matching so a configured domain with a leading `www.` blocks the same host and its
-  subdomains consistently with allowlist matching [#2496](https://github.com/llm4s/llm4s/issues/2496).
-- **Fixed** (security) HTTP tool domain matching ignores trailing dots on both sides, so `example.com.` is blocked
-  (or allowed) with `example.com` [#2581](https://github.com/llm4s/llm4s/issues/2581).
+- **Fixed** (security) HTTP tool domain matching (`HttpConfig.isDomainAllowed`) ignores a leading `www.` and trailing dots
+  on both sides, so `www.example.com` and `example.com.` are blocked (or allowed) with `example.com` [#2496](https://github.com/llm4s/llm4s/issues/2496), [#2581](https://github.com/llm4s/llm4s/issues/2581).
 - **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
   Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
   derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to

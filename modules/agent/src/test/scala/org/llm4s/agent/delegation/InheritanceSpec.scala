@@ -736,6 +736,25 @@ class InheritanceSpec extends AnyFlatSpec with Matchers with EitherValues with O
     client.sentTo("CHILD:researcher") should have size 1
   }
 
+  it should "count a reasoning model's thinking tokens against its token grant" in {
+    // an OpenAI-format reply after its client's conversion: 10 in, 5 answer and 45 reasoning tokens out (60 in all)
+    val reasoning = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 60, thinkingTokens = Some(45))
+    val thinking: PartialFunction[Vector[Message], Result[Completion]] = { case Child("researcher", messages) =>
+      Right(
+        calling(ToolCall(s"k${toolResults(messages).size}", "probe", ujson.Obj("text" -> "x"))).withUsage(reasoning)
+      )
+    }
+    val ran    = new AtomicInteger(0)
+    val client = RoutingClient(delegatingOnce.orElse(thinking))
+    val agent  = askingFamily(client, ran, TaskBudget().withMaxTokens(30L), GraphRuntime.inMemory())
+    val first  = agent.run(ThreadId("t1"), "go").value // the child's one call used 60: 15 without its thinking
+
+    val done = agent.resume(ThreadId("t1"), Map(first.approve(delegatedId(first)))).value
+    ran.get shouldBe 0
+    toolResults(done.messages).loneElement should include("token budget")
+    client.sentTo("CHILD:researcher") should have size 1
+  }
+
   it should "run with only what is left of its token grant" in {
     val ran    = new AtomicInteger(0)
     val client = RoutingClient(delegatingOnce.orElse(looping("probe")))

@@ -228,6 +228,9 @@ class GeminiClient(
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
                       // (#1562); a chunk that is not JSON at all is skipped, as it always was
                       BoundedJson.read(jsonStr) match {
+                        case Right(json) if GeminiBlocked.error(json, "Gemini").isDefined =>
+                          // a blocked candidate or prompt ends the stream with its reason, as it fails `complete`
+                          refused = GeminiBlocked.error(json, "Gemini")
                         case Right(json) =>
                           parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
                             textLength += parsed.text.length
@@ -459,52 +462,54 @@ class GeminiClient(
    */
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
-      Try {
-        val candidates = json("candidates").arr
-
-        if (candidates.isEmpty) {
-          Left(ValidationError("response", "No candidates in Gemini response"))
-        } else {
-          val candidate = candidates.head
-          val content   = candidate("content")
-          val parts     = GeminiThoughtSignatures.partsOf(content) // none when the model wrote nothing
-
-          // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
-          // thought summary if one was requested, and the thought signatures, split by part
-          val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
-          val textContent = parsed.text
-          val toolCalls   = parsed.calls
-
-          val usageOpt = GeminiUsage.fromResponse(json)
-
-          // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
-          val thinking =
-            Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
-          val message = AssistantMessage(
-            contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
-            toolCalls = toolCalls,
-            thinking = thinking
-          )
-
-          // Estimate cost using CostEstimator
-          val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-
-          Right(
-            Completion(
-              id = UUID.randomUUID().toString,
-              content = textContent,
-              model = config.model,
-              toolCalls = toolCalls.toList,
-              created = Instant.now(),
-              message = message,
-              usage = usageOpt,
-              estimatedCost = cost,
-              citations = GeminiGrounding.citations(candidate)
-            )
-          )
-        }
-      }.toEither.left.map(e => e.toLLMError).flatten
+      GeminiBlocked.error(json, "Gemini").toLeft(()).flatMap(_ => parseCandidate(json))
     }
+
+  private def parseCandidate(json: ujson.Value): Result[Completion] =
+    Try {
+      val candidates = json("candidates").arr
+
+      if (candidates.isEmpty) {
+        Left(ValidationError("response", "No candidates in Gemini response"))
+      } else {
+        val candidate = candidates.head
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none when the model wrote nothing
+
+        // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
+        // thought summary if one was requested, and the thought signatures, split by part
+        val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
+        val textContent = parsed.text
+        val toolCalls   = parsed.calls
+
+        val usageOpt = GeminiUsage.fromResponse(json)
+
+        // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
+        val thinking =
+          Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
+        val message = AssistantMessage(
+          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          toolCalls = toolCalls,
+          thinking = thinking
+        )
+
+        // Estimate cost using CostEstimator
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
+        Right(
+          Completion(
+            id = UUID.randomUUID().toString,
+            content = textContent,
+            model = config.model,
+            toolCalls = toolCalls.toList,
+            created = Instant.now(),
+            message = message,
+            usage = usageOpt,
+            estimatedCost = cost,
+            citations = GeminiGrounding.citations(candidate)
+          )
+        )
+      }
+    }.toEither.left.map(e => e.toLLMError).flatten
 
   /**
    * Parse a streaming chunk from Gemini into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per
@@ -520,8 +525,7 @@ class GeminiClient(
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
         val candidate = candidates.head
-        val content   = candidate("content")
-        val parts     = GeminiThoughtSignatures.partsOf(content) // none: the chunk still ends the stream
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none: the chunk still ends the stream
 
         // Extract text delta, function calls and thought signatures
         val parsed =

@@ -207,8 +207,10 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
-returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. They are part of
-`completionTokens`, not in addition to it. OpenAI's chat-completions API does not return the
+returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
+inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
+`thinkingTokens` (`totalTokens` is kept as reported, and `totalOutputTokens` is the two added
+together). OpenAI's chat-completions API does not return the
 reasoning text itself, so `Completion.thinking` stays empty.
 
 ### Streaming and token usage

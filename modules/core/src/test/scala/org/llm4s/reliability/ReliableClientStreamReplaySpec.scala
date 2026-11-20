@@ -1,6 +1,6 @@
 package org.llm4s.reliability
 
-import org.llm4s.error.{ NetworkError, TimeoutError }
+import org.llm4s.error.{ ContentFilteredError, NetworkError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -58,6 +58,19 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
       None
     )
 
+  /** A client whose circuit breaker opens on the first failure and stays open for the test. */
+  private def breaking(inner: LLMClient, deadline: Option[FiniteDuration]) =
+    new ReliableClient(
+      inner,
+      "test",
+      ReliabilityConfig(
+        retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis),
+        circuitBreaker = CircuitBreakerConfig(failureThreshold = 1, recoveryTimeout = 1.hour, successThreshold = 1),
+        deadline = deadline
+      ),
+      None
+    )
+
   for (deadline <- List(None, Some(30.seconds))) {
     val path = if (deadline.isEmpty) "without a deadline" else "with a deadline"
 
@@ -88,6 +101,37 @@ class ReliableClientStreamReplaySpec extends AnyFlatSpec with Matchers {
         )
       result.left.toOption.map(_.message).getOrElse("") should include("client gone")
       inner.calls.get() shouldBe 1
+    }
+
+    it should "not count the caller's own onChunk failure against the circuit breaker" in {
+      val inner   = new Scripted(List("Hel") -> Right(completion("Hello")), Nil -> Right(completion("ok")))
+      val client  = breaking(inner, deadline)
+      val boom    = new IllegalStateException("client gone")
+      val result  = client.streamComplete(conversation, onChunk = _ => throw boom)
+      val message = result.left.toOption.map(_.message).getOrElse("")
+      message should include("client gone") // the client saw the caller's exception, rethrown unchanged
+      // one failure would open this breaker; the caller's failure is not one, so the next call reaches the provider
+      client.complete(conversation) shouldBe Right(completion("ok"))
+      inner.calls.get() shouldBe 2
+    }
+
+    it should "still count a provider failure after a chunk against the circuit breaker" in {
+      val inner  = new Scripted(List("Hel") -> Left(timeout), Nil -> Right(completion("ok")))
+      val client = breaking(inner, deadline)
+      client.streamComplete(conversation, onChunk = _ => ()) shouldBe Left(timeout)
+      client.complete(conversation).isLeft shouldBe true // the breaker is open
+      inner.calls.get() shouldBe 1
+    }
+
+    it should "not count a content-filter block against the circuit breaker" in {
+      val filtered = ContentFilteredError.reply("Gemini", "SAFETY")
+      val inner    = new Scripted(List("Hel") -> Left(filtered), Nil -> Left(filtered), Nil -> Right(completion("ok")))
+      val client   = breaking(inner, deadline)
+      client.streamComplete(conversation, onChunk = _ => ()) shouldBe Left(filtered)
+      client.complete(conversation) shouldBe Left(filtered) // not retried: it is non-recoverable
+      // one failure would open this breaker; neither block is one, so the next call reaches the provider
+      client.complete(conversation) shouldBe Right(completion("ok"))
+      inner.calls.get() shouldBe 3
     }
 
     "ReliableClient.complete " + path should "still retry, since nothing reached the caller" in {

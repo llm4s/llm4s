@@ -41,7 +41,8 @@ order, `Completion.created`, positional patterns on types that gained fields, th
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
-  Spring Boot starter no longer bring (#1496).
+  Spring Boot starter no longer bring (#1496), and `TokenUsage.completionTokens`, which no longer includes thinking
+  tokens (#2564).
 - New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
   `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
   a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
@@ -52,6 +53,38 @@ order, `Completion.created`, positional patterns on types that gained fields, th
   search-tool and store keys, `VectorStoreFactory.Config.withSecret`).
 - Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
   `llm4s-rag` (#2358).
+
+## `completionTokens` no longer includes thinking tokens (#2564)
+
+`TokenUsage.thinkingTokens` are never part of `TokenUsage.completionTokens`. OpenAI counts its `reasoning_tokens`
+inside `completion_tokens`, and so do Perplexity's `output_tokens` and the `openai-compatible` providers that report
+reasoning in OpenAI's format: DeepSeek, OpenRouter (its top-level `usage.reasoning_tokens` or
+`completion_tokens_details`), and the generic provider (Groq and other servers), Mistral, Cohere and Z.ai whenever
+they send `completion_tokens_details.reasoning_tokens`. Their clients now take the reasoning tokens out, so
+`completionTokens` is the answer alone. Gemini, Vertex AI and xAI already counted them apart and are unchanged.
+`totalTokens` is kept as the provider reported it, and `totalOutputTokens` is `completionTokens + thinkingTokens`.
+
+The source does not change; numbers do. For an OpenAI reasoning model reporting prompt 81, completion 64 (46 of them
+reasoning) and total 145, `completionTokens` was 64 and is now 18, with `thinkingTokens` 46. Code that read
+`completionTokens` as all the output tokens reads `totalOutputTokens` instead. An `OpenAICompatibleDialect` of your
+own reads `completion_tokens_details.reasoning_tokens` by default now; one for a provider that counts reasoning apart
+from `completion_tokens`, as xAI does, overrides the new `reasoningInCompletion` to `false`.
+
+Output token counts everywhere else are what the provider billed as output, thinking included, for every provider -
+Gemini, Vertex AI and xAI too, where thinking used to be left out of them:
+
+- `UsageSummary.outputTokens` and `ModelUsage.outputTokens` (so `AgentResult.usage`, `RunBudgets.maxTokens` and a
+  child's token grant, which count input plus output), with `thinkingTokens` the part of it that was thinking. Do not
+  add `thinkingTokens` to `outputTokens` again.
+- The `output` token metric of `llm4s-observability-prometheus` and `llm4s-observability-micrometer`, and so
+  `CostTracker`.
+- OpenTelemetry's `gen_ai.usage.output_tokens`, Langfuse's generation `usage.output`, and the `output_tokens` beside
+  `completion_tokens` and `thinking_tokens` on the trace collector's and Langfuse's token-usage records.
+- Spring AI's `Usage.getCompletionTokens` from `Llm4sChatModel`, as Spring AI's own OpenAI binding counts it, and
+  `RAGOperationCompleted.llmCompletionTokens`.
+
+Dashboards and alerts on those counts see larger numbers for reasoning models. The trace events' raw
+`completion_tokens` keeps its meaning and gains a `thinking_tokens` field beside it.
 
 ## Provider fromValues take model, key, then base URL (#2340)
 

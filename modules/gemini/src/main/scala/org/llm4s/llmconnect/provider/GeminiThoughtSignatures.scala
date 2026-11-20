@@ -63,12 +63,19 @@ private[provider] object GeminiThoughtSignatures {
   )
 
   /**
-   * The `parts` of a candidate's `content`, or none when the key is absent. Gemini omits `parts` when the model
+   * The `parts` of a candidate's `content`, or none when either key is absent. Gemini omits `parts` when the model
    * wrote nothing, as when a thinking model spends the whole `maxOutputTokens` thinking (`finishReason`
    * `MAX_TOKENS`, its usage still reported): that is an empty answer, in `complete` as in a stream, not an error.
+   * A candidate with no `content` that Gemini blocked is caught before this, by [[GeminiBlocked]].
    */
-  def partsOf(content: ujson.Value): Seq[ujson.Value] =
-    content.obj.get("parts").map(_.arr.toSeq).getOrElse(Seq.empty)
+  def partsOf(candidate: ujson.Value): Seq[ujson.Value] =
+    candidate.objOpt
+      .flatMap(_.get("content"))
+      .flatMap(_.objOpt)
+      .flatMap(_.get("parts"))
+      .flatMap(_.arrOpt)
+      .map(_.toSeq)
+      .getOrElse(Seq.empty)
 
   /**
    * Splits `parts` into the answer text, the thought-summary text, the function calls and the signature

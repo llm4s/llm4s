@@ -6,36 +6,22 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Providers report thinking tokens two ways. OpenAI, and servers that copy its format (Groq,
- * DeepSeek, OpenRouter), count `reasoning_tokens` inside `completion_tokens`, and `total_tokens` is
- * prompt + completion. Gemini (`thoughtsTokenCount`) and xAI count them outside, and the total adds
- * them. `totalOutputTokens`, and the cost built on it, must count each output token once either way.
- * Real usage blocks from 2026-11: Groq `openai/gpt-oss-20b` gave prompt 81, completion 64, total 145,
- * reasoning 46; Gemini `gemini-3.5-flash` gave prompt 8, no candidates, total 539, thoughts 531.
+ * `TokenUsage.thinkingTokens` are never part of `completionTokens`. Providers that count reasoning
+ * inside their completion count (OpenAI, and servers that copy its format) have it subtracted by
+ * their client; Gemini (`thoughtsTokenCount`) and xAI count it apart already. So
+ * `totalOutputTokens` is a plain sum, and the cost built on it counts each output token once. Each
+ * client's conversion is tested in its own module.
  */
 class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
 
   private val registry = ModelRegistryTestSupport.defaultService()
 
-  "totalOutputTokens" should "not add thinking that the completion count already holds (OpenAI's way)" in {
-    TokenUsage(81, 64, 145, thinkingTokens = Some(46)).totalOutputTokens shouldBe 64
-  }
-
-  it should "add thinking that is counted apart from the completion (Gemini's and xAI's way)" in {
+  "totalOutputTokens" should "add thinking to the completion, which never includes it" in {
+    // OpenAI's prompt 81, completion 64 (46 of them reasoning), total 145, after its client's conversion
+    TokenUsage(81, 18, 145, thinkingTokens = Some(46)).totalOutputTokens shouldBe 64
+    // Gemini: no answer tokens, 531 thoughts
     TokenUsage(8, 0, 539, thinkingTokens = Some(531)).totalOutputTokens shouldBe 531
     TokenUsage(1000, 500, 3500, thinkingTokens = Some(2000)).totalOutputTokens shouldBe 2500
-  }
-
-  it should "not add thinking that is the whole completion, as in a reply that only reasoned (OpenAI's way)" in {
-    TokenUsage(8, 531, 539, thinkingTokens = Some(531)).totalOutputTokens shouldBe 531
-  }
-
-  it should "add thinking smaller than the completion when the total shows it was counted apart (xAI's way)" in {
-    TokenUsage(100, 500, 800, thinkingTokens = Some(200)).totalOutputTokens shouldBe 700
-  }
-
-  it should "add thinking larger than the completion, which cannot be inside it" in {
-    TokenUsage(100, 50, 150, thinkingTokens = Some(200)).totalOutputTokens shouldBe 250
   }
 
   it should "be the completion when there is no thinking" in {
@@ -43,16 +29,17 @@ class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
     TokenUsage(100, 50, 150, thinkingTokens = Some(0)).totalOutputTokens shouldBe 50
   }
 
-  "CostEstimator" should "price gpt-5 reasoning once, since OpenAI counts it inside completion_tokens" in {
-    // 1000 input at 1.25e-6 and 5000 output at 1e-5, the 4000 reasoning tokens already among the 5000.
+  "CostEstimator" should "price gpt-5 reasoning once" in {
+    // OpenAI reported 5000 completion tokens, 4000 of them reasoning; its client keeps 1000 as the completion.
+    // 1000 input at 1.25e-6 and 5000 output at 1e-5.
     val cost = CostEstimator.estimateFromMetadata(
       registry.lookup("gpt-5").toOption,
-      TokenUsage(1000, 5000, 6000, thinkingTokens = Some(4000))
+      TokenUsage(1000, 1000, 6000, thinkingTokens = Some(4000))
     )
     cost.get shouldBe 0.05125 +- 1e-9
   }
 
-  it should "price Gemini's thoughts on top of its answer, since Gemini counts them apart" in {
+  it should "price Gemini's thoughts on top of its answer" in {
     // 1000 input at 3e-7, then 500 answer tokens and 2000 thought tokens at 2.5e-6 each.
     val cost = CostEstimator.estimateFromMetadata(
       registry.lookup("gemini-2.5-flash").toOption,
@@ -69,4 +56,5 @@ class TokenUsageThinkingSpec extends AnyFlatSpec with Matchers {
     )
     cost.get shouldBe (8 * 3e-7 + 531 * 2.5e-6) +- 1e-9
   }
+
 }
