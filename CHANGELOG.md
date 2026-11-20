@@ -293,6 +293,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
   model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason [#2563](https://github.com/llm4s/llm4s/pull/2563).
+- **Fixed** cost for reasoning models counting thinking tokens once: OpenAI-format usage counts them inside
+  `completion_tokens`, Gemini and xAI apart, and `TokenUsage.totalOutputTokens` now handles both [#2564](https://github.com/llm4s/llm4s/pull/2564).
 - **Fixed** `ReliableClient.streamComplete` no longer retries a stream once a chunk has reached the caller, so a failure
   mid-reply is not delivered twice ("HelHello") or run and billed again [#2562](https://github.com/llm4s/llm4s/pull/2562).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or

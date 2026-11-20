@@ -101,18 +101,17 @@ object CostEstimator {
       (usage.thinkingTokens, pricing.outputCostPerReasoningToken) match {
         case (Some(thinkingTokens), Some(reasoningCostPerToken)) =>
           pricing.outputCostPerToken.flatMap { outputCostPerToken =>
-            val effectiveThinkingTokens   = math.max(0, thinkingTokens)
-            val effectiveCompletionTokens = math.max(0, usage.completionTokens)
-            val normalCompletionTokens    = math.max(0, effectiveCompletionTokens - effectiveThinkingTokens)
-            val normalOutputCost          = normalCompletionTokens * outputCostPerToken
-            val reasoningOutputCost       = effectiveThinkingTokens * reasoningCostPerToken
-            val outputCost                = normalOutputCost + reasoningOutputCost
+            // the output that is not thinking, whether the provider counted thinking in the completion or apart
+            val effectiveThinkingTokens = math.max(0, thinkingTokens)
+            val normalCompletionTokens  = math.max(0, usage.totalOutputTokens - effectiveThinkingTokens)
+            val normalOutputCost        = normalCompletionTokens * outputCostPerToken
+            val reasoningOutputCost     = effectiveThinkingTokens * reasoningCostPerToken
+            val outputCost              = normalOutputCost + reasoningOutputCost
             estimateInputCostWithCaching(outputCost)
           }
 
         case _ =>
-          // For models with thinking tokens, include them in the output token count
-          // as they are typically billed at the completion token rate
+          // Thinking is billed at the output rate; totalOutputTokens counts it once, however the provider reported it
           val effectiveOutputTokens = usage.totalOutputTokens
 
           val outputCostOpt = pricing.outputCostPerToken.map(outCost => math.max(0, effectiveOutputTokens) * outCost)
