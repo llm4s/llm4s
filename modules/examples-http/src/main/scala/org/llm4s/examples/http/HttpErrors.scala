@@ -4,6 +4,7 @@ import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{
   AuthenticationError,
   ConfigurationError,
+  ContentFilteredError,
   InvalidInputError,
   LLMError,
   RateLimitError,
@@ -51,7 +52,8 @@ object HttpErrors {
   /**
    * The status for `error`:
    *
-   *  - `400` for a request the caller must change (`ValidationError`, `InvalidInputError`);
+   *  - `400` for a request the caller must change (`ValidationError`, `InvalidInputError`, and a
+   *    `ContentFilteredError`, whose prompt or reply the provider's content filter stopped);
    *  - `429` with `Retry-After` for a provider rate limit (the provider's hint, else `RateLimitError`'s default);
    *  - `504` for a provider timeout;
    *  - `502` for a provider that refused the server's credentials (`AuthenticationError`): the credential is the
@@ -61,12 +63,12 @@ object HttpErrors {
    *    anything else.
    */
   def of(error: LLMError): HttpFailure = rootCause(error) match {
-    case e @ (_: ValidationError | _: InvalidInputError) => HttpFailure(400, None, e)
-    case e: RateLimitError                               => HttpFailure(429, e.retryDelay, e)
-    case e: TimeoutError                                 => HttpFailure(504, None, e)
-    case e: AuthenticationError                          => HttpFailure(502, None, e)
-    case e: ConfigurationError                           => HttpFailure(500, None, e)
-    case e if LLMError.isRecoverable(e)                  => HttpFailure(503, None, e)
-    case e                                               => HttpFailure(502, None, e)
+    case e @ (_: ValidationError | _: InvalidInputError | _: ContentFilteredError) => HttpFailure(400, None, e)
+    case e: RateLimitError                                                         => HttpFailure(429, e.retryDelay, e)
+    case e: TimeoutError                                                           => HttpFailure(504, None, e)
+    case e: AuthenticationError                                                    => HttpFailure(502, None, e)
+    case e: ConfigurationError                                                     => HttpFailure(500, None, e)
+    case e if LLMError.isRecoverable(e)                                            => HttpFailure(503, None, e)
+    case e                                                                         => HttpFailure(502, None, e)
   }
 }

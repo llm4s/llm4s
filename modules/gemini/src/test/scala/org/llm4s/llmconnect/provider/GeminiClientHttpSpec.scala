@@ -555,12 +555,11 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   noContentShapes.foreach { case (body, expected, filtered) =>
-    it should s"end the stream naming the reason when a chunk has no parts: $expected (${body.take(40)})" in {
-      val first  = """{"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}"""
+    it should s"end the stream naming the reason when its only chunk has no parts: $expected (${body.take(40)})" in {
       val chunks = ListBuffer.empty[StreamedChunk]
       noContentMessage(
         {
-          val sseData  = s"data: $first\n\ndata: ${ujson.read(body).render()}\n\n"
+          val sseData  = s"data: ${ujson.read(body).render()}\n\n"
           val mockHttp = stub[Llm4sHttpClient]
           (mockHttp.postStream _)
             .when(*, *, *, *)
@@ -571,7 +570,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         },
         filtered
       ) should include(expected)
-      chunks.flatMap(_.content) shouldBe List("Hel")
+      chunks.flatMap(_.content) shouldBe empty
     }
   }
 
@@ -692,5 +691,46 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
         (e.message should not).include("key=")
       case other => fail(s"expected a NetworkError, got $other")
     }
+  }
+
+  // text, then a finish that is not a normal one: `complete` (one candidate with the text and the finish) and a
+  // stream (the text, then a chunk with the finish and no parts) must end the same way
+  private def helThen: Seq[(String, String)] = Seq("SAFETY", "MALFORMED_FUNCTION_CALL").map { reason =>
+    (
+      s"""{"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"$reason"}]}""",
+      s"""data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\n\n""" +
+        s"""data: {"candidates":[{"content":{"role":"model"},"finishReason":"$reason"}]}\n\n"""
+    )
+  }
+
+  "A reply a content filter cut short after text" should "be a ContentFilteredError from complete and from a stream" in {
+    val (body, sse) = helThen.head
+    val chunks      = ListBuffer.empty[StreamedChunk]
+    noContentMessage(
+      completeOf(body)
+    ) shouldBe "Gemini stopped the reply after 3 characters of text: finishReason SAFETY"
+    noContentMessage(streamOf(sse, chunks += _)) shouldBe
+      "Gemini stopped the reply after 3 characters of text: finishReason SAFETY"
+    chunks.flatMap(_.content) shouldBe List("Hel") // what was delivered stays delivered
+  }
+
+  "A reply that produced text before an abnormal finish" should "be the text, from complete and from a stream" in {
+    val (body, sse) = helThen(1)
+    completeOf(body).map(_.content) shouldBe Right("Hel")
+    streamOf(sse, _ => ()).map(_.content) shouldBe Right("Hel")
+  }
+
+  private def completeOf(body: String): org.llm4s.types.Result[Completion] = {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
+    mkClient(mockHttp).complete(conversation("Hi"), CompletionOptions())
+  }
+
+  private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] = {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sse.getBytes(StandardCharsets.UTF_8)))))
+    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
   }
 }

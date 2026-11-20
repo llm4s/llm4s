@@ -213,7 +213,9 @@ class GeminiClient(
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
             val citations   = scala.collection.mutable.ArrayBuffer.empty[Citation]      // grounding sources, in order
             var textLength = 0 // characters of answer text streamed so far: where a text signature sits
-            var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
+            // a chunk nested too deeply, or a filter stop: the stream fails with it, unread past it
+            var refused = Option.empty[LLMError]
+            var finish  = Option.empty[String] // the last finish reason a chunk stated
 
             val result =
               Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
@@ -228,23 +230,28 @@ class GeminiClient(
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
                       // (#1562); a chunk that is not JSON at all is skipped, as it always was
                       BoundedJson.read(jsonStr) match {
-                        case Right(json) if GeminiBlocked.error(json, "Gemini").isDefined =>
-                          // a blocked candidate or prompt ends the stream with its reason, as it fails `complete`
-                          refused = GeminiBlocked.error(json, "Gemini")
                         case Right(json) =>
-                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                            textLength += parsed.text.length
-                            signatures ++= parsed.signatures
-                            chunks.foreach { chunk =>
-                              accumulator.addChunk(chunk)
-                              onChunk(chunk)
-                            }
+                          GeminiBlocked.filtered(json, "Gemini", textLength) match {
+                            case Some(filtered) =>
+                              // a filter stop ends the stream with its reason, as the same reply fails `complete`;
+                              // the text already delivered stays delivered
+                              refused = Some(filtered)
+                            case None =>
+                              GeminiBlocked.finishReason(json).foreach(reason => finish = Some(reason))
+                              parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                                textLength += parsed.text.length
+                                signatures ++= parsed.signatures
+                                chunks.foreach { chunk =>
+                                  accumulator.addChunk(chunk)
+                                  onChunk(chunk)
+                                }
+                              }
+                              // grounding metadata usually arrives with the last chunk; collect it from any chunk
+                              Try(json("candidates").arr.headOption).toOption.flatten
+                                .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
+                              // token usage, thinking and cached tokens included, when this chunk reports it
+                              GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                           }
-                          // grounding metadata usually arrives with the last chunk; collect it from any chunk
-                          Try(json("candidates").arr.headOption).toOption.flatten
-                            .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
-                          // token usage, thinking and cached tokens included, when this chunk reports it
-                          GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
                             s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
@@ -273,6 +280,8 @@ class GeminiClient(
                       .withAdjustments(adjustments)
                   }
                 )
+                // an abnormal finish with nothing produced fails, decided from the whole stream as `complete` does
+                .flatMap(c => GeminiBlocked.unanswered(finish, c, "Gemini").toLeft(c))
 
             recordingExchange(startedAt, requestText)(result)(
               successResponse = Some(rawStream.result()),
@@ -462,7 +471,11 @@ class GeminiClient(
    */
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
-      GeminiBlocked.error(json, "Gemini").toLeft(()).flatMap(_ => parseCandidate(json))
+      GeminiBlocked
+        .filtered(json, "Gemini")
+        .toLeft(())
+        .flatMap(_ => parseCandidate(json))
+        .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Gemini").toLeft(c))
     }
 
   private def parseCandidate(json: ujson.Value): Result[Completion] =

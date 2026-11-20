@@ -83,8 +83,27 @@ Gemini, Vertex AI and xAI too, where thinking used to be left out of them:
 - Spring AI's `Usage.getCompletionTokens` from `Llm4sChatModel`, as Spring AI's own OpenAI binding counts it, and
   `RAGOperationCompleted.llmCompletionTokens`.
 
-Dashboards and alerts on those counts see larger numbers for reasoning models. The trace events' raw
-`completion_tokens` keeps its meaning and gains a `thinking_tokens` field beside it.
+Dashboards and alerts on those counts see larger numbers for reasoning models. The raw `completion_tokens` on
+trace events, spans and Langfuse records is `TokenUsage.completionTokens`, so for OpenAI, OpenAI-compatible and
+Perplexity reasoning replies its value drops (64 becomes 18 above). A dashboard on it shifts: point it at
+`output_tokens`, or at `completion_tokens` plus the new `thinking_tokens` beside it.
+
+## A Gemini reply a content filter stopped is an error (#2563)
+
+The Gemini and Vertex AI clients end a reply the same way from `complete` and from `streamComplete`:
+
+- A content-filter `finishReason` (`SAFETY`, `RECITATION`, `LANGUAGE`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`,
+  `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `ESCALATION`) is a `Left(ContentFilteredError)`,
+  even when text came before it: `complete` used to return that partial text as the answer, and a stream returned it
+  too. A stream's text already passed to `onChunk` stays delivered; the error's message says how many characters
+  the filter cut after. A prompt Gemini blocked (`promptFeedback.blockReason`) is one too, where `complete` failed
+  with `UnknownError` and a stream returned an empty answer.
+- Any other abnormal finish (`MALFORMED_FUNCTION_CALL`, `OTHER`, ...) is a `ValidationError` naming it only when the
+  reply produced no text and no tool call; otherwise the reply is returned with what it produced.
+- `STOP`, `MAX_TOKENS` or `CONTINUATION` with nothing produced is an empty answer.
+
+Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you handled a partial answer or an
+`UnknownError`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure.
 
 ## Provider fromValues take model, key, then base URL (#2340)
 

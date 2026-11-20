@@ -237,7 +237,7 @@ object CostTrackingExample {
     val perRequest = header("1. Per request: Completion.estimatedCost") ++ Seq(
       s"  model:  ${report.perRequest.model}",
       s"  tokens: ${report.perRequest.usage
-          .fold("not reported by the provider")(u => s"${u.promptTokens} in, ${u.completionTokens} out")}",
+          .fold("not reported by the provider")(u => s"${u.promptTokens} in, ${u.totalOutputTokens} out")}",
       s"  cost:   ${costOrUnknown(report.perRequest)}"
     )
 
@@ -256,8 +256,8 @@ object CostTrackingExample {
     val custom = report.custom
     val check = custom.request.usage.map { u =>
       val inCost  = u.promptTokens * custom.inputPerMillion / 1.0e6
-      val outCost = u.completionTokens * custom.outputPerMillion / 1.0e6
-      f"  check:  ${u.promptTokens} in x $$${custom.inputPerMillion}%.2f/M + ${u.completionTokens} out x $$${custom.outputPerMillion}%.2f/M = $$${inCost + outCost}%.6f"
+      val outCost = u.totalOutputTokens * custom.outputPerMillion / 1.0e6 // thinking is billed as output
+      f"  check:  ${u.promptTokens} in x $$${custom.inputPerMillion}%.2f/M + ${u.totalOutputTokens} out x $$${custom.outputPerMillion}%.2f/M = $$${inCost + outCost}%.6f"
     }
     val customLines = header("4. Custom pricing: a registry that prices your model") ++ Seq(
       f"  registered '${custom.modelId}' at $$${custom.inputPerMillion}%.2f/M input and $$${custom.outputPerMillion}%.2f/M output",

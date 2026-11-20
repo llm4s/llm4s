@@ -296,8 +296,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
   model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason;
-  a candidate with no parts that a content filter stopped (`SAFETY` and the like) or a blocked prompt is the new `ContentFilteredError`,
-  which `ReliableClient`'s circuit breaker does not count, and another such finish a `ValidationError` naming it, in a stream too [#2563](https://github.com/llm4s/llm4s/pull/2563).
+  a reply a content filter stopped (`SAFETY` and the like), even after text, or a blocked prompt is the new `ContentFilteredError`,
+  which `ReliableClient`'s circuit breaker does not count, and another abnormal finish with nothing produced a `ValidationError`, the same from `complete` and a stream;
+  [migration](docs/reference/migration.md#a-gemini-reply-a-content-filter-stopped-is-an-error-2563) [#2563](https://github.com/llm4s/llm4s/pull/2563).
 - **Changed** `TokenUsage.completionTokens` never includes `thinkingTokens`: the OpenAI, OpenAI-compatible (not xAI) and
   Perplexity clients take reasoning tokens out of it, so cost counts thinking once, and every output token count includes thinking [#2564](https://github.com/llm4s/llm4s/pull/2564).
 - **Fixed** `ReliableClient.streamComplete` no longer retries a stream once a chunk has reached the caller, so a failure

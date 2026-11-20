@@ -203,8 +203,9 @@ class VertexAIClient(
                 scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
               val citations = scala.collection.mutable.ArrayBuffer.empty[Citation] // grounding sources, in order
               var textLength = 0 // characters of answer text streamed so far: where a text signature sits
-              // a chunk nested too deeply: the stream fails with it, unread
+              // a chunk nested too deeply, or a filter stop: the stream fails with it, unread past it
               var refused = Option.empty[org.llm4s.error.LLMError]
+              var finish  = Option.empty[String] // the last finish reason a chunk stated
 
               Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
                 Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
@@ -217,23 +218,28 @@ class VertexAIClient(
                       // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
                       // (#1562); a chunk that is not JSON at all is skipped, as it always was
                       BoundedJson.read(jsonStr) match {
-                        case Right(json) if GeminiBlocked.error(json, "Vertex AI").isDefined =>
-                          // a blocked candidate or prompt ends the stream with its reason, as it fails `complete`
-                          refused = GeminiBlocked.error(json, "Vertex AI")
                         case Right(json) =>
-                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                            textLength += parsed.text.length
-                            signatures ++= parsed.signatures
-                            chunks.foreach { chunk =>
-                              accumulator.addChunk(chunk)
-                              onChunk(chunk)
-                            }
+                          GeminiBlocked.filtered(json, "Vertex AI", textLength) match {
+                            case Some(filtered) =>
+                              // a filter stop ends the stream with its reason, as the same reply fails `complete`;
+                              // the text already delivered stays delivered
+                              refused = Some(filtered)
+                            case None =>
+                              GeminiBlocked.finishReason(json).foreach(reason => finish = Some(reason))
+                              parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                                textLength += parsed.text.length
+                                signatures ++= parsed.signatures
+                                chunks.foreach { chunk =>
+                                  accumulator.addChunk(chunk)
+                                  onChunk(chunk)
+                                }
+                              }
+                              // grounding metadata usually arrives with the last chunk; collect it from any chunk
+                              Try(json("candidates").arr.headOption).toOption.flatten
+                                .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
+                              // token usage, thinking and cached tokens included, when this chunk reports it
+                              GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                           }
-                          // grounding metadata usually arrives with the last chunk; collect it from any chunk
-                          Try(json("candidates").arr.headOption).toOption.flatten
-                            .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
-                          // token usage, thinking and cached tokens included, when this chunk reports it
-                          GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
                             s"[VertexAI] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
@@ -263,10 +269,15 @@ class VertexAIClient(
                         ThinkingReplay.bindOrigin(replayOrigin, message)
                       )
                       .withAdjustments(adjustments)
-                    recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
                     completion
                   }
                 )
+                // an abnormal finish with nothing produced fails, decided from the whole stream as `complete` does
+                .flatMap(c => GeminiBlocked.unanswered(finish, c, "Vertex AI").toLeft(c))
+                .map { completion =>
+                  recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+                  completion
+                }
                 .tapLeft(error =>
                   recordExchange(
                     startedAt,
@@ -404,7 +415,11 @@ class VertexAIClient(
   // crosses: a reply nested more than 512 levels deep is refused before it is parsed (#1562, as GeminiClient)
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
-      GeminiBlocked.error(json, "Vertex AI").toLeft(()).flatMap(_ => parseCandidate(json))
+      GeminiBlocked
+        .filtered(json, "Vertex AI")
+        .toLeft(())
+        .flatMap(_ => parseCandidate(json))
+        .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Vertex AI").toLeft(c))
     }
 
   private def parseCandidate(json: ujson.Value): Result[Completion] =
