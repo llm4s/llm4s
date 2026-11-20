@@ -245,6 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Agent runtime
 
 - **Fixed** the per-step cost of hex-encoding effect keys, trace ids and other digests (one `String.format` per byte), of `KeyDigest.canonical`'s sorted copy of the JSON, and of an Ox scope for a superstep with one task (it gets one virtual thread); every digest is unchanged [#2633](https://github.com/llm4s/llm4s/issues/2633), [#2642](https://github.com/llm4s/llm4s/issues/2642).
+- **Fixed** `ContextWindowMiddleware` and `SummarizationMiddleware` count tokens with `cl100k_base` by default, not words x 1.3,
+  which counted minified JSON as ~1 token; core's tokenizer reads special-token names as text [#2587](https://github.com/llm4s/llm4s/issues/2587).
 - **Added** `InputGuardrail.from` and `OutputGuardrail.from`, which adapt a `CompositeGuardrail` (or any
   `Guardrail[String]`) for `GuardrailMiddleware`, passing the hook's context on; running a whole guardrail list is
   recorded as the default [#1521](https://github.com/llm4s/llm4s/issues/1521).
@@ -291,6 +293,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
 - **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
   model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason [#2563](https://github.com/llm4s/llm4s/pull/2563).
+- **Fixed** `ReliableClient.streamComplete` no longer retries a stream once a chunk has reached the caller, so a failure
+  mid-reply is not delivered twice ("HelHello") or run and billed again [#2562](https://github.com/llm4s/llm4s/pull/2562).
 - **Fixed** the OpenAI-compatible client returning `Right` for a stream that never finished: one with no `finish_reason` or
   `[DONE]`, or carrying an `error` event, is now a `Left`, so a tool call cut before its arguments no longer reaches an agent [#2550](https://github.com/llm4s/llm4s/pull/2550).
 - **Added** `LlmClientOptions.withHttpClient`: the SDK-free chat providers send their requests through your own
@@ -427,6 +431,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** HTTP tool blocklist matching so a configured domain with a leading `www.` blocks the same host and its
   subdomains consistently with allowlist matching [#2496](https://github.com/llm4s/llm4s/issues/2496).
+- **Fixed** (security) HTTP tool domain matching ignores trailing dots on both sides, so `example.com.` is blocked
+  (or allowed) with `example.com` [#2581](https://github.com/llm4s/llm4s/issues/2581).
 - **Added** typed tools to `llm4s-schema-derivation` (Experimental): `Tool.of[Args, R](name, description)(args =>
   Either[String, R])` builds the existing `ToolFunction` from a function over a case class, with the parameter schema
   derived from `Args` and argument errors reported as `SafeParameterExtractor`'s `ToolParameterError`s; no change to
