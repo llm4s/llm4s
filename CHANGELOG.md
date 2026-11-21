@@ -402,7 +402,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reply as a Reactor `Flux<String>` over `JLlmClient.streamAsPublisher`, with backpressure, and cancellation that
   interrupts the provider call [#1492](https://github.com/llm4s/llm4s/issues/1492); see [Java Reactor](docs/guide/java-reactor.md).
 - **Added** `llm4s-spring-ai` (Experimental, Spring AI 2.0.x provided): `Llm4sChatModel` / `Llm4sEmbeddingModel` (an llm4s client as a Spring AI
-  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
+  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client, its options a copy of the model's own [#2645](https://github.com/llm4s/llm4s/issues/2645)) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).

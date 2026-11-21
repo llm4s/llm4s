@@ -2926,6 +2926,7 @@ lazy val springAi = (project in file("modules/spring-ai"))
       Deps.springBoot4AutoConfigure % Provided,
       Deps.scalatest                % Test,
       Deps.springAiClientChat       % Test,
+      Deps.springAiOpenAi           % Test,
       Deps.reactorTest              % Test
     ) ++ Deps.springBoot4.map(_ % Test)
   )
