@@ -16,9 +16,11 @@ class ContainerisedWorkspaceAwaitSpec extends AnyFlatSpec with Matchers {
   private def workspace() = new ContainerisedWorkspace("/tmp/unused", "unused-image", 0)
 
   "An interrupted wait for a command" should "end the wait as a failure, which sendCommand cancels" in {
-    val future = new CompletableFuture[WorkspaceAgentResponse]()
+    // everything built before the interrupt: a class's first initialisation (upickle's) may itself wait interruptibly
+    val (ws, command) = (workspace(), ExecuteCommandCommand("c1", "sleep 60"))
+    val future        = new CompletableFuture[WorkspaceAgentResponse]()
     Thread.currentThread().interrupt()
-    val result = workspace().awaitResponse(ExecuteCommandCommand("c1", "sleep 60"), future)
+    val result = ws.awaitResponse(command, future)
     Thread.interrupted(): Unit // cleared, for the rest of the suite; sendCommand restores it for its caller
     result match {
       case Failure(_: InterruptedException) => ()
@@ -27,12 +29,13 @@ class ContainerisedWorkspaceAwaitSpec extends AnyFlatSpec with Matchers {
   }
 
   "An interrupted wait for a file change" should "wait on for its response, keeping the interrupt" in {
-    val future   = new CompletableFuture[WorkspaceAgentResponse]()
-    val response = WriteFileResponse("w1", success = true, "f", 1L)
-    val answer   = new Thread(() => { Thread.sleep(200); future.complete(response): Unit })
+    val future        = new CompletableFuture[WorkspaceAgentResponse]()
+    val response      = WriteFileResponse("w1", success = true, "f", 1L)
+    val answer        = new Thread(() => { Thread.sleep(200); future.complete(response): Unit })
+    val (ws, command) = (workspace(), WriteFileCommand("w1", "f", "x"))
     answer.start()
     Thread.currentThread().interrupt()
-    val result = workspace().awaitResponse(WriteFileCommand("w1", "f", "x"), future)
+    val result = ws.awaitResponse(command, future)
     val kept   = Thread.interrupted()
     answer.join()
     result shouldBe Success(response)
