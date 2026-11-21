@@ -490,6 +490,9 @@ tests start using the tag joins that list (`scripts/check-performance-tests.sh` 
 on a catastrophic (quadratic) regression.
 
 On Linux CI runs each module's tests once, in its coverage leg or in the `test` job (`TEST_MODULES`).
+A suite that reads `docs/` (a guide's code blocks, links or tables) is annotated `@org.llm4s.tags.DocsSpec`, and its
+module listed in `docsTestProjects`: a docs-only PR runs only those (`sbt testDocs`), and
+`scripts/check-docs-tests.sh` fails an untagged one. On a PR, `scripts/ci-changes.sh` decides which test jobs run.
 CI's Windows job (pull requests and the nightly run, not pushes to main) runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
 separators, permissions, deleting or moving open files, processes and their arguments, SQLite files
 and locks, line endings written to files, temp files, the user's home), listed in

@@ -60,8 +60,10 @@ permissions:
   contents: read
 
 jobs:
-  # What a pull request's change needs (scripts/ci-changes.sh lists the paths behind each decision), and whether it is a
-  # draft. The checkout is the PR's merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's
+  # What a pull request's change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`,
+  # `windows`, `integration`, `consumers`, `workspace`, `performance`), and whether it is a draft. A change to a build
+  # file (build.sbt, project/, this workflow, ...) runs every job; a docs-only change runs Quick Checks, ScalaDoc and the
+  # suites that read docs/ (`Docs tests`). The checkout is the PR's merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's
   # change. Every other job needs this one and reads its outputs; it runs only on a pull request, so on every other
   # event they are empty, and each job's condition (`!= 'false'`, `!= 'true'`) then runs it. A draft pull request runs
   # nothing else: every decision is false, and All Tests Pass is skipped rather than reporting a pass for tests that did
@@ -75,6 +77,11 @@ jobs:
       contents: read
     outputs:
       draft: ${{ steps.diff.outputs.draft }}
+      code: ${{ steps.diff.outputs.code }}
+      docs: ${{ steps.diff.outputs.docs }}
+      windows: ${{ steps.diff.outputs.windows }}
+      integration: ${{ steps.diff.outputs.integration }}
+      consumers: ${{ steps.diff.outputs.consumers }}
       workspace: ${{ steps.diff.outputs.workspace }}
       performance: ${{ steps.diff.outputs.performance }}
 
@@ -90,7 +97,8 @@ jobs:
         run: |
           if [ "$DRAFT" = true ]; then
             echo "A draft pull request: no job runs until it is marked ready for review"
-            printf '%s\n' draft=true workspace=false performance=false >> "$GITHUB_OUTPUT"
+            printf '%s\n' draft=true code=false docs=false windows=false integration=false consumers=false \
+              workspace=false performance=false >> "$GITHUB_OUTPUT"
           else
             echo draft=false >> "$GITHUB_OUTPUT"
             scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
@@ -389,6 +397,13 @@ jobs:
           scripts/test-check-performance-tests.sh
           scripts/check-performance-tests.sh --model target/build-model.json
 
+      # Fails when a suite that reads docs/ is not tagged DocsSpec, or is in a module `sbt testDocs` does not run: a
+      # docs-only pull request runs only those suites (the `Docs tests` job), so an untagged one would not run on it.
+      - name: Check every suite that reads docs/ is tagged DocsSpec
+        run: |
+          scripts/test-check-docs-tests.sh
+          scripts/check-docs-tests.sh --model target/build-model.json
+
       # docs/_data/capabilities.yml (from the provider descriptors discovery finds) and docs/_data/tested-versions.yml
       # (from Versions, Common and this workflow) are generated, and docs/reference/compatibility-matrix.md renders them
       # (#2290). Fails when the committed copies differ from what the code says now, so a new provider module or a
@@ -480,8 +495,11 @@ jobs:
   scaladoc:
     name: ScalaDoc
     needs: [changes]
-    # Not on a draft pull request (the `changes` job), and not on a push to main: the nightly run runs it there.
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # On a pull request that changes code or docs (`changes`; not a draft), and not on a push to main: the nightly run
+    # runs it there.
+    if: >-
+      ${{ !cancelled() && (needs.changes.outputs.code != 'false' || needs.changes.outputs.docs != 'false') &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -547,8 +565,8 @@ jobs:
   coverage-leg:
     name: Code Coverage (${{ matrix.leg }})
     needs: [changes]
-    # Not on a draft pull request (the `changes` job).
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # On a pull request only when it changes code (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     # Healthy legs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 30
@@ -1318,8 +1336,8 @@ jobs:
   coverage:
     name: Code Coverage
     needs: [changes, coverage-leg]
-    # It runs when a leg fails, to report it (`!cancelled()`); not on a draft pull request.
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # It runs when a leg fails, to report it (`!cancelled()`); on a pull request only when it changes code, as the legs.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1382,8 +1400,8 @@ jobs:
   test:
     name: Test (other modules, JDK ${{ matrix.java }})
     needs: [changes]
-    # Not on a draft pull request (the `changes` job).
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # On a pull request only when it changes code (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     permissions:
       contents: read
     strategy:
@@ -1457,8 +1475,12 @@ jobs:
   test-windows:
     name: Test (Windows)
     needs: [changes]
-    # Not on a draft pull request (the `changes` job), and not on a push to main: the nightly run runs it there.
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # On a pull request only when it changes something Windows tests (`changes`: a whole module of PlatformTests, a
+    # source platform-sensitive-sources.txt lists, a suite it names, or a build file), and not on a push to main: the
+    # nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.windows != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     permissions:
       contents: read
     runs-on: windows-latest
@@ -1553,8 +1575,9 @@ jobs:
   integration-tests:
     name: Integration Tests
     needs: [changes]
-    # Not on a draft pull request (the `changes` job).
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
+    # On a pull request only when it changes modules/it, deploy/, config/ or a module the @Docker suites reach
+    # (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.integration != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1861,8 +1884,11 @@ jobs:
   consumers:
     name: Kotlin, Java and framework consumers
     needs: [changes]
-    # Not on a draft pull request (the `changes` job), and not on a push to main: the nightly run runs it there.
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
+    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     # Healthy runs take about 15 minutes.
     timeout-minutes: 35
@@ -2043,8 +2069,11 @@ jobs:
   spring-compat:
     name: Spring Boot and Spring AI (latest)
     needs: [changes]
-    # Not on a draft pull request (the `changes` job), and not on a push to main: the nightly run runs it there.
-    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
+    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     # Healthy runs take about 6 minutes.
     timeout-minutes: 20
@@ -2075,6 +2104,52 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springAiVersion=2.0.2 springAi/test
 
+  # A pull request that changes docs and no code (`changes`: docs/, the top-level markdown, other workflows, scripts/...)
+  # skips the coverage legs and the other test jobs. A few dozen suites read docs/ - a guide's code blocks, links and
+  # tables tested against the code - so a docs-only change can still break them: this runs those, tagged DocsSpec
+  # (`sbt testDocs`, the modules in `docsTestProjects` in build.sbt). scripts/check-docs-tests.sh (Quick Checks) fails
+  # when a suite reads docs/ without the tag. On a change with code the coverage legs and `Test (other modules)` run
+  # these suites with all the others, so this job is skipped.
+  docs-tests:
+    name: Docs tests
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    # Healthy runs take about 10 minutes: samples compiles most of the build.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt resolveAll
+
+      # The unforked suites (samples, ...) run inside the sbt JVM: the same heap as `Test (other modules)`.
+      - name: Run the suites that read docs/
+        run: sbt -J-Xmx4g testDocs
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-docs
+          path: |
+            **/target/test-reports/
+            **/target/scala-3.7.1/test-reports/
+          retention-days: 5
+
   # All tests must pass. The one check a merge needs (docs/reference/merge-queue.md), so it knows, job by job, when
   # `skipped` is a pass: never for the jobs every event runs; on a push to main for those the nightly run takes there;
   # on a pull request for a job its change does not need (`changes`). Skipped itself on a draft pull request, where
@@ -2084,7 +2159,7 @@ jobs:
     if: ${{ always() && needs.changes.outputs.draft != 'true' }}
     # changes, workspace-integration and performance-tests run only where they apply (#1982): skipped is a pass for
     # them, failed is not, so a PR that changes the workspace cannot merge with the live suites red.
-    needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, integration-tests, consumers, spring-compat, workspace-integration]
+    needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, docs-tests, integration-tests, consumers, spring-compat, workspace-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -2094,6 +2169,11 @@ jobs:
       - name: Check all tests passed
         env:
           MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          CODE: ${{ needs.changes.outputs.code }}
+          DOCS: ${{ needs.changes.outputs.docs }}
+          WINDOWS: ${{ needs.changes.outputs.windows }}
+          INTEGRATION: ${{ needs.changes.outputs.integration }}
+          CONSUMERS: ${{ needs.changes.outputs.consumers }}
           PERFORMANCE: ${{ needs.changes.outputs.performance }}
         run: |
           failed=0
@@ -2106,17 +2186,35 @@ jobs:
               failed=1
             fi
           }
-          perf_skip=false
-          if [[ "$MAIN_PUSH" == "true" || "$PERFORMANCE" == "false" ]]; then perf_skip=true; fi
+          # skip_ok DECISION...: true on a push to main, or when the `changes` job decided any of them false (on a pull
+          # request; elsewhere the decisions are empty)
+          skip_ok() {
+            local d
+            [[ "$MAIN_PUSH" == "true" ]] && { echo true; return; }
+            for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done
+            echo false
+          }
+          not_pr_skip() { local d; for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done; echo false; }
           require "Quick Checks" "${{ needs.quick-checks.result }}"
-          require "Test (other modules)" "${{ needs.test.result }}"
-          require "Code Coverage" "${{ needs.coverage.result }}"
-          require "Integration Tests" "${{ needs.integration-tests.result }}"
-          require "Test (Windows)" "${{ needs.test-windows.result }}" "$MAIN_PUSH"
-          require "ScalaDoc" "${{ needs.scaladoc.result }}" "$MAIN_PUSH"
-          require "Kotlin, Java and framework consumers" "${{ needs.consumers.result }}" "$MAIN_PUSH"
-          require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$MAIN_PUSH"
-          require "Performance tests" "${{ needs.performance-tests.result }}" "$perf_skip"
+          require "Test (other modules)" "${{ needs.test.result }}" "$(not_pr_skip "$CODE")"
+          require "Code Coverage" "${{ needs.coverage.result }}" "$(not_pr_skip "$CODE")"
+          require "Integration Tests" "${{ needs.integration-tests.result }}" "$(not_pr_skip "$INTEGRATION")"
+          require "Test (Windows)" "${{ needs.test-windows.result }}" "$(skip_ok "$WINDOWS")"
+          scaladoc_skip=false
+          if [[ "$MAIN_PUSH" == "true" || ( "$CODE" == "false" && "$DOCS" == "false" ) ]]; then scaladoc_skip=true; fi
+          require "ScalaDoc" "${{ needs.scaladoc.result }}" "$scaladoc_skip"
+          require "Kotlin, Java and framework consumers" "${{ needs.consumers.result }}" "$(skip_ok "$CONSUMERS")"
+          require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$(skip_ok "$CONSUMERS")"
+          require "Performance tests" "${{ needs.performance-tests.result }}" "$(skip_ok "$PERFORMANCE")"
+          # Docs tests runs only on a pull request that changes docs and no code; anywhere else skipped is the pass.
+          if [[ "${{ needs.docs-tests.result }}" != "success" && "${{ needs.docs-tests.result }}" != "skipped" ]]; then
+            echo "::error::Docs tests: ${{ needs.docs-tests.result }}"
+            failed=1
+          fi
+          if [[ "$DOCS" == "true" && "$CODE" == "false" && "${{ needs.docs-tests.result }}" != "success" ]]; then
+            echo "::error::The change touches docs/ only, but Docs tests did not run and pass"
+            failed=1
+          fi
           if [[ "${{ needs.changes.result }}" != "success" && "${{ needs.changes.result }}" != "skipped" ]]; then
             echo "::error::Deciding what the change needs failed"
             failed=1

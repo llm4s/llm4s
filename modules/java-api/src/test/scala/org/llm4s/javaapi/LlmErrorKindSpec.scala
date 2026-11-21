@@ -22,6 +22,7 @@ import scala.util.Using
  * `LlmErrorKinds.byClass` - a class added to core without a kind would otherwise read as `OTHER` without anyone
  * deciding so.
  */
+@org.llm4s.tags.DocsSpec
 class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
   import LlmErrorKindSpec.SpeechLikeError
 

@@ -126,6 +126,28 @@ addCommandAlias(
   performanceTestProjects.map(p => s"$p/testOnly -- -n $PerformanceTestTag").mkString(";", ";", "")
 )
 
+// ---- Docs tier ----
+// Suites annotated `@org.llm4s.tags.DocsSpec` (core's src/test/java) read docs/: a guide's code blocks, links or tables
+// tested against the code. A pull request that changes docs and no code skips CI's test jobs and runs only these, with
+// `sbt testDocs`, in the modules that have them. scripts/check-docs-tests.sh (Quick Checks) fails when a suite reads
+// docs/ without the tag, or a module with tagged suites is missing here. `sbt test` runs them as before.
+lazy val DocsSpecTag = "org.llm4s.tags.DocsSpec"
+lazy val docsTestProjects = Seq(
+  "capabilities",
+  "core",
+  "examplesHttp",
+  "javaApi",
+  "javaRag",
+  "llm4sPekko",
+  "observabilityMicrometer",
+  "reactor",
+  "samples",
+  "schemaDerivation",
+  "schemaIron",
+  "springBootStarter"
+)
+addCommandAlias("testDocs", docsTestProjects.map(p => s"$p/testOnly -- -n $DocsSpecTag").mkString(";", ";", ""))
+
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
 // `it/itTierCheck` fails the build if one declares none. Each alias selects a tier by tag, so a
@@ -215,6 +237,14 @@ lazy val commonSettings = Seq(
   // coverage run - leaves them out (#1932). Scoped to `test`, as `it`'s tier filter is, so that `testOnly` of a named
   // suite still runs all of it, and so that `testPerformance` can select the tag with `testOnly -- -n`.
   Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", PerformanceTestTag),
+  // The DocsSpec tag annotation (see `docsTestProjects`) is compiled into the tests of every module that uses it, so
+  // tagging a suite needs no dependency on core's tests. Core has it in its own test sources.
+  Test / unmanagedSources ++= {
+    val id = thisProject.value.id
+    if (docsTestProjects.contains(id) && id != "core")
+      Seq((LocalRootProject / baseDirectory).value / "modules/core/src/test/java/org/llm4s/tags/DocsSpec.java")
+    else Nil
+  },
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second

@@ -20,6 +20,7 @@ import java.time.Instant
  * whitespace), so a guide that teaches something that no longer compiles fails here. Its `json` block must be the
  * schema that is derived. Change the guide and this spec together.
  */
+@org.llm4s.tags.DocsSpec
 class DerivedSchemasGuideSpec extends AnyFlatSpec with Matchers {
 
   // ---- A first call

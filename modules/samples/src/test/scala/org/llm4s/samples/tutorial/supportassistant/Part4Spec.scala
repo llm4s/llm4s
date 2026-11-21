@@ -13,6 +13,7 @@ import org.scalatest.matchers.should.Matchers
  * cited answer and help-centre tool, run against a scripted client and the stand-in embedding model; its page,
  * compared with the code word for word; and exercise 4, the solution and yours.
  */
+@org.llm4s.tags.DocsSpec
 class Part4Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   import Part4HelpCentre.*
 

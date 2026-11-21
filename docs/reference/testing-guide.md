@@ -375,8 +375,16 @@ which runs the tests of the modules no leg measures (each module's tests run in 
 merge needs, waits for all of them. Coverage floors are enforced per module in the coverage legs; see
 [Test Coverage](test-coverage#what-ci-runs).
 
-Not every event runs every job. A draft pull request runs none (mark it ready for review to start CI), and
-`Performance tests` runs on a pull request only when it changes core, agent or the build (`scripts/ci-changes.sh`).
+Not every event runs every job. A draft pull request runs none (mark it ready for review to start CI). On a pull
+request the `Changes` job (`scripts/ci-changes.sh`, which lists the paths behind each decision) skips what the change
+cannot affect: the coverage legs and `Test (other modules)` need a change to code (anything but docs/, the top-level
+markdown, other workflows and scripts/), `Test (Windows)` a change to what `PlatformTests` runs, `Integration Tests`
+a change to modules/it or a module its `@Docker` suites reach, the consumer and Spring jobs a change to the Java,
+Kotlin, Spring or Quarkus modules or what they build on, and `Performance tests` a change to core, agent or media. A
+change to a build file (build.sbt, project/, ci.yml, ...) runs everything. A docs-only change runs Quick Checks,
+`ScalaDoc` and `Docs tests`: the suites that read docs/, which carry the class annotation `@org.llm4s.tags.DocsSpec`
+and run with `sbt testDocs`. A suite that reads docs/ must carry it: `scripts/check-docs-tests.sh` (Quick Checks) fails
+otherwise, and a module with tagged suites joins `docsTestProjects` in build.sbt.
 A push to main runs what main's own results need - Quick Checks, the coverage legs (Codecov compares pull requests
 with main), the other modules' tests and the integration tiers - and leaves `Test (Windows)`, `Performance tests`,
 `ScalaDoc` and the consumer and Spring jobs, which each pull request already ran, to a nightly run of the whole
