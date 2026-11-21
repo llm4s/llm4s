@@ -92,6 +92,6 @@ class CompletionOptionsTest {
         assertEquals(0.5, sentOptions.presencePenalty())
         assertEquals(-0.5, sentOptions.frequencyPenalty())
         assertEquals("high", (sentOptions.reasoning().get() as ReasoningEffort).name())
-        assertEquals(Option.apply<Any>(Thinking.budget(4096).toOption<Thinking>().get()), sentOptions.thinking())
+        assertEquals<Thinking>(Thinking.budget(4096).toOption().get(), sentOptions.thinking().get())
     }
 }
