@@ -458,3 +458,69 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     }
     stored shouldBe Vector(broken)
   }
+
+  // RFC 0009 (#2613): how each reply ended reaches an agent caller on the call's ModelCallCompleted
+  "ModelCallCompleted's finish reason" should "be its completion's, live and as stored" in {
+    def cut    = Scripted(Right(answer("cut sh").withFinishReason(FinishReason.Length)))
+    val (_, c) = collect(agentWith(cut), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe
+      Vector(Some(FinishReason.Length))
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val agent   = Agent.builder("assistant", cut).withRuntime(runtime).build().fold(e => fail(e.message), identity)
+    // a cut answer still ends the run Completed (RFC 0009, open question 6)
+    agent.run(ThreadId("cut"), "go").map(_.answer) shouldBe Right(Some("cut sh"))
+    val stored = replayed(runtime, store, ThreadId("cut")).collect {
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        upickle.default.read[ModelCallCompleted](ujson.read(payload.render())).finishReason
+    }
+    stored shouldBe Vector(Some(FinishReason.Length))
+  }
+
+  it should "be each call's own: ToolCalls for the tool call, then the answer's" in {
+    val client = Scripted(Right(toolCallCompletion.withFinishReason(FinishReason.ToolCalls)), Right(answer("done")))
+    val (_, c) = collect(agentWith(client, echoTool), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe
+      Vector(Some(FinishReason.ToolCalls), Some(FinishReason.Stop))
+  }
+
+  it should "be the streamed completion's when the agent streams" in {
+    val streamed = new LLMClient:
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        Left(NetworkError("complete is not called when the agent streams", None, "test"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] =
+        onChunk(StreamedChunk(id = "s", content = Some("cut"), finishReason = Some(FinishReason.Length)))
+        Right(answer("cut").withFinishReason(FinishReason.Length))
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+    val (result, c) = collect(agentWith(streamed).withStreaming(), "go")
+    result.map(_.answer) shouldBe Right(Some("cut"))
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe
+      Vector(Some(FinishReason.Length))
+  }
+
+  it should "be a hook's accounted call's, and none for usage recorded without a call" in {
+    val judge = Scripted(Right(answer("ok").withFinishReason(FinishReason.Other("SAFETY"))))
+    val judging = new AgentMiddleware:
+      val id = MiddlewareId("judge")
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
+    val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.finishReason) } shouldBe
+      Vector(
+        ("embedder", 0, None),
+        ("test-model", 0, Some(FinishReason.Other("SAFETY"))),
+        ("test-model", 1, Some(FinishReason.Stop))
+      )
+  }
+
+  it should "be none, without failing the call, when a custom client leaves it null" in {
+    val (result, c) = collect(agentWith(Scripted(Right(answer("done").withFinishReason(null)))), "go")
+    result.map(_.answer) shouldBe Right(Some("done"))
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.finishReason } shouldBe Vector(None)
+  }

@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  FinishReason,
   Message,
   RequestAdjustment,
   ResponseFormat,
@@ -58,13 +59,24 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
 
   /** Records usage that arrived without a client call, as one request to `model`. */
   def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit =
-    record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage, provider = None, adjustments = Nil)
+    record(
+      model,
+      Some(usage),
+      estimatedCost,
+      attempt = 0,
+      toolCalls = 0,
+      usage,
+      provider = None,
+      adjustments = Nil,
+      finishReason = None
+    )
 
   /**
    * Records a completed model call of `request`, sent with `definitions` (its tool and response-format schemas, as
    * [[ModelContext.definitions]] renders them): attempt `attempt` of the agent's model step, or 0 for a hook's own
    * call. A completion without usage is charged an estimate (#2084). `provider` is the called provider's id, when known.
-   * The event carries the completion's adjustments (RFC 0008), so an agent caller sees what each call did not send.
+   * The event carries the completion's adjustments (RFC 0008), so an agent caller sees what each call did not send,
+   * and its finish reason (RFC 0009), so it sees how each reply ended.
    */
   private[agent] def recordCall(
     completion: Completion,
@@ -81,7 +93,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
       completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions)),
       provider,
-      ModelContext.nonNull(completion.adjustments).toList
+      ModelContext.nonNull(completion.adjustments).toList,
+      Option(completion.finishReason)
     )
 
   /**
@@ -111,7 +124,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     toolCalls: Int,
     charged: TokenUsage,
     provider: Option[ProviderId],
-    adjustments: List[RequestAdjustment]
+    adjustments: List[RequestAdjustment],
+    finishReason: Option[FinishReason]
   ): Unit =
     run.usage.add(model, charged, cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
@@ -126,7 +140,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
         usage.map(events.CallUsage.fromTokenUsage),
         cost,
         provider,
-        adjustments
+        adjustments,
+        finishReason
       )
     )
 

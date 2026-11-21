@@ -6,6 +6,7 @@ import upickle.default._
 
 import java.nio.file.{ Files, LinkOption, Paths }
 import java.nio.file.attribute.BasicFileAttributes
+import java.util.Locale
 import scala.annotation.tailrec
 import scala.util.Try
 
@@ -101,7 +102,8 @@ object FileInfoTool {
       if (config.resolve(p).isEmpty) {
         Left(s"Access denied: path '$pathStr' is not allowed")
       } else {
-        val name   = p.getFileName.toString
+        // The filesystem root "/" or a drive such as C:\ has no file name: name it by its path (#2670)
+        val name   = Option(p.getFileName).fold(p.toString)(_.toString)
         val exists = Files.exists(p)
 
         if (!exists) {
@@ -168,7 +170,8 @@ object FileInfoTool {
     @tailrec
     def calculate(currentSize: Double, remainingUnits: Seq[String]): String =
       if (currentSize < 1024 || remainingUnits.tail.isEmpty) {
-        f"$currentSize%.1f ${remainingUnits.head}"
+        // Locale.ROOT: the decimal separator is '.' whatever the JVM's default locale (#2669)
+        String.format(Locale.ROOT, "%.1f %s", Double.box(currentSize), remainingUnits.head)
       } else {
         calculate(currentSize / 1024, remainingUnits.tail)
       }

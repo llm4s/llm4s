@@ -43,7 +43,7 @@ object PositionalPatternsGainFields {
   val arity: Map[String, (Int, Int)] = Map(
     "org/llm4s/error/ServiceError"                                  -> (4  -> 5),
     "org/llm4s/agent/AgentStatus.Suspended"                         -> (4  -> 5),
-    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 8),
+    "org/llm4s/agent/events/ModelCallCompleted"                     -> (6  -> 9),
     "org/llm4s/agent/events/ToolExecuted"                           -> (5  -> 6),
     "org/llm4s/agent/graph/Checkpoint"                              -> (10 -> 11),
     "org/llm4s/agent/graph/Commit"                                  -> (6  -> 8),

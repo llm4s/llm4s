@@ -69,6 +69,10 @@ client.complete(conversation, options).map { c =>
   stream traces the `stop_reason` of `message_delta`, where it traced a made-up `stop`; OpenAI's fake
   streaming (o1) ends with the reply's own reason, not `stop`; Ollama reads `done_reason`, where it guessed `stop` or
   `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
+- An agent's `AgentEvents.ModelCallCompleted` gains `finishReason: Option[FinishReason]` (default `None`), after
+  `adjustments`, filled from each call's `Completion` (PR 6). Construction is unchanged; a positional pattern needs a
+  ninth binder, `case ModelCallCompleted(a, m, n, t, u, c, p, adj, _)`, or match on the type and read the fields. An
+  event stored before reads with `None`.
 
 ## Every provider's content-filter stop is an error (#2677)
 

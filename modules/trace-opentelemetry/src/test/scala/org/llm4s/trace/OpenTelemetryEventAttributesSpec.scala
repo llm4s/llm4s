@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Completion,
   EmbeddingUsage,
+  FinishReason,
   TokenUsage,
   ToolCall,
   ToolMessage,
@@ -348,6 +349,19 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
       )
       val event = TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj("payload" -> payload), at)
       long(mapped(event)._2, "gen_ai.usage.output_tokens") shouldBe 7L
+    }
+
+    "carry the call's finish reason by name (RFC 0009)" in {
+      def reasons(finishReason: Option[FinishReason]): Option[Seq[String]] =
+        val payload = ujson.Obj("agent" -> "a", "model" -> "gpt-4o")
+        finishReason.foreach(r => payload("finishReason") = upickle.default.writeJs(r))
+        val event = TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj("payload" -> payload), at)
+        Option(mapped(event)._2.get(AttributeKey.stringArrayKey("gen_ai.response.finish_reasons"))).map(_.asScala.toSeq)
+      reasons(Some(FinishReason.Length)) shouldBe Some(Seq("length"))
+      reasons(Some(FinishReason.ToolCalls)) shouldBe Some(Seq("tool_calls"))
+      reasons(Some(FinishReason.Other("SAFETY"))) shouldBe Some(Seq("SAFETY"))
+      reasons(Some(FinishReason.Other(""))) shouldBe None
+      reasons(None) shouldBe None
     }
   }
 

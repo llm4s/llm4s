@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
   [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
 - `StreamedChunk.finishReason` is an `Option[FinishReason]`, no longer an `Option[String]`; a positional
-  pattern on `Completion` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
+  pattern on `Completion` or `ModelCallCompleted` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
   [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
 - A content-filter stop (`content_filter`, Anthropic's `refusal`, Bedrock's guardrail reasons) is a
   `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2);
@@ -45,8 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
-  traces too, mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider
-  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1-2) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+  traces too, and on each agent call's `ModelCallCompleted` (an event stored before reads with none), mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider
+  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1, 2 and 6) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
   Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
   and every client's content-filter stop is a `ContentFilteredError` carrying the billed `usage`, which metrics record
@@ -67,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
   path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).
+- **Fixed** `file_info` describes the filesystem root instead of throwing, and its `sizeHuman` is `1.5 KB` under every
+  default locale [#2670](https://github.com/llm4s/llm4s/issues/2670), [#2669](https://github.com/llm4s/llm4s/issues/2669).
 
 ### Build & tooling
 
