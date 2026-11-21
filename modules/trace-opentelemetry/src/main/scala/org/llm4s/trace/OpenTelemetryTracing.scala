@@ -12,7 +12,15 @@ import io.opentelemetry.sdk.trace.{ IdGenerator, SdkTracerProvider, SpanProcesso
 import io.opentelemetry.sdk.trace.`export`.{ BatchSpanProcessor, SimpleSpanProcessor, SpanExporter }
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.config.OpenTelemetryConfig
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Message, TokenUsage, ToolMessage }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  Completion,
+  CompletionOptions,
+  FinishReason,
+  Message,
+  TokenUsage,
+  ToolMessage
+}
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 
@@ -336,6 +344,13 @@ class OpenTelemetryTracing private[trace] (
           .flatMap(_.get("provider"))
           .flatMap(_.strOpt)
           .foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p)))
+        // the call's finish reason (RFC 0009), by name as on a client's chat span; one not read, Other(""), is left out
+        payload
+          .flatMap(_.get("finishReason"))
+          .flatMap(r => Try(upickle.default.read[FinishReason](r)).toOption)
+          .map(_.name)
+          .filter(_.nonEmpty)
+          .foreach(r => builder.put(TraceAttributes.FinishReasons, List(r).asJava))
         (s"${TraceAttributes.Chat} $model", builder.build())
 
       case e: TraceEvent.CustomEvent =>

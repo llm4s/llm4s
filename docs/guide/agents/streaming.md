@@ -64,7 +64,7 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments`, `finishReason` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
@@ -85,6 +85,24 @@ agent
         case RequestAdjustment.Dropped(option, reason) => println(s"${m.model} did not send $option: $reason")
         case _                                         => ()
       }
+    case _ => ()
+  }
+  .flatMap(_.await())
+```
+
+`finishReason` is the call's `Completion.finishReason` ([RFC 0009](../../rfcs/0009-model-call-contract)): why the
+model's turn ended, `Stop`, `ToolCalls`, `Length` or `Other(raw)`. `Length` means the reply was cut at an output limit;
+the run still ends `Completed` with that answer, so check the event when a cut answer matters. It is `None` for usage
+a hook records without a call (`ModelContext.recordUsage`) and in an event stored before the field existed. Tracing
+reports it on the call's span as `gen_ai.response.finish_reasons`.
+
+```scala
+import org.llm4s.llmconnect.model.FinishReason
+
+agent
+  .stream(ThreadId("t1"), "Summarise the report") {
+    case AgentEvents.ModelCallCompleted(m) if m.finishReason.contains(FinishReason.Length) =>
+      println(s"${m.model} stopped at its output limit: raise maxTokens")
     case _ => ()
   }
   .flatMap(_.await())
