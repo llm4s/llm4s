@@ -389,6 +389,8 @@ A push to main runs what main's own results need - Quick Checks, the coverage le
 with main), the other modules' tests and the integration tiers - and leaves `Test (Windows)`, `Performance tests`,
 `ScalaDoc` and the consumer and Spring jobs, which each pull request already ran, to a nightly run of the whole
 workflow on main. To run every job on a branch, dispatch it: `gh workflow run ci.yml --ref <branch> -f tier=none`.
+The agent coverage leg and `Test (other modules)` restore the target directories the nightly run saved
+(`compiled-v1-<kind>` caches; compiled-cache.yml keeps one per kind), so they recompile only what changed since.
 
 ---
 
