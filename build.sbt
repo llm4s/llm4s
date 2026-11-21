@@ -116,9 +116,37 @@ addCommandAlias(
 // ---- Performance tier ----
 // Tests tagged `org.llm4s.testutil.PerformanceTest` check that an operation's cost grows linearly with its input
 // (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
-// every module. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
-lazy val PerformanceTestTag = "org.llm4s.tags.PerformanceTest"
-addCommandAlias("testPerformance", s"testOnly -- -n $PerformanceTestTag")
+// the modules that have them: a `testOnly` across the whole build compiled every module's tests to run tests in two.
+// scripts/check-performance-tests.sh (Quick Checks) fails when a test elsewhere uses the tag, so a module whose tests
+// start using it is added here. CI runs it in the ubuntu-only `Performance tests` job (pull requests that change core or agent, and nightly).
+lazy val PerformanceTestTag      = "org.llm4s.tags.PerformanceTest"
+lazy val performanceTestProjects = Seq("core", "agent")
+addCommandAlias(
+  "testPerformance",
+  performanceTestProjects.map(p => s"$p/testOnly -- -n $PerformanceTestTag").mkString(";", ";", "")
+)
+
+// ---- Docs tier ----
+// Suites annotated `@org.llm4s.tags.DocsSpec` (core's src/test/java) read docs/: a guide's code blocks, links or tables
+// tested against the code. A pull request that changes docs and no code skips CI's test jobs and runs only these, with
+// `sbt testDocs`, in the modules that have them. scripts/check-docs-tests.sh (Quick Checks) fails when a suite reads
+// docs/ without the tag, or a module with tagged suites is missing here. `sbt test` runs them as before.
+lazy val DocsSpecTag = "org.llm4s.tags.DocsSpec"
+lazy val docsTestProjects = Seq(
+  "capabilities",
+  "core",
+  "examplesHttp",
+  "javaApi",
+  "javaRag",
+  "llm4sPekko",
+  "observabilityMicrometer",
+  "reactor",
+  "samples",
+  "schemaDerivation",
+  "schemaIron",
+  "springBootStarter"
+)
+addCommandAlias("testDocs", docsTestProjects.map(p => s"$p/testOnly -- -n $DocsSpecTag").mkString(";", ";", ""))
 
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
@@ -184,9 +212,20 @@ lazy val commonSettings = Seq(
   // No `-Wconf` for `doc`: Scala 3's Scaladoc skips `-Wconf` and `-Werror` ("Skipping unused scalacOptions"), so
   // they can neither silence nor fail a Scaladoc warning. CI's ScalaDoc job fails on a warning in an llm4s source
   // with scripts/check-scaladoc-warnings.sh instead (#1967).
-  semanticdbEnabled                      := true,
-  Test / scalafix / unmanagedSources     := Seq.empty,
-  Compile / packageDoc / publishArtifact := !isSnapshot.value,
+  semanticdbEnabled                  := true,
+  Test / scalafix / unmanagedSources := Seq.empty,
+  // The -javadoc.jar is a pointer to the site's unified Scaladoc (https://llm4s.org/scaladoc/), not this module's own
+  // Scaladoc, which repeated ~6 MB of Scaladoc's static assets in every jar: the 0.6.0 javadoc jars were 165 MB of a
+  // 193 MB upload, over Sonatype's monthly release-size limit. Maven Central requires the jar, not its content. Setting
+  // the mappings means packaging (and so `publish` and `ci-release`) never runs `Compile / doc`; `sbt doc` and
+  // `sbt docs/doc` still build the Scaladoc. `javadocJarCheck` fails CI when a published module's javadoc jar is
+  // missing or is not the pointer. See project/JavadocPointer.scala.
+  Compile / packageDoc / publishArtifact := true,
+  Compile / packageDoc / mappings := JavadocPointer.mappings(
+    target.value / "javadoc-pointer",
+    if (crossPaths.value) s"${moduleName.value}_${scalaBinaryVersion.value}" else moduleName.value,
+    version.value
+  ),
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
   Test / doc / sources                := Seq.empty,
@@ -198,6 +237,14 @@ lazy val commonSettings = Seq(
   // coverage run - leaves them out (#1932). Scoped to `test`, as `it`'s tier filter is, so that `testOnly` of a named
   // suite still runs all of it, and so that `testPerformance` can select the tag with `testOnly -- -n`.
   Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", PerformanceTestTag),
+  // The DocsSpec tag annotation (see `docsTestProjects`) is compiled into the tests of every module that uses it, so
+  // tagging a suite needs no dependency on core's tests. Core has it in its own test sources.
+  Test / unmanagedSources ++= {
+    val id = thisProject.value.id
+    if (docsTestProjects.contains(id) && id != "core")
+      Seq((LocalRootProject / baseDirectory).value / "modules/core/src/test/java/org/llm4s/tags/DocsSpec.java")
+    else Nil
+  },
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second
@@ -240,6 +287,12 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
+// The `docs` project's `docs/doc` is the site's one Scaladoc tree, from the sources it borrows (see `docs` below). A
+// published module missing from that list vanishes from the site silently; this fails instead. CI's ScalaDoc job used to
+// catch it by running `doc` on every module besides `docs/doc`.
+lazy val docsSourcesCheck = taskKey[Unit](
+  "Fail the build if a published module's sources are not in the docs project's aggregate Scaladoc"
+)
 // What a release must put on Maven Central, one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line,
 // for scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`. `gradle` lines are the artifacts
 // release.yml publishes from a Gradle build (llm4s-kotlin-api), see PublishedArtifacts.Gradle.
@@ -254,6 +307,10 @@ lazy val listPublishedArtifacts = taskKey[Unit](
 // committed files differ.
 lazy val generateCompatibilityMatrix = taskKey[Unit](
   "Write docs/_data/capabilities.yml (from the discovered provider descriptors) and docs/_data/tested-versions.yml (from the build)"
+)
+// Every published module's -javadoc.jar is the pointer to https://llm4s.org/scaladoc/. See project/JavadocPointer.scala.
+lazy val javadocJarCheck = taskKey[Unit](
+  "Fail the build if a published module ships no -javadoc.jar, or one that is not the small pointer to the site's Scaladoc"
 )
 lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
@@ -387,6 +444,7 @@ lazy val llm4s = (project in file("."))
     llm4sOx,
     javaApi,
     javaRag,
+    reactor,
     springBootStarter,
     springBootStarterBoot4,
     springAi,
@@ -447,8 +505,31 @@ lazy val llm4s = (project in file("."))
       val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val described =
         Def.task((name.value, (publish / skip).value, description.value)).all(ScopeFilter(inAnyProject)).value
+      // `ci-release` publishes the root's aggregate only: a published module outside it is listed in the BOM but never
+      // reaches Central, as llm4s-reactor did in 0.6.0.
+      val aggregated =
+        Def.task(name.value).all(ScopeFilter(inAggregates(LocalRootProject, includeRoot = false))).value.toSet
+      val unaggregated = projects.collect { case (n, false) if !aggregated(n) => n }
+      if (unaggregated.nonEmpty)
+        sys.error(s"Published but not in the root aggregate, so never released: ${unaggregated.sorted.mkString(", ")}")
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
       PomDescriptions.check(described, streams.value.log)
+    },
+    docsSourcesCheck / aggregate := false,
+    docsSourcesCheck := {
+      val inDocs = (docs / Compile / sources).value.toSet
+      val modules = Def
+        .task((name.value, (publish / skip).value, (Compile / sources).value))
+        .all(ScopeFilter(inAnyProject -- inProjects(docs)))
+        .value
+      val published = modules.collect { case (n, false, srcs) if srcs.nonEmpty => (n, srcs) }
+      val missing   = published.collect { case (n, srcs) if srcs.exists(f => !inDocs(f)) => n }.sorted
+      if (missing.nonEmpty)
+        throw new MessageOnlyException(
+          s"Published, but not (or not wholly) in the docs project's Scaladoc: ${missing.mkString(", ")}. Add each to " +
+            "the `docs` project's dependsOn and Compile / sources in build.sbt, or its API is missing from the site."
+        )
+      streams.value.log.info(s"All ${published.size} published modules with sources are in the aggregate Scaladoc")
     },
     listPublishedArtifacts / aggregate := false,
     listPublishedArtifacts := {
@@ -611,6 +692,39 @@ lazy val llm4s = (project in file("."))
       CompatibilityMatrix.write((ThisBuild / baseDirectory).value, streams.value.log)
       (samples / Compile / runMain).toTask(" org.llm4s.samples.docs.CapabilityMatrixMain").value
     },
+    // The bundle `sonaRelease` (the last step of `sbt ci-release`) uploads: the staging directory `publishSigned` wrote,
+    // without the checksums of the `.asc` signatures, checked file by file and capped at Sonatype's monthly limit
+    // (project/CentralBundle.scala). Replaces sbt's own `sonaBundle`, which zipped the directory as it was.
+    ThisBuild / sonaBundle := CentralBundle.make(
+      (ThisBuild / Keys.stagingDirectory).value,
+      (ThisBuild / baseDirectory).value / "target" / "sona-bundle" / "bundle.zip",
+      streams.value.log
+    ),
+    // Every published module that ships a jar ships a javadoc jar, and it is the small pointer to the site's Scaladoc,
+    // not the module's own Scaladoc (project/JavadocPointer.scala).
+    javadocJarCheck / aggregate := false,
+    javadocJarCheck := Def.taskDyn {
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      Def.task {
+        val jars = Def
+          .task(
+            (
+              if (crossPaths.value) s"${moduleName.value}_${scalaBinaryVersion.value}" else moduleName.value,
+              (Compile / packageDoc / publishArtifact).value,
+              (Compile / packageDoc).value
+            )
+          )
+          .all(ScopeFilter(inProjects(refs: _*)))
+          .value
+        JavadocPointer.check(jars, streams.value.log)
+      }
+    }.value,
     bomCheck / aggregate := false,
     bomCheck := {
       val projects = Def
@@ -2056,8 +2170,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     name := "llm4s-config-policy",
     commonSettings,
     publish / skip := true,
-    // Not measured: unpublished CLI tooling, verified end-to-end by the
-    // config-policy-check CI job rather than by unit-test coverage.
+    // Not measured: unpublished CLI tooling, verified end-to-end by ConfigPolicyCiSmokeSpec (the CLIs against the
+    // committed smoke config and each preset) rather than by unit-test coverage.
     coverageDisabled,
     // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
     // is forked. Keep the forked working directory at the repo root so the

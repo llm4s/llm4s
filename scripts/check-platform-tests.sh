@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fails when platform-sensitive code would not be tested on Windows.
 #
-# CI's `Test (windows-latest, 21)` job runs `sbt testPlatform`, not `sbt test`: Windows runs the same JVM as Linux,
+# CI's `Test (Windows)` job runs `sbt testPlatform`, not `sbt test`: Windows runs the same JVM as Linux,
 # so it runs only the tests of what differs between platforms (project/PlatformTests.scala) - every suite of the
 # modules in `PlatformTests.wholeModules`, and the suites `PlatformTests.suites` names in other modules. Leaving the
 # rest to ubuntu is only safe while every piece of platform-sensitive code is in one of those. This checks, against
@@ -24,7 +24,7 @@
 #   --model     the build model (default target/build-model.json; write it with `sbt "dumpBuildModel FILE"`)
 #   --sources   the platform-sensitive sources list (default scripts/platform-sensitive-sources.txt)
 #   --root      the repository whose modules/ are scanned (default this repository)
-#   --workflow  the workflow holding the `test` job (default .github/workflows/ci.yml)
+#   --workflow  the workflow holding the Windows test job (default .github/workflows/ci.yml)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -156,10 +156,15 @@ test_files.each do |f|
 end
 
 wf = YAML.load_file(workflow_file)
-steps = Array(((wf['jobs'] || {})['test'] || {})['steps'])
-unless steps.any? { |s| s['run'].to_s.include?('testPlatform') && s['run'].to_s.match?(/Windows/i) }
-  errors << "#{File.basename(workflow_file)}: no step of the `test` job runs `sbt testPlatform` on Windows"
+# A job on a Windows runner with a step that runs testPlatform, or a step that picks testPlatform for Windows itself.
+windows_runs = (wf['jobs'] || {}).values.any? do |job|
+  on_windows = job['runs-on'].to_s.match?(/windows/i)
+  Array(job['steps']).any? do |s|
+    run = s['run'].to_s
+    run.include?('testPlatform') && (on_windows || run.match?(/Windows/i))
+  end
 end
+errors << "#{File.basename(workflow_file)}: no job runs `sbt testPlatform` on Windows" unless windows_runs
 
 if errors.empty?
   puts "Windows runs #{whole.size} modules whole and #{suites.values.sum(&:size)} named suites in " \

@@ -29,6 +29,7 @@ import scala.annotation.tailrec
  * modules' own tests, and the MUnit, munit-cats-effect, weaver and ZIO Test suites beside this spec: the last test reads the page and fails if a block is not found in any of them, so the page
  * cannot show code that no longer compiles. Change the page and these specs together.
  */
+@org.llm4s.tags.DocsSpec
 class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   import TestingWithTestkitGuideSpec.*
 

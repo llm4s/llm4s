@@ -30,6 +30,7 @@ import java.nio.file.{ Files, Path, Paths }
  * the checks are on what llm4s sends and returns, never on what a model says. The two configuration snippets need a
  * provider, so they are compiled (as the bodies of `def`s) but not run.
  */
+@org.llm4s.tags.DocsSpec
 class ScalaClientMigrationGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---------------------------------------------------------------------------------------------------------------
