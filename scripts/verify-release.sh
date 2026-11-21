@@ -21,6 +21,10 @@
 # `-cyclonedx.json` SBOM, which Sonatype's 1,000-files-a-month limit has no room for (project/CentralBundle.scala; the
 # SBOMs are on the GitHub Release). Only the POM's and the jar's extras are probed, not every file's.
 #
+# Those upload rules (the pointer javadoc jar, no checksum of a signature, no SBOM on Central; #2667) apply from 0.6.1.
+# 0.6.0 and earlier were uploaded before them, with each module's full Scaladoc in its -javadoc.jar and the extras: for
+# those the javadoc jar must only exist, and the extras are not probed.
+#
 # Maven Central's index can lag a successful publish by a while. A 404 straight after the release job
 # finishes is not proof of a miss: re-run before concluding one.
 #
@@ -68,6 +72,14 @@ fi
 status() { curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$1" || echo 000; }
 
 JAVADOC_MAX_BYTES=51200   # JavadocPointer.MaxBytes
+
+# Was VERSION uploaded under the current rules (0.6.1 and later, a pre-release of 0.6.1 included)?
+IFS=. read -r vmajor vminor vpatch _ <<<"${VERSION%%[-+]*}"
+if [ "$vmajor" -gt 0 ] || [ "$vminor" -gt 6 ] || { [ "$vminor" -eq 6 ] && [ "$vpatch" -ge 1 ]; }; then
+  SLIM_UPLOAD=1
+else
+  SLIM_UPLOAD=0
+fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -110,12 +122,13 @@ while read -r kind id; do
   fi
   # Maven Central requires a javadoc jar. An sbt module's is the pointer to the site's Scaladoc
   # (project/JavadocPointer.scala), so it must be small and say where the API docs are; the Kotlin artifact's is Dokka's.
+  # Up to 0.6.0 an sbt module's held its full Scaladoc, so for those only its presence is checked.
   if { [ "$kind" = artifact ] || [ "$kind" = gradle ]; } && [ -z "$problems" ]; then
     javadoc="$BASE/$id/$VERSION/$id-$VERSION-javadoc.jar"
     dcode="$(status "$javadoc")"
     if [ "$dcode" != 200 ]; then
       problems="javadoc jar HTTP $dcode"
-    elif [ "$kind" = artifact ]; then
+    elif [ "$kind" = artifact ] && [ "$SLIM_UPLOAD" = 1 ]; then
       curl -s --max-time 60 "$javadoc" > "$TMP/javadoc.jar"
       size="$(wc -c < "$TMP/javadoc.jar" | tr -d ' ')"
       if [ "$size" -gt "$JAVADOC_MAX_BYTES" ]; then
@@ -136,10 +149,12 @@ while read -r kind id; do
         [ "$ccode" = 200 ] || problems="${problems:+$problems; }$id-$VERSION$f$c HTTP $ccode"
       done
     done
-    for extra in ".pom.asc.md5" "-cyclonedx.json"; do
-      [ "$kind" = artifact ] && [ "$extra" = ".pom.asc.md5" ] && extra=".jar.asc.md5"
-      [ "$(status "$stem$extra")" = 404 ] || problems="${problems:+$problems; }$id-$VERSION$extra was uploaded"
-    done
+    if [ "$SLIM_UPLOAD" = 1 ]; then
+      for extra in ".pom.asc.md5" "-cyclonedx.json"; do
+        [ "$kind" = artifact ] && [ "$extra" = ".pom.asc.md5" ] && extra=".jar.asc.md5"
+        [ "$(status "$stem$extra")" = 404 ] || problems="${problems:+$problems; }$id-$VERSION$extra was uploaded"
+      done
+    fi
   fi
   if [ "$ATTEST" = 1 ] && [ -z "$problems" ]; then
     case "$kind" in artifact | gradle) file="$id-$VERSION.jar" ;; *) file="$id-$VERSION.pom" ;; esac
