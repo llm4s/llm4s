@@ -622,6 +622,25 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
+      # Compiled-output cache pilot: the target directories the nightly run on main saved for this job kind, so a
+      # pull request compiles only what changed since (zinc keys sources by content, not timestamp). Keyed by job kind:
+      # instrumented classes (a coverage leg) must never meet uninstrumented ones. Test reports and coverage
+      # measurements are left out of the entry. compiled-cache.yml keeps one entry per kind.
+      - name: Restore the compiled output
+        id: compiled
+        if: matrix.leg == 'agent'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            **/target
+            !**/target/**/test-reports
+            !**/target/**/scoverage-report
+            !**/target/**/scoverage-data/scoverage.measurements.*
+            !**/target/sboms
+            !**/target/docker
+          key: compiled-v1-coverage-agent-${{ github.run_id }}
+          restore-keys: compiled-v1-coverage-agent-
+
       # `coverage` first: it adds scoverage's runtime to every project's dependencies.
       - name: Resolve the dependencies
         run: scripts/retry-on-transient-network.sh sbt coverage resolveAll
@@ -639,6 +658,20 @@ jobs:
           for m in $MODULES; do args+=("$m/test" "$m/coverageReport"); done
           echo "sbt coverage ${args[*]}"
           sbt coverage "${args[@]}"
+
+      # Saved by the nightly run (and a manual run, to measure the pilot), never by a pull request or a push.
+      - name: Save the compiled output
+        if: matrix.leg == 'agent' && success() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            **/target
+            !**/target/**/test-reports
+            !**/target/**/scoverage-report
+            !**/target/**/scoverage-data/scoverage.measurements.*
+            !**/target/sboms
+            !**/target/docker
+          key: compiled-v1-coverage-agent-${{ github.run_id }}-${{ github.run_attempt }}
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes a file to a flag whose
       # `paths` contain it, so a module uploaded under someone else's flag is worse than not uploaded. Flags are
@@ -1440,6 +1473,24 @@ jobs:
           "$RUNNER_TEMP/mcp-venv/bin/pip" install --quiet -r modules/samples/src/main/python/requirements.txt
           echo "$RUNNER_TEMP/mcp-venv/bin" >> "$GITHUB_PATH"
 
+      # Compiled-output cache pilot: the target directories the nightly run on main saved for this job kind, so a
+      # pull request compiles only what changed since (zinc keys sources by content, not timestamp). Keyed by job kind:
+      # instrumented classes (a coverage leg) must never meet uninstrumented ones. Test reports and coverage
+      # measurements are left out of the entry. compiled-cache.yml keeps one entry per kind.
+      - name: Restore the compiled output
+        id: compiled
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            **/target
+            !**/target/**/test-reports
+            !**/target/**/scoverage-report
+            !**/target/**/scoverage-data/scoverage.measurements.*
+            !**/target/sboms
+            !**/target/docker
+          key: compiled-v1-test-${{ github.run_id }}
+          restore-keys: compiled-v1-test-
+
       - name: Resolve the dependencies
         run: scripts/retry-on-transient-network.sh sbt resolveAll
 
@@ -1451,6 +1502,20 @@ jobs:
           for m in $TEST_MODULES; do args+=("$m/test"); done
           echo "sbt -J-Xmx4g ${args[*]}"
           sbt -J-Xmx4g "${args[@]}"
+
+      # Saved by the nightly run (and a manual run, to measure the pilot), never by a pull request or a push.
+      - name: Save the compiled output
+        if: success() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            **/target
+            !**/target/**/test-reports
+            !**/target/**/scoverage-report
+            !**/target/**/scoverage-data/scoverage.measurements.*
+            !**/target/sboms
+            !**/target/docker
+          key: compiled-v1-test-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload test reports
         if: failure()
