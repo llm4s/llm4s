@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.llmconnect.model.{ RequestAdjustment, TokenUsage }
+import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, TokenUsage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationJson
 import org.slf4j.LoggerFactory
@@ -35,6 +35,26 @@ private given ReadWriter[List[RequestAdjustment]] =
         })
     )
 
+// A finish reason this version cannot read - a case added later (RFC 0009) - reads as None, so the event, and the
+// usage it carries, still reads. Written as FinishReason's own codec writes it.
+private given ReadWriter[Option[FinishReason]] =
+  upickle.default
+    .readwriter[ujson.Value]
+    .bimap[Option[FinishReason]](
+      _.fold(ujson.Null: ujson.Value)(upickle.default.writeJs[FinishReason](_)),
+      {
+        case ujson.Null => None
+        case json =>
+          Try(upickle.default.read[FinishReason](json)).fold(
+            e =>
+              logger.debug(s"Left out a finish reason this version cannot read: ${e.getMessage}")
+              None
+            ,
+            Some(_)
+          )
+      }
+    )
+
 /** A model call's token usage, as plain numbers. */
 final case class CallUsage(promptTokens: Int, completionTokens: Int, totalTokens: Int, thinkingTokens: Option[Int])
     derives ReadWriter:
@@ -54,7 +74,10 @@ object CallUsage:
  * it existed (#2275). `adjustments` are the completion's (`Completion.adjustments`): the options the client did not
  * send as asked (RFC 0008, #2115); llm4s's own clients put no message content in them. Empty for usage recorded
  * without a call, and in an event stored before the field existed. An adjustment this version cannot read, an option
- * or a case added later, is left out rather than failing the event.
+ * or a case added later, is left out rather than failing the event. `finishReason` is the completion's
+ * (`Completion.finishReason`): why the model's turn ended (RFC 0009, #2613), `Length` when the reply was cut at an
+ * output limit. `None` for usage recorded without a call, and in an event stored before the field existed; a reason
+ * this version cannot read, a case added later, is `None` too.
  */
 final case class ModelCallCompleted(
   agent: String,
@@ -64,7 +87,8 @@ final case class ModelCallCompleted(
   usage: Option[CallUsage],
   estimatedCost: Option[Double],
   provider: Option[ProviderId] = None,
-  adjustments: List[RequestAdjustment] = List.empty
+  adjustments: List[RequestAdjustment] = List.empty,
+  finishReason: Option[FinishReason] = None
 ) derives ReadWriter
 
 /** How a tool call ended for the loop. */

@@ -1,6 +1,6 @@
 package org.llm4s.agent.events
 
-import org.llm4s.llmconnect.model.{ RequestAdjustment, RequestOption }
+import org.llm4s.llmconnect.model.{ FinishReason, RequestAdjustment, RequestOption }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -8,7 +8,8 @@ import upickle.default.{ read, write, ReadWriter }
 
 /**
  * A stored `ModelCallCompleted` keeps its provider as a plain string, so events stored before #2275 still read, and
- * reads without `adjustments` when it was stored before RFC 0008 (#2115) added them.
+ * reads without `adjustments` when it was stored before RFC 0008 (#2115) added them, and without `finishReason` when
+ * it was stored before RFC 0009 (#2613) added it.
  */
 class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
 
@@ -119,4 +120,74 @@ class ModelCallCompletedCodecSpec extends AnyFlatSpec with Matchers:
     read.adjustments shouldBe adjustments
     read.usage shouldBe usage
     read.estimatedCost shouldBe Some(0.01)
+  }
+
+  /** The payload as it was stored before it had a finish reason (RFC 0009, #2613). */
+  final private case class StoredWithoutFinishReason(
+    agent: String,
+    model: String,
+    attempts: Int,
+    toolCalls: Int,
+    usage: Option[CallUsage],
+    estimatedCost: Option[Double],
+    provider: Option[String] = None,
+    adjustments: List[RequestAdjustment] = List.empty
+  ) derives ReadWriter
+
+  private def reasons =
+    Seq(
+      FinishReason.Stop,
+      FinishReason.ToolCalls,
+      FinishReason.Length,
+      FinishReason.Other("SAFETY"),
+      FinishReason.Other("")
+    )
+
+  it should "read an event stored before it had a finish reason with none" in {
+    val stored =
+      write(StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, Some(0.01), Some("openai"), adjustments))
+    val event = read[ModelCallCompleted](stored)
+    event.finishReason shouldBe None
+    event.adjustments shouldBe adjustments
+  }
+
+  it should "store an event with no finish reason as it was stored before it existed" in {
+    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, Some(ProviderId("openai")), adjustments)
+    write(event) shouldBe
+      write(StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, None, Some("openai"), adjustments))
+  }
+
+  it should "round-trip every finish reason" in {
+    reasons.foreach { r =>
+      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, None, Nil, Some(r))
+      read[ModelCallCompleted](write(event)) shouldBe event
+    }
+  }
+
+  it should "store a finish reason as FinishReason's own codec writes it" in {
+    reasons.foreach { r =>
+      val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, None, None, Nil, Some(r))
+      ujson.read(write(event))("finishReason") shouldBe upickle.default.writeJs(r)
+    }
+  }
+
+  it should "be read by a reader that predates the finish reason, which ignores it" in {
+    val event = ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, Nil, Some(FinishReason.Length))
+    read[StoredWithoutFinishReason](write(event)) shouldBe
+      StoredWithoutFinishReason("assistant", "gpt-4o", 1, 0, usage, Some(0.01))
+  }
+
+  it should "read a finish reason it cannot read, a case added later, as none and keep the rest" in {
+    val stored = ujson.read(
+      write(
+        ModelCallCompleted("assistant", "gpt-4o", 1, 0, usage, Some(0.01), None, adjustments, Some(FinishReason.Stop))
+      )
+    )
+    stored("finishReason") = ujson.Str("ContentFiltered")
+    val event = read[ModelCallCompleted](stored)
+    event.finishReason shouldBe None
+    event.adjustments shouldBe adjustments
+    event.usage shouldBe usage
+    stored("finishReason") = ujson.Null
+    read[ModelCallCompleted](stored).finishReason shouldBe None
   }
