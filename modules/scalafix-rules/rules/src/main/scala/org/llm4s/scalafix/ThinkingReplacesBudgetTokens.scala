@@ -11,9 +11,11 @@ import scalafix.v1._
  * `options.withThinking(Thinking.Off)`, and `CompletionOptions(reasoning = Some(ReasoningEffort.None), ...)` becomes
  * `CompletionOptions(thinking = Some(Thinking.Off), ...)`; `import org.llm4s.llmconnect.model.Thinking` is added where
  * it is missing. On OpenAI `Thinking.Off` asks for the lowest effort where `None` sent none, as the migration note
- * says. It reports what it cannot rewrite:
+ * says. `Thinking.Off` takes precedence over `reasoning`, where `None` was only a `reasoning` level, so a call whose
+ * chain sets `withReasoning` again afterwards is reported instead. One reset later through a `val` is out of the
+ * rule's sight: the migration note says to check it. It reports what it cannot rewrite:
  *
- *   - any other use of `ReasoningEffort.None`;
+ *   - any other use of `ReasoningEffort.None`, the overridden one above among them;
  *   - `budgetTokens`, `withBudgetTokens` and the `budgetTokens` argument of `CompletionOptions(...)`: their
  *     replacement, `Thinking.budget(n)`, is a `Result`, so the expression changes type;
  *   - a `match` on `ReasoningEffort` with no catch-all case, which needs cases for `Minimal`, `XHigh` and `Max`.
@@ -43,21 +45,38 @@ class ThinkingReplacesBudgetTokens extends SemanticRule("ThinkingReplacesBudgetT
 
   /** A rewrite of `withReasoning(None)` or `CompletionOptions(reasoning = Some(None))`, and the `None` it replaces. */
   private def rewrite(t: Term.Apply)(implicit doc: SemanticDocument): Option[(Tree, Patch)] =
-    Migration.callee(t).flatMap { callee =>
-      val args = t.argClause.values
-      if (callee.startsWith(Options + "#withReasoning("))
-        (t.fun, args) match {
-          case (Term.Select(_, name), List(arg)) if isNone(arg) || isSomeNone(arg) =>
-            Some(arg -> (Patch.replaceTree(name, "withThinking") + Patch.replaceTree(arg, "Thinking.Off")))
-          case _ => None
-        }
-      else if (Migration.constructs(callee, Options) && !args.exists(isNamed(_, "thinking")))
-        args.collectFirst {
-          case a @ Term.Assign(Term.Name("reasoning"), rhs) if isSomeNone(rhs) =>
-            a -> Patch.replaceTree(a, "thinking = Some(Thinking.Off)")
-        }
-      else None
-    }
+    if (laterSetsReasoning(t)) None
+    else
+      Migration.callee(t).flatMap { callee =>
+        val args = t.argClause.values
+        if (callee.startsWith(Options + "#withReasoning("))
+          (t.fun, args) match {
+            case (Term.Select(_, name), List(arg)) if isNone(arg) || isSomeNone(arg) =>
+              Some(arg -> (Patch.replaceTree(name, "withThinking") + Patch.replaceTree(arg, "Thinking.Off")))
+            case _ => None
+          }
+        else if (Migration.constructs(callee, Options) && !args.exists(isNamed(_, "thinking")))
+          args.collectFirst {
+            case a @ Term.Assign(Term.Name("reasoning"), rhs) if isSomeNone(rhs) =>
+              a -> Patch.replaceTree(a, "thinking = Some(Thinking.Off)")
+          }
+        else None
+      }
+
+  /**
+   * Whether a later call in the same chain sets `reasoning` again. `ReasoningEffort.None` was a `reasoning` level, so
+   * a later `withReasoning(High)` replaced it; `Thinking.Off` is a separate field that takes precedence over
+   * `reasoning`, so the rewrite would turn thinking off where the old chain asked for high effort.
+   */
+  private def laterSetsReasoning(t: Term): Boolean = t.parent match {
+    case Some(s @ Term.Select(qual, name)) if qual eq t =>
+      name.value == "withReasoning" || name.value == "withThinking" ||
+      s.parent.exists {
+        case a: Term.Apply if a.fun eq s => laterSetsReasoning(a)
+        case _                           => laterSetsReasoning(s)
+      }
+    case _ => false
+  }
 
   /** A `match` (or partial function) on `ReasoningEffort` with no case for anything it does not name. */
   private def exhaustive(tree: Tree, cases: List[Case])(implicit doc: SemanticDocument): Patch = {

@@ -558,7 +558,10 @@ for the three new levels.
 The `ThinkingReplacesBudgetTokens` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites
 `withReasoning(ReasoningEffort.None)` and `CompletionOptions(reasoning = Some(ReasoningEffort.None))` to
 `Thinking.Off`. It reports, without rewriting, a budget (its replacement is a `Result`), any other use of
-`ReasoningEffort.None`, and a `match` on `ReasoningEffort` with no catch-all. Java and Kotlin sources need a hand edit.
+`ReasoningEffort.None`, and a `match` on `ReasoningEffort` with no catch-all. `Thinking.Off` takes precedence over
+`reasoning`, where `None` was only a `reasoning` level that a later `withReasoning(High)` replaced: the rule reports a
+chain that sets `withReasoning` again instead of rewriting it, but check options that are changed later through a
+`val`. Java and Kotlin sources need a hand edit.
 
 ## Smaller breaks since 0.4.1
 
