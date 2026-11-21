@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
+### Core
+
+- **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
+  moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
+
 ### Build & tooling
 
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,

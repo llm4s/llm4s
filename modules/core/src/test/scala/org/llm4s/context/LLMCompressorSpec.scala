@@ -180,7 +180,9 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
     )
     val capTokens = 10 // small cap, forces compression of both digests
 
-    val processed = LLMCompressor.squeezeDigest(messages, counter, mockLLMClient, capTokens).toOption.get
+    val processed = LLMCompressor
+      .squeezeDigest(messages, counter, mockLLMClient, capTokens)
+      .fold(e => fail(e.formatted), identity)
 
     processed.length shouldBe messages.length
     // every slot that held a digest still holds a (now compressed) digest; every other slot is untouched
