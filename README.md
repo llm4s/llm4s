@@ -79,7 +79,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Current Status
 
-LLM4S is under active pre-1.0 development. The latest published release is [v0.5.1](https://github.com/llm4s/llm4s/releases/tag/v0.5.1); [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
+LLM4S is under active pre-1.0 development. The latest published release is [v0.6.0](https://github.com/llm4s/llm4s/releases/tag/v0.6.0); [v0.5.0](https://github.com/llm4s/llm4s/releases/tag/v0.5.0) was the first with the split module artifacts. Both target Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
@@ -167,14 +167,14 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 
 ### Use LLM4S in your project
 
-LLM4S is on Maven Central; the current release is **0.5.1**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
+LLM4S is on Maven Central; the current release is **0.6.0**, for Scala 3.7.x (built with 3.7.1) on JDK 21.
 `llm4s-core` holds no provider client, so add the module of the provider you call next to it:
 
 ```scala
 // build.sbt
 ThisBuild / scalaVersion := "3.7.1"
 
-val llm4sVersion = "0.5.1"
+val llm4sVersion = "0.6.0"
 
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-core"   % llm4sVersion,
@@ -471,7 +471,7 @@ sbt new llm4s/llm4s.g8 \
 --name=<your.project.name> \
 --package=<your.organization> \
 --version=<your.project.version> \
---llm4s_version=0.5.1 \
+--llm4s_version=0.6.0 \
 --scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=<your.project.name> \
@@ -480,11 +480,8 @@ sbt new llm4s/llm4s.g8 \
 
 to create new project.
 
-Since 0.5.0 `llm4s-core` ships no provider, so the generated `build.sbt` needs `llm4s-core` and at least one provider
-module at the same version. The template is being moved to 0.5.x
-([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6)), which adds `llm4s-ollama` and `llm4s-openai` itself; a
-template from before that lists `llm4s-core` only (and defaults to llm4s 0.4.0 if you leave out `--llm4s_version`),
-so add the provider you use, for example `llm4s-openai` at 0.5.1.
+Since 0.5.0 `llm4s-core` ships no provider, so the generated `build.sbt` adds `llm4s-ollama` and `llm4s-openai` at the
+same version as `llm4s-core`, with a local Ollama section as the default; add any other provider module you use.
 
 For more information about the template, including compatibility matrix and documentation, visit the [template repository](https://github.com/llm4s/llm4s.g8).
 Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using starter kit.

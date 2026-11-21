@@ -101,6 +101,7 @@ llm4s/
 │   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
+│   ├── secrets-aws/           # AwsSecretsManagerApiKeyProvider: an API key read from AWS Secrets Manager, SigV4, no SDK (published)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
@@ -128,7 +129,7 @@ llm4s/
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.6.0
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)

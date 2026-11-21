@@ -7,14 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 0.5.1, by area. Add an entry to its area's list; a follow-up to unreleased work edits
+<!-- The net change since 0.6.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+
+### Breaking changes
+
+- `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
+  (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
+  `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
+  [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
+
+### Providers
+
+- **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
+  `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
+  entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `CompletionOptions.thinking` (`Thinking.Off`, `Adaptive`, or `Thinking.budget(n)`) and the effort levels
+  `Minimal`, `XHigh` and `Max`, mapped per provider: Anthropic sends `thinking: disabled`/`adaptive`, a fitted
+  `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
+  4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
+  each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
+  explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+
+### Java & Kotlin APIs
+
+- **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
+  `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
+  `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+
+## [0.6.0] - 2026-11-21
+
+### Highlights
+
+0.6.0 makes the agent runtime ready to deploy and widens who can use llm4s. Agents gain typed subagents (child
+threads, token budgets, supervision, nested streams) and production adapters: a PostgreSQL checkpointer shared across
+machines, a durable run queue with workers, and one OpenTelemetry trace per run. Credentials are `Secret`s and can come
+from a file or an `ApiKeyProvider`; console and OpenTelemetry tracing withhold message content unless you opt in. New
+providers and features: xAI, Perplexity, keyless Entra ID for Azure OpenAI, web search for Anthropic and Gemini, one
+proxy and CA setting for every client, and your own HTTP client. The Java facade gains agents, streaming, annotated
+tools and RAG (`llm4s-java-rag`), and `llm4s-kotlin-api` is published for the first time. New experimental modules
+include `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-schema-iron`, `llm4s-tapir`,
+`llm4s-repl`, `llm4s-sttp`, `llm4s-spring-ai`, `llm4s-jlama` (an in-process local model) and `llm4s-secrets-vault`, along
+with the Elasticsearch/OpenSearch and Redis vector stores and `llm4s-doctor`. A `Completion` reports the options a provider
+could not honour (`adjustments`), and thinking tokens are counted once in usage and cost. Many data types are now
+growth-safe (private constructors and `with*` setters), which breaks `copy` and positional patterns: read the
+[migration guide](docs/reference/migration.md) before upgrading. 0.6.0 sets no MiMa baseline.
 
 ### Breaking changes
 
 - `TokenUsage.completionTokens` no longer includes reasoning tokens for OpenAI, OpenAI-compatible and Perplexity replies,
   and output token counts (`UsageSummary.outputTokens`, token budgets, metrics, OpenTelemetry, Langfuse, Spring AI) include
   thinking for every provider; [migration](docs/reference/migration.md#completiontokens-no-longer-includes-thinking-tokens-2564).
+- A Gemini or Vertex AI reply a content filter stopped, or a blocked prompt, is a `Left(ContentFilteredError)`, not a
+  partial answer or `UnknownError`; [migration](docs/reference/migration.md#a-gemini-reply-a-content-filter-stopped-is-an-error-2563).
 - A `Llm4sHttpClient` passed to an SDK-free provider client is no longer closed with it, and `LlmClientOptions` and
   `ProviderFeatures` gain a field; [migration](docs/reference/migration.md#a-supplied-http-client-is-the-callers-to-close-2341).
 - `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;
@@ -51,10 +97,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `OpenAICompatibleDialect.addReasoning` returns the `List[RequestAdjustment]` it could not send, not `Unit`; the
   standard dialect reports a set `reasoning` as `Dropped` (RFC 0008, PR 1); recompile a dialect that overrides it;
   [migration](docs/reference/migration.md#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115).
-- `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
-  (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
-  `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
-  [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
 - Tier hygiene before the baseline: `org.llm4s.trace.AnsiColors` is `private[llm4s]`; `org.llm4s.core.safety.UsingOps`
   moved to `llm4s-agent-tools` and `org.llm4s.llmconnect.utils.ModelSelector` to `llm4s-rag`, their only consumers,
   with packages unchanged; the `org.llm4s.assistant` types are `@Experimental`, matching their Beta tier;
@@ -283,6 +325,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#2313](https://github.com/llm4s/llm4s/issues/2313), [#2477](https://github.com/llm4s/llm4s/issues/2477), [#2478](https://github.com/llm4s/llm4s/issues/2478).
 - **Added** `llm4s-secrets-vault` (experimental): `VaultApiKeyProvider` reads a provider's API key from HashiCorp Vault's KV engine
   over its HTTP API (no SDK), cached and read again every refresh interval [#2479](https://github.com/llm4s/llm4s/issues/2479).
+- **Added** `llm4s-secrets-aws` (experimental): `AwsSecretsManagerApiKeyProvider` reads a provider's API key from AWS Secrets Manager
+  with `GetSecretValue`, signed with SigV4 (no AWS SDK), cached and read again every refresh interval [#2479](https://github.com/llm4s/llm4s/issues/2479).
 
 ### Providers
 
@@ -298,16 +342,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because the `@Stable` `Completion` exposes them (#1818); the RFC is amended to match ([RFC 0008](docs/rfcs/0008-generation-controls.md) decisions 12 and 13, PR 1) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** every reply of a model the registry does not know (a local, custom or gateway name) rescanning the whole model registry to estimate its cost: a registry now remembers how it resolved an id that is not an exact key [#2632](https://github.com/llm4s/llm4s/issues/2632).
 - **Fixed** the OpenAI-compatible, Gemini and Vertex AI clients redacting every request and response body for a debug log line even with DEBUG off; a chat call allocates less than half as much [#2631](https://github.com/llm4s/llm4s/issues/2631).
-- **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
-  `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
-  entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
-- **Added** `CompletionOptions.thinking` (`Thinking.Off`, `Adaptive`, or `Thinking.budget(n)`) and the effort levels
-  `Minimal`, `XHigh` and `Max`, mapped per provider: Anthropic sends `thinking: disabled`/`adaptive`, a fitted
-  `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
-  4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
-  each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
-  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
-  explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Fixed** the Gemini and Vertex AI clients failing `complete` with `UnknownError("key not found: parts")` when a thinking
   model spent the whole `maxOutputTokens` thinking: it is an empty answer with its usage, and a stream now passes on its `MAX_TOKENS` finish reason;
   a reply a content filter stopped (`SAFETY` and the like), even after text, or a blocked prompt is the new `ContentFilteredError`,
@@ -385,9 +419,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Added** `quarkus-llm4s` (`modules/quarkus`, Maven, not yet published): `@Named` `JLlmClient` beans per
   `llm4s.providers` section and a `JEmbeddingClient` from `application.properties` in the Spring starter's spelling,
   checked at build time, and a SmallRye Health readiness check; JVM mode, Quarkus 3.40.1. Part of [#2280](https://github.com/llm4s/llm4s/issues/2280); see the [Quarkus guide](docs/guide/quarkus.md).
-- **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
-  `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
-  `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 - **Added** `Llm4s.agentBuilder(id, client)` to `llm4s-java-api`: a `JAgent` with a system prompt, tools, input and output
   guardrails (`JGuardrails`: length, profanity, regex, JSON), a context window (`JContextWindow.lastMessages`) and
   streaming, and a step limit, checkpointer and tracer (`maxSteps`, `checkpointer`, `tracing`, #2279) [#2476](https://github.com/llm4s/llm4s/issues/2476); see the [Java guide](docs/guide/java.md#an-agent-with-a-system-prompt-guardrails-and-a-context-window).
@@ -419,7 +450,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reply as a Reactor `Flux<String>` over `JLlmClient.streamAsPublisher`, with backpressure, and cancellation that
   interrupts the provider call [#1492](https://github.com/llm4s/llm4s/issues/1492); see [Java Reactor](docs/guide/java-reactor.md).
 - **Added** `llm4s-spring-ai` (Experimental, Spring AI 2.0.x provided): `Llm4sChatModel` / `Llm4sEmbeddingModel` (an llm4s client as a Spring AI
-  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
+  model), `SpringAiLlmClient` (a Spring AI `ChatModel` as an llm4s client, its options a copy of the model's own [#2645](https://github.com/llm4s/llm4s/issues/2645)) and a `ChatModel` bean auto-configuration [#2278](https://github.com/llm4s/llm4s/issues/2278); see [Using LLM4S with Spring AI](docs/guide/spring-ai.md).
 - **Added** `FakeLlmClient` to `llm4s-java-api`: a scripted fake model for testing Java code that calls llm4s, whose
   `client()` is a real `JLlmClient`, with a call log and scripted failures of each `LlmErrorKind`, and a JUnit 5
   "Testing your code" section in the Java guide [#1497](https://github.com/llm4s/llm4s/issues/1497).
@@ -763,7 +794,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,
   a section reloaded from system properties, and failover through `ReliableClient` plus a fallback provider
   [#380](https://github.com/llm4s/llm4s/issues/380).
-- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
+- **Fixed** `llm4s-kotlin-api` is published, first in 0.6.0: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
 - **Added** `@Cloud` smoke suites for Azure OpenAI (classic, custom-domain and `/openai/v1` endpoints), Requesty, the generic
   `openai-compatible` provider (Groq, plus a keyless local run), Voyage embeddings and Vertex AI, and Mistral dialect checks [#1213](https://github.com/llm4s/llm4s/issues/1213).
@@ -1716,7 +1747,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/llm4s/llm4s/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/llm4s/llm4s/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/llm4s/llm4s/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm4s/llm4s/compare/v0.4.0...v0.4.1

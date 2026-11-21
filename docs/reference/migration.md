@@ -11,11 +11,11 @@ nav_order: 2
 Upgrading from `0.4.1`? Start with [Upgrading from 0.4.1 to 0.5.0](../migrations/0-4-1-to-0-5-0), one page grouped
 by what you use. The notes below are the per-change detail it links to. From 0.5.0 to 0.5.1 the source breaks are
 [Multimodal content parts](#multimodal-content-parts-1913) and
-[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). After 0.5.1, [`MemoryManagerConfig` is
+[Harness profile and middleware placement](#harness-profile-and-middleware-placement-1915). From 0.5.1 to 0.6.0, [`MemoryManagerConfig` is
 growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPolicy`](#toolretrypolicy-is-growth-safe-1708),
 [`GeminiConfig`, `VertexAIConfig` and `AzureConfig`](#geminiconfig-vertexaiconfig-and-azureconfig-are-growth-safe-2263),
 [core's tool, client, embedding, registry and tracing configs](#core-config-types-are-growth-safe-2346),
-[core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356)
+[core's HTTP response, embedding, pricing, usage and exchange types](#core-data-types-are-growth-safe-2356),
 [the `TraceEvent` cases](#traceevent-cases-are-growth-safe-2377),
 [the `llmconnect.model` types](#llmconnectmodel-types-are-growth-safe-2378),
 [the provider SPI, caching, streaming and exchange-sink types](#provider-spi-caching-streaming-and-exchange-sink-types-are-growth-safe-2379),
@@ -29,8 +29,10 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311);
 [`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115);
-[`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115); and
+[`completionTokens` no longer includes thinking tokens](#completiontokens-no-longer-includes-thinking-tokens-2564);
+[a Gemini reply a content filter stopped is an error](#a-gemini-reply-a-content-filter-stopped-is-an-error-2563); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
+Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
 
 ## Changes since 0.5.1 that no rule automates
 
@@ -42,8 +44,8 @@ order, `Completion.created`, positional patterns on types that gained fields, th
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
-  Spring Boot starter no longer bring (#1496), and `TokenUsage.completionTokens`, which no longer includes thinking
-  tokens (#2564).
+  Spring Boot starter no longer bring (#1496), `TokenUsage.completionTokens`, which no longer includes thinking
+  tokens (#2564), and a Gemini or Vertex AI reply a content filter stopped, now a `ContentFilteredError` (#2563).
 - New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
   `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
   a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
@@ -418,6 +420,14 @@ Nothing to change: `llm4s-secrets-vault` is a new, experimental module over `llm
 depends on it. To read a provider's API key from HashiCorp Vault without Vault Agent or a CSI driver, add it and set
 `VaultApiKeyProvider(VaultSettings(...))` with `withApiKeyProvider`; see
 [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile` is unchanged.
+
+## `llm4s-secrets-aws`, a new module (#2479)
+
+Nothing to change: `llm4s-secrets-aws` is a new, experimental module over `llm4s-core` alone, and no other module
+depends on it. To read a provider's API key from AWS Secrets Manager without the Secrets Store CSI driver or External
+Secrets Operator, add it and set `AwsSecretsManagerApiKeyProvider(AwsSecretsManagerSettings(...))` with
+`withApiKeyProvider`; see [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile`
+is unchanged.
 
 ## `llm4s-repl`, a new module (#2342)
 

@@ -131,6 +131,9 @@ flags:
   secrets-vault:
     paths:
       - modules/secrets-vault/src/main/scala
+  secrets-aws:
+    paths:
+      - modules/secrets-aws/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala

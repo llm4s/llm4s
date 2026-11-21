@@ -378,6 +378,8 @@ object Deps {
   // ChatClient, which the module's specs and the sample build over the adapted model.
   val springAiModel      = "org.springframework.ai" % "spring-ai-model"       % Versions.springAi
   val springAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAi
+  // Test-only in llm4s-spring-ai: a real OpenAiChatModel, against a local server, for SpringAiLlmClient (#2645).
+  val springAiOpenAi = "org.springframework.ai" % "spring-ai-openai" % Versions.springAi
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().
