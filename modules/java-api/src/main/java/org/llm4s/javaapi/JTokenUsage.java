@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * The tokens one model call used, as {@link JCompletion#usage()} reports them. An agent turn's
  * {@link JUsageSummary} adds these up across its calls: its {@code inputTokens} are the sum of
- * {@code promptTokens}, its {@code outputTokens} of {@code completionTokens}.
+ * {@code promptTokens}, its {@code outputTokens} of {@code completionTokens + thinkingTokens}.
  *
  * <p>A value: two are equal when every field is. Built only by this package - its constructor is
  * package-private, so fields can be added without breaking a caller (#1666).
@@ -39,12 +39,12 @@ public final class JTokenUsage {
     return promptTokens;
   }
 
-  /** Tokens received in the reply. */
+  /** Tokens received in the reply, not counting {@link #thinkingTokens()}. */
   public int completionTokens() {
     return completionTokens;
   }
 
-  /** The total the provider reported, normally {@code promptTokens + completionTokens}. */
+  /** The total the provider reported, as it reported it. */
   public int totalTokens() {
     return totalTokens;
   }

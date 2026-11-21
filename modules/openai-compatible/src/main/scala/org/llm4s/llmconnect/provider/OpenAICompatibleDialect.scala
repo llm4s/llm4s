@@ -38,7 +38,8 @@ import scala.annotation.unused
  *  - '''Response:''' how `content` is read back ([[decodeContent]]); where the
  *    model's thinking is ([[thinking]]), and any provider-specific replay data beside it
  *    ([[thinkingDetails]], [[decodeThinkingDetails]]); where its reasoning-token count is
- *    ([[reasoningTokens]]); and how a non-streaming `tool_calls` array is
+ *    ([[reasoningTokens]]) and whether `completion_tokens` includes it
+ *    ([[reasoningInCompletion]]); and how a non-streaming `tool_calls` array is
  *    parsed ([[parseToolCalls]]).
  *
  * The generic `openai-compatible` provider uses [[OpenAICompatibleDialect.standard]],
@@ -183,8 +184,21 @@ trait OpenAICompatibleDialect:
    */
   def decodeThinkingDetails(details: Seq[ujson.Value]): Seq[ThinkingBlock] = Nil
 
-  /** Reads the reasoning-token count from a `usage` object. Standard: none. */
-  def reasoningTokens(usage: ujson.Value): Option[Int] = None
+  /**
+   * Reads the reasoning-token count from a `usage` object. Standard: OpenAI's
+   * `completion_tokens_details.reasoning_tokens`, which servers that copy its format (Groq, DeepSeek, xAI and the
+   * generic provider's) send too.
+   */
+  def reasoningTokens(usage: ujson.Value): Option[Int] =
+    OpenAICompatibleDialect.completionReasoningTokens(usage)
+
+  /**
+   * Whether the provider counts [[reasoningTokens]] inside `completion_tokens`, as OpenAI does
+   * (and DeepSeek and OpenRouter after it). When it does, the client subtracts them, because
+   * `TokenUsage.completionTokens` never includes `thinkingTokens`; `total_tokens` is kept as
+   * reported. Standard: `true`. xAI counts them apart and overrides it to `false`.
+   */
+  def reasoningInCompletion: Boolean = true
 
   /**
    * Parses the `tool_calls` array of a non-streaming reply.
@@ -244,6 +258,15 @@ object OpenAICompatibleDialect:
         arguments = BoundedJson.read(argsStr).getOrElse(ujson.Obj())
       )
     }
+
+  /** `usage.completion_tokens_details.reasoning_tokens`, OpenAI's reasoning-token count. */
+  private[provider] def completionReasoningTokens(usage: ujson.Value): Option[Int] =
+    usage.objOpt
+      .flatMap(_.get("completion_tokens_details"))
+      .flatMap(_.objOpt)
+      .flatMap(_.get("reasoning_tokens"))
+      .flatMap(_.numOpt)
+      .map(_.toInt)
 
   /** Reads the first of `fields` present on `obj` as a string. */
   private[provider] def firstString(obj: ujson.Value, fields: String*): Option[String] =

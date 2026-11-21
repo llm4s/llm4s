@@ -891,4 +891,4 @@ collections.get(path).foreach {
 
 - **[Vector Store Guide](vector-store)** - Learn about the underlying vector storage
 - **[RAG Evaluation Guide](rag-evaluation)** - Measure and improve RAG quality
-- **[Examples Gallery](/examples/#embeddings-examples)** - See more RAG examples
+- **[Examples Gallery](/examples/#embeddings)** - See more RAG examples

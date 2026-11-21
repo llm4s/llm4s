@@ -50,7 +50,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
       
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
@@ -108,7 +110,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
@@ -235,7 +239,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
@@ -310,7 +316,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13

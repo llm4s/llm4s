@@ -103,11 +103,3 @@ private[llm4s] object DeepSeekDialect extends OpenAICompatibleDialect:
    */
   override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
     ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)
-
-  override def reasoningTokens(usage: ujson.Value): Option[Int] =
-    usage.obj
-      .get("completion_tokens_details")
-      .flatMap(_.objOpt)
-      .flatMap(_.get("reasoning_tokens"))
-      .flatMap(_.numOpt)
-      .map(_.toInt)

@@ -102,8 +102,9 @@ private[provider] trait OpenAIClientTransport {
  * resolve gets it whenever it is asked for. Reasoning models get `max_completion_tokens` rather
  * than `max_tokens`, and no `temperature`, `top_p` or penalties. The reasoning tokens a
  * response reports (`completion_tokens_details.reasoning_tokens`) become
- * `TokenUsage.thinkingTokens`, streamed or not; they are part of `completionTokens`, not added
- * to it. See [[OpenAIReasoning]].
+ * `TokenUsage.thinkingTokens`, streamed or not. OpenAI counts them inside `completion_tokens`;
+ * they are taken out of `TokenUsage.completionTokens`, which never includes thinking, and
+ * `totalTokens` is kept as reported. See [[OpenAIReasoning]].
  *
  * == Streamed usage ==
  *
@@ -780,11 +781,13 @@ class OpenAIClient private[provider] (
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
     val completionTokens = known(u._completionTokens()).fold(0)(_.intValue)
+    val reasoningTokens  = known(u._completionTokensDetails()).flatMap(d => known(d._reasoningTokens())).map(_.intValue)
     TokenUsage(
       promptTokens = promptTokens,
-      completionTokens = completionTokens,
+      // OpenAI counts reasoning inside completion_tokens; TokenUsage.completionTokens never includes thinkingTokens
+      completionTokens = math.max(0, completionTokens - reasoningTokens.fold(0)(math.max(0, _))),
       totalTokens = known(u._totalTokens()).fold(promptTokens + completionTokens)(_.intValue),
-      thinkingTokens = known(u._completionTokensDetails()).flatMap(d => known(d._reasoningTokens())).map(_.intValue),
+      thinkingTokens = reasoningTokens,
       cachedTokens = known(u._promptTokensDetails()).flatMap(d => known(d._cachedTokens())).map(_.intValue)
     )
   }

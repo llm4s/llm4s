@@ -25,11 +25,117 @@ growth-safe](#memorymanagerconfig-is-growth-safe-1847), and so are [`ToolRetryPo
 [the `AssistantError` cases](#assistanterror-cases-are-growth-safe-2383),
 [`RerankProviderConfig`](#rerankproviderconfig-is-growth-safe-2478)
 and [the remaining config, model and util types](#config-model-and-util-types-are-growth-safe-2384);
+[`OpenAIConfig.fromValues` and `AzureConfig.fromValues` take model, key, then base URL](#provider-fromvalues-take-model-key-then-base-url-2340);
 [`OpenAIToolHelper` is internal](#openaitoolhelper-is-internal-2360);
 [`ServiceError`'s extractor gains `retryAfter`](#serviceerror-extractor-and-isrecoverablestatus-2266); [console tracing prints no content by default](#console-tracing-prints-no-content-by-default-2311);
 [`OpenAICompatibleDialect.addReasoning` returns what it did not send](#openaicompatibledialectaddreasoning-returns-what-it-did-not-send-2115);
 [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
+
+## Changes since 0.5.1 that no rule automates
+
+The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
+below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
+order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
+`loadTextEmbeddingModel`. It reports the removed APIs it cannot replace. These need a hand edit:
+
+- Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
+  (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
+  kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
+  Spring Boot starter no longer bring (#1496), and `TokenUsage.completionTokens`, which no longer includes thinking
+  tokens (#2564).
+- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
+  `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
+  a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
+  `deleteThread`).
+- Types that changed: `LLMClientPekko.streamComplete`'s `Future[Done]` (#1848), `LLM4STemplate.completeAsync`'s
+  failure (#2276), `new X(...)` and a positional `copy` on a growth-safe type (reported), `MemoryManagerConfig`
+  (was a class with no `copy`), and a key passed by position or another credential that is now a `Secret` (Langfuse,
+  search-tool and store keys, `VectorStoreFactory.Config.withSecret`).
+- Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
+  `llm4s-rag` (#2358).
+
+## `completionTokens` no longer includes thinking tokens (#2564)
+
+`TokenUsage.thinkingTokens` are never part of `TokenUsage.completionTokens`. OpenAI counts its `reasoning_tokens`
+inside `completion_tokens`, and so do Perplexity's `output_tokens` and the `openai-compatible` providers that report
+reasoning in OpenAI's format: DeepSeek, OpenRouter (its top-level `usage.reasoning_tokens` or
+`completion_tokens_details`), and the generic provider (Groq and other servers), Mistral, Cohere and Z.ai whenever
+they send `completion_tokens_details.reasoning_tokens`. Their clients now take the reasoning tokens out, so
+`completionTokens` is the answer alone. Gemini, Vertex AI and xAI already counted them apart and are unchanged.
+`totalTokens` is kept as the provider reported it, and `totalOutputTokens` is `completionTokens + thinkingTokens`.
+
+The source does not change; numbers do. For an OpenAI reasoning model reporting prompt 81, completion 64 (46 of them
+reasoning) and total 145, `completionTokens` was 64 and is now 18, with `thinkingTokens` 46. Code that read
+`completionTokens` as all the output tokens reads `totalOutputTokens` instead. An `OpenAICompatibleDialect` of your
+own reads `completion_tokens_details.reasoning_tokens` by default now; one for a provider that counts reasoning apart
+from `completion_tokens`, as xAI does, overrides the new `reasoningInCompletion` to `false`.
+
+Output token counts everywhere else are what the provider billed as output, thinking included, for every provider -
+Gemini, Vertex AI and xAI too, where thinking used to be left out of them:
+
+- `UsageSummary.outputTokens` and `ModelUsage.outputTokens` (so `AgentResult.usage`, `RunBudgets.maxTokens` and a
+  child's token grant, which count input plus output), with `thinkingTokens` the part of it that was thinking. Do not
+  add `thinkingTokens` to `outputTokens` again.
+- The `output` token metric of `llm4s-observability-prometheus` and `llm4s-observability-micrometer`, and so
+  `CostTracker`.
+- OpenTelemetry's `gen_ai.usage.output_tokens`, Langfuse's generation `usage.output`, and the `output_tokens` beside
+  `completion_tokens` and `thinking_tokens` on the trace collector's and Langfuse's token-usage records.
+- Spring AI's `Usage.getCompletionTokens` from `Llm4sChatModel`, as Spring AI's own OpenAI binding counts it, and
+  `RAGOperationCompleted.llmCompletionTokens`.
+
+Dashboards and alerts on those counts see larger numbers for reasoning models. The raw `completion_tokens` on
+trace events, spans and Langfuse records is `TokenUsage.completionTokens`, so for OpenAI, OpenAI-compatible and
+Perplexity reasoning replies its value drops (64 becomes 18 above). A dashboard on it shifts: point it at
+`output_tokens`, or at `completion_tokens` plus the new `thinking_tokens` beside it.
+
+## A Gemini reply a content filter stopped is an error (#2563)
+
+The Gemini and Vertex AI clients end a reply the same way from `complete` and from `streamComplete`:
+
+- A content-filter `finishReason` (`SAFETY`, `RECITATION`, `LANGUAGE`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`,
+  `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION`, `ESCALATION`) is a `Left(ContentFilteredError)`,
+  even when text came before it: `complete` used to return that partial text as the answer, and a stream returned it
+  too. A stream's text already passed to `onChunk` stays delivered; the error's message says how many characters
+  the filter cut after. A prompt Gemini blocked (`promptFeedback.blockReason`) is one too, where `complete` failed
+  with `UnknownError` and a stream returned an empty answer.
+- Any other abnormal finish (`MALFORMED_FUNCTION_CALL`, `OTHER`, ...) is a `ValidationError` naming it only when the
+  reply produced no text and no tool call; otherwise the reply is returned with what it produced.
+- `STOP`, `MAX_TOKENS` or `CONTINUATION` with nothing produced is an empty answer.
+
+Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you handled a partial answer or an
+`UnknownError`. `ReliableClient`'s circuit breaker counts it as neither a success nor a failure.
+
+## Provider fromValues take model, key, then base URL (#2340)
+
+Every provider config's `fromValues` now takes its common parameters in one order - model, then API key, then base
+URL - with whatever is optional after what is required
+([Configuration in code](../getting-started/configuration-in-code)). Two did not:
+
+- `OpenAIConfig.fromValues(model, apiKey, organization, baseUrl)` is
+  `OpenAIConfig.fromValues(model, apiKey, baseUrl, organization = None)`. Drop a `None` organization, or move it
+  after the base URL:
+
+  ```scala
+  // Before
+  OpenAIConfig.fromValues("gpt-4o", apiKey, None, OpenAIConfig.DEFAULT_BASE_URL)
+  OpenAIConfig.fromValues("gpt-4o", apiKey, Some("org-1"), baseUrl, Some(ProviderId("requesty")))
+  // After
+  OpenAIConfig.fromValues("gpt-4o", apiKey, OpenAIConfig.DEFAULT_BASE_URL)
+  OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl, Some("org-1"), Some(ProviderId("requesty")))
+  ```
+
+- `AzureConfig.fromValues(deployment, endpoint, apiKey, apiVersion)` is
+  `AzureConfig.fromValues(deployment, apiKey, endpoint, apiVersion = AzureConfig.DEFAULT_API_VERSION)`, and
+  `AzureConfig.fromTokenProvider(deployment, endpoint, tokenProvider, apiVersion)` is
+  `AzureConfig.fromTokenProvider(deployment, tokenProvider, endpoint, apiVersion = AzureConfig.DEFAULT_API_VERSION)`.
+
+The types differ (`Secret` against `String`, `Option[String]` against `String`), so a call in the old order no longer
+compiles rather than misbehaving; calls with named arguments are unchanged.
+
+Also new, and not breaking: a `given ModelRegistryService` now supplies the `ContextWindowResolver` that `fromValues`
+takes, so `ModelRegistryService.default()` - the bundled catalogue, with no configuration file - is all a
+values-only setup needs. A `ContextWindowResolver` given explicitly still wins.
 
 ## A supplied HTTP client is the caller's to close (#2341)
 
@@ -3686,12 +3792,12 @@ non-empty"`) with the field in `missingKeys`.
 
 ```scala
 // Before
-val config: OpenAIConfig = OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl)
+val config: OpenAIConfig = OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl)
 val client = LLMConnect.getClient(config)
 
 // After
 val client: Result[LLMClient] =
-  OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl).flatMap(LLMConnect.getClient(_))
+  OpenAIConfig.fromValues("gpt-4o", apiKey, baseUrl).flatMap(LLMConnect.getClient(_))
 ```
 
 A `ProviderDescriptor.buildConfig` that returned `fromValues` from a `for`'s `yield`, or

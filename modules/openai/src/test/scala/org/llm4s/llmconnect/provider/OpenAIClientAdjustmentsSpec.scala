@@ -29,7 +29,7 @@ final class OpenAIClientAdjustmentsSpec extends AnyFlatSpec with Matchers with E
     """{"id":"c1","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}]}"""
 
   private def config(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), None, "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(model, Secret("sk-test"), "https://example.invalid/v1").value
 
   /** A client for `model`, and the requests it sends. */
   private def client(model: String): (OpenAIClient, ListBuffer[ChatCompletionCreateParams]) = {

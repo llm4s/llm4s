@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1465, 2289, 2305, 2306, 2307, 2310]
+cites_open_issues: [1281, 1465, 2289, 2305, 2307, 2310]
 ---
 
 # Enterprise Evaluation
@@ -64,7 +64,7 @@ linked to its open issue.
 | Is there an SBOM? | Yes: a CycloneDX SBOM per published module on each GitHub Release, also built and validated on every pull request. See [Software Bill of Materials](sbom). |
 | Are dependencies scanned? | OSV-Scanner scans the SBOMs weekly and on pull requests that change dependencies; a pull request that adds a HIGH or CRITICAL advisory fails. See [Vulnerability scanning](sbom#vulnerability-scanning). |
 | Are artifacts signed? | The Maven Central artifacts are PGP-signed by the release workflow ([`release.yml`](https://github.com/llm4s/llm4s/blob/main/.github/workflows/release.yml), `sbt ci-release`). There is no build provenance attestation, the SBOMs are not signed, and there is no guide to verifying a release yet: see [Known gaps](#known-gaps). |
-| OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet: see [Known gaps](#known-gaps). |
+| OpenSSF Scorecard or Best Practices badge? | Scorecard runs on every push to main ([results](https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s)); the branch-protection items it scores are still open. No Best Practices badge yet; the evidence for each passing criterion is in [OpenSSF Best Practices](best-practices), and see [Known gaps](#known-gaps). |
 
 ## Data protection
 
@@ -98,7 +98,7 @@ linked to its open issue.
 
 | Question | Answer and evidence |
 |---|---|
-| Who uses it? | Organisations list themselves by pull request in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md), which has no entries yet. Public projects are on the [Showcase](../showcase/). |
+| Who uses it? | Organisations list themselves by pull request in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md); each entry says only what its authors wrote. The first is [Scala Teams](https://scalateams.com) (since November 2026), which uses LLM4S as the multi-provider LLM layer of Spec Manager, an AI spec-authoring and code-generation tool, on `llm4s-core` and `llm4s-anthropic`, and whose team wrote and is implementing [RFC 0008](../rfcs/0008-generation-controls) ([Success Stories](../community/#success-stories)). Public projects are on the [Showcase](../showcase/). |
 | Where is the community? | [Discord](https://discord.gg/4uvTPn6qww), [GitHub issues](https://github.com/llm4s/llm4s/issues) and the [Community](../community/) pages. |
 | Where do we get help? | [SUPPORT.md](https://github.com/llm4s/llm4s/blob/main/SUPPORT.md). The maintainers are volunteers: replies are best effort and there is no service-level agreement. |
 | Is commercial support available? | No paid support is offered. Questions about sponsoring or partnering with the project go to the contact on the [Foundation](../foundation/) page. |
@@ -116,7 +116,6 @@ closes, so this list is updated when the gap is.
 | GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
 | Support policy published, but release cadence, supported lines after 1.0, long-term support and end-of-support notice period are not yet decided (see [Support Policy](support-policy)) | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
 | No build provenance or signed SBOMs, and no guide to verifying a release | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
-| Scorecard's branch-protection items not yet enabled | [#2306](https://github.com/llm4s/llm4s/issues/2306) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
 
@@ -155,6 +154,7 @@ Data protection: no telemetry; data goes only to the providers and stores you co
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).
 Platform: Scala 3 (3.7.1), JDK 21. Java and Kotlin APIs; Spring Boot, Quarkus, cats-effect,
   ZIO and Pekko integrations.
-Adopters: ADOPTERS.md (by pull request).
+Adopters: ADOPTERS.md (by pull request); first entry Scala Teams (Spec Manager, since
+  2026-11).
 Full answers with evidence: https://llm4s.org/reference/enterprise-evaluation
 ```

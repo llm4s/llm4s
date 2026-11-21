@@ -81,11 +81,8 @@ package object types {
       ArtifactKey(java.util.UUID.randomUUID().toString)
 
     def fromContent(content: String): ArtifactKey = {
-      val hash = java.security.MessageDigest
-        .getInstance("SHA-256")
-        .digest(content.getBytes("UTF-8"))
-        .map("%02x".format(_))
-        .mkString
+      val hash =
+        org.llm4s.util.Hex.of(java.security.MessageDigest.getInstance("SHA-256").digest(content.getBytes("UTF-8")))
       ArtifactKey(s"content_$hash")
     }
   }

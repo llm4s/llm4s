@@ -142,4 +142,4 @@ The `ImageGenerationOptions` class allows you to fine-tune the generation proces
 ## See Also
 
 - [Examples](/examples/) - Working code examples
-- [API Reference](/api/llm-client) - Complete API documentation
+- [API Reference](/api/) - Complete API documentation

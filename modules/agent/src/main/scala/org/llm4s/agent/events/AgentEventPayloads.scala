@@ -1,16 +1,39 @@
 package org.llm4s.agent.events
 
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ RequestAdjustment, TokenUsage }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.util.DurationJson
+import org.slf4j.LoggerFactory
 import upickle.default.{ macroRW, ReadWriter }
 
 import scala.concurrent.duration.FiniteDuration
+import scala.util.Try
 
 // Durable payloads: committed with the task that emitted them, replayable. They carry no message content.
 
 // A provider id is stored as its canonical string, so an event written before the field was typed still reads (#2275).
 private given ReadWriter[ProviderId] = upickle.default.readwriter[String].bimap[ProviderId](_.asString, ProviderId(_))
+
+private val logger = LoggerFactory.getLogger("org.llm4s.agent.events.AgentEventPayloads")
+
+// An adjustment this version cannot read - an option or a case added later (RFC 0008 plans more) - is left out, so
+// the event, and the usage it carries, still reads. Written as the derived codec writes it.
+private given ReadWriter[List[RequestAdjustment]] =
+  upickle.default
+    .readwriter[ujson.Value]
+    .bimap[List[RequestAdjustment]](
+      adjustments => ujson.Arr.from(adjustments.map(upickle.default.writeJs[RequestAdjustment](_))),
+      json =>
+        json.arrOpt.fold(List.empty)(_.toList.flatMap { entry =>
+          Try(upickle.default.read[RequestAdjustment](entry)).fold(
+            e =>
+              logger.debug(s"Left out an adjustment this version cannot read: ${e.getMessage}")
+              None
+            ,
+            Some(_)
+          )
+        })
+    )
 
 /** A model call's token usage, as plain numbers. */
 final case class CallUsage(promptTokens: Int, completionTokens: Int, totalTokens: Int, thinkingTokens: Option[Int])
@@ -28,7 +51,10 @@ object CallUsage:
  * `ModelContext.accounted`, or usage it recorded with `ModelContext.recordUsage`. `toolCalls` is the completion's.
  * `usage` and `estimatedCost` (USD) are the completion's, when the provider reported them. `provider` is the canonical
  * id of the provider called, when its client reported one (`LLMClient.providerId`); `None` in an event stored before
- * it existed (#2275).
+ * it existed (#2275). `adjustments` are the completion's (`Completion.adjustments`): the options the client did not
+ * send as asked (RFC 0008, #2115); llm4s's own clients put no message content in them. Empty for usage recorded
+ * without a call, and in an event stored before the field existed. An adjustment this version cannot read, an option
+ * or a case added later, is left out rather than failing the event.
  */
 final case class ModelCallCompleted(
   agent: String,
@@ -37,7 +63,8 @@ final case class ModelCallCompleted(
   toolCalls: Int,
   usage: Option[CallUsage],
   estimatedCost: Option[Double],
-  provider: Option[ProviderId] = None
+  provider: Option[ProviderId] = None,
+  adjustments: List[RequestAdjustment] = List.empty
 ) derives ReadWriter
 
 /** How a tool call ended for the loop. */

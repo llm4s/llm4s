@@ -117,9 +117,11 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
       completion.thinking shouldBe Some("91 = 7 x 13.")
       completion.message.thinking shouldBe Seq(ThinkingBlock.Text("91 = 7 x 13."))
       val usage = completion.usage.get
+      // xAI counts reasoning apart from completion_tokens, so nothing is taken out of it
       usage.thinkingTokens shouldBe Some(28)
       usage.completionTokens shouldBe 2
       usage.totalTokens shouldBe 40
+      usage.totalOutputTokens shouldBe 30
     }
 
   it should "leave thinking empty when the reply has none, or an empty one" in {
@@ -154,6 +156,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
       completion.content shouldBe "No."
       completion.usage.flatMap(_.thinkingTokens) shouldBe Some(28)
       completion.usage.map(_.promptTokens) shouldBe Some(10)
+      completion.usage.map(_.completionTokens) shouldBe Some(2)
     }
 
   // ---- reasoning_effort ----

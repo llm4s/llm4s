@@ -243,7 +243,9 @@ private[springai] object SpringAiMapping {
         builder.usage(
           new DefaultUsage(
             Integer.valueOf(u.promptTokens),
-            Integer.valueOf(u.completionTokens),
+            Integer.valueOf(
+              u.totalOutputTokens
+            ), // output as billed, reasoning included, as Spring AI's OpenAI binding counts it
             Integer.valueOf(u.totalTokens),
             u,
             u.cachedTokens.map(t => java.lang.Long.valueOf(t.toLong)).orNull,

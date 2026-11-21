@@ -143,8 +143,13 @@ map_file_to_project() {
     modules/agent-checkpoint-postgres/*)  echo "agentCheckpointPostgres" ;;
     modules/agent-memory/*)               echo "agentMemory" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
+    # The comparative benchmarks (#2288): not in the root aggregate, so only a change to them compiles them.
+    modules/benchmarks-comparative/llm4s/*) echo "benchmarksComparativeLlm4s" ;;
+    modules/benchmarks-comparative/*)     echo "benchmarksComparative" ;;
     modules/scalafix-rules/rules/*)       echo "scalafixRules" ;;
     # The testkit projects: `scalafixTests/test` compiles the input and output and runs every rule on them.
+    modules/scalafix-rules/input-0.5/*|modules/scalafix-rules/tests-0.5/*) echo "scalafixTests05" ;;
+    modules/scalafix-rules/output/src/main/scala/fix/v1/*) echo "scalafixTests05" ;;
     modules/scalafix-rules/*)             echo "scalafixTests" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -239,6 +244,9 @@ propagate_downstream() {
       ;;
     observabilityMicrometer)
       set_add DOWNSTREAM_COMPILE springBootStarter
+      ;;
+    benchmarksComparativeLlm4s)
+      set_add DOWNSTREAM_COMPILE benchmarksComparative
       ;;
     springBootStarter)
       set_add DOWNSTREAM_COMPILE springAi
@@ -631,6 +639,7 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+      set_add DOWNSTREAM_COMPILE scalafixTests05
       ;;
     repl)
       set_add DOWNSTREAM_COMPILE samples

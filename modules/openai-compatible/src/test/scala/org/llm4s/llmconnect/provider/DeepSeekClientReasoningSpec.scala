@@ -55,6 +55,8 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
       completion.thinking shouldBe Some("Let me think.")
       completion.message.thinking shouldBe Seq(ThinkingBlock.Text("Let me think."))
       completion.usage.flatMap(_.thinkingTokens) shouldBe Some(12)
+      // DeepSeek counts reasoning inside completion_tokens, so it is taken out
+      completion.usage.map(_.completionTokens) shouldBe Some(8)
     }
 
   it should "leave thinking empty for deepseek-chat, which sends no reasoning_content" in

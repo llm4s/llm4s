@@ -127,7 +127,8 @@ class OpenAICompatibleClient(
           .flatMap { response =>
             val body = response.body
             logger.debug(s"Response status: ${response.statusCode}")
-            logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
+            // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+            if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
                 Try(parseCompletion(readReply(body))).toResult
@@ -369,7 +370,7 @@ class OpenAICompatibleClient(
       .tapRight { (requestText, adjustments) =>
         adjustmentLog.record(settings.model, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
-        logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
+        if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
       .tapLeft(error => recordExchange(Instant.now(), "", None, Left(error)))
 
@@ -615,16 +616,24 @@ class OpenAICompatibleClient(
   private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
     cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
-  /** Token usage from a `usage` object, or from the first element of a `usage` array. */
+  /**
+   * Token usage from a `usage` object, or from the first element of a `usage` array. Reasoning
+   * tokens the provider counts inside `completion_tokens` ([[OpenAICompatibleDialect.reasoningInCompletion]])
+   * are taken out of `completionTokens`, so they are counted once, as `thinkingTokens`.
+   */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
     usage.objOpt.orElse(usage.arrOpt.flatMap(_.headOption).flatMap(_.objOpt)).map { u =>
       val prompt     = u("prompt_tokens").num.toInt
       val completion = u("completion_tokens").num.toInt
+      val reasoning  = dialect.reasoningTokens(ujson.Obj.from(u))
+      // TokenUsage.completionTokens never includes thinkingTokens: take them out where the provider counted them in
+      val answer =
+        if (dialect.reasoningInCompletion) math.max(0, completion - reasoning.fold(0)(math.max(0, _))) else completion
       TokenUsage(
         promptTokens = prompt,
-        completionTokens = completion,
+        completionTokens = answer,
         totalTokens = u.get("total_tokens").flatMap(_.numOpt).map(_.toInt).getOrElse(prompt + completion),
-        thinkingTokens = dialect.reasoningTokens(ujson.Obj.from(u))
+        thinkingTokens = reasoning
       )
     }
 

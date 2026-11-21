@@ -65,6 +65,11 @@ object Versions {
   // ZIO Test for those examples: the zio that zio-json above brings onto the samples' Test classpath (2.1.26, not
   // `zio` below), since zio-test's macros must match the zio they run with.
   val zioTestSamples = "2.1.26"
+  // docs/getting-started/configuration-in-code.md's ciris and zio-config examples (#2340), samples' Test scope only.
+  // ciris 3.7.0 is the last release on cats-effect 3.5 (3.8.0 needs 3.6); zio-config 4.0.8 is built on the zio
+  // 2.1.26 above.
+  val ciris     = "3.7.0"
+  val zioConfig = "4.0.8"
 
   // http4s, for the unpublished reference app in modules/examples-http (#1459) only. 0.23.30 is built on the
   // cats-effect and fs2 versions above.
@@ -154,9 +159,21 @@ object Versions {
   // `-Dllm4s.springAiVersion=<latest 2.0.x>`, so the range docs/guide/spring-ai.md states is tested at both ends.
   val springAiBaseline = "2.0.0"
   val springAi         = sys.props.getOrElse("llm4s.springAiVersion", springAiBaseline)
+
+  // The libraries the comparative benchmarks measure llm4s against (#2288, modules/benchmarks-comparative). Pinned, and
+  // printed with the results. Only the unpublished comparative projects depend on them, and those are not in the root
+  // aggregate.
+  val langchain4j       = "1.23.0"
+  val springAiBenchmark = "2.0.2"
 }
 
 object Deps {
+
+  // Comparative benchmarks only (#2288): never a dependency of a published module.
+  val langchain4j             = "dev.langchain4j"        % "langchain4j"           % Versions.langchain4j
+  val langchain4jOpenAi       = "dev.langchain4j"        % "langchain4j-open-ai"   % Versions.langchain4j
+  val benchSpringAiOpenAi     = "org.springframework.ai" % "spring-ai-openai"      % Versions.springAiBenchmark
+  val benchSpringAiClientChat = "org.springframework.ai" % "spring-ai-client-chat" % Versions.springAiBenchmark
 
   val cats                    = "org.typelevel"           %% "cats-core"       % Versions.cats
   val upickle                 = "com.lihaoyi"             %% "upickle"         % Versions.upickle
@@ -263,6 +280,9 @@ object Deps {
   val weaverCats        = "com.disneystreaming" %% "weaver-cats"       % Versions.weaver
   val zioTestSamples    = "dev.zio"             %% "zio-test"          % Versions.zioTestSamples
   val zioTestSbtSamples = "dev.zio"             %% "zio-test-sbt"      % Versions.zioTestSamples
+  // Configuration libraries for docs/getting-started/configuration-in-code.md (#2340), samples' Test scope only
+  val ciris     = "is.cir"  %% "ciris"      % Versions.ciris
+  val zioConfig = "dev.zio" %% "zio-config" % Versions.zioConfig
 
   // ZIO
   val zio        = "dev.zio" %% "zio"          % Versions.zio

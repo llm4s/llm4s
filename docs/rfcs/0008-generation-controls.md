@@ -328,8 +328,9 @@ below).
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
-  `ModelCallCompleted`). Part 2 breaks code that uses `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None`
-  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels. Part 1 also breaks an
+  `ModelCallCompleted`). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
+  `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None` (PR 4); an exhaustive `match` on `ReasoningEffort`
+  warns about the three new levels. Part 1 also breaks an
   `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
 - **Behaviour:** a call that compiles after PR 4 sends the same request as before, except a `reasoning`-only call to
   a model that rejects a thinking budget, which fails today and now succeeds with `output_config.effort`. The new

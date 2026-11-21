@@ -699,8 +699,4 @@ object AgentBuilder:
    */
   private[agent] def fingerprint(family: Vector[AgentBuilder]): String =
     val canonical = ujson.Arr.from(family.sortBy(_.id).map(_.canonical)).render()
-    MessageDigest
-      .getInstance("SHA-256")
-      .digest(canonical.getBytes(StandardCharsets.UTF_8))
-      .map(b => f"${b & 0xff}%02x")
-      .mkString
+    org.llm4s.util.Hex.of(MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8)))

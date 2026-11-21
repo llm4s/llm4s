@@ -114,6 +114,16 @@ object MistralConfig:
     val root = baseUrl.trim.stripSuffix("/")
     if root.endsWith("/v1") then root else s"$root/v1"
 
+  /**
+   * Constructs a [[MistralConfig]], resolving `contextWindow` and `reserveCompletion` from the
+   * model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"mistral-large-latest"`.
+   * @param apiKey    Mistral API key; must be non-empty.
+   * @param baseUrl   API root; must be non-empty. [[MistralConfig.DEFAULT_BASE_URL]] is Mistral's
+   *                  own, and the default when loaded via [[org.llm4s.config.Llm4sConfig]].
+   * @return `Left(ConfigurationError)` for a blank `apiKey` or `baseUrl`.
+   */
   def fromValues(
     modelName: String,
     apiKey: Secret,

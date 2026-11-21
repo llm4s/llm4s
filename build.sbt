@@ -299,6 +299,18 @@ lazy val coveragePolicyCheck = taskKey[Unit](
   "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
 )
 
+// ---- dependency cache ----
+// Resolves every artifact CI downloads lazily, in every project, including those outside the root aggregate (`it`,
+// `docs`, the scalafix projects, the benchmarks). .github/workflows/dependency-cache.yml runs it on main and saves the
+// result as the one sbt dependency cache every other job restores: on 2026-11-20 each job resolved what a partial
+// cache lacked, in parallel, and Maven Central answered 429 (pekko-stream_3, llm4s-rag_3 0.5.1, scala2-sbt-bridge).
+// `update` resolves all of a project's configurations at once (Compile, Test, Jmh, scala-tool, scala-doc-tool), so
+// `Test / update` is the same report. The compiler bridge and MiMa's previous artifacts are resolved separately, on
+// first use, so they are named here too.
+lazy val resolveAll = taskKey[Unit](
+  "Resolve every dependency, compiler bridge and MiMa baseline of every project, for the CI dependency cache"
+)
+
 // ---- frozen dependency check ----
 // A frozen module must not resolve a document-parsing, speech, cloud-storage, database,
 // observability-backend or foreign vendor-SDK dependency, directly or transitively: freezing it
@@ -401,6 +413,8 @@ lazy val llm4s = (project in file("."))
     scalafixInput,
     scalafixOutput,
     scalafixTests,
+    scalafixInput05,
+    scalafixTests05,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -647,6 +661,17 @@ lazy val llm4s = (project in file("."))
              |  coverageDisabled      // with a comment saying why it is not measured
              |Also add a codecov flag for the module in codecov.yml in the same commit.""".stripMargin
         )
+    },
+    resolveAll / aggregate := false,
+    resolveAll := {
+      // The filter is written out each time: a val shared between `.all` calls breaks the task macro.
+      val reports   = update.all(ScopeFilter(inAnyProject)).value
+      val bridges   = scalaCompilerBridgeBinaryJar.all(ScopeFilter(inAnyProject)).value
+      val baselines = mimaPreviousClassfiles.all(ScopeFilter(inAnyProject)).value
+      streams.value.log.info(
+        s"Resolved ${reports.size} projects, ${bridges.flatten.distinct.size} compiler bridge(s) and " +
+          s"${baselines.map(_.size).sum} MiMa baseline(s)"
+      )
     },
     frozenDependencyCheck / aggregate := false,
     frozenDependencyCheck := {
@@ -1948,6 +1973,10 @@ lazy val samples = (project in file("modules//samples"))
       Deps.weaverCats        % Test,
       Deps.zioTestSamples    % Test,
       Deps.zioTestSbtSamples % Test,
+      // docs/getting-started/configuration-in-code.md's ciris and zio-config examples (#2340), compiled by DocSnippets
+      // and run by ConfigurationInCodeGuideSpec. Never a dependency of a published module.
+      Deps.ciris     % Test,
+      Deps.zioConfig % Test,
       // The tapir sample (#2299), `org.llm4s.samples.tapir.TapirEndpointToolsExample`: its endpoints run on tapir's
       // in-process stub server, so it needs no network. Compile scope, like the sample.
       Deps.tapirSttpStubServer
@@ -2604,66 +2633,68 @@ lazy val docs = (project in file("modules/docs"))
     ),
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
-    Compile / sources := {
-      (media / Compile / sources).value ++
-        (core / Compile / sources).value ++
-        (rag / Compile / sources).value ++
-        (vectorstoreElasticsearch / Compile / sources).value ++
-        (vectorstoreRedis / Compile / sources).value ++
-        (knowledgegraph / Compile / sources).value ++
-        (memory / Compile / sources).value ++
-        (memoryPostgres / Compile / sources).value ++
-        (mcp / Compile / sources).value ++
-        (image / Compile / sources).value ++
-        (speech / Compile / sources).value ++
-        (ollama / Compile / sources).value ++
-        (gemini / Compile / sources).value ++
-        (anthropic / Compile / sources).value ++
-        (openai / Compile / sources).value ++
-        (azureIdentity / Compile / sources).value ++
-        (secretsVault / Compile / sources).value ++
-        (openaiCompatible / Compile / sources).value ++
-        (voyage / Compile / sources).value ++
-        (bedrock / Compile / sources).value ++
-        (jina / Compile / sources).value ++
-        (jev / Compile / sources).value ++
-        (cohere / Compile / sources).value ++
-        (watsonx / Compile / sources).value ++
-        (perplexity / Compile / sources).value ++
-        (jlama / Compile / sources).value ++
-        (providerTestkit / Compile / sources).value ++
-        (schemaDerivation / Compile / sources).value ++
-        (schemaIron / Compile / sources).value ++
-        (prompt / Compile / sources).value ++
-        (testkit / Compile / sources).value ++
-        (capabilities / Compile / sources).value ++
-        (doctor / Compile / sources).value ++
-        (repl / Compile / sources).value ++
-        (workspaceShared / Compile / sources).value ++
-        (workspaceClient / Compile / sources).value ++
-        (observability / Compile / sources).value ++
-        (observabilityPrometheus / Compile / sources).value ++
-        (observabilityMicrometer / Compile / sources).value ++
-        (traceOpentelemetry / Compile / sources).value ++
-        (agent / Compile / sources).value ++
-        (agentTestkit / Compile / sources).value ++
-        (agentCheckpointSqlite / Compile / sources).value ++
-        (agentCheckpointPostgres / Compile / sources).value ++
-        (agentMemory / Compile / sources).value ++
-        (agentTools / Compile / sources).value ++
-        (llm4sTapir / Compile / sources).value ++
-        (llm4sSttp / Compile / sources).value ++
-        (knowledgegraphNeo4j / Compile / sources).value ++
-        (llm4sEffect / Compile / sources).value ++
-        (llm4sZio / Compile / sources).value ++
-        (llm4sPekko / Compile / sources).value ++
-        (llm4sOx / Compile / sources).value ++
-        (javaApi / Compile / sources).value ++
-        (javaRag / Compile / sources).value ++
-        (reactor / Compile / sources).value ++
-        (springBootStarter / Compile / sources).value ++
-        (springAi / Compile / sources).value
-    },
+    // A flat Seq, not a chain of `++`: each `++` nests the tree one level deeper, and at 57 modules the chain overflowed
+    // scalac's stack while sbt compiled the build on CI's runners.
+    Compile / sources := Seq(
+      (media / Compile / sources).value,
+      (core / Compile / sources).value,
+      (rag / Compile / sources).value,
+      (vectorstoreElasticsearch / Compile / sources).value,
+      (vectorstoreRedis / Compile / sources).value,
+      (knowledgegraph / Compile / sources).value,
+      (memory / Compile / sources).value,
+      (memoryPostgres / Compile / sources).value,
+      (mcp / Compile / sources).value,
+      (image / Compile / sources).value,
+      (speech / Compile / sources).value,
+      (ollama / Compile / sources).value,
+      (gemini / Compile / sources).value,
+      (anthropic / Compile / sources).value,
+      (openai / Compile / sources).value,
+      (azureIdentity / Compile / sources).value,
+      (secretsVault / Compile / sources).value,
+      (openaiCompatible / Compile / sources).value,
+      (voyage / Compile / sources).value,
+      (bedrock / Compile / sources).value,
+      (jina / Compile / sources).value,
+      (jev / Compile / sources).value,
+      (cohere / Compile / sources).value,
+      (watsonx / Compile / sources).value,
+      (perplexity / Compile / sources).value,
+      (jlama / Compile / sources).value,
+      (providerTestkit / Compile / sources).value,
+      (schemaDerivation / Compile / sources).value,
+      (schemaIron / Compile / sources).value,
+      (prompt / Compile / sources).value,
+      (testkit / Compile / sources).value,
+      (capabilities / Compile / sources).value,
+      (doctor / Compile / sources).value,
+      (repl / Compile / sources).value,
+      (workspaceShared / Compile / sources).value,
+      (workspaceClient / Compile / sources).value,
+      (observability / Compile / sources).value,
+      (observabilityPrometheus / Compile / sources).value,
+      (observabilityMicrometer / Compile / sources).value,
+      (traceOpentelemetry / Compile / sources).value,
+      (agent / Compile / sources).value,
+      (agentTestkit / Compile / sources).value,
+      (agentCheckpointSqlite / Compile / sources).value,
+      (agentCheckpointPostgres / Compile / sources).value,
+      (agentMemory / Compile / sources).value,
+      (agentTools / Compile / sources).value,
+      (llm4sTapir / Compile / sources).value,
+      (llm4sSttp / Compile / sources).value,
+      (knowledgegraphNeo4j / Compile / sources).value,
+      (llm4sEffect / Compile / sources).value,
+      (llm4sZio / Compile / sources).value,
+      (llm4sPekko / Compile / sources).value,
+      (llm4sOx / Compile / sources).value,
+      (javaApi / Compile / sources).value,
+      (javaRag / Compile / sources).value,
+      (reactor / Compile / sources).value,
+      (springBootStarter / Compile / sources).value,
+      (springAi / Compile / sources).value
+    ).flatten,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     // Cross-links (#2291): a source link on every member, to the release tag (`main` for a snapshot); links out to
@@ -2918,6 +2949,126 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     )
   )
 
+// ---- comparative benchmarks (#2288) ----
+// llm4s, LangChain4j and Spring AI on the same scenarios, against one local mock OpenAI-compatible server (no API key,
+// no network). LangChain4j and Spring AI are dependencies of these projects only, and none of them is in the root
+// aggregate: `sbt test`, publishing and every published-module check (`frozenDependencyCheck`, `licenseCheck`) never
+// see them. One project per library, so each library's cold start and footprint are measured on its own classpath.
+// `sbt "benchmarksComparative/comparativeBenchmarks"` runs everything into target/comparative;
+// docs/reference/comparative-benchmarks.md has the method. Not measured for coverage: benchmark code, never tested.
+lazy val comparativeColdStart = taskKey[File](
+  "Time a fresh JVM's first chat call and count the jars, per compared library: target/comparative/coldstart.json"
+)
+lazy val comparativeColdStartRuns = settingKey[Int]("Fresh JVMs per library in comparativeColdStart")
+lazy val comparativeBenchmarks = inputKey[Unit](
+  "Cold start, the JMH scenarios (extra arguments go to JMH) and the results tables, into target/comparative"
+)
+
+// The Java projects carry no Scala library, so it is not counted in LangChain4j's or Spring AI's footprint.
+lazy val comparativeJavaSettings: Seq[Def.Setting[_]] = Seq(
+  publish / skip   := true,
+  crossPaths       := false,
+  autoScalaLibrary := false,
+  // `-parameters`: Spring AI and LangChain4j read tool parameter names by reflection.
+  javacOptions ++= Seq("--release", javaRelease, "-parameters"),
+  // No Scala sources; set for scripts/check-doc-support.sh, which checks every project's bytecode level.
+  scalacOptions ++= Seq("-java-output-version", javaRelease)
+) ++ coverageDisabled
+
+lazy val benchmarksComparativeHarness = (project in file("modules/benchmarks-comparative/harness"))
+  .settings(name := "benchmarks-comparative-harness", comparativeJavaSettings)
+
+lazy val benchmarksComparativeLlm4s = (project in file("modules/benchmarks-comparative/llm4s"))
+  .dependsOn(benchmarksComparativeHarness, openaiCompatible, agent)
+  .settings(
+    name := "benchmarks-comparative-llm4s",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled
+  )
+
+lazy val benchmarksComparativeLangchain4j = (project in file("modules/benchmarks-comparative/langchain4j"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-langchain4j",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.langchain4j, Deps.langchain4jOpenAi)
+  )
+
+lazy val benchmarksComparativeSpringAi = (project in file("modules/benchmarks-comparative/spring-ai"))
+  .dependsOn(benchmarksComparativeHarness)
+  .settings(
+    name := "benchmarks-comparative-spring-ai",
+    comparativeJavaSettings,
+    libraryDependencies ++= Seq(Deps.benchSpringAiOpenAi, Deps.benchSpringAiClientChat)
+  )
+
+lazy val benchmarksComparative = (project in file("modules/benchmarks-comparative/jmh"))
+  .dependsOn(
+    benchmarksComparativeHarness,
+    benchmarksComparativeLlm4s,
+    benchmarksComparativeLangchain4j,
+    benchmarksComparativeSpringAi
+  )
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name := "benchmarks-comparative",
+    commonSettings,
+    publish / skip := true,
+    coverageDisabled,
+    appLogging,
+    comparativeColdStartRuns := 10,
+    comparativeColdStart := {
+      val java       = javaHome.value.getOrElse(file(sys.props("java.home"))) / "bin" / "java"
+      val harnessJar = (benchmarksComparativeHarness / Compile / packageBin).value
+      def library(name: String, version: String, mainClass: String, cp: Classpath, own: File) = {
+        val jars = cp.map(_.data)
+        // The footprint is the library and what it pulls in: not the harness, not the adapter's own few classes.
+        ComparativeColdStart.Library(name, version, mainClass, jars, jars.filterNot(j => j == harnessJar || j == own))
+      }
+      ComparativeColdStart.run(
+        java,
+        Seq(harnessJar),
+        Seq(
+          library(
+            "llm4s",
+            (ThisBuild / version).value,
+            "org.llm4s.benchcmp.llm4s.Llm4sColdStart",
+            (benchmarksComparativeLlm4s / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLlm4s / Compile / packageBin).value
+          ),
+          library(
+            "langchain4j",
+            Versions.langchain4j,
+            "org.llm4s.benchcmp.langchain4j.LangChain4jColdStart",
+            (benchmarksComparativeLangchain4j / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeLangchain4j / Compile / packageBin).value
+          ),
+          library(
+            "spring-ai",
+            Versions.springAiBenchmark,
+            "org.llm4s.benchcmp.springai.SpringAiColdStart",
+            (benchmarksComparativeSpringAi / Runtime / fullClasspathAsJars).value,
+            (benchmarksComparativeSpringAi / Compile / packageBin).value
+          )
+        ),
+        comparativeColdStartRuns.value,
+        (ThisBuild / baseDirectory).value / "target" / "comparative" / "coldstart.json",
+        streams.value.log
+      )
+    },
+    comparativeBenchmarks := Def.inputTaskDyn {
+      val extra   = Def.spaceDelimited("<jmh arguments>").parsed
+      val out     = (ThisBuild / baseDirectory).value / "target" / "comparative"
+      val jmhArgs = Seq("-prof", "gc", "-rf", "json", "-rff", (out / "jmh.json").getAbsolutePath) ++ extra
+      Def.sequential(
+        comparativeColdStart,
+        (Jmh / run).toTask(jmhArgs.mkString(" ", " ", "")),
+        (Compile / runMain).toTask(s" org.llm4s.benchcmp.Report ${out.getAbsolutePath}")
+      )
+    }.evaluated
+  )
+
 lazy val gradleDemo = (project in file("modules/gradle-demo"))
   .dependsOn(core)
   .settings(
@@ -2939,14 +3090,16 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // conflict with the Scala 3-only library policy (#1126). It is not published yet; publishing it with the release
 // workflow, and listing it in the BOM, are the rest of #2330.
 //
-// The other three projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
+// The other projects are the scalafix-testkit layout: `scalafixInput` is user code compiled with SemanticDB
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
-// output. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
+// output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
+// input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
 // compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"
 lazy val scalafixVersion  = "0.12.1"
 lazy val scalafixOldLlm4s = "0.4.1"
+lazy val scalafix05Llm4s  = "0.5.1"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
   publish / skip       := true,
   mimaFailOnNoPrevious := false,
@@ -2988,8 +3141,17 @@ lazy val scalafixInput = (project in file("modules/scalafix-rules/input"))
   )
 
 lazy val scalafixOutput = (project in file("modules/scalafix-rules/output"))
-  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, anthropic, ollama)
+  .dependsOn(core, rag, agentTools, observabilityPrometheus, openaiCompatible, openai, anthropic, ollama, gemini, agent)
   .settings(scalafixTestLayout)
+
+lazy val scalafixInput05 = (project in file("modules/scalafix-rules/input-0.5"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled := true,
+    libraryDependencies ++= Seq("core", "openai-compatible", "openai", "anthropic", "gemini", "rag", "agent").map(m =>
+      "org.llm4s" %% s"llm4s-$m" % scalafix05Llm4s
+    )
+  )
 
 lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
   .dependsOn(scalafixRules)
@@ -3011,6 +3173,27 @@ lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
     // The output must compile against this checkout: that is what proves a rewrite lands on the new API.
     Test / test     := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
     Test / testOnly := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
+  )
+
+lazy val scalafixTests05 = (project in file("modules/scalafix-rules/tests-0.5"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput05 / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput05 / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput05 / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput05 / Compile / scalaVersion).value,
+    Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )
 
 // ---- relocation stubs for the 0.4.0 artifact rename ----

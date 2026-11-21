@@ -136,9 +136,12 @@ object Completion {
  * @param promptTokens Number of tokens in the prompt (input).
  * @param completionTokens Number of tokens in the completion (output).
  * @param totalTokens Total tokens (prompt + completion).
- * @param thinkingTokens Optional number of tokens used for thinking/reasoning.
- *                       Present when using reasoning modes with Claude or o1/o3 models.
- *                       These tokens count toward billing but are separate from completion tokens.
+ * @param thinkingTokens Optional number of tokens used for thinking/reasoning, billed as output.
+ *                       They are never part of `completionTokens`: a provider that counts them inside
+ *                       its completion count (OpenAI's `reasoning_tokens`, and servers that copy its
+ *                       format) has them subtracted by its client, while Gemini and xAI already count
+ *                       them apart. `totalTokens` is kept as the provider reported it.
+ *                       [[totalOutputTokens]] is the two added together.
  * @param cachedTokens Optional number of tokens served from the provider's prompt cache (cache read).
  *                     When present, these tokens are billed at the cheaper cache-read rate.
  * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
@@ -167,7 +170,7 @@ final case class TokenUsage private (
     copy(cacheCreationTokens = cacheCreationTokens)
 
   /**
-   * Total output tokens including thinking.
+   * Total output tokens: the completion plus any thinking, which `completionTokens` never includes.
    *
    * For billing purposes, thinking tokens are typically billed at the same rate as output tokens.
    */
