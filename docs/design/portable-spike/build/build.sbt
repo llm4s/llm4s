@@ -90,6 +90,7 @@ val portableCoreFiles = Seq(
   "llmconnect/model/ReasoningEffort.scala",
   "llmconnect/model/RequestAdjustment.scala",
   "llmconnect/model/ResponseFormat.scala",
+  "llmconnect/model/Thinking.scala",
   "llmconnect/model/ThinkingBlock.scala",
   "llmconnect/model/UsageSummary.scala",
   "toolapi/Backoff.scala",

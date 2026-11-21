@@ -39,8 +39,8 @@ class CrossPlatformJsonSpec extends AnyFlatSpec with Matchers {
   }
 
   "ReasoningEffort" should "round-trip every level" in {
-    val levels: Seq[ReasoningEffort] =
-      Seq(ReasoningEffort.None, ReasoningEffort.Low, ReasoningEffort.Medium, ReasoningEffort.High)
+    val levels: Seq[ReasoningEffort] = ReasoningEffort.values
+    levels should not be empty
     levels.map(l => read[ReasoningEffort](write[ReasoningEffort](l))) shouldBe levels
   }
 
