@@ -41,6 +41,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
+### Core
+
+- **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
+  moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
+- **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`
+  starting with `[HISTORY_SUMMARY]`, so `TokenWindow` no longer pins a message that merely quotes the marker [#2505](https://github.com/llm4s/llm4s/issues/2505).
+
+### Agent harness
+
+- **Added** `ContainerisedWorkspace(commandCgroups = true)`: on Linux each workspace command runs in a cgroup of its own and is
+  killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
+- **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
+  now cancels it on the runner too; it used to keep running, with any daemon it started [#2656](https://github.com/llm4s/llm4s/pull/2656).
+
 ### Build & tooling
 
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
@@ -49,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its CycloneDX SBOM and the signatures' checksums are no longer uploaded to Maven Central (SBOMs: GitHub Release); IDEs read the sources jar ([release guide](docs/reference/release.md#what-is-published-to-maven-central)).
 - **Changed** CI costs fewer runner minutes: each module's tests run once (its coverage leg, or `Test (other modules)`), drafts run nothing, a pull request skips the test jobs its change cannot affect (a docs-only one runs the suites tagged `DocsSpec`), a push to main leaves Windows, performance, ScalaDoc and the consumer and Spring jobs to a nightly run, the consumer and Spring builds share jobs, the agent coverage leg and the other-modules tests reuse the nightly build's compiled output, and benchmarks run weekly ([testing guide](docs/reference/testing-guide.md)).
   `sbt testPerformance` runs only core and agent; MiMa and the config-policy CLIs moved into Quick Checks and the tests.
+- **Added** `llm4s-kotlin-api` publishes from its own workflow (`publish-kotlin.yml`), which a release calls and which can be run by hand for a tag whose Kotlin publish failed: it builds the tag's code with the current upload rules ([release guide](docs/reference/release.md#re-triggering-a-failed-release)).
 - **Fixed** `llm4s-reactor` was never published (it was missing from the root aggregate, so 0.6.0 lacks it); `publishedArtifactsCheck` now fails on a published module outside the aggregate.
 
 ## [0.6.0] - 2026-11-21

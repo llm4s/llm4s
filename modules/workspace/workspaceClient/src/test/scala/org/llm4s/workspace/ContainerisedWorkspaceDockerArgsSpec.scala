@@ -66,4 +66,19 @@ class ContainerisedWorkspaceDockerArgsSpec extends AnyFlatSpec with Matchers {
       .dockerRunArgs("ws-test", 18080, 8080, "/tmp/ws", "img", Set("sh"), Some(WorkspaceSandboxConfig.Permissive))
       .isLeft shouldBe true
   }
+
+  it should "give the container a writable cgroup for a cgroup per command only when asked (#2008)" in {
+    val asked = ContainerisedWorkspace
+      .dockerRunArgs("ws-test", 18080, 8080, "/tmp/ws", "img", Set.empty, None, commandCgroups = true)
+      .fold(fail(_), identity)
+    asked.slice(7, 12) shouldBe Seq(
+      "--cgroupns=private",
+      "--cap-add",
+      "SYS_ADMIN",
+      "--security-opt",
+      "apparmor=unconfined"
+    )
+    asked.last shouldBe "img"
+    args(Set.empty).fold(fail(_), identity).exists(a => a.contains("cgroup") || a.contains("SYS_ADMIN")) shouldBe false
+  }
 }

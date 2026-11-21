@@ -431,8 +431,14 @@ help.
     the run. `publish-kotlin` is safe to re-run at any step: the upload exits 0 without uploading when the version
     is already published or publishing, and follows a deployment an earlier attempt left validating. When it goes
     green, `github-release`, then `docs` and `sbom`, run as usual.
-  - **If the fix needs a change to the build** (`modules/kotlin-api`, the workflow, the scripts), it cannot be in
-    version X: the workflow builds the tagged commit, and Maven Central is immutable. Land the fix on `main`;
+  - **If the fix is to the publishing, not to the code** (the upload rules in `scripts/publish-kotlin-api.sh` or
+    `scripts/check-kotlin-publication.sh`, or a step of `.github/workflows/publish-kotlin.yml`), land it on `main`
+    and run **Actions → Publish Kotlin API → Run workflow** from `main` with the tag (`gh workflow run
+    publish-kotlin.yml -f tag=vX.Y.Z`). It builds the tag's code with `main`'s workflow and scripts; **Re-run failed
+    jobs** would use the tag's copies. It does not run `github-release`, `docs` or `sbom`: once it is green, release
+    those by hand, as below, skipping what already exists.
+  - **If the fix needs a change to the code** (`modules/kotlin-api`, or anything it compiles against), it cannot be
+    in version X: the workflow builds the tagged commit, and Maven Central is immutable. Land the fix on `main`;
     `llm4s-kotlin-api` first ships with the next patch version. Version X then stays without it, and its
     `llm4s-bom` still lists `org.llm4s:llm4s-kotlin-api:X`, which will never resolve: a Gradle build that imports
     the X BOM and declares the Kotlin artifact fails, so the X Release notes must say to use the next version for

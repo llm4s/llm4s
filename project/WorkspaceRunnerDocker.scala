@@ -81,6 +81,9 @@ object WorkspaceRunnerDocker {
     )
   )
 
+  /** The image's entry point, before the runner's start script. */
+  val EntryPoint: String = "/usr/local/bin/llm4s-entrypoint"
+
   /** The runner JVM's java.io.tmpdir: owner-only, never granted to a command (design §4.39). */
   val RunnerTmpDir: String = "/var/tmp/llm4s-runner"
 
@@ -92,6 +95,10 @@ object WorkspaceRunnerDocker {
     dockerBaseImage      := "eclipse-temurin:21-jdk",
     Docker / version     := version.value.replace('+', '-'),
     Docker / mappings += (baseDirectory.value / "src" / "main" / "c" / "llm4s-confine.c") -> "/opt/docker/confine/llm4s-confine.c",
+    // The entry point (design §4.39, #2008): makes the container's cgroup writable when it was started for a cgroup per
+    // command, then drops CAP_SYS_ADMIN and starts the runner
+    Docker / mappings += (baseDirectory.value / "src" / "main" / "sh" / "llm4s-entrypoint.sh") -> "/opt/docker/confine/llm4s-entrypoint.sh",
+    dockerEntrypoint := EntryPoint +: dockerEntrypoint.value,
     // The runner grants commands /tmp only when its JVM keeps nothing there (design §4.39): no attach mechanism (its
     // trigger file and socket are in /tmp, so a command could otherwise attach to the unconfined runner), no shared
     // perf-data file, and its own temporary files (git's empty directory) in a runner-private directory, made below.
@@ -100,7 +107,10 @@ object WorkspaceRunnerDocker {
       "-J-XX:+PerfDisableSharedMem",
       s"-J-Djava.io.tmpdir=$RunnerTmpDir"
     ),
-    dockerCommands ++= devToolingCommands :+ Cmd("RUN", s"mkdir -p -m 0700 $RunnerTmpDir"),
+    dockerCommands ++= devToolingCommands ++ Seq(
+      Cmd("RUN", s"mkdir -p -m 0700 $RunnerTmpDir"),
+      Cmd("RUN", s"install -m 0755 /opt/docker/confine/llm4s-entrypoint.sh $EntryPoint")
+    ),
     dockerLabels ++= Map(
       "org.opencontainers.image.title"       -> "llm4s workspace-runner",
       "org.opencontainers.image.source"      -> "https://github.com/llm4s/llm4s",

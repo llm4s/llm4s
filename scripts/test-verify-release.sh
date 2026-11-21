@@ -8,7 +8,8 @@
 # The cases cover each kind of line `sbt listPublishedArtifacts` prints: `artifact` (POM, jar and the pointer javadoc
 # jar), `gradle` (the Gradle-built llm4s-kotlin-api: POM, jar, javadoc jar, and a POM that depends on llm4s-java-api_3 at the release's version, #1494),
 # `bom` (a POM with <dependencyManagement>) and `stub` (a POM with <relocation>); for the sbt-published ones, the .asc,
-# .md5 and .sha1 beside each file, and no checksum of a signature or CycloneDX SBOM.
+# .md5 and .sha1 beside each file, and no checksum of a signature or CycloneDX SBOM. The pointer and "nothing more"
+# rules hold from 0.6.1; 0.6.0 and earlier, uploaded before them, are checked without them.
 #
 # `--attestations` (#2305) is tested against a fake `gh` that accepts `gh attestation verify <target> -R llm4s/llm4s
 # --signer-workflow llm4s/llm4s/.github/workflows/release.yml` for a target named in a fixture list and refuses any
@@ -61,7 +62,7 @@ exit 1
 FAKE
 chmod +x "$WORK/bin/gh"
 
-VERSION=0.5.0
+VERSION=0.6.1   # the first release uploaded under the current rules (#2667); 0.6.0 is tested at the end
 
 # pointer_jar <jar> <README.md text>: a javadoc jar holding a README.md, as project/JavadocPointer.scala writes one
 pointer_jar() {
@@ -237,6 +238,38 @@ cp -R "$WORK/good" "$WORK/sbom"
 echo '{}' > "$WORK/sbom/org/llm4s/llm4s-bom/$VERSION/llm4s-bom-$VERSION-cyclonedx.json"
 run sbom "$WORK/sbom"
 expect "an SBOM on Central is refused" 1 "llm4s-bom-$VERSION-cyclonedx.json was uploaded"
+
+# ---- 0.6.0 and earlier predate the pointer javadoc jar and the slimmer upload ---------------------------------------------
+NEW_VERSION="$VERSION"
+VERSION=0.6.0
+CORE_JAVADOC="org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION-javadoc.jar"
+fixture "$WORK/old"
+rm "$WORK/old/$CORE_JAVADOC"
+echo scaladoc > "$WORK/old/$CORE_JAVADOC"
+head -c 60000 /dev/zero >> "$WORK/old/$CORE_JAVADOC"
+echo x > "$WORK/old/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.jar.asc.md5"
+echo x > "$WORK/old/org/llm4s/core_3/$VERSION/core_3-$VERSION.pom.asc.md5"
+echo '{}' > "$WORK/old/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION-cyclonedx.json"
+run old "$WORK/old"
+expect "0.6.0's full Scaladoc javadoc jar, signature checksums and SBOMs are accepted" 0 "All 4 coordinates resolve at 0.6.0."
+
+cp -R "$WORK/old" "$WORK/oldnodoc"
+rm "$WORK/oldnodoc/$CORE_JAVADOC"
+run oldnodoc "$WORK/oldnodoc"
+expect "0.6.0 still needs a javadoc jar" 1 "javadoc jar HTTP 404"
+
+cp -R "$WORK/old" "$WORK/oldnoasc"
+rm "$WORK/oldnoasc/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.pom.asc"
+run oldnoasc "$WORK/oldnoasc"
+expect "0.6.0 still needs every signature" 1 "llm4s-core_3-$VERSION.pom.asc HTTP 404"
+
+# A pre-release of 0.6.1 is uploaded under the current rules.
+VERSION=0.6.1-RC1
+fixture "$WORK/rc"
+echo x > "$WORK/rc/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.jar.asc.md5"
+run rc "$WORK/rc"
+expect "0.6.1-RC1 is held to the current rules" 1 "llm4s-core_3-$VERSION.jar.asc.md5 was uploaded"
+VERSION="$NEW_VERSION"
 
 # ---- the list sbt prints feeds the gradle lines through ---------------------------------------------------------------
 if grep -qF "'^(artifact|gradle|bom|stub) '" "$SCRIPT"; then
