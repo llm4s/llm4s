@@ -68,7 +68,7 @@ final private[runner] class WebSocketCommandExecutor(
 
       case Right(prepared) =>
         // the command's scratch directory, on every path where it never starts
-        def discard(): Unit = prepared.scratch.foreach(_.delete())
+        def discard(): Unit = prepared.discard()
         // a client that has flooded its cancellations takes no new commands until they age out: the bound holds
         // without ever forgetting a cancellation a waiting command needs
         if (cancelledEarly.full) {
@@ -85,7 +85,8 @@ final private[runner] class WebSocketCommandExecutor(
             owner,
             cmd.commandId,
             prepared.builder,
-            () => !cancelledEarly.remove(cmd.commandId) && connected()
+            () => !cancelledEarly.remove(cmd.commandId) && connected(),
+            prepared.cgroup
           ) match {
             case Left(notStarted) if notStarted.code == ProcessRegistry.NotStarted =>
               // cancelled, or its connection closed, while it waited at the gate: it never started (exit 143)
@@ -285,10 +286,10 @@ final private[runner] class WebSocketCommandExecutor(
       .flatMap(_ => exitCodePromise.future)
       .onComplete {
         case Success(_) if survivedKill.get() =>
-          prepared.scratch.foreach(_.delete()) // reported when the kill failed
+          prepared.discard() // reported when the kill failed
         case Success(rawExitCode) =>
           val unconfinable = prepared.scratch.flatMap(_.unavailable(rawExitCode))
-          prepared.scratch.foreach(_.delete())
+          prepared.discard()
           unconfinable match {
             case Some(reason) =>
               // the helper could not confine it (status 125 and its status file): the program never ran
@@ -328,7 +329,7 @@ final private[runner] class WebSocketCommandExecutor(
               }
           }
         case Failure(ex) =>
-          prepared.scratch.foreach(_.delete())
+          prepared.discard()
           fail(
             Option(ex.getMessage).getOrElse("Command execution failed"),
             "EXECUTION_FAILED",
