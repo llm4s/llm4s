@@ -239,7 +239,7 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
 than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
 in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
-signed with a throwaway key, never uploaded). A release is then 952 files and about 27 MB from sbt (58 modules, the BOM
+signed with a throwaway key, never uploaded). A release is then 968 files and about 27 MB from sbt (59 modules, the BOM
 and 5 relocation stubs) plus 20 files from `llm4s-kotlin-api`, so **one release a month fits under the limit, and two do
 not**: a second release in a month (a patch release included) needs the limit raised by Sonatype first.
 `scripts/verify-release.sh` checks the published result: each file's `.asc`, `.md5` and `.sha1`, and no `.asc.md5` or
