@@ -63,7 +63,8 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 ## Adding a module
 
 Each step below is easy to miss because a missing one does not fail the build (step 3 now fails Quick Checks' `docsSourcesCheck`).
-1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit.
+1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit. CI runs a
+   module's tests only in its coverage leg, or, with no floor, in the `test` job's `TEST_MODULES`; `scripts/check-coverage-legs.sh` fails a module in neither.
 2. Add a migration note in the CHANGELOG and docs.
 3. Add a published module to the `docs` project's `dependsOn` and source list in `build.sbt`, or its Scaladoc is never generated; `sbt docsSourcesCheck` fails without it.
 4. Register it in `hooks/pre-commit`.
@@ -488,7 +489,8 @@ tests start using the tag joins that list (`scripts/check-performance-tests.sh` 
 `LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
 on a catastrophic (quadratic) regression.
 
-CI's Windows job runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
+On Linux CI runs each module's tests once, in its coverage leg or in the `test` job (`TEST_MODULES`).
+CI's Windows job (pull requests and the nightly run, not pushes to main) runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
 separators, permissions, deleting or moving open files, processes and their arguments, SQLite files
 and locks, line endings written to files, temp files, the user's home), listed in
 `project/PlatformTests.scala` as `wholeModules` (every suite runs) and `suites` (named suites of

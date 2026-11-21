@@ -81,6 +81,33 @@ expect_fail "a module dropped from its leg fails" "has a coverage floor .* but i
 
 fresh
 mutate <<'RB'
+test_env = wf['jobs']['test']['env']
+test_env['TEST_MODULES'] = test_env['TEST_MODULES'].split.drop(1).join(' ')
+RB
+expect_fail "a module dropped from the test job's list fails" "is aggregated by .* but no job runs its tests"
+
+fresh
+mutate <<'RB'
+test_env = wf['jobs']['test']['env']
+test_env['TEST_MODULES'] = "#{test_env['TEST_MODULES']} #{legs[0]['modules'].first}"
+RB
+expect_fail "a module in a leg and in the test job's list fails" "its tests would run twice"
+
+fresh
+mutate <<'RB'
+test_env = wf['jobs']['test']['env']
+test_env['TEST_MODULES'] = "#{test_env['TEST_MODULES']} noSuchModule"
+RB
+expect_fail "a test-job module that is not a project fails" "noSuchModule, in test's TEST_MODULES, is not a project"
+
+fresh
+mutate <<'RB'
+wf['jobs']['test']['env'].delete('TEST_MODULES')
+RB
+expect_fail "a test job without TEST_MODULES fails" "has no TEST_MODULES env"
+
+fresh
+mutate <<'RB'
 legs[1]['modules'] << legs[0]['modules'].first
 RB
 expect_fail "a module in two legs fails" "is in more than one coverage leg"

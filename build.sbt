@@ -118,7 +118,7 @@ addCommandAlias(
 // (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
 // the modules that have them: a `testOnly` across the whole build compiled every module's tests to run tests in two.
 // scripts/check-performance-tests.sh (Quick Checks) fails when a test elsewhere uses the tag, so a module whose tests
-// start using it is added here. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
+// start using it is added here. CI runs it in the ubuntu-only `Performance tests` job (pull requests that change core or agent, and nightly).
 lazy val PerformanceTestTag      = "org.llm4s.tags.PerformanceTest"
 lazy val performanceTestProjects = Seq("core", "agent")
 addCommandAlias(

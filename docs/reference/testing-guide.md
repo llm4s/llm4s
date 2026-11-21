@@ -221,8 +221,9 @@ it should "read values in time linear in the input" taggedAs PerformanceTest in 
 platform, so running these tests on Windows and under coverage instrumentation multiplied their
 cost - most of each CI test job's time - without adding a signal. `sbt testPerformance` runs only
 the tagged tests, in the modules that have them (`performanceTestProjects` in `build.sbt`: core and agent;
-`scripts/check-performance-tests.sh` fails Quick Checks when a test elsewhere uses the tag); CI runs it in the ubuntu-only `Performance tests` job on every
-pull request, in parallel with the other test jobs, and nightly (`performance-nightly.yml`).
+`scripts/check-performance-tests.sh` fails Quick Checks when a test elsewhere uses the tag); CI runs it in the ubuntu-only `Performance tests` job, in parallel with
+the other test jobs, on a pull request that changes core, agent or the build (`scripts/ci-changes.sh`) and in CI's nightly
+run on main.
 `sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
 exclusion applies to `test`, not to a suite named explicitly.
 
@@ -233,7 +234,8 @@ regression without a bound tight enough to flake on a slow runner.
 
 ### Platform tests (`sbt testPlatform`)
 
-CI's ubuntu `Test` job runs every test. Its Windows leg runs `sbt testPlatform`: only the tests of
+On Linux, CI runs every module's tests once: in its coverage leg, or in `Test (other modules)` for the
+modules no leg measures. The `Test (Windows)` job runs `sbt testPlatform`: only the tests of
 behaviour that differs between platforms, because pure JVM logic runs on the same JVM on both and a
 second run of it on Windows cost some 15 minutes a pull request without adding a signal. What
 differs: file paths, separators, permissions and links; deleting or moving a file that is still open
@@ -365,11 +367,20 @@ sbt testMcpReference
 
 If your test fails in CI but not locally, it is usually a **non-determinism issue**.
 
-The jobs of `.github/workflows/ci.yml` start together; none waits for another. `Quick Checks` (formatting,
-scalafix, compile and the build's policy checks) runs beside `Test` (ubuntu and Windows), `Performance tests`,
-the four `Code Coverage (<leg>)` jobs and the rest, and `All Tests Pass`, the check a merge needs, waits for all
-of them. Coverage floors are enforced per module in the coverage legs; see
+The jobs of `.github/workflows/ci.yml` start together once the few-second `Changes` job has decided what a pull
+request needs; none waits for another. `Quick Checks` (formatting, scalafix, compile and the build's policy checks)
+runs beside the four `Code Coverage (<leg>)` jobs, which run each measured module's tests, `Test (other modules)`,
+which runs the tests of the modules no leg measures (each module's tests run in exactly one of them,
+`scripts/check-coverage-legs.sh`), `Test (Windows)`, `Performance tests` and the rest, and `All Tests Pass`, the check a
+merge needs, waits for all of them. Coverage floors are enforced per module in the coverage legs; see
 [Test Coverage](test-coverage#what-ci-runs).
+
+Not every event runs every job. A draft pull request runs none (mark it ready for review to start CI), and
+`Performance tests` runs on a pull request only when it changes core, agent or the build (`scripts/ci-changes.sh`).
+A push to main runs what main's own results need - Quick Checks, the coverage legs (Codecov compares pull requests
+with main), the other modules' tests and the integration tiers - and leaves `Test (Windows)`, `Performance tests`,
+`ScalaDoc` and the consumer and Spring jobs, which each pull request already ran, to a nightly run of the whole
+workflow on main. To run every job on a branch, dispatch it: `gh workflow run ci.yml --ref <branch> -f tier=none`.
 
 ---
 
