@@ -86,6 +86,9 @@ jobs:
         env:
           SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
 
+      # `ci-release` runs `publishSigned` into target/sona-staging and `sonaRelease`, which uploads the bundle the build's
+      # `sonaBundle` makes: no checksums of the signatures and no SBOMs, checked file by file and capped at Sonatype's
+      # 1,000 files a month (project/CentralBundle.scala). The SBOMs go on the GitHub Release (the `sbom` job).
       - name: Release
         run: sbt ci-release
         env:

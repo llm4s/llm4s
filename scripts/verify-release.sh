@@ -15,6 +15,11 @@
 # the POM must exist and must carry a <relocation>. v0.4.0 shipped without its stubs and nobody noticed
 # until a user could not resolve `org.llm4s:core:0.4.0` (#1150); this is the check that would have said so.
 #
+# Every file of an sbt-published coordinate (the POM, and for an `artifact` the jar, sources jar and javadoc jar) must
+# have its .asc, .md5 and .sha1, and nothing more: no checksum of a signature (`.pom.asc.md5`) and no
+# `-cyclonedx.json` SBOM, which Sonatype's 1,000-files-a-month limit has no room for (project/CentralBundle.scala; the
+# SBOMs are on the GitHub Release). Only the POM's and the jar's extras are probed, not every file's.
+#
 # Maven Central's index can lag a successful publish by a while. A 404 straight after the release job
 # finishes is not proof of a miss: re-run before concluding one.
 #
@@ -92,6 +97,22 @@ while read -r kind id; do
         problems="javadoc jar has no README.md pointing to https://llm4s.org/scaladoc/"
       fi
     fi
+  fi
+  # What Central requires beside each file, and the extras a release no longer uploads (sbt-published coordinates).
+  if [ "$kind" != gradle ] && [ -z "$problems" ]; then
+    stem="$BASE/$id/$VERSION/$id-$VERSION"
+    files=(".pom")
+    [ "$kind" = artifact ] && files+=(".jar" "-sources.jar" "-javadoc.jar")
+    for f in "${files[@]}"; do
+      for c in .asc .md5 .sha1; do
+        ccode="$(status "$stem$f$c")"
+        [ "$ccode" = 200 ] || problems="${problems:+$problems; }$id-$VERSION$f$c HTTP $ccode"
+      done
+    done
+    for extra in ".pom.asc.md5" "-cyclonedx.json"; do
+      [ "$kind" = artifact ] && [ "$extra" = ".pom.asc.md5" ] && extra=".jar.asc.md5"
+      [ "$(status "$stem$extra")" = 404 ] || problems="${problems:+$problems; }$id-$VERSION$extra was uploaded"
+    done
   fi
   if [ -n "$problems" ]; then
     printf '  MISSING  %-8s %-40s %s\n' "$kind" "$id" "$problems"

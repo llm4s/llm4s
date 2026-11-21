@@ -626,6 +626,14 @@ lazy val llm4s = (project in file("."))
       CompatibilityMatrix.write((ThisBuild / baseDirectory).value, streams.value.log)
       (samples / Compile / runMain).toTask(" org.llm4s.samples.docs.CapabilityMatrixMain").value
     },
+    // The bundle `sonaRelease` (the last step of `sbt ci-release`) uploads: the staging directory `publishSigned` wrote,
+    // without the checksums of the `.asc` signatures, checked file by file and capped at Sonatype's monthly limit
+    // (project/CentralBundle.scala). Replaces sbt's own `sonaBundle`, which zipped the directory as it was.
+    ThisBuild / sonaBundle := CentralBundle.make(
+      (ThisBuild / Keys.stagingDirectory).value,
+      (ThisBuild / baseDirectory).value / "target" / "sona-bundle" / "bundle.zip",
+      streams.value.log
+    ),
     // Every published module that ships a jar ships a javadoc jar, and it is the small pointer to the site's Scaladoc,
     // not the module's own Scaladoc (project/JavadocPointer.scala).
     javadocJarCheck / aggregate := false,

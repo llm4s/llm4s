@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
-- **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/),
-  not its own Scaladoc (165 MB of 0.6.0's 193 MB upload); IDEs read the sources jar ([release guide](docs/reference/release.md)).
+- **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/), not its own Scaladoc, and
+  its CycloneDX SBOM and the signatures' checksums are no longer uploaded to Maven Central (SBOMs: GitHub Release); IDEs read the sources jar ([release guide](docs/reference/release.md#what-is-published-to-maven-central)).
 
 ## [0.6.0] - 2026-11-21
 

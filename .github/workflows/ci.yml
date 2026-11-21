@@ -1781,6 +1781,20 @@ jobs:
         # provider modules, so all of them must be in the local repository, not just llm4s-java-api.
         run: scripts/retry-on-transient-network.sh sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
 
+      # The Maven Central bundle `sbt ci-release` uploads, built as the release builds it but signed with a throwaway key
+      # and never uploaded: `publishSigned` at a release version writes the local staging directory, and `sonaBundle`
+      # (project/CentralBundle.scala) zips it, failing on a checksum of a signature, a CycloneDX SBOM, a file without its
+      # .asc, .md5 and .sha1, more than 16 files for one artifact, or more than Sonatype's 1,000 files a month in all.
+      # The classes are already compiled by the step above.
+      - name: Dry-run the Maven Central bundle
+        run: |
+          set -o pipefail
+          export GNUPGHOME="$(mktemp -d)"
+          gpg --batch --pinentry-mode loopback --passphrase ci-dry-run \
+            --quick-gen-key 'llm4s CI dry run <ci-dry-run@llm4s.invalid>' rsa3072 sign never
+          PGP_PASSPHRASE=ci-dry-run sbt 'set ThisBuild / version := "0.1.0"' 'set ThisBuild / isSnapshot := false' \
+            publishSigned sonaBundle 2>&1 | tee bundle.log | grep -E '\[error\]|Maven Central bundle'
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
