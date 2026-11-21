@@ -47,13 +47,12 @@ The Maven Central artifacts are signed with this OpenPGP key:
 | Created / expires | 2025-04-03 / 2028-04-02 |
 | Published on | [keyserver.ubuntu.com](https://keyserver.ubuntu.com/pks/lookup?op=index&search=0x2246615CFDEAD8F450C085552550305A740BC5E3&fingerprint=on), [keys.openpgp.org](https://keys.openpgp.org/search?q=2246615CFDEAD8F450C085552550305A740BC5E3) |
 
-The 0.5.0 and 0.5.1 jars on Maven Central verify against it. keys.openpgp.org serves the key without its user
-ID until the address is confirmed there, so `gpg` reports "no user ID" when it imports from that server alone;
-the fingerprint is what to check.
+The 0.5.0, 0.5.1 and 0.6.0 jars and POMs on Maven Central verify against it. Both keyservers serve it with its user
+ID; the fingerprint is what to check.
 
-<!-- TODO(maintainer): confirm on the release key's owner's side that the fingerprint above is the key the release
-     workflow's PGP_SECRET holds, confirm the user ID on keys.openpgp.org, and update this table whenever the key is
-     rotated or its expiry is extended. -->
+<!-- Maintainers: the release workflow's PGP_SECRET holds this key (the 0.6.0 artifacts, signed by release run
+     44886740482, verify against it), and its user ID is confirmed on keys.openpgp.org. Update this table whenever
+     the key is rotated or its expiry is extended. -->
 
 ## Check a jar's PGP signature
 
