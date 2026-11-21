@@ -53,12 +53,15 @@ public final class JUsageSummary {
     return inputTokens;
   }
 
-  /** Completion tokens received, across every model. */
+  /** Output tokens received, across every model, thinking included. */
   public long outputTokens() {
     return outputTokens;
   }
 
-  /** Extended-thinking tokens, across every model; zero where a provider reports none. */
+  /**
+   * Thinking/reasoning tokens, across every model: the part of {@code outputTokens} that was thinking; zero
+   * where a provider reports none.
+   */
   public long thinkingTokens() {
     return thinkingTokens;
   }

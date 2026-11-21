@@ -31,12 +31,12 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
 
   test("OpenAIConfig.load returns Left when api key missing") {
     val res =
-      OpenAIConfig.fromValues("gpt-4o", Secret(""), None, DEFAULT_OPENAI_BASE_URL)
+      OpenAIConfig.fromValues("gpt-4o", Secret(""), DEFAULT_OPENAI_BASE_URL)
     res.isLeft shouldBe true
   }
 
   test("OpenAIConfig.fromValues constructs an OpenAI config") {
-    val openAi = OpenAIConfig.fromValues("gpt-4o", Secret("sk"), None, DEFAULT_OPENAI_BASE_URL).value
+    val openAi = OpenAIConfig.fromValues("gpt-4o", Secret("sk"), DEFAULT_OPENAI_BASE_URL).value
     openAi shouldBe a[OpenAIConfig]
   }
 

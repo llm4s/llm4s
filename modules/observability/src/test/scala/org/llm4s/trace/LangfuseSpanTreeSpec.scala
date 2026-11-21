@@ -131,6 +131,28 @@ class LangfuseSpanTreeSpec extends AnyFlatSpec with Matchers with OptionValues {
     messages.map(_("parentObservationId").str).toSet shouldBe Set(parentRun.spanId, childRun.spanId)
   }
 
+  it should "report a model call's output as billed: the completion plus the thinking it leaves out" in {
+    def output(usage: ujson.Obj): ujson.Value = {
+      val tracing = new Recording
+      tracing.traceEvent(
+        agentEvent(
+          "agent.model_call_completed",
+          ujson.Obj("agent" -> "lead", "model" -> "o3", "usage" -> usage),
+          TraceSpan(parentRun.spanFor("event:1"), Some(parentRun), t0),
+          t0
+        )
+      )
+      lone(tracing.ofType("generation-create"))("usage")("output")
+    }
+    output(
+      ujson.Obj("promptTokens" -> 81, "completionTokens" -> 18, "totalTokens" -> 145, "thinkingTokens" -> 46)
+    ).num shouldBe 64
+    output(
+      ujson.Obj("promptTokens" -> 3, "completionTokens" -> 2, "totalTokens" -> 5, "thinkingTokens" -> ujson.Null)
+    ).num shouldBe 2
+    output(ujson.Obj("promptTokens" -> 3)) shouldBe ujson.Null
+  }
+
   it should "place any other placed event in its trace, under its parent" in {
     val tracing = new Recording
     val placed  = TraceSpan(parentRun.spanFor("e"), Some(parentRun), t0)

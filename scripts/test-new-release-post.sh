@@ -35,6 +35,7 @@ has "its breaking changes under Upgrading" "$POST" '`ToolOutcome.Success` takes 
 has "link to the CHANGELOG section" "$POST" 'https://github.com/llm4s/llm4s/blob/v0.5.1/CHANGELOG.md#051---2026-10-15'
 has "link to the GitHub release" "$POST" 'https://github.com/llm4s/llm4s/releases/tag/v0.5.1'
 has "relative CHANGELOG links point at GitHub at the tag" "$POST" '](https://github.com/llm4s/llm4s/blob/v0.5.1/docs/reference/migration.md#multimodal-content-parts-1913)'
+has "link to the support policy under Upgrading (#2289)" "$POST" '[support policy](/reference/support-policy)'
 ! grep -qE '\]\(docs/' "$POST"; expect "no repository-relative link is left" 0 $?
 ! grep -q '^```scala' "$POST"; expect "no Scala block: the dependency line is fenced as sbt" 0 $?
 

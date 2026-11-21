@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.llm4s.error.LLMError
 import org.llm4s.javaapi.JCompletionOptions
 import org.llm4s.javaapi.JReasoningEffort
+import org.llm4s.javaapi.JThinking
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.AssistantMessage
 import org.llm4s.llmconnect.model.Citation
@@ -44,11 +45,11 @@ class OptionsAndClientDslTest {
             presencePenalty = 0.5
             frequencyPenalty = -0.5
             reasoning = JReasoningEffort.HIGH
-            budgetTokens = 4096
+            thinking = JThinking.budget(4096)
         }
         val java = JCompletionOptions.builder()
             .temperature(0.2).topP(0.9).maxTokens(200).presencePenalty(0.5).frequencyPenalty(-0.5)
-            .reasoning(JReasoningEffort.HIGH).budgetTokens(4096)
+            .reasoning(JReasoningEffort.HIGH).thinking(JThinking.budget(4096))
             .build()
         assertEquals(java, dsl)
     }

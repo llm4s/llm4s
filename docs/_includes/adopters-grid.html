@@ -1,0 +1,22 @@
+{%- comment -%}
+  Cards for the organisations in _data/adopters.yml (mirrors ADOPTERS.md). No logos.
+{%- endcomment -%}
+<ul class="lp-showcase">
+  {%- for a in site.data.adopters %}
+  <li class="lp-card lp-card--project">
+    <p class="lp-card__repo">Adopter since {{ a.since }}</p>
+    <h3><a href="{{ a.url }}">{{ a.name }}</a></h3>
+    <p>{{ a.use_case }}.</p>
+    {%- if a.contribution %}
+    <p><strong>Builds LLM4S too.</strong> {{ a.contribution }}</p>
+    {%- endif %}
+    {%- if a.team %}
+    <p>{% for m in a.team %}{% if m.url %}<a href="{{ m.url }}">{{ m.name }}</a>{% else %}{{ m.name }}{% endif %}{% if m.role %} ({{ m.role }}){% endif %}{% unless forloop.last %}, {% endunless %}{% endfor %}</p>
+    {%- endif %}
+    <p class="lp-tags">{% for m in a.modules %}<span>{{ m }}</span>{% endfor %}</p>
+    {%- if a.story %}
+    <p><a href="{{ a.story | relative_url }}">Read their story</a></p>
+    {%- endif %}
+  </li>
+  {%- endfor %}
+</ul>

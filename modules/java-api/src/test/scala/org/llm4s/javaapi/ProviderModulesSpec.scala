@@ -10,6 +10,7 @@ import java.net.{ URL, URLClassLoader }
  * The provider modules are optional dependencies of `llm4s-java-api` (#1496): a builder or starter provider whose
  * module is absent fails with a `ConfigurationError` naming the artifact to add.
  */
+@org.llm4s.tags.DocsSpec
 class ProviderModulesSpec extends AnyFlatSpec with Matchers {
 
   private val allModules = Seq(

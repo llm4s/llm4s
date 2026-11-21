@@ -58,7 +58,8 @@ trait MetricsRecording {
       case Right(value) =>
         metrics.observeRequest(provider, model, Outcome.Success, duration)
         extractUsage(value).foreach { usage =>
-          metrics.addTokens(provider, model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+          // output tokens are what the provider billed as output: the completion plus any thinking
+          metrics.addTokens(provider, model, usage.promptTokens.toLong, usage.totalOutputTokens.toLong)
         }
         // Record cost from the result itself (not computed here)
         extractCost(value).foreach(cost => metrics.recordCost(provider, model, cost))

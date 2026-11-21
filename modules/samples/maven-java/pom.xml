@@ -3,7 +3,7 @@
   A standalone Maven project that calls llm4s from Java through llm4s-java-api. See README.md and
   docs/getting-started/maven.md.
 
-  Build against a release with -Dllm4s.version=0.5.1 (or later). The default is the locally built snapshot that
+  Build against a release with -Dllm4s.version=0.6.0 (or later). The default is the locally built snapshot that
   `sbt publishM2` puts in your local Maven repository; CI builds the sample against it, so the sample cannot drift
   from the API on main.
 -->

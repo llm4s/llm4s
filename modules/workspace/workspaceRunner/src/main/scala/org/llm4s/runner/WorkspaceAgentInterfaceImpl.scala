@@ -33,6 +33,9 @@ import scala.util.chaining._
  * @param commitAfterGate how long after its gate wait a file change may still commit; past it, it is refused unchanged
  * @param confiner      the sandbox helper every `execute` command is started through (design §4.39); the platform's:
  *                      on Linux the helper, elsewhere None, and commands run unconfined
+ * @param cgroups       where each confined command gets a cgroup of its own, killed whole when it ends (#2008); the
+ *                      platform's: Left, saying why, where the container has no writable cgroup v2 hierarchy, and a
+ *                      daemon a command starts can then outlive it
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
@@ -42,7 +45,8 @@ class WorkspaceAgentInterfaceImpl(
   gateWait: FiniteDuration = WorkspaceAgentInterfaceImpl.GateWait,
   startProcess: java.lang.ProcessBuilder => Process = _.start(),
   commitAfterGate: FiniteDuration = WorkspaceSandboxConfig.CommitAfterGate,
-  confiner: Option[Confiner] = Confiner.platform()
+  confiner: Option[Confiner] = Confiner.platform(),
+  cgroups: => Either[String, CommandCgroups] = CommandCgroups.platform
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -1864,7 +1868,31 @@ class WorkspaceAgentInterfaceImpl(
       }.recover { case e => s.delete(); throw e }.get
       s
     }
-    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout), scratch)
+    // #2008: where the container's cgroup v2 hierarchy is writable, the confined command joins a cgroup of its own
+    // before anything of it runs, and the registry kills that cgroup whole (cgroup.kill) when it ends, times out or is
+    // cancelled: a daemon (`setsid`) leaves the process group, never the cgroup. Elsewhere, as before.
+    val cgroup = for {
+      s  <- scratch
+      cg <- cgroups.toOption
+    } yield {
+      val made = cg
+        .create()
+        .fold(
+          e => {
+            s.delete()
+            throw new WorkspaceAgentException(
+              s"Commands run in a cgroup of their own here and the runner could not make one (${e.getMessage}); " +
+                "the command was not run",
+              "SANDBOX_UNAVAILABLE",
+              None
+            )
+          },
+          identity
+        )
+      builder.command((made.joinArgs(s.status) ++ builder.command().asScala).asJava): Unit
+      made
+    }
+    PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout), scratch, cgroup)
   }
 
   /**
@@ -1913,7 +1941,7 @@ class WorkspaceAgentInterfaceImpl(
       prepareCommand(command, workingDirectory, timeout, environment).fold(refused => throw refused, identity)
     // the command's scratch directory goes however it ends: refused at the gate, failed, timed out or completed
     val outcome = Try(run(prepared, maxOutputBytes))
-    prepared.scratch.foreach(_.delete())
+    prepared.discard()
     outcome.get
   }
 
@@ -1954,7 +1982,7 @@ class WorkspaceAgentInterfaceImpl(
 
     // started through the registry: it holds a gate permit and stays tracked (killable by shutdown) until it exits
     val entry = processes
-      .spawn(DirectOwner, java.util.UUID.randomUUID().toString, builder)
+      .spawn(DirectOwner, java.util.UUID.randomUUID().toString, builder, cgroup = prepared.cgroup)
       .fold(refused => throw refused, identity)
     val exitCode =
       Try {
@@ -2059,12 +2087,22 @@ class WorkspaceAgentInterfaceImpl(
  * @param timeout the caller's timeout, else the sandbox's `defaultCommandTimeout`
  * @param scratch the command's own scratch directory when it is confined (Linux); the caller deletes it once the
  *                command has ended or will never start
+ * @param cgroup  the command's own cgroup, where commands get one (#2008); the registry removes it once everything in
+ *                it has exited, and [[discard]] where it never started
  */
 final private[runner] case class PreparedCommand(
   builder: java.lang.ProcessBuilder,
   timeout: FiniteDuration,
-  scratch: Option[CommandScratch] = None
-)
+  scratch: Option[CommandScratch] = None,
+  cgroup: Option[CommandCgroup] = None
+) {
+
+  /** Deletes the scratch directory and removes the cgroup if it is empty: once the command has ended or never will. */
+  def discard(): Unit = {
+    scratch.foreach(_.delete())
+    cgroup.foreach(_.remove()): Unit
+  }
+}
 
 private[runner] object WorkspaceAgentInterfaceImpl {
 

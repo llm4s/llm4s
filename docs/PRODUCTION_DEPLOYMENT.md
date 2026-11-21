@@ -321,8 +321,35 @@ yield client
 
 The Vault token is yours to obtain (Kubernetes or AppRole login); a token that expires needs a new provider.
 
+**Read from AWS Secrets Manager by llm4s.** `llm4s-secrets-aws`'s `AwsSecretsManagerApiKeyProvider` reads the key
+with `GetSecretValue` - the whole `SecretString`, or one field of a key/value secret with `withField` - signing the
+request with Signature Version 4 itself, so no AWS SDK. It caches the key and reads it again every `refreshInterval`
+(5 minutes by default), and reads the `AWSCURRENT` version, so a key rotated in Secrets Manager is sent from the first
+request after the interval. Its errors (`AuthenticationError` for refused credentials or denied access,
+`NotFoundError` for a missing secret, `ConfigurationError` for a binary-only secret or a missing or blank field) never
+hold the key or the credentials.
+
+```scala
+import org.llm4s.llmconnect.auth.aws.{ AwsCredentials, AwsSecretsManagerApiKeyProvider, AwsSecretsManagerSettings }
+import org.llm4s.security.Secret
+import scala.concurrent.duration.*
+
+for
+  keys <- AwsSecretsManagerApiKeyProvider(
+            AwsSecretsManagerSettings("eu-west-1", AwsCredentials(accessKeyId, Secret(secretAccessKey)), "llm4s/openai")
+              .withField("apiKey")                 // a key/value secret; omit for a plain SecretString
+              .withRefreshInterval(1.minute)
+          )
+  config <- Llm4sConfig.provider("openai-main").map(_.withApiKeyProvider(keys))
+  client <- LLMConnect.getClient(config)
+yield client
+```
+
+The credentials are yours to obtain (an instance profile, IRSA, an assumed role). For temporary ones, pass a function
+with `withCredentials(() => ...)`: it is called again for every read, so renewed credentials are used.
+
 **Fetched by your code.** Without a file, implement `ApiKeyProvider` over your secret store's client
-(Vault's API, AWS Secrets Manager's `GetSecretValue`, ...) and set it with `withApiKeyProvider`; the client
+(Azure Key Vault, GCP Secret Manager, ...) and set it with `withApiKeyProvider`; the client
 asks it for the key on every request. llm4s itself depends on no secret-manager SDK. A compiled example is
 in [Rotating keys](getting-started/configuration#rotating-keys-apikeyfile-and-apikeyprovider).
 
@@ -762,7 +789,8 @@ For manual tracking:
 completion.usage match {
   case Some(usage) =>
     val inputCost = usage.promptTokens * MODEL_INPUT_PRICE_PER_1K / 1000
-    val outputCost = usage.completionTokens * MODEL_OUTPUT_PRICE_PER_1K / 1000
+    // output as billed: the completion plus any thinking, which completionTokens leaves out
+    val outputCost = usage.totalOutputTokens * MODEL_OUTPUT_PRICE_PER_1K / 1000
     logger.info(s"Request cost: $$${inputCost + outputCost}")
   case None =>
     logger.warn("Usage data not available")

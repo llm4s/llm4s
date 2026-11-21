@@ -27,4 +27,4 @@ Sign your commits as for any contribution (`git commit -s`, see [CONTRIBUTING.md
 | Name | Link | Use case | Since | Modules |
 |------|------|----------|-------|---------|
 | Scala Teams | https://scalateams.com | Multi-provider LLM layer for Spec Manager, an AI spec-authoring and code-generation tool | 2026-11 | llm4s-core, llm4s-anthropic |
-<!-- Add rows above this line, in alphabetical order by name. -->
+<!-- Add rows above this line, in alphabetical order by name. Maintainers: mirror each row in docs/_data/adopters.yml for the website. -->

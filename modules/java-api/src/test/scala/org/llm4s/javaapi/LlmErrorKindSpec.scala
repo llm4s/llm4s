@@ -22,6 +22,7 @@ import scala.util.Using
  * `LlmErrorKinds.byClass` - a class added to core without a kind would otherwise read as `OTHER` without anyone
  * deciding so.
  */
+@org.llm4s.tags.DocsSpec
 class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
   import LlmErrorKindSpec.SpeechLikeError
 
@@ -58,6 +59,7 @@ class LlmErrorKindSpec extends AnyFlatSpec with Matchers {
     (ValidationError.required("query"), LlmErrorKind.VALIDATION, false),
     (InvalidInputError("image", "x", "not an image"), LlmErrorKind.VALIDATION, false),
     (UnsupportedContentPartError("ollama", "image (url, image/png)", "user"), LlmErrorKind.VALIDATION, false),
+    (ContentFilteredError.reply("Gemini", "SAFETY"), LlmErrorKind.VALIDATION, false),
     (ConfigurationError("no provider"), LlmErrorKind.CONFIGURATION, false),
     (CancelledError("complete"), LlmErrorKind.CANCELLED, false),
     (ContextError.invalidTrimming("empty"), LlmErrorKind.OTHER, false),

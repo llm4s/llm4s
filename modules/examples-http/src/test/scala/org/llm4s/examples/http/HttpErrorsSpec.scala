@@ -4,6 +4,7 @@ import org.llm4s.agent.graph.{ GraphError, NodeId, StateKeyId, TaskId, ToolCallI
 import org.llm4s.error.{
   AuthenticationError,
   ConfigurationError,
+  ContentFilteredError,
   InvalidInputError,
   NetworkError,
   ProcessingError,
@@ -22,6 +23,9 @@ class HttpErrorsSpec extends AnyFlatSpec with Matchers {
   "HttpErrors.of" should "answer 400 for a request the caller must change" in {
     HttpErrors.of(ValidationError("message", "must not be blank")).status shouldBe 400
     HttpErrors.of(InvalidInputError("message", "", "empty")).status shouldBe 400
+    // a content filter stopped the prompt or reply: the caller must change it, the provider is not at fault
+    HttpErrors.of(ContentFilteredError.prompt("Gemini", "SAFETY")).status shouldBe 400
+    HttpErrors.of(ContentFilteredError.reply("Gemini", "SAFETY")).status shouldBe 400
   }
 
   it should "answer 429 with the provider's Retry-After for a rate limit" in {

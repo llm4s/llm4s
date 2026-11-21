@@ -29,6 +29,7 @@ object DocSnippets {
   val pages: Seq[String] = Seq(
     "ai-assistants.md",
     "getting-started/configuration.md",
+    "getting-started/configuration-in-code.md",
     "getting-started/first-example.md",
     "getting-started/installation.md",
     "getting-started/local-jlama.md",
@@ -41,6 +42,7 @@ object DocSnippets {
     "guide/custom-tools.md",
     "guide/data-protection.md",
     "guide/direct-style.md",
+    "guide/document-loaders.md",
     "guide/embeddings.md",
     "guide/error-handling.md",
     "guide/for-python-developers.md",
@@ -48,6 +50,7 @@ object DocSnippets {
     "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
+    "guide/rag-evaluation.md",
     "guide/reference-architecture.md",
     "guide/replacing-a-python-sidecar.md",
     "guide/tapir-tools.md",
@@ -61,7 +64,9 @@ object DocSnippets {
     "scala-ai/rag.md",
     "tutorials/support-assistant/part-1-first-call.md",
     "tutorials/support-assistant/part-2-typed-answers.md",
-    "tutorials/support-assistant/part-3-tools.md"
+    "tutorials/support-assistant/part-3-tools.md",
+    "tutorials/support-assistant/part-4-help-centre.md",
+    "tutorials/support-assistant/part-5-safety-memory.md"
   )
 
   val packageName = "org.llm4s.docsnippets"

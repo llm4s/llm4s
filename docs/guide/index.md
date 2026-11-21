@@ -31,7 +31,7 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
 - **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
 - **[Micronaut](micronaut)** - A `@Factory` bean for `JLlmClient` configured from `application.yml`, blocking and streamed endpoints, a health indicator and tests with `FakeLlmClient`
 - **[Helidon](helidon)** - Helidon SE 4: the client built from `application.yaml`, blocking and streamed routes on virtual threads, a health check and tests with `FakeLlmClient`
-- **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; not on Maven Central for {{ site.data.project.latest_release }} yet, so built locally for now)
+- **[Kotlin](/getting-started/installation#for-kotlin-coroutines-and-flow)** - `llm4s-kotlin-api`: suspend functions and `Flow`s over the Java API (Experimental; on Maven Central from 0.6.0)
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Jupyter Notebooks](notebooks)** - Run LLM4S in Jupyter with the Almond Scala kernel: two offline notebooks (completion, streaming, structured output, a typed tool, RAG) and configuration inside a notebook
 - **[Testing with the Testkit](testing-with-the-testkit)** - Script an `LLMClient` in your tests: canned replies, tool calls, injected errors, recorded requests
@@ -68,6 +68,8 @@ Since 0.5.0 each feature below is its own module next to `llm4s-core` (the agent
   - **Hybrid Search**: BM25 keyword + vector fusion with RRF strategy
   - **Reranking**: Cohere cross-encoder for result refinement
   - **Document Chunking**: Sentence-aware + simple chunking strategies
+
+- **[Document Loaders](document-loaders)** - Load text, files, directories, URLs, a web crawl or S3 into RAG; compose loaders; `ingest`, `sync` and `refresh`; SSRF protection and robots.txt
 
 - **[Query Transformers](rag-query-transformers)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
 

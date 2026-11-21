@@ -48,7 +48,8 @@ object ContextTestFixtures {
     toolCallId = "call_123"
   )
 
-  val historyDigestMessage: AssistantMessage = AssistantMessage(
+  // A real digest is always a SystemMessage: HistoryCompressor never writes one of any other type.
+  val historyDigestMessage: SystemMessage = SystemMessage(
     "[HISTORY_SUMMARY]\nPrevious conversation discussed coding topics and weather."
   )
 

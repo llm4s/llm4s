@@ -727,9 +727,12 @@ under the home directory gets no home grant, and build tools run there cannot wr
 above it (with `readOnlyPaths = ["ro"]`, in the workspace root); the runner's own file operations still can. Landlock
 has no metadata rights, so `chmod`, `chown` and timestamps on a read-only path are not refused, only its content. An
 existing hard link into a read-only file can write it, and a read-only symlink protects its target, not the link.
-`/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Abstract Unix
-sockets stay reachable without network, and a command can signal the runner. A daemon a command starts (`setsid`)
-stays confined but outlives the command ([#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own
+`/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Below
+Landlock ABI v6 (kernel 6.12), abstract Unix sockets stay reachable without network and a command can signal the
+runner; from v6 a command reaches only abstract sockets, and signals only processes, inside its own sandbox
+([#2009](https://github.com/llm4s/llm4s/issues/2009)). The runner logs at startup which of these apply. A daemon a command starts (`setsid`)
+stays confined, and outlives the command unless the container gives commands cgroups (below,
+[#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own
 helper programs (the git configuration lister, `getfacl`, `setfacl`) run unconfined, so on Linux they are taken from
 `/usr/bin` or `/bin` only, never from `PATH`, which includes the writable home directory.
 
@@ -738,6 +741,23 @@ helper programs (the git configuration lister, `getfacl`, `setfacl`) run unconfi
 policy only, and the runner logs this once. An amd64 image run under emulation (Docker Desktop's Rosetta on Apple
 silicon) refuses every command `SANDBOX_UNAVAILABLE`, since Landlock is unavailable there; a local
 `sbt workspaceRunner/Docker/publishLocal` builds for the host architecture, which confines.
+
+**A cgroup per command** ([#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner kills a command's process
+group when it ends, times out or is cancelled, but a daemon (`setsid`) has left the group. Where the container's
+cgroup v2 hierarchy is writable, each confined command instead joins a cgroup of its own before it starts, and the
+runner kills that cgroup whole (`cgroup.kill`, Linux 5.14): nothing the command started outlives it. Docker mounts
+the hierarchy read-only, so the container must be started with
+
+```
+docker run --cgroupns=private --cap-add SYS_ADMIN --security-opt apparmor=unconfined ...
+```
+
+which `ContainerisedWorkspace(..., commandCgroups = true)` does. The image's entry point uses `SYS_ADMIN` only to remount
+the container's own cgroup (its private namespace) read-write, and drops it from the bounding set before the runner
+starts, so neither the runner nor a command holds it; AppArmor's `docker-default` profile is off because it refuses
+every mount. The runner logs at startup whether commands get cgroups and, if not, why; without them it behaves as
+before. Off by default. A program that calls `clone3` with `CLONE_INTO_CGROUP` itself can still start a process in
+another cgroup of the container; no allowlisted program does.
 
 To set these fields in a container, pass the whole config; the runner receives it as `WORKSPACE_SANDBOX_CONFIG`:
 

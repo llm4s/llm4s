@@ -27,7 +27,7 @@ import org.springframework.ai.chat.messages.{
 }
 import org.springframework.ai.chat.metadata.{ ChatGenerationMetadata, ChatResponseMetadata, DefaultUsage }
 import org.springframework.ai.chat.model.{ ChatModel, ChatResponse, Generation }
-import org.springframework.ai.chat.prompt.Prompt
+import org.springframework.ai.chat.prompt.{ ChatOptions, Prompt }
 import org.springframework.ai.model.tool.ToolCallingChatOptions
 import reactor.core.publisher.Flux
 
@@ -38,9 +38,11 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   /** A Spring AI model that answers from a function and records every prompt it was given. */
   final private class FakeChatModel(
     answer: Prompt => ChatResponse,
-    streaming: Prompt => Flux[ChatResponse] = _ => Flux.error(new UnsupportedOperationException("no streaming"))
+    streaming: Prompt => Flux[ChatResponse] = _ => Flux.error(new UnsupportedOperationException("no streaming")),
+    defaults: Option[ChatOptions] = Some(ChatOptions.builder().build())
   ) extends ChatModel {
     @volatile var prompts: Vector[Prompt] = Vector.empty
+    override def getOptions: ChatOptions  = defaults.orNull
     override def call(prompt: Prompt): ChatResponse = {
       prompts = prompts :+ prompt
       answer(prompt)
@@ -115,6 +117,30 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     sent.getPresencePenalty shouldBe 0.1
     sent.getFrequencyPenalty shouldBe 0.2
     sent.getToolCallbacks shouldBe empty
+  }
+
+  it should "start from a copy of the model's own tool-calling options (#2645)" in {
+    val own   = ToolCallingChatOptions.builder()
+    val _     = own.model("spring-default")
+    val _     = own.topK(Integer.valueOf(5))
+    val _     = own.temperature(java.lang.Double.valueOf(0.9))
+    val model = new FakeChatModel(_ => reply("ok"), defaults = Some(own.build()))
+    new SpringAiLlmClient(model)
+      .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions().withTemperature(0.3))
+
+    val sent = model.prompts.head.getOptions.asInstanceOf[ToolCallingChatOptions]
+    sent.getModel shouldBe "spring-default"
+    sent.getTopK shouldBe 5
+    sent.getTemperature shouldBe 0.3
+    model.getOptions.getTemperature shouldBe 0.9
+  }
+
+  it should "send tool-calling options when the model has no options" in {
+    val model = new FakeChatModel(_ => reply("ok"), defaults = None)
+    new SpringAiLlmClient(model)
+      .complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions().withTemperature(0.3))
+    model.prompts.head.getOptions shouldBe a[ToolCallingChatOptions]
+    model.prompts.head.getOptions.getTemperature shouldBe 0.3
   }
 
   it should "leave max tokens unset when llm4s sets none" in {

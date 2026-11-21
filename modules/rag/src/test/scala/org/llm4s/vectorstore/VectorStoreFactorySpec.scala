@@ -1,0 +1,264 @@
+package org.llm4s.vectorstore
+
+import org.llm4s.error.NotFoundError
+import org.llm4s.security.Secret
+import org.llm4s.types.Result
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+
+import java.nio.file.{ Files, Path }
+import scala.util.Using
+
+/**
+ * Offline coverage for the factory paths other specs never reach.
+ *
+ * pgvector is left to `PgVectorStoreFactoryIntegrationSpec`: those paths open a database connection.
+ */
+class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
+
+  "VectorStoreFactory.Backend" should {
+
+    "resolve each backend name in any case and reject an unknown name" in {
+      val names = Seq(
+        "SQLite"   -> VectorStoreFactory.Backend.SQLite,
+        "sqlite"   -> VectorStoreFactory.Backend.SQLite,
+        "PGVECTOR" -> VectorStoreFactory.Backend.PgVector,
+        "pgvector" -> VectorStoreFactory.Backend.PgVector,
+        "Qdrant"   -> VectorStoreFactory.Backend.Qdrant,
+        "qdrant"   -> VectorStoreFactory.Backend.Qdrant
+      )
+
+      names.foreach { case (name, backend) =>
+        withClue(s"fromString($name)") {
+          VectorStoreFactory.Backend.fromString(name) shouldBe Some(backend)
+        }
+      }
+
+      VectorStoreFactory.Backend.fromString("nope") shouldBe None
+    }
+
+    "list sqlite, pgvector and qdrant" in {
+      VectorStoreFactory.Backend.all shouldBe Seq(
+        VectorStoreFactory.Backend.SQLite,
+        VectorStoreFactory.Backend.PgVector,
+        VectorStoreFactory.Backend.Qdrant
+      )
+    }
+  }
+
+  "VectorStoreFactory.create" should {
+
+    "return NotFoundError listing the supported backends for an unknown provider" in {
+      VectorStoreFactory.create("nope") match {
+        case Left(error: NotFoundError) =>
+          error.key shouldBe "nope"
+          error.message should include("sqlite")
+          error.message should include("pgvector")
+          error.message should include("qdrant")
+        case other =>
+          fail(s"Expected NotFoundError, got $other")
+      }
+    }
+
+    "round-trip a record through a file-backed SQLite config" in {
+      withTempDb("factory-config-") { path =>
+        val record = VectorRecord("persist-config", Array(0.1f, 0.2f, 0.3f), Some("file backed config"))
+        val config = VectorStoreFactory.Config(VectorStoreFactory.Backend.SQLite, path = Some(path.toString))
+
+        closing(VectorStoreFactory.create(config))(_.close()) { store =>
+          store.upsert(record) shouldBe Right(())
+          store.get("persist-config").map(_.map(_.id)) shouldBe Right(Some("persist-config"))
+        }
+
+        closing(VectorStoreFactory.create(config))(_.close()) { store =>
+          store.get("persist-config").map(_.map(_.content)) shouldBe Right(Some(Some("file backed config")))
+        }
+      }
+    }
+
+    "return a local Qdrant store when the config has no connection string" in {
+      expectQdrant(
+        VectorStoreFactory.create(VectorStoreFactory.Config(VectorStoreFactory.Backend.Qdrant)),
+        "http://localhost:6333",
+        "vectors",
+        expectKey = false
+      )
+    }
+
+    "return a Qdrant store for an explicit URL" in {
+      val config = VectorStoreFactory.Config(
+        VectorStoreFactory.Backend.Qdrant,
+        connectionString = Some("http://qdrant.example:6333"),
+        options = Map("collectionName" -> "docs")
+      )
+
+      expectQdrant(VectorStoreFactory.create(config), "http://qdrant.example:6333", "docs", expectKey = false)
+    }
+
+    "return a Qdrant store for a URL and an apiKey secret" in {
+      // apiKey is a credential, so it is a secret. Putting it in options is rejected before the Qdrant branch.
+      val config = VectorStoreFactory
+        .Config(
+          VectorStoreFactory.Backend.Qdrant,
+          connectionString = Some("https://example.qdrant.io"),
+          options = Map("collectionName" -> "cloud-docs")
+        )
+        .withSecret("apiKey", Secret("test-key"))
+
+      expectQdrant(VectorStoreFactory.create(config), "https://example.qdrant.io", "cloud-docs", expectKey = true)
+    }
+
+    "pass the provider name's path and connection string through to the store" in {
+      withTempDb("factory-provider-") { path =>
+        val record = VectorRecord("persist-provider", Array(0.5f, 0.5f), Some("by provider name"))
+
+        closing(VectorStoreFactory.create("SQLite", path = Some(path.toString)))(_.close()) { store =>
+          store.upsert(record) shouldBe Right(())
+        }
+
+        closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
+          store.get("persist-provider").map(_.map(_.content)) shouldBe Right(Some(Some("by provider name")))
+        }
+      }
+
+      expectQdrant(
+        VectorStoreFactory.create("Qdrant", connectionString = Some("http://qdrant.example:6335")),
+        "http://qdrant.example:6335",
+        "vectors",
+        expectKey = false
+      )
+    }
+  }
+
+  "VectorStoreFactory.sqlite" should {
+
+    "round-trip a record through a temporary file" in {
+      withTempDb("factory-sqlite-") { path =>
+        val record = VectorRecord("persist-sqlite", Array(1.0f, 0.0f), Some("file backed sqlite"))
+
+        closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
+          store.upsert(record) shouldBe Right(())
+          store.get("persist-sqlite").map(_.map(_.content)) shouldBe Right(Some(Some("file backed sqlite")))
+        }
+
+        closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
+          store.get("persist-sqlite").map(_.map(_.id)) shouldBe Right(Some("persist-sqlite"))
+        }
+      }
+    }
+  }
+
+  "VectorStoreFactory qdrant shortcuts" should {
+
+    "build an offline store from qdrant(collection)" in {
+      expectQdrant(VectorStoreFactory.qdrant("docs"), "http://localhost:6333", "docs", expectKey = false)
+    }
+
+    "build an offline store from qdrant(url, collection)" in {
+      expectQdrant(
+        VectorStoreFactory.qdrant("http://qdrant.example:6334", "remote-docs"),
+        "http://qdrant.example:6334",
+        "remote-docs",
+        expectKey = false
+      )
+    }
+
+    "build an offline store from qdrantCloud(url, key)" in {
+      expectQdrant(
+        VectorStoreFactory.qdrantCloud("https://cloud.example.qdrant.io", Secret("cloud-key")),
+        "https://cloud.example.qdrant.io",
+        "vectors",
+        expectKey = true
+      )
+    }
+  }
+
+  "KeywordIndex.sqlite" should {
+
+    "index a document and find it by a word in it" in {
+      withTempDb("keyword-sqlite-") { path =>
+        closing(KeywordIndex.sqlite(path.toString))(_.close()) { index =>
+          index.index(KeywordDocument("doc-1", "The factory stores vectors")) shouldBe Right(())
+
+          index.search("factory", topK = 5).map(_.map(_.id)) should matchPattern {
+            case Right(ids: Seq[?]) if ids.contains("doc-1") =>
+          }
+        }
+      }
+    }
+  }
+
+  "HybridSearcher.sqlite" should {
+
+    "write the vector store and keyword index to their own files" in {
+      withTempDbs("hybrid-vector-", "hybrid-keyword-") { (vectorPath, keywordPath) =>
+        val record = VectorRecord("hybrid-vec", Array(0.3f, 0.7f), Some("hybrid vector"))
+
+        closing(HybridSearcher.sqlite(vectorPath.toString, keywordPath.toString))(_.close()) { searcher =>
+          searcher.vectorStore.upsert(record) shouldBe Right(())
+          searcher.keywordIndex.index(KeywordDocument("hybrid-doc", "The hybrid searcher indexes keywords")) shouldBe
+            Right(())
+        }
+
+        closing(VectorStoreFactory.sqlite(vectorPath.toString))(_.close()) { store =>
+          store.get("hybrid-vec").map(_.map(_.content)) shouldBe Right(Some(Some("hybrid vector")))
+        }
+
+        closing(KeywordIndex.sqlite(keywordPath.toString))(_.close()) { index =>
+          index.search("keywords", topK = 5).map(_.map(_.id)) should matchPattern {
+            case Right(ids: Seq[?]) if ids.contains("hybrid-doc") =>
+          }
+        }
+      }
+    }
+  }
+
+  private def expectQdrant(
+    opened: Result[VectorStore],
+    baseUrl: String,
+    collectionName: String,
+    expectKey: Boolean
+  ): Unit =
+    opened match {
+      case Right(store: QdrantVectorStore) =>
+        store.baseUrl shouldBe baseUrl
+        store.collectionName shouldBe collectionName
+        withClue("hasApiKey: ")(store.hasApiKey shouldBe expectKey)
+        store.close()
+      case Right(other) =>
+        fail(s"Expected QdrantVectorStore, got ${other.getClass.getName}")
+      case Left(error) =>
+        fail(s"Expected QdrantVectorStore, got ${error.formatted}")
+    }
+
+  private def closing[A, B](opened: Result[A])(release: A => Unit)(body: A => B): B =
+    opened match {
+      case Left(error) => fail(s"Failed to create resource: ${error.formatted}")
+      case Right(resource) =>
+        Using.resource(new AutoCloseable {
+          override def close(): Unit = release(resource)
+        })(_ => body(resource))
+    }
+
+  private def withTempDb[A](prefix: String)(body: Path => A): A =
+    Using.resource(new TempDb(prefix))(tmp => body(tmp.path))
+
+  private def withTempDbs[A](vectorPrefix: String, keywordPrefix: String)(body: (Path, Path) => A): A =
+    Using.Manager { use =>
+      val vector  = use(new TempDb(vectorPrefix))
+      val keyword = use(new TempDb(keywordPrefix))
+      body(vector.path, keyword.path)
+    }.get
+
+  final private class TempDb(prefix: String) extends AutoCloseable {
+    val path: Path = Files.createTempFile(prefix, ".db")
+
+    override def close(): Unit = {
+      val name = path.getFileName.toString
+      List(name, s"$name-wal", s"$name-shm", s"$name-journal").foreach { fileName =>
+        Files.deleteIfExists(path.resolveSibling(fileName))
+        ()
+      }
+    }
+  }
+}

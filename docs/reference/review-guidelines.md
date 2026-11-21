@@ -31,7 +31,7 @@ This document captures coding best practices derived from PR review feedback, pa
 5. [Code review checklist](#5-code-review-checklist-llm4s-specific)
 6. [API and design review](#6-api-and-design-review-checklist)
 7. [Architecture review](#7-architecture-review-checklist)
-8. [Functional programming patterns](#8-fp-patterns-in-llm4s)
+8. [Functional programming patterns](#8-functional-programming-patterns-in-llm4s)
 9. [Design patterns](#9-design-patterns-in-llm4s)
 10. [SOLID principles](#10-solid-in-llm4s)
 11. [Testing strategy](#11-testing-strategy-review)

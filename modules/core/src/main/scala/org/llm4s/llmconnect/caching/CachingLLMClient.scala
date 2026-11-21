@@ -37,7 +37,8 @@ import org.slf4j.LoggerFactory
  * - Searches cache for entries within `similarityThreshold`.
  * - Validates additional constraints:
  *   - Entry must be within TTL.
- *   - Entry `CompletionOptions` must strictly match the request options.
+ *   - Entry `CompletionOptions` must match the request's on every field that changes the answer
+ *     ([[CompletionCacheKey]]; today, every field).
  * - On Hit: Returns cached `Completion` and updates LRU order. Emits `cache_hit` trace event.
  * - On Miss: Delegating to `baseClient`, caches the result, and emits `cache_miss` trace event.
  *
@@ -118,9 +119,10 @@ class CachingLLMClient(
             .toList
 
           // Find the best valid match (Sim >= Threshold AND Options Match AND TTL Valid)
+          val requestKey = CompletionCacheKey.of(options)
           val validMatch = candidates
             .filter { case (_, entry, _) =>
-              entry.options == options && isWithinTtl(entry.timestamp, ttlNanos, now)
+              CompletionCacheKey.of(entry.options) == requestKey && isWithinTtl(entry.timestamp, ttlNanos, now)
             }
             .maxByOption(_._3)
 
@@ -133,7 +135,8 @@ class CachingLLMClient(
               } else {
                 // We have matches with high similarity, but they are invalid.
                 // Check if any would have been valid except for TTL (i.e., Options matched)
-                if (candidates.exists(_._2.options == options)) TraceEvent.CacheMissReason.TtlExpired
+                if (candidates.exists(c => CompletionCacheKey.of(c._2.options) == requestKey))
+                  TraceEvent.CacheMissReason.TtlExpired
                 else TraceEvent.CacheMissReason.OptionsMismatch
               }
               (None, Some(reason))

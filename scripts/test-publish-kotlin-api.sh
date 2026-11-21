@@ -82,8 +82,10 @@ fixture() { # <dir> [unsigned-file]
   mkdir -p "$d"
   for f in "llm4s-kotlin-api-$VERSION.pom" "llm4s-kotlin-api-$VERSION.jar" "llm4s-kotlin-api-$VERSION-sources.jar" \
     "llm4s-kotlin-api-$VERSION-javadoc.jar" "llm4s-kotlin-api-$VERSION.module"; do
-    echo "$f" > "$d/$f"; echo sum > "$d/$f.md5"; echo sum > "$d/$f.sha1"
-    [ "$f" = "${2:-}" ] || echo sig > "$d/$f.asc"
+    echo "$f" > "$d/$f"; echo sum > "$d/$f.md5"; echo sum > "$d/$f.sha1"; echo sum > "$d/$f.sha256"; echo sum > "$d/$f.sha512"
+    [ "$f" = "${2:-}" ] || {
+      echo sig > "$d/$f.asc"; echo sum > "$d/$f.asc.md5"; echo sum > "$d/$f.asc.sha1"; echo sum > "$d/$f.asc.sha256"
+    }
   done
   echo '<metadata/>' > "$d/maven-metadata.xml"
   echo '<metadata/>' > "$1/org/llm4s/llm4s-kotlin-api/maven-metadata.xml"
@@ -160,6 +162,11 @@ if grep -qx "$REL/llm4s-kotlin-api-$VERSION.pom.asc" <<<"$bundle" &&
   ok "the bundle holds the version directory with its signatures, and no maven-metadata.xml"
 else
   bad "the bundle holds the version directory with its signatures, and no maven-metadata.xml" "$bundle"
+fi
+if [ "$(grep -c . <<<"$bundle")" = 20 ] && ! grep -qE '\.asc\.|\.sha256$|\.sha512$' <<<"$bundle"; then
+  ok "the bundle is 20 files: five, each with .asc, .md5 and .sha1, and no checksum of a signature, SHA-256 or SHA-512"
+else
+  bad "the bundle is 20 files: five, each with .asc, .md5 and .sha1, and no checksum of a signature, SHA-256 or SHA-512" "$bundle"
 fi
 token="$(printf 'user:secret' | base64)"
 upload_call="$(grep -F "/api/v1/publisher/upload?name=llm4s-kotlin-api-$VERSION&publishingType=AUTOMATIC" <<<"$CALLS")"
@@ -259,27 +266,43 @@ expect "Maven Central not answering falls through to the Portal, which decides" 
 uploaded_once "Maven Central not answering still uploads once, on the Portal's word"
 
 # ---- release.yml runs it, after the sbt publish and before the GitHub Release -------------------------------------------
+# The job is publish-kotlin.yml, called from release.yml and dispatchable by hand for a tag whose run failed there.
 RELEASE="${RELEASE_WORKFLOW:-$REPO_ROOT/.github/workflows/release.yml}"
+KOTLIN_WF="${KOTLIN_WORKFLOW:-$REPO_ROOT/.github/workflows/publish-kotlin.yml}"
 if command -v ruby >/dev/null 2>&1; then
   wiring="$(ruby -ryaml -e '
     wf = YAML.load_file(ARGV[0]); jobs = wf["jobs"] || {}; errs = []
-    k = jobs["publish-kotlin"]
-    if k.nil?
+    c = jobs["publish-kotlin"]
+    if c.nil?
       errs << "no publish-kotlin job"
     else
-      errs << "publish-kotlin must run after publish" unless Array(k["needs"]).include?("publish")
-      runs = (k["steps"] || []).map { |s| s["run"].to_s }.join("\n")
-      errs << "publish-kotlin must check the version sbt released" unless runs.include?("print ThisBuild / version")
-      errs << "publish-kotlin must build with the tag version" unless runs.include?("-Pllm4sVersion=\"${GITHUB_REF_NAME#v}\"")
-      errs << "publish-kotlin must check the signed publication" unless runs.include?("REQUIRE_SIGNATURES=1 scripts/check-kotlin-publication.sh")
-      errs << "publish-kotlin must upload with publish-kotlin-api.sh" unless runs.include?("scripts/publish-kotlin-api.sh")
-      envs = (k["steps"] || []).map { |s| s["env"] || {} }.reduce({}, :merge)
-      %w[PGP_SECRET ORG_GRADLE_PROJECT_signingPassword SONATYPE_USERNAME SONATYPE_PASSWORD].each { |e| errs << "publish-kotlin needs #{e}" unless envs.key?(e) }
-      errs << "a workflow expression is interpolated into a shell" if runs.include?("${{")
+      errs << "publish-kotlin must run after publish" unless Array(c["needs"]).include?("publish")
+      errs << "publish-kotlin must call publish-kotlin.yml" unless c["uses"] == "./.github/workflows/publish-kotlin.yml"
+      errs << "publish-kotlin must pass the tag" unless (c["with"] || {})["tag"] == "${{ github.ref_name }}"
+      errs << "publish-kotlin must pass the secrets" unless c["secrets"] == "inherit"
     end
     gr = jobs["github-release"]
     errs << "github-release must wait for publish-kotlin" unless gr && Array(gr["needs"]).include?("publish-kotlin")
-    puts errs' "$RELEASE")"
+    kw = YAML.load_file(ARGV[1])
+    on = kw["on"] || kw[true] || {}
+    %w[workflow_call workflow_dispatch].each { |t| errs << "publish-kotlin.yml must be callable by #{t}" unless on.key?(t) }
+    k = (kw["jobs"] || {})["publish-kotlin"]
+    if k.nil?
+      errs << "publish-kotlin.yml has no publish-kotlin job"
+    else
+      steps = k["steps"] || []
+      co = steps.find { |s| s["uses"].to_s.start_with?("actions/checkout@") }
+      errs << "publish-kotlin.yml must build the tag" unless co && (co["with"] || {})["ref"] == "${{ inputs.tag }}"
+      runs = steps.map { |s| s["run"].to_s }.join("\n")
+      errs << "publish-kotlin must check the version sbt released" unless runs.include?("print ThisBuild / version")
+      errs << "publish-kotlin must build with the tag version" unless runs.include?("-Pllm4sVersion=\"$VERSION\"")
+      errs << "publish-kotlin must check the signed publication" unless runs.include?("REQUIRE_SIGNATURES=1 \"$RUNNER_TEMP/scripts/check-kotlin-publication.sh\"")
+      errs << "publish-kotlin must upload with publish-kotlin-api.sh" unless runs.include?("\"$RUNNER_TEMP/scripts/publish-kotlin-api.sh\"")
+      envs = steps.map { |s| s["env"] || {} }.reduce({}, :merge)
+      %w[PGP_SECRET ORG_GRADLE_PROJECT_signingPassword SONATYPE_USERNAME SONATYPE_PASSWORD].each { |e| errs << "publish-kotlin needs #{e}" unless envs.key?(e) }
+      errs << "a workflow expression is interpolated into a shell" if runs.include?("${{")
+    end
+    puts errs' "$RELEASE" "$KOTLIN_WF")"
   if [ -z "$wiring" ]; then ok "release.yml publishes the Kotlin artifact after sbt and before the GitHub Release"; else bad "release.yml wiring" "$wiring"; fi
 
   # The version check, run against what sbt prints on the runner: each project's `<id> / version` then the value on its
@@ -287,16 +310,16 @@ if command -v ruby >/dev/null 2>&1; then
   ruby -ryaml -e '
     k = (YAML.load_file(ARGV[0])["jobs"] || {})["publish-kotlin"] || {}
     s = (k["steps"] || []).find { |st| st["name"] == "Check sbt released the tag'"'"'s version" }
-    print(s ? s["run"].to_s : "exit 99")' "$RELEASE" > "$WORK/version-check.sh"
+    print(s ? s["run"].to_s : "exit 99")' "$KOTLIN_WF" > "$WORK/version-check.sh"
   mkdir -p "$WORK/fake-sbt"
   printf '#!/usr/bin/env bash\nprintf "llm4sZio / version\\n\\t%%s\\nThisBuild / version\\n\\t%%s\\n\\033[0J" "$FAKE_SBT_VERSION" "$FAKE_SBT_VERSION"\n' > "$WORK/fake-sbt/sbt"
   chmod +x "$WORK/fake-sbt/sbt"
-  if PATH="$WORK/fake-sbt:$PATH" GITHUB_REF_NAME=v0.5.1 FAKE_SBT_VERSION=0.5.1 bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
+  if PATH="$WORK/fake-sbt:$PATH" VERSION=0.5.1 FAKE_SBT_VERSION=0.5.1 bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
     ok "the version check reads sbt's tab-indented version"
   else
     bad "the version check" "refused sbt's own 0.5.1 for tag v0.5.1"
   fi
-  if PATH="$WORK/fake-sbt:$PATH" GITHUB_REF_NAME=v0.5.1 FAKE_SBT_VERSION=0.5.1+3-abc1234-SNAPSHOT bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
+  if PATH="$WORK/fake-sbt:$PATH" VERSION=0.5.1 FAKE_SBT_VERSION=0.5.1+3-abc1234-SNAPSHOT bash -e "$WORK/version-check.sh" >/dev/null 2>&1; then
     bad "the version check" "accepted a snapshot for tag v0.5.1"
   else
     ok "the version check refuses a version that is not the tag's"

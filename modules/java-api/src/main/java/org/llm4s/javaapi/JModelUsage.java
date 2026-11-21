@@ -36,12 +36,12 @@ public final class JModelUsage {
     return inputTokens;
   }
 
-  /** Completion tokens received from this model. */
+  /** Output tokens received from this model, thinking included. */
   public long outputTokens() {
     return outputTokens;
   }
 
-  /** Extended-thinking tokens from this model; zero where its provider reports none. */
+  /** Thinking tokens from this model, the part of {@code outputTokens} that was thinking; zero where none. */
   public long thinkingTokens() {
     return thinkingTokens;
   }

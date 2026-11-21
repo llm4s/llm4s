@@ -25,7 +25,16 @@ final class LlmResult[A] private[javaapi] (token: FacadeToken, private val under
 
   FacadeToken.check(token, "LlmResult")
 
+  /**
+   * Returns `true` if this result holds a value, so [[get]] returns it without throwing. Exactly one of
+   * `isSuccess` and [[isFailure]] is `true`.
+   */
   def isSuccess: Boolean = underlying.isRight
+
+  /**
+   * Returns `true` if this result holds an error, so [[get]] throws [[LlmException]] and [[getError]] returns it.
+   * Exactly one of [[isSuccess]] and `isFailure` is `true`.
+   */
   def isFailure: Boolean = underlying.isLeft
 
   /** Returns the value on success, or throws [[LlmException]] on failure. */

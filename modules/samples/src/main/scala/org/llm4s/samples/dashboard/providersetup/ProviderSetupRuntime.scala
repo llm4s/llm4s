@@ -221,8 +221,8 @@ private[providersetup] object ProviderSetupRuntime:
             .fromValues(
               model,
               apiKey,
-              input.organization,
-              input.baseUrl.getOrElse(OpenAIProvider.DEFAULT_BASE_URL)
+              input.baseUrl.getOrElse(OpenAIProvider.DEFAULT_BASE_URL),
+              input.organization
             )
             .left
             .map(_.message)
@@ -240,8 +240,8 @@ private[providersetup] object ProviderSetupRuntime:
           config <- AzureConfig
             .fromValues(
               model,
-              endpoint,
               apiKey,
+              endpoint,
               input.apiVersion.getOrElse(AzureConfig.DEFAULT_API_VERSION)
             )
             .left

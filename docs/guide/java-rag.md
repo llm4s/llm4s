@@ -36,8 +36,7 @@ receive them. It is **Experimental**: its API may change in any release
 ([1.0 Scope](../reference/v1-scope)).
 
 {: .note }
-> `llm4s-java-rag` is new and is published from the release after {{ site.data.project.latest_release }}. Until then,
-> build it from `main` ([Unreleased changes](../getting-started/installation#unreleased-changes-main)).
+> `llm4s-java-rag` is new: it is published from 0.6.0.
 
 ## Add the dependency
 

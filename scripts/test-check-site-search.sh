@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/add-scaladoc-to-search.py and scripts/check-site-search.cjs (#2291), on a fake built site searched
-# with the lunr release just-the-docs ships (2.3.9, from npm).
+# with the lunr release just-the-docs ships (2.3.9, from npm). It is installed with `npm ci` from the lock file in
+# scripts/site-search-test, which pins it by integrity hash (OpenSSF Scorecard's Pinned-Dependencies, #2306).
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ADD="$REPO_ROOT/scripts/add-scaladoc-to-search.py"
@@ -12,7 +13,9 @@ expect() { # name expected-exit actual-exit
   if [ "$2" = "$3" ]; then echo "ok: $1"; else echo "FAIL: $1 (exit $3, wanted $2)"; fails=$((fails + 1)); fi
 }
 
-npm install --silent --no-save --no-audit --no-fund --prefix "$WORK/npm" lunr@2.3.9 >/dev/null ||
+mkdir -p "$WORK/npm"
+cp "$REPO_ROOT/scripts/site-search-test/package.json" "$REPO_ROOT/scripts/site-search-test/package-lock.json" "$WORK/npm/"
+(cd "$WORK/npm" && npm ci --silent --no-audit --no-fund >/dev/null) ||
   { echo "FAIL: could not install lunr from npm"; exit 1; }
 LUNR="$WORK/npm/node_modules/lunr/lunr.js"
 

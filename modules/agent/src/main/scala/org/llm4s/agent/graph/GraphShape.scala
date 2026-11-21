@@ -152,7 +152,7 @@ final private[graph] class LegacyFingerprint(
   private def over(kept: Vector[String]): String =
     val digest = started()
     kept.foreach(k => digest.update(s"\nkey:$k".getBytes(StandardCharsets.UTF_8)))
-    digest.digest().map(b => f"$b%02x").mkString
+    org.llm4s.util.Hex.of(digest.digest())
 
   val value: String = over(sortedKeys)
 

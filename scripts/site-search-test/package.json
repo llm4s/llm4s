@@ -1,0 +1,8 @@
+{
+  "name": "llm4s-site-search-test",
+  "private": true,
+  "description": "The lunr release just-the-docs ships, for scripts/test-check-site-search.sh; installed with npm ci from the lock file",
+  "dependencies": {
+    "lunr": "2.3.9"
+  }
+}

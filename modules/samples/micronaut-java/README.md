@@ -14,7 +14,7 @@ Against a release:
 ```bash
 ollama pull llama3.2
 cd modules/samples/micronaut-java
-gradle run -Pllm4sVersion=0.5.1
+gradle run -Pllm4sVersion=0.6.0
 curl -X POST -H 'Content-Type: text/plain' -d 'What is Micronaut, in one sentence?' http://localhost:8080/chat
 ```
 

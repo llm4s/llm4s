@@ -85,6 +85,7 @@ getting-started/installation.md | acebca2c40 | skip | sbt build definition, not 
 getting-started/installation.md | f178be64a2 | skip | sbt build definition, not Scala source
 getting-started/installation.md | ec5eaa078c | skip | sbt build definition, not Scala source
 getting-started/installation.md | 49823275db | skip | sbt build definition, not Scala source
+getting-started/installation.md | a0f61f208f | skip | sbt build definition, not Scala source
 guide/vector-store.md | 82d7940cc0 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 1ec60e6ed3 | skip | sbt build definition, not Scala source
 guide/vector-store.md | 0c5a836dc4 | with | import org.llm4s.vectorstore.elasticsearch._
@@ -164,3 +165,14 @@ tutorials/support-assistant/part-2-typed-answers.md | 5af41b0c73 | with | import
 tutorials/support-assistant/part-3-tools.md | 3e96213cf7 | with | import org.llm4s.schema.*; import org.llm4s.toolapi.ToolFunction; import org.llm4s.types.Result; import upickle.default.ReadWriter
 tutorials/support-assistant/part-3-tools.md | 41049c3fc7 | with | import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools.{ orderTool, policyTool }
 guide/for-python-developers.md | 37ce026ffe | with | import org.llm4s.samples.guides.PythonDevelopersGuide.FirstCall.ask
+guide/rag-evaluation.md | 10931d5ebd | skip | API reference: the class's signature and members without their bodies
+guide/rag-evaluation.md | cbf7728d95 | skip | API reference: the object's members without their bodies
+guide/rag-evaluation.md | 27d416bdf9 | skip | API reference: the case class as declared in RAGASTypes.scala; compiling it would only declare a local copy
+guide/rag-evaluation.md | 965bf6f7ad | skip | API reference: the case classes' fields and members without their bodies
+guide/rag-evaluation.md | bf46734ded | skip | API reference: the class's signature and members without their bodies
+guide/rag-evaluation.md | f2b322db11 | skip | API reference: the object's members without their bodies
+tutorials/support-assistant/part-4-help-centre.md | 95b1c19f04 | with | import org.llm4s.samples.tutorial.supportassistant.Part4HelpCentre.articles
+tutorials/support-assistant/part-4-help-centre.md | ce8185ac81 | with | import org.llm4s.rag.RAG; import org.llm4s.types.Result
+tutorials/support-assistant/part-4-help-centre.md | 5b9ef47be8 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.rag.RAG; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-5-safety-memory.md | fdc857af96 | with | import org.llm4s.samples.tutorial.supportassistant.Part3Tools
+tutorials/support-assistant/part-5-safety-memory.md | 0a03fc5f05 | with | import org.llm4s.llmconnect.LLMClient; import org.llm4s.types.Result; import org.llm4s.samples.tutorial.supportassistant.Part5SafetyMemory.{ reply, safeAgent }

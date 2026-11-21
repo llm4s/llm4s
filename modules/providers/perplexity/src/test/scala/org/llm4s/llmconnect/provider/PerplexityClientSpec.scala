@@ -146,11 +146,13 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       )
     }
 
-    "map every reasoning effort, None to minimal" in {
-      PerplexityClient.reasoningEffortValue(ReasoningEffort.None) shouldBe "minimal"
+    "map every reasoning effort to its own name, all of which the Agent API takes" in {
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.Minimal) shouldBe "minimal"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.Low) shouldBe "low"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.Medium) shouldBe "medium"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.High) shouldBe "high"
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.XHigh) shouldBe "xhigh"
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.Max) shouldBe "max"
     }
 
     "refuse plain JSON mode before sending anything" in {
@@ -204,11 +206,31 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
         Citation(url = "https://a.example/1", title = Some("A"), citedText = Some("alpha"))
       )
       completion.usage shouldBe Some(
-        TokenUsage(100, 40, 140, thinkingTokens = Some(12), cachedTokens = Some(64), cacheCreationTokens = Some(8))
+        // the 12 reasoning tokens are inside output_tokens; completionTokens never includes them
+        TokenUsage(100, 28, 140, thinkingTokens = Some(12), cachedTokens = Some(64), cacheCreationTokens = Some(8))
       )
       completion.estimatedCost shouldBe Some(0.42)
       completion.toolCalls shouldBe empty
       completion.message.thinking shouldBe empty
+    }
+
+    "take the reasoning tokens out of output_tokens, which counts them, never below zero" in {
+      val usage = PerplexityClient
+        .parseUsage(
+          ujson
+            .read(
+              """{"input_tokens":81,"output_tokens":64,"total_tokens":145,"output_tokens_details":{"reasoning_tokens":46}}"""
+            )
+            .obj
+        )
+        .get
+      (usage.completionTokens, usage.thinkingTokens, usage.totalTokens, usage.totalOutputTokens) shouldBe
+        ((18, Some(46), 145, 64))
+      PerplexityClient
+        .parseUsage(
+          ujson.read("""{"input_tokens":1,"output_tokens":2,"output_tokens_details":{"reasoning_tokens":5}}""").obj
+        )
+        .map(_.completionTokens) shouldBe Some(0)
     }
 
     "read cache reads when cached_tokens is absent, and no cost in another currency or without one" in {

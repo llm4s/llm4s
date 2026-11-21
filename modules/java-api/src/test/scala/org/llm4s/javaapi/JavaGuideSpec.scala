@@ -40,6 +40,7 @@ import java.time.Instant
  * compiling or an assertion fails, the guide is teaching something that no longer works: change the guide and
  * these files together.
  */
+@org.llm4s.tags.DocsSpec
 class JavaGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   // ---- The guide itself: its blocks are read from docs/guide/java.md, so a block cannot drift from the code.

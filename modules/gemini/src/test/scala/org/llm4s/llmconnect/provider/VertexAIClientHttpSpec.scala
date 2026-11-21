@@ -39,6 +39,61 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
        | "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""".stripMargin
 
+  // the shape Gemini returns when thinking spent the whole maxOutputTokens: content with no `parts` (seen from
+  // gemini-3.5-flash on 2026-11-05; Vertex AI serves the same response format)
+  private val noPartsMaxTokensBody =
+    """|{"candidates":[{"content":{"role":"model"},"finishReason":"MAX_TOKENS","index":0}],
+       | "usageMetadata":{"promptTokenCount":8,"totalTokenCount":539,"thoughtsTokenCount":531}}""".stripMargin
+
+  private val noPartsUsage =
+    TokenUsage(promptTokens = 8, completionTokens = 0, totalTokens = 539, thinkingTokens = Some(531))
+
+  // the shapes of a candidate that holds no parts and did not finish normally, and the error each must be
+  private val noContentShapes: Seq[(String, String, Boolean)] = Seq(
+    // no `content` at all, as Gemini sends for a safety block
+    (
+      """{"candidates":[{"finishReason":"SAFETY","index":0,"safetyRatings":[{"category":"HARM_CATEGORY_HARASSMENT","probability":"HIGH"}]}],"usageMetadata":{"promptTokenCount":8,"totalTokenCount":8}}""",
+      "returned no content: finishReason SAFETY",
+      true
+    ),
+    // `content` with a role and no `parts`
+    ("""{"candidates":[{"content":{"role":"model"},"finishReason":"SAFETY"}]}""", "finishReason SAFETY", true),
+    // `content` with an empty `parts`
+    (
+      """{"candidates":[{"content":{"parts":[]},"finishReason":"PROHIBITED_CONTENT"}]}""",
+      "finishReason PROHIBITED_CONTENT",
+      true
+    ),
+    // not a filter: still no answer, named after its reason, but a ValidationError
+    (
+      """{"candidates":[{"content":{"role":"model"},"finishReason":"MALFORMED_FUNCTION_CALL"}]}""",
+      "returned no content: finishReason MALFORMED_FUNCTION_CALL",
+      false
+    )
+  )
+
+  // a blocked prompt has no candidate, only promptFeedback
+  private val promptBlockedBody =
+    """{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"usageMetadata":{"promptTokenCount":8,"totalTokenCount":8}}"""
+
+  /** The message of a ContentFilteredError (`filtered`) or of a ValidationError. */
+  private def noContentMessage(result: org.llm4s.types.Result[Completion], filtered: Boolean = true): String =
+    result match {
+      case Left(e: org.llm4s.error.ContentFilteredError) if filtered => e.message
+      case Left(e: org.llm4s.error.ValidationError) if !filtered     => e.message
+      case other                                                     => fail(s"unexpected $other")
+    }
+
+  private def streamingClient(sseData: String): VertexAIClient = {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8)))))
+    new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+  }
+
   /**
    * Creates a VertexAIClient backed by a mock HTTP client that:
    *  - routes POST to the oauth2 token endpoint → returns a valid token
@@ -118,6 +173,35 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "return an empty answer with its usage when thinking spent the whole token budget (no parts)" in {
+    val client = stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(noPartsMaxTokensBody))
+
+    val completion = client.complete(conversation("Hi"), CompletionOptions()) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.message.contentOpt shouldBe None
+    completion.toolCalls shouldBe empty
+    completion.usage shouldBe Some(noPartsUsage)
+  }
+
+  noContentShapes.foreach { case (body, expected, filtered) =>
+    it should s"fail naming the reason for a candidate with no parts: $expected (${body.take(40)})" in {
+      noContentMessage(
+        stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body)).complete(conversation("Hi"), CompletionOptions()),
+        filtered
+      ) should include(expected)
+    }
+  }
+
+  it should "fail with a ContentFilteredError naming the block reason when Gemini blocked the prompt" in {
+    noContentMessage(
+      stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(promptBlockedBody))
+        .complete(conversation("Hi"), CompletionOptions())
+    ) should include("blocked the prompt: blockReason PROHIBITED_CONTENT")
   }
 
   it should "parse a tool call response" in {
@@ -301,6 +385,33 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     chunks should have size 2
   }
 
+  it should "report a requested reasoning effort as dropped, from complete and from a stream (RFC 0008)" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    val client   = stubHttpWithAuth(mockHttp, httpOk(successBody))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .onCall((_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+        Right(
+          StreamingHttpResponse(
+            200,
+            new ByteArrayInputStream(
+              "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hi\"}]}}]}\n"
+                .getBytes(StandardCharsets.UTF_8)
+            )
+          )
+        )
+      )
+    val reasoning = CompletionOptions().withReasoning(ReasoningEffort.High)
+    val dropped = List(
+      RequestAdjustment
+        .Dropped(RequestOption.Reasoning, s"reasoning effort is not sent to ${testConfig.model} by this client")
+    )
+
+    client.complete(conversation("Hi"), reasoning).toOption.value.adjustments shouldBe dropped
+    client.streamComplete(conversation("Hi"), reasoning, _ => ()).toOption.value.adjustments shouldBe dropped
+    client.complete(conversation("Hi"), CompletionOptions()).toOption.value.adjustments shouldBe empty
+  }
+
   it should "report grounding sources from the stream as citations" in {
     val sseData =
       "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}," +
@@ -380,6 +491,50 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
         cachedTokens = Some(64)
       )
     )
+  }
+
+  it should "end with the MAX_TOKENS finish reason and the usage when the last chunk has no parts" in {
+    val sseData     = "data: " + ujson.read(noPartsMaxTokensBody).render() + "\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
+
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val completion = client.streamComplete(conversation("Hi"), CompletionOptions(), chunks += _) match {
+      case Right(c) => c
+      case Left(e)  => fail(s"expected an empty answer, got $e")
+    }
+    completion.content shouldBe ""
+    completion.usage shouldBe Some(noPartsUsage)
+    chunks.flatMap(_.finishReason) shouldBe List("MAX_TOKENS")
+    chunks.flatMap(_.content) shouldBe empty
+  }
+
+  noContentShapes.foreach { case (body, expected, filtered) =>
+    it should s"end the stream naming the reason when its only chunk has no parts: $expected (${body.take(40)})" in {
+      val chunks = ListBuffer.empty[StreamedChunk]
+      noContentMessage(
+        streamingClient(s"data: ${ujson.read(body).render()}\n\n")
+          .streamComplete(conversation("Hi"), CompletionOptions(), chunks += _),
+        filtered
+      ) should include(expected)
+      chunks.flatMap(_.content) shouldBe empty
+    }
+  }
+
+  it should "end the stream with a ContentFilteredError naming the block reason when Gemini blocks the prompt" in {
+    noContentMessage(
+      streamingClient(s"data: $promptBlockedBody\n\n").streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+    ) should include("blockReason PROHIBITED_CONTENT")
   }
 
   it should "return an error for non-200 stream status" in {
@@ -466,4 +621,37 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
       case Left(err) => fail(s"Tool build failed: ${err.message}")
     }
   }
+
+  // text, then a finish that is not a normal one: `complete` (one candidate with the text and the finish) and a
+  // stream (the text, then a chunk with the finish and no parts) must end the same way
+  private def helThen: Seq[(String, String)] = Seq("SAFETY", "MALFORMED_FUNCTION_CALL").map { reason =>
+    (
+      s"""{"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"},"finishReason":"$reason"}]}""",
+      s"""data: {"candidates":[{"content":{"parts":[{"text":"Hel"}],"role":"model"}}]}\n\n""" +
+        s"""data: {"candidates":[{"content":{"role":"model"},"finishReason":"$reason"}]}\n\n"""
+    )
+  }
+
+  "A reply a content filter cut short after text" should "be a ContentFilteredError from complete and from a stream" in {
+    val (body, sse) = helThen.head
+    val chunks      = ListBuffer.empty[StreamedChunk]
+    noContentMessage(
+      completeOf(body)
+    ) shouldBe "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
+    noContentMessage(streamOf(sse, chunks += _)) shouldBe
+      "Vertex AI stopped the reply after 3 characters of text: finishReason SAFETY"
+    chunks.flatMap(_.content) shouldBe List("Hel") // what was delivered stays delivered
+  }
+
+  "A reply that produced text before an abnormal finish" should "be the text, from complete and from a stream" in {
+    val (body, sse) = helThen(1)
+    completeOf(body).map(_.content) shouldBe Right("Hel")
+    streamOf(sse, _ => ()).map(_.content) shouldBe Right("Hel")
+  }
+
+  private def completeOf(body: String): org.llm4s.types.Result[Completion] =
+    stubHttpWithAuth(stub[Llm4sHttpClient], httpOk(body)).complete(conversation("Hi"), CompletionOptions())
+
+  private def streamOf(sse: String, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] =
+    streamingClient(sse).streamComplete(conversation("Hi"), CompletionOptions(), onChunk)
 }

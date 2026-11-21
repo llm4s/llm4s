@@ -37,8 +37,9 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write  # For trusted publishing
-    
+      id-token: write  # For trusted publishing, and the Sigstore certificate that signs the provenance
+      attestations: write  # SLSA build provenance for every file staged for Maven Central (#2305)
+
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,7 +51,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
       
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
@@ -61,10 +64,13 @@ jobs:
           echo "GPG keys imported:"
           gpg --list-secret-keys
 
-      # The Scaladoc this job packages into every -javadoc.jar, checked before anything is signed or uploaded (#1967).
-      # Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` never fails `doc` or `ci-release`; the log is
-      # read instead, as in CI's ScalaDoc job. It fails on a warning in an llm4s source, or in a third-party source that
-      # is not on scripts/scaladoc-third-party-warnings.txt. `ci-release` then reuses the compiled classes.
+      # The Scaladoc of the released code, checked before anything is signed or uploaded (#1967). The -javadoc.jars do
+      # not carry it (each is a pointer to https://llm4s.org/scaladoc/, project/JavadocPointer.scala), so `ci-release`
+      # never runs `doc`: this step is what keeps a release from shipping a Scaladoc warning, which the Pages workflow's
+      # site Scaladoc would then publish. Scaladoc ignores `-Werror` and `-Wconf`, so a broken `[[link]]` never fails
+      # `doc`; the log is read instead, as in CI's ScalaDoc job. It fails on a warning in an llm4s source, or in a
+      # third-party source that is not on scripts/scaladoc-third-party-warnings.txt. `ci-release` then reuses the
+      # compiled classes.
       - name: Check Scaladoc warnings
         run: |
           set -o pipefail
@@ -74,88 +80,58 @@ jobs:
         env:
           SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
 
-      - name: Release
+      # Every module's -javadoc.jar is the small pointer and none is missing: Maven Central refuses a release without
+      # one, and the full Scaladoc in each jar once put a release over Sonatype's monthly size limit.
+      - name: Check the javadoc jars
+        run: sbt javadocJarCheck
+        env:
+          SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
+
+      # `sbt ci-release` on a tag runs `clean`, `publishSigned` into the local staging directory (target/sona-staging,
+      # build.sbt's `publishTo`) and then the command in CI_SONATYPE_RELEASE, by default `sonaRelease`, which uploads
+      # the bundle the build's `sonaBundle` makes: no checksums of the signatures and no SBOMs, checked file by file and
+      # capped at Sonatype's 1,000 files a month (project/CentralBundle.scala). Here it runs `sonaBundle` instead, which
+      # only checks and zips it, so the staged files can be attested before anything irreversible happens; `sonaRelease`
+      # below then uploads the same directory (#2305). What reaches Central is unchanged: the same signed files, by the
+      # same route. The SBOMs go on the GitHub Release, and are attested there (the `sbom` job).
+      - name: Build, sign and stage the release
         run: sbt ci-release
         env:
           SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
+          CI_SONATYPE_RELEASE: sonaBundle
           PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
 
-  # org.llm4s:llm4s-kotlin-api, built by Gradle (modules/kotlin-api), not sbt, so `sbt ci-release` does not publish it
-  # (#1494). It runs after `publish` and is its own job, so a failure here can be re-run alone: `publish` cannot be
-  # re-run once the sbt artifacts are on Central. `github-release` waits for both, so a Release is announced only
-  # when every artifact of the version, the Kotlin one included, is on its way to Central.
-  #
-  # The version is the tag's, the one sbt-dynver gave the sbt artifacts; the job checks the two agree before building.
-  # The Kotlin build compiles against llm4s-java-api_3 at that version, published to this runner's local Maven
-  # repository from the same commit, rather than waiting for Central to serve it.
-  publish-kotlin:
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Attested in the job that built them: attesting files downloaded back from Central would prove nothing.
+      # `gh attestation verify <file> -R llm4s/llm4s` checks one (docs/reference/verifying-releases.md).
+      - name: Attest build provenance of the staged artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          fetch-depth: 0  # Needed for sbt-dynver
+          subject-path: |
+            target/sona-staging/**/*.jar
+            target/sona-staging/**/*.pom
 
-      - name: Setup JVM
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          java-version: "21"
-          distribution: "temurin"
-          cache: "sbt"
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with:
-          gradle-version: '8.11.1'
-          cache-provider: basic
-
-      - name: Check sbt released the tag's version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # `print` writes `<project> / version` then the value on its own line, indented with a tab (`\t0.5.1`), and
-          # on the runner the last line can be a bare `ESC[0J`. Strip escapes, keep the last version line, trim it:
-          # reading the last line failed 0.5.0's publish-kotlin, and a `^[0-9]` match failed 0.5.1's.
-          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
-          if [ "$SBT_VERSION" != "$VERSION" ]; then
-            echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
-            exit 1
-          fi
-
-      - name: Publish the library to the local Maven repository
-        run: sbt publishM2
+      - name: Upload the staged release to Maven Central
+        run: sbt sonaRelease
         env:
           SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
-
-      - name: Build and sign the Kotlin publication
-        working-directory: modules/kotlin-api
-        # PGP_SECRET is the base64 of the armored secret key sbt-ci-release signs with; Gradle's in-memory signer takes
-        # the armored key itself, as the `signingKey` property (build.gradle.kts), so it is decoded here.
-        run: |
-          ORG_GRADLE_PROJECT_signingKey="$(printf '%s' "$PGP_SECRET" | base64 --decode)"
-          export ORG_GRADLE_PROJECT_signingKey
-          gradle publishMavenPublicationToStagingRepository -Pllm4sVersion="${GITHUB_REF_NAME#v}"
-        env:
-          PGP_SECRET: ${{ secrets.PGP_SECRET }}
-          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.PGP_PASSPHRASE }}
-
-      - name: Check the publication
-        run: REQUIRE_SIGNATURES=1 scripts/check-kotlin-publication.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
-
-      - name: Upload to Maven Central
-        run: scripts/publish-kotlin-api.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
-        env:
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+
+  # org.llm4s:llm4s-kotlin-api, built by Gradle: publish-kotlin.yml, which can also be run by hand for a tag (#1494).
+  # It runs after `publish` and is its own job, so a failure here can be re-run alone: `publish` cannot be re-run once
+  # the sbt artifacts are on Central. `github-release` waits for both, so a Release is announced only when every
+  # artifact of the version, the Kotlin one included, is on its way to Central.
+  publish-kotlin:
+    needs: publish
+    uses: ./.github/workflows/publish-kotlin.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
   # Publish the GitHub Release. This is what makes a release visible in the repo UI and
   # what notifies anyone watching "Releases only" -- neither happened automatically
@@ -223,6 +199,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write  # the Sigstore certificate that signs the provenance
+      attestations: write  # SLSA build provenance for the BOMs and licence reports (#2305)
 
     steps:
       - name: Checkout
@@ -235,7 +213,9 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
@@ -254,6 +234,14 @@ jobs:
             echo "$WRONG"
             exit 1
           fi
+
+      # A BOM downloaded from the Release is tied to this run by `gh attestation verify <file> -R llm4s/llm4s`.
+      - name: Attest build provenance of the SBOMs and licence reports
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            target/sboms/*.bom.json
+            target/licences/*.licences.csv
 
       - name: Attach the SBOMs and licence reports to the GitHub Release
         env:
@@ -297,7 +285,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      packages: write  # push the image, and its provenance beside it
+      id-token: write  # the Sigstore certificate that signs the provenance
+      attestations: write  # SLSA build provenance for the image (#2305)
 
     steps:
       - name: Checkout
@@ -310,19 +300,22 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - name: Setup sbt
         uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
+        id: image
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           sbt "workspaceRunner/Docker/publishLocal"
@@ -331,3 +324,17 @@ jobs:
           docker tag llm4s/workspace-runner:${VERSION#v} ghcr.io/${{ github.repository_owner }}/workspace-runner:${VERSION#v}
           docker push ghcr.io/${{ github.repository_owner }}/workspace-runner:${VERSION#v}
           docker push ghcr.io/${{ github.repository_owner }}/workspace-runner:latest
+          # The digest both tags now name in the registry: the provenance is bound to it, not to a tag.
+          IMAGE="ghcr.io/${{ github.repository_owner }}/workspace-runner"
+          DIGEST="$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE:${VERSION#v}" | grep -F "$IMAGE@sha256:" | head -1)"
+          [ -n "$DIGEST" ] || { echo "No registry digest for $IMAGE:${VERSION#v} after the push."; exit 1; }
+          echo "digest=${DIGEST#*@}" >> "$GITHUB_OUTPUT"
+
+      # `gh attestation verify oci://ghcr.io/llm4s/workspace-runner:<version> -R llm4s/llm4s` checks it.
+      - name: Attest build provenance of the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/workspace-runner
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false  # a storage record needs `artifact-metadata: write`; the attestation does not

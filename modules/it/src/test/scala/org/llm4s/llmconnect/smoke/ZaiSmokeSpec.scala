@@ -6,14 +6,7 @@ import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ZaiConfig }
-import org.llm4s.llmconnect.model.{
-  Completion,
-  CompletionOptions,
-  Conversation,
-  ReasoningEffort,
-  StreamedChunk,
-  UserMessage
-}
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, Thinking, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.ZaiClient
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
@@ -94,11 +87,11 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with Prov
 
   /**
    * The contract's checks cap the reply at a few tens of tokens, which GLM-4.5's default thinking could spend
-   * entirely, so they run with thinking off: `ReasoningEffort.None` goes to GLM-4.5 as `thinking.type: disabled`
+   * entirely, so they run with thinking off: `Thinking.Off` goes to GLM-4.5 as `thinking.type: disabled`
    * (#1691). Everything else is the client's own request. The reasoning check below leaves thinking on.
    */
   final private class ThinkingOff(underlying: LLMClient) extends LLMClient {
-    private def off(options: CompletionOptions): CompletionOptions = options.withReasoning(ReasoningEffort.None)
+    private def off(options: CompletionOptions): CompletionOptions = options.withThinking(Thinking.Off)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
       underlying.complete(conversation, off(options))
