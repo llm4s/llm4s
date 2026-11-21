@@ -30,7 +30,7 @@ import com.openai.models.chat.completions.{
 }
 import com.openai.models.completions.CompletionUsage
 import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
-import org.llm4s.error.{ LLMError, UnknownError }
+import org.llm4s.error.{ ContentFilteredError, LLMError, UnknownError }
 import org.llm4s.http.{ HttpNetwork, HttpNetworkSettings }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -211,8 +211,8 @@ class OpenAIClient private[provider] (
       )
       _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
       body = serializeParams(params)
-      response <- call("completion")(transport.createChatCompletion(params))
-      completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
+      response   <- call("completion")(transport.createChatCompletion(params))
+      completion <- filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -294,14 +294,17 @@ class OpenAIClient private[provider] (
     adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    call("fake streaming")(transport.createChatCompletion(params))
-      .map { response =>
-        val completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
-        emitCompletionAsChunks(completion, onChunk)
-        recordExchange(startedAt, Some(requestBody), Some(serialize(response)), Right(completion))
-        completion
-      }
-      .tapLeft(error => recordExchange(startedAt, Some(requestBody), None, Left(error)))
+    call("fake streaming")(transport.createChatCompletion(params)) match {
+      case Left(error) =>
+        recordExchange(startedAt, Some(requestBody), None, Left(error))
+        Left(error)
+      case Right(response) =>
+        // a filtered reply fails before any chunk, as `complete` fails on it
+        val result = filteredReply(convertFromOpenAIFormat(response).withAdjustments(adjustments))
+        result.foreach(emitCompletionAsChunks(_, onChunk))
+        recordExchange(startedAt, Some(requestBody), Some(serialize(response)), result)
+        result
+    }
 
   /**
    * Handles native streaming for models that support streaming.
@@ -317,30 +320,34 @@ class OpenAIClient private[provider] (
     val accumulator = StreamingAccumulator.create()
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
+    val state       = new StreamState
 
     val attempt = call("native streaming") {
       Using.resource(transport.createChatCompletionStream(params)) { response =>
         response.stream().forEach { chunk =>
           rawStream.append(serialize(chunk)).append('\n')
-          processStreamingChunk(chunk, toolCalls, accumulator, onChunk)
+          processStreamingChunk(chunk, toolCalls, accumulator, state, onChunk)
         }
       }
     }
 
     recordingExchange(startedAt, Some(requestBody)) {
-      attempt.flatMap(_ =>
-        // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
-        // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
-        // The accumulator holds the service's own usage report, with its reasoning and cached-token
-        // breakdown and its total (`StreamingAccumulator.updateUsage`).
-        accumulator.toCompletion.map { c =>
-          val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-          c.withModel(model)
-            .withToolCalls(c.message.toolCalls.toList)
-            .withEstimatedCost(cost)
-            .withAdjustments(adjustments)
-        }
-      )
+      // a content-filter finish fails the stream, with the usage reported after it
+      attempt
+        .flatMap(_ => state.filtered.map(_.withUsage(state.usage)).toLeft(()))
+        .flatMap(_ =>
+          // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
+          // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
+          // The accumulator holds the service's own usage report, with its reasoning and cached-token
+          // breakdown and its total (`StreamingAccumulator.updateUsage`).
+          accumulator.toCompletion.map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+            c.withModel(model)
+              .withToolCalls(c.message.toolCalls.toList)
+              .withEstimatedCost(cost)
+              .withAdjustments(adjustments)
+          }
+        )
     }(
       successResponse = _ => Some(rawStream.result()),
       failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
@@ -371,9 +378,11 @@ class OpenAIClient private[provider] (
     chunk: ChatCompletionChunk,
     toolCalls: StreamToolCalls,
     accumulator: StreamingAccumulator,
+    state: StreamState,
     onChunk: StreamedChunk => Unit
   ): Unit = {
-    known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
+    // after a content-filter finish nothing more is delivered; the stream is read on for its usage
+    if (state.filtered.isEmpty) known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
       val delta      = known(choice._delta())
       val calls      = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
       val contentOpt = delta.flatMap(d => known(d._content()))
@@ -381,10 +390,31 @@ class OpenAIClient private[provider] (
         known(choice._finishReason()).map(_.asString()).filter(_.nonEmpty).map(ChatCompletionsFinishReason(_))
       val chunkId = known(chunk._id()).getOrElse("")
 
-      emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
+      ChatCompletionsFinishReason.filtered(
+        displayName,
+        finishReason,
+        state.textLength + contentOpt.map(_.length).getOrElse(0),
+        None
+      ) match {
+        // the event that stopped the reply is not delivered; the text before it stays delivered
+        case Some(filtered) => state.filtered = Some(filtered)
+        case None =>
+          state.textLength += contentOpt.map(_.length).getOrElse(0)
+          emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
+      }
     }
 
-    known(chunk._usage()).foreach(usage => accumulator.updateUsage(toTokenUsage(usage)))
+    known(chunk._usage()).map(toTokenUsage).foreach { usage =>
+      state.usage = Some(usage)
+      accumulator.updateUsage(usage)
+    }
+  }
+
+  /** What a native stream has seen so far, beyond what the accumulator holds. */
+  final private class StreamState {
+    var textLength: Int                        = 0    // characters of answer text delivered
+    var filtered: Option[ContentFilteredError] = None // a content-filter finish: the reply's end
+    var usage: Option[TokenUsage]              = None // the last usage report
   }
 
   /**
@@ -719,6 +749,13 @@ class OpenAIClient private[provider] (
     }
 
   /**
+   * A reply the content filter stopped (`finish_reason` `content_filter`) as a `ContentFilteredError`, with the usage
+   * it was billed; any other reply unchanged (RFC 0009).
+   */
+  private def filteredReply(c: Completion): Result[Completion] =
+    ChatCompletionsFinishReason.filtered(displayName, Some(c.finishReason), c.content.length, c.usage).toLeft(c)
+
+  /**
    * Converts a chat-completions response to llm4s Completion format.
    *
    * Reads the first choice, including content, tool calls, token usage and estimated cost.
@@ -917,6 +954,9 @@ object OpenAIClient {
    * exchange puts the endpoint's reply in one - is redacted the same way, and truncated.
    */
   private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
+    case service: OpenAIServiceException if service.statusCode() == 400 && promptFiltered(service) =>
+      // Azure OpenAI refuses a prompt its content filter blocks with a 400 whose code is `content_filter`
+      ContentFilteredError.prompt(displayName(ProviderId(provider)), ChatCompletionsFinishReason.ContentFilter)
     case service: OpenAIServiceException =>
       HttpErrorMapper
         .mapHttpError(
@@ -932,6 +972,19 @@ object OpenAIClient {
     case io: OpenAIIoException if io.getCause != null => redactMessage(io.getCause.toLLMError, io.getCause)
     case other                                        => redactMessage(other.toLLMError, other)
   }
+
+  /**
+   * Whether a service error's body is `{"error":{"code":"content_filter",...}}`, a prompt the filter blocked. The SDK
+   * may hand over the whole body or only its `error` object, so the code is read from either.
+   */
+  private def promptFiltered(service: OpenAIServiceException): Boolean =
+    Try(ObjectMappers.jsonMapper().writeValueAsString(service.body())).toOption
+      .flatMap(body => Try(ujson.read(body)).toOption)
+      .flatMap(_.objOpt)
+      .map(body => body.get("error").flatMap(_.objOpt).getOrElse(body))
+      .flatMap(_.get("code"))
+      .flatMap(_.strOpt)
+      .contains(ChatCompletionsFinishReason.ContentFilter)
 
   /** `error` with its message redacted when it is the exception's own message, as `UnknownError`'s is. */
   private def redactMessage(error: LLMError, cause: Throwable): LLMError = error match {

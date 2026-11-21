@@ -147,6 +147,10 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       }
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(AnthropicContractFixtures.replies, "/v1/messages")(clientAt)
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/v1/messages")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
     }

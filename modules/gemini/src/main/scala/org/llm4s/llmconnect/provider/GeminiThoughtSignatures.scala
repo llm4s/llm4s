@@ -150,11 +150,9 @@ private[provider] object GeminiThoughtSignatures {
    * first carrying the text and the thought, the last carrying the finish reason; or a single chunk when
    * there is no call.
    */
-  def chunks(parsed: Parsed, messageId: String, rawFinishReason: Option[String]): Seq[StreamedChunk] = {
-    // the raw finishReason until RFC 0009 PR 2 maps it
-    val finishReason = rawFinishReason.map(FinishReason.Other(_))
-    val content      = Option.when(parsed.text.nonEmpty)(parsed.text)
-    val thought      = Option.when(parsed.thought.nonEmpty)(parsed.thought)
+  def chunks(parsed: Parsed, messageId: String, finishReason: Option[FinishReason]): Seq[StreamedChunk] = {
+    val content = Option.when(parsed.text.nonEmpty)(parsed.text)
+    val thought = Option.when(parsed.thought.nonEmpty)(parsed.thought)
     if (parsed.calls.isEmpty)
       Seq(
         StreamedChunk(

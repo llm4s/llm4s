@@ -148,6 +148,10 @@ class Llm4sBedrockModuleSpec extends AnyWordSpec with Matchers with ProviderModu
       withServer("/")(sendEventStream(_, textStream("Hi", "!")))(url => assertStreams(clientAt(url)))
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(BedrockContractFixtures.replies)(clientAt)
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(url => assertCancelsWhenInterrupted(clientAt(url)))
     }

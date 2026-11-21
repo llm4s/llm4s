@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StreamedChunk.finishReason` is an `Option[FinishReason]`, no longer an `Option[String]`; a positional
   pattern on `Completion` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
   [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
+- A content-filter stop (`content_filter`, Anthropic's `refusal`, Bedrock's guardrail reasons) is a
+  `Left(ContentFilteredError)` on every client, not a `Completion` (RFC 0009 PR 2);
+  [migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677).
 
 ### Providers
 
@@ -42,9 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Core
 
 - **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
-  traces too; which clients map it is in the [migration note](docs/reference/migration.md#finish-reasons-are-typed-2613) ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+  traces too, mapped by every chat client, and `llm4s-provider-testkit`'s `assertModelCallContract` checking it per provider
+  ([migration](docs/reference/migration.md#finish-reasons-are-typed-2613), [RFC 0009](docs/rfcs/0009-model-call-contract.md) PRs 1-2) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
-  Anthropic streams no longer trace `"stop"` before PR 2 maps them, and Perplexity's `incomplete` with a tool call is `Length` [#2613](https://github.com/llm4s/llm4s/issues/2613).
+  Anthropic streams trace `message_delta`'s `stop_reason` instead of `"stop"`, Perplexity's `incomplete` with a tool call is `Length`,
+  and every client's content-filter stop is a `ContentFilteredError` carrying the billed `usage`, which metrics record
+  ([migration](docs/reference/migration.md#every-providers-content-filter-stop-is-an-error-2677)) [#2613](https://github.com/llm4s/llm4s/issues/2613) [#2677](https://github.com/llm4s/llm4s/issues/2677) [#2676](https://github.com/llm4s/llm4s/issues/2676).
 - **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`

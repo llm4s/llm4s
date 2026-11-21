@@ -171,6 +171,19 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
 
   "a client built by each openai-compatible descriptor" should {
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          assertModelCallContract(ChatCompletionsContractFixtures.replies) { baseUrl =>
+            assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
+          }
+        }
+      }
+    }
+  }
+
+  "a client built by each openai-compatible descriptor" should {
+
     "send exactly one tool message per tool call, keeping every call and result (design 5.3)" in {
       expectations.foreach { (descriptor, _, _) =>
         withClue(s"${descriptor.id.asString}: ") {

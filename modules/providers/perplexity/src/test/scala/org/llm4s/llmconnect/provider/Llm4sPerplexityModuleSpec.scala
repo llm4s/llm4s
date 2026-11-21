@@ -163,6 +163,10 @@ class Llm4sPerplexityModuleSpec extends AnyWordSpec with Matchers with ProviderM
       withServer("/")(sendSseResponse(_, sseText))(baseUrl => assertStreams(clientAt(baseUrl)))
     }
 
+    "report how each reply ended, on complete and on a stream alike (RFC 0009)" in {
+      assertModelCallContract(PerplexityContractFixtures.replies)(clientAt)
+    }
+
     "return CancelledError when a call is interrupted" in {
       withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
     }
