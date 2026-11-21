@@ -84,6 +84,7 @@ expect 'deploy/'               'code integration'                        "touchp
 expect 'java-api'              'code consumers'                          "touchp modules/java-api/src/main/scala/J.scala"
 expect 'the Spring starter'    'code consumers'                          "touchp modules/spring-boot-starter/src/main/scala/S.scala"
 expect 'a Gradle sample'       'code consumers'                          "touchp modules/samples/micronaut-java/build.gradle"
+expect 'the Kafka sample modules/it borrows' 'code integration'           "touchp modules/samples/src/main/scala/org/llm4s/samples/kafka/TicketPipeline.scala"
 expect 'a Scala sample'        'code'                                    "touchp modules/samples/src/main/scala/S.scala"
 expect 'kotlin-api'            'code consumers'                          "touchp modules/kotlin-api/build.gradle.kts"
 # Windows
@@ -124,13 +125,21 @@ if out="$(ruby -e '
   script, sbt = File.read(ARGV[0]), File.read(ARGV[1])
   pats = script[/^INTEGRATION=\((.*?)^\)/m, 1].to_s.scan(/'"'"'([^'"'"']+)'"'"'/).flatten.map { |p| Regexp.new(p) }
   unreached = script[/^INTEGRATION_UNREACHED=.([^'"'"']*)/m, 1].to_s.split
-  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h
+  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h.transform_values { |d| d.squeeze("/") }
   deps = sbt[/^lazy val it = .*?\.dependsOn\((.*?)\)\s*\.settings/m, 1].to_s.gsub(%r{//[^\n]*}, "").scan(/^\s*(\w+)/).flatten
   abort "no dependsOn of it in build.sbt" if deps.empty?
   errs = deps.reject do |d|
     unreached.include?(d) || (dirs[d] && pats.any? { |p| p.match?("#{dirs[d]}/x") })
   end
-  puts errs.map { |d| "#{d}: add its directory to INTEGRATION or its id to INTEGRATION_UNREACHED in scripts/ci-changes.sh" }
+  errs = errs.map { |d| "#{d}: add its directory to INTEGRATION or its id to INTEGRATION_UNREACHED in scripts/ci-changes.sh" }
+  # sources borrowed with `(<project> / baseDirectory).value / "a" / "b"` in the it project settings
+  block = sbt[/^lazy val it = .*?(?=^lazy val )/m].to_s
+  block.scan(/\((\w+)\s*\/\s*baseDirectory\)\.value((?:\s*\/\s*"[^"]+")+)/).each do |proj, segs|
+    path = ([dirs[proj]] + segs.scan(/"([^"]+)"/).flatten).join("/")
+    next if pats.any? { |p| p.match?("#{path}/x") || p.match?(path) }
+    errs << "modules/it borrows #{path}: add it to INTEGRATION in scripts/ci-changes.sh"
+  end
+  puts errs
   extra = unreached.reject { |d| deps.include?(d) }
   puts extra.map { |d| "#{d} is in INTEGRATION_UNREACHED, but modules/it does not depend on it" }
   exit(errs.empty? && extra.empty? ? 0 : 1)

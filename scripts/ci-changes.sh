@@ -63,7 +63,8 @@ DOCS=(
 )
 # The modules the @Docker suites in modules/it import, and what they need: modules/it depends on more (every provider,
 # the workspace client, image, speech, mcp, ...), and INTEGRATION_UNREACHED lists those, so that a module `it` starts
-# to depend on must be put in one list or the other (scripts/test-ci-changes.sh checks build.sbt against both).
+# to depend on must be put in one list or the other, and a source file it borrows from another module must be in
+# INTEGRATION (scripts/test-ci-changes.sh checks build.sbt against both).
 INTEGRATION=(
   '^modules/it/'
   '^deploy/'
@@ -72,6 +73,8 @@ INTEGRATION=(
   '^modules/(memory|memory-postgres|observability|openai|openai-compatible|testkit|provider-testkit)/'
   '^modules/(agent|agent-testkit|agent-checkpoint-sqlite|agent-checkpoint-postgres|deploy-service)/'
   '^modules/(secrets-vault|secrets-aws)/'
+  # sources modules/it compiles into its own tests (`Test / unmanagedSources`): the Kafka pipeline sample
+  '^modules/samples/src/main/scala/org/llm4s/samples/kafka/'
 )
 # shellcheck disable=SC2034 # read by scripts/test-ci-changes.sh
 INTEGRATION_UNREACHED='mcp image speech ollama gemini anthropic azureIdentity voyage bedrock jina jev cohere watsonx
@@ -125,7 +128,7 @@ decide docs "$(any "${DOCS[@]}")"
 windows_files="$(printf '%s\n' "$files" | ruby -e '
   files = $stdin.read.split("\n").reject(&:empty?)
   sbt = File.exist?("build.sbt") ? File.read("build.sbt") : ""
-  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h
+  dirs = sbt.scan(/^lazy val (\w+)\s*=\s*\(?project in file\("([^"]+)"\)/).to_h.transform_values { |d| d.squeeze("/") }
   pt = File.exist?("project/PlatformTests.scala") ? File.read("project/PlatformTests.scala") : ""
   whole = pt[/val wholeModules[^=]*=\s*Seq\((.*?)\)/m, 1].to_s.scan(/"(\w+)"/).flatten
   suites = pt[/val suites[^=]*=\s*Seq\((.*)\)/m, 1].to_s.scan(/"([\w.*]+\.[\w*]+)"/).flatten
