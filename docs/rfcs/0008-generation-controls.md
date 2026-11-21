@@ -164,7 +164,7 @@ refuse-before-send option (the issue's `Strict`) is left out until a caller need
 ### Part 2: Thinking, separated from effort
 
 ```scala
-@Experimental
+@Stable   // decision 14
 sealed trait Thinking derives ReadWriter
 object Thinking {
   case object Off      extends Thinking      // Anthropic thinking: disabled; Z.ai thinking.type: disabled; Gemini thinkingBudget 0
@@ -242,14 +242,16 @@ supportsBudgetThinking: Option[Boolean]                   // no litellm key; set
 ```
 
 The litellm metadata has no key for "rejects a manual budget", so `supportsBudgetThinking` comes only from
-`llm4s_model_overrides.json`, and `None` (unknown) keeps today's behaviour. Where the litellm metadata is missing or
+`llm4s_model_overrides.json`, and `None` (unknown) keeps today's behaviour. It is set there by patch entries
+(`"llm4s_patch": true`), which add the key and keep the rest of the litellm entry, so the flag does not freeze the
+entry's prices against a refresh. Where the litellm metadata is missing or
 wrong, the overrides file corrects it, and a provider's `RequestTransformer.adjusted` adds rules that follow from
 its model naming. No hard-coded model checks in core.
 
 **`ThinkingReplay`.** The replay fingerprint today covers the system messages, tools, `responseFormat` and the
 messages before the assistant turn. `thinking` joins it if a change of `thinking` makes a replayed signed block
-invalid for the provider (decision 4 below). PR 3 settles this against the Anthropic and Bedrock APIs and records
-the result in `ThinkingReplay`'s Scaladoc. Adding `thinking` when it isn't needed would unseal blocks that could
+invalid for the provider (decision 4 below). PR 4 settled this against Anthropic's documentation, which Bedrock
+shares: it does not, so `thinking` stays out of the fingerprint, as recorded in `ThinkingReplay`'s Scaladoc. Adding `thinking` when it isn't needed would unseal blocks that could
 have been replayed.
 
 ### Part 3: Provider-side prompt caching
@@ -318,7 +320,7 @@ below).
 
 - **Modules and tiers:** `llm4s-core` (Frozen at 1.0): `CompletionOptions`, `ReasoningEffort`, `Completion`,
   `TransformationResult` and `ModelCapabilities` change. `RequestOption` and `RequestAdjustment` are new and
-  `@Stable` (decision 12); `Thinking` and `PromptCache` are new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
+  `@Stable` (decision 12), and so is `Thinking` (decision 14); `PromptCache` is new and `@Experimental`. `llm4s-agent`: `AgentEvents.ModelCallCompleted` gains a defaulted field.
   Provider modules change only internally, except `llm4s-openai-compatible`: `OpenAICompatibleDialect.addReasoning`
   returns the `List[RequestAdjustment]` it could not send instead of `Unit` (decision 13). `llm4s-java-api` and `kotlin-api` follow core: `JReasoningEffort` loses
   `NONE` and gains `MINIMAL`, `XHIGH` and `MAX`, `JCompletionOptions` loses `budgetTokens` and gains `thinking`, and
@@ -326,8 +328,9 @@ below).
 - **Binary:** there is no baseline yet (#1281), so no MiMa filter is needed.
 - **Source:** Parts 1 and 3 are additive, apart from the usual exception for any growth-pattern addition: a
   positional pattern match on a case-class extractor whose arity changes (`TransformationResult`, `Completion`,
-  `ModelCallCompleted`). Part 2 breaks code that uses `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None`
-  (PR 4), and an exhaustive `match` on `ReasoningEffort` warns about the three new levels. Part 1 also breaks an
+  `ModelCallCompleted`). Part 2 has the same exception for `ModelCapabilities` (PR 3), and breaks code that uses
+  `budgetTokens`, `withBudgetTokens` or `ReasoningEffort.None` (PR 4); an exhaustive `match` on `ReasoningEffort`
+  warns about the three new levels. Part 1 also breaks an
   `OpenAICompatibleDialect` that overrides `addReasoning` (PR 1, decision 13).
 - **Behaviour:** a call that compiles after PR 4 sends the same request as before, except a `reasoning`-only call to
   a model that rejects a thinking budget, which fails today and now succeeds with `output_config.effort`. The new
@@ -387,7 +390,9 @@ Each PR has its own review:
    logging. No new options.
 2. **PR 2 (Part 1).** `AgentEvents.ModelCallCompleted.adjustments`, filled from each call's `Completion`.
 3. **PR 3 (Part 2).** `ModelCapabilities` reads the metadata keys above, plus `supportsBudgetThinking` from the
-   overrides file.
+   overrides file. `supportedReasoningEfforts` holds the levels `ReasoningEffort` has at that point (`low`, `medium`,
+   `high`, which litellm implies for a reasoning model unless a `supports_<level>_reasoning_effort` key says `false`);
+   PR 4 reads the `minimal`, `xhigh` and `max` keys when it adds those levels.
 4. **PR 4 (Part 2).** `Thinking` with `Thinking.budget` validation and per-provider fitting, the new
    `ReasoningEffort` levels, the budget-rejecting-model exception, and the removal of `budgetTokens` and
    `ReasoningEffort.None`, for Anthropic and OpenAI, with the `ThinkingReplay` check. Other providers report `Dropped`
@@ -419,7 +424,9 @@ The issue discussion settled the questions an earlier draft left open
    capability query can follow once a caller needs one.
 3. **`CachingLLMClient`'s key becomes an explicit calculation** before `promptCache` lands (PR 5).
 4. **`thinking` joins the `ThinkingReplay` fingerprint** if a change of `thinking` makes a replayed thinking block
-   invalid for the provider. PR 4 checks and records the answer.
+   invalid for the provider. PR 4 checked: it does not. Anthropic's documentation, which covers Bedrock too, says a
+   change of thinking configuration between turns is allowed and one within a turn "doesn't error" but silently
+   disables thinking for that request; a change invalidates only the prompt cache. So `thinking` stays out.
 5. **`TraceEvent` gets adjustments when a backend reads them**, not now.
 
 The review of this PR settled these:
@@ -449,6 +456,20 @@ PR 1 settled these:
     what it could not send, as "Where they come from" describes, which for xAI includes the penalties it strips from
     a reasoning model's request. The dialects that map reasoning themselves (Z.ai,
     xAI, OpenRouter) report nothing new yet; a level one of them leaves unsent is a follow-up under this RFC.
+
+PR 4 settled these:
+
+14. **`Thinking` is `@Stable`**, not `@Experimental`, for decision 12's reason: the `@Stable` `CompletionOptions`
+    exposes it as a field. `stabilityTierCheck` reads a case class's header as one member, so the field alone cannot
+    be marked `@Experimental`; leaving it out of `CompletionOptions(...)` and marking only the setters was the
+    alternative. `PromptCache` (PR 6) will meet the same choice.
+15. **A provider that sent something for `ReasoningEffort.None` sends the same for `Thinking.Off`**, so a call migrated
+    from one to the other sends the request it sent before (the compatibility promise above): Z.ai `thinking.type:
+    disabled` or `reasoning_effort: none` by model, xAI and watsonx `low`, Perplexity `minimal`. Where that still thinks
+    it is reported `Adjusted`, replacing the per-process warnings those clients logged. OpenAI differs, as the
+    migration says: `Off` asks for the lowest effort. Perplexity and watsonx report no adjustments yet, so theirs are a
+    follow-up. Claude Fable 5 rejects `thinking: disabled`, which its metadata does not say, so its patch entries carry
+    `supports_none_reasoning_effort: false` beside PR 3's `supports_budget_thinking: false`.
 
 ## Open questions
 

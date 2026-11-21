@@ -117,7 +117,7 @@ class OllamaClient(
 
   /** What `options` asks for that the request does not send: Ollama's `think` is not mapped yet (RFC 0008). */
   private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments = UnmappedOptions.reasoning(config.model, options)
+    val adjustments = UnmappedOptions.reasoningAndThinking(config.model, options)
     adjustmentLog.record(config.model, adjustments)
     adjustments
   }

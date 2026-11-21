@@ -146,11 +146,13 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       )
     }
 
-    "map every reasoning effort, None to minimal" in {
-      PerplexityClient.reasoningEffortValue(ReasoningEffort.None) shouldBe "minimal"
+    "map every reasoning effort to its own name, all of which the Agent API takes" in {
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.Minimal) shouldBe "minimal"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.Low) shouldBe "low"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.Medium) shouldBe "medium"
       PerplexityClient.reasoningEffortValue(ReasoningEffort.High) shouldBe "high"
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.XHigh) shouldBe "xhigh"
+      PerplexityClient.reasoningEffortValue(ReasoningEffort.Max) shouldBe "max"
     }
 
     "refuse plain JSON mode before sending anything" in {

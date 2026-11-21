@@ -26,11 +26,12 @@ class CompletionOptionsSettersSpec extends AnyFlatSpec with Matchers {
     base.withTools(Seq.empty) shouldBe base
   }
 
-  it should "set and clear reasoning, the thinking budget and the response format" in {
+  it should "set and clear reasoning, thinking and the response format" in {
     base.withReasoning(Some(ReasoningEffort.High)).reasoning shouldBe Some(ReasoningEffort.High)
     base.withReasoning(Some(ReasoningEffort.High)).withReasoning(None) shouldBe base
-    base.withBudgetTokens(Some(1000)).budgetTokens shouldBe Some(1000)
-    base.withBudgetTokens(Some(1000)).withBudgetTokens(None) shouldBe base
+    base.withThinking(Some(Thinking.Adaptive)).thinking shouldBe Some(Thinking.Adaptive)
+    base.withThinking(Thinking.Off).thinking shouldBe Some(Thinking.Off)
+    base.withThinking(Thinking.Adaptive).withThinking(None) shouldBe base
     base.withResponseFormat(Some(ResponseFormat.Json)).responseFormat shouldBe Some(ResponseFormat.Json)
     base.withResponseFormat(Some(ResponseFormat.Json)).withResponseFormat(None) shouldBe base
   }

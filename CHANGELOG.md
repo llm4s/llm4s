@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- The net change since 0.6.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
+### Breaking changes
+
+- `CompletionOptions.budgetTokens` and `withBudgetTokens`, and `ReasoningEffort.None`, are removed: use `thinking`
+  (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
+  `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
+  [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
+
+### Providers
+
+- **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
+  `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
+  entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+- **Added** `CompletionOptions.thinking` (`Thinking.Off`, `Adaptive`, or `Thinking.budget(n)`) and the effort levels
+  `Minimal`, `XHigh` and `Max`, mapped per provider: Anthropic sends `thinking: disabled`/`adaptive`, a fitted
+  `budget_tokens` and `output_config.effort`, and a `reasoning`-only request to a model that rejects a budget (Opus
+  4.7 and later) as adaptive thinking instead of a 400; OpenAI sends the nearest `reasoning_effort` the model accepts;
+  each reports what it changed on `Completion.adjustments` ([cost controls](docs/guide/cost-controls.md),
+  [RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4, decision 14); `CachingLLMClient` matches a cached answer on an
+  explicit list of the options that change it, `thinking` and `reasoning` among them (PR 5, decision 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+
+### Java & Kotlin APIs
+
+- **Added** `JThinking` (`off()`, `adaptive()`, `budget(n)`) and `JCompletionOptions.Builder.thinking`, the Kotlin
+  `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
+  `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
+
 ### Build & tooling
 
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,

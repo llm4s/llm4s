@@ -37,8 +37,9 @@ import scala.util.{ Try, Using }
  *
  * `temperature` is always sent, `top_p` when not 1.0 and `max_output_tokens` when set. The Agent API rejects an
  * `anthropic/` model without `max_output_tokens`, so such a request that sets no limit is sent the config's
- * `reserveCompletion`. `CompletionOptions.reasoning` is sent as `reasoning.effort` (`ReasoningEffort.None` as
- * `minimal`, the least the API takes; `budgetTokens` has no counterpart). The penalties have no counterpart in the
+ * `reserveCompletion`. `CompletionOptions.reasoning` is sent as `reasoning.effort`, and `Thinking.Off` as `minimal`, the
+ * least the API takes, winning over a `reasoning` also set; `Thinking.Adaptive` and `Thinking.Budget` have no counterpart
+ * and are not sent (this client reports no adjustments yet). The penalties have no counterpart in the
  * Agent API and are not sent. A `ResponseFormat.JsonSchema` is sent as `response_format`
  * (`{"type":"json_schema","json_schema":{"name","schema","strict"}}`); the Agent API takes no plain JSON mode, so
  * `ResponseFormat.Json` is refused before anything is sent.
@@ -268,7 +269,9 @@ class PerplexityClient(
       options.maxTokens
         .orElse(Option.when(isAnthropic(config.model))(anthropicDefaultMaxTokens(config.reserveCompletion)))
         .foreach(max => body("max_output_tokens") = max)
-      options.reasoning.foreach(effort => body("reasoning") = ujson.Obj("effort" -> reasoningEffortValue(effort)))
+      val effort =
+        if (options.thinking.contains(Thinking.Off)) Some("minimal") else options.reasoning.map(reasoningEffortValue)
+      effort.foreach(e => body("reasoning") = ujson.Obj("effort" -> e))
       format.foreach(f => body("response_format") = f)
       val tools =
         (if (config.webSearch) Seq(ujson.Obj("type" -> "web_search")) else Seq.empty) ++
@@ -382,14 +385,9 @@ object PerplexityClient {
 
   /**
    * A `ReasoningEffort` as the Agent API's `reasoning.effort`, which takes `minimal`, `low`, `medium`, `high`,
-   * `xhigh` and `max`. `None` has no "off": it is sent as `minimal`, the least.
+   * `xhigh` and `max`: each level by its own name. It has no "off"; `Thinking.Off` is sent as `minimal`, the least.
    */
-  private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort match {
-    case ReasoningEffort.None   => "minimal"
-    case ReasoningEffort.Low    => "low"
-    case ReasoningEffort.Medium => "medium"
-    case ReasoningEffort.High   => "high"
-  }
+  private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort.name
 
   private def encodeJsonSchema(format: ResponseFormat.JsonSchema): ujson.Value =
     ujson.Obj(

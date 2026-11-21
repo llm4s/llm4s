@@ -186,11 +186,24 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     }
   }
 
-  test("ReasoningEffort.None is sent to a gpt-oss model as low, the least, with a warning logged once") {
-    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.None)).should(include(""""reasoning_effort":"low""""))
+  test("Thinking.Off is sent to a gpt-oss model as low, the least, with a warning logged once") {
+    gptOssBody(CompletionOptions().withThinking(Thinking.Off)).should(include(""""reasoning_effort":"low""""))
     WatsonXClient.warnedReasoningNotDisabled.get() shouldBe true
     // a second request logs nothing new and sends the same
-    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.None)).should(include(""""reasoning_effort":"low""""))
+    gptOssBody(CompletionOptions().withThinking(Thinking.Off)).should(include(""""reasoning_effort":"low""""))
+  }
+
+  test("Thinking.Off wins over a reasoning level also set") {
+    gptOssBody(CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High)) shouldBe
+      gptOssBody(CompletionOptions().withThinking(Thinking.Off))
+  }
+
+  test("the levels the chat API lacks are sent as the nearest it takes") {
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Minimal))
+      .should(include(""""reasoning_effort":"low""""))
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.XHigh))
+      .should(include(""""reasoning_effort":"high""""))
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Max)).should(include(""""reasoning_effort":"high""""))
   }
 
   test("include_reasoning is never sent: it defaults to true") {
@@ -217,11 +230,15 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers with LoneElement:
     WatsonXClient.warnedReasoningNotSent.get() shouldBe true
   }
 
-  test("reasoning unset sends no reasoning_effort, and budgetTokens is ignored, on a gpt-oss model too") {
-    val plain = gptOssBody(CompletionOptions())
+  test(
+    "reasoning unset sends no reasoning_effort, and a thinking budget or adaptive thinking is ignored, on a gpt-oss model too"
+  ) {
+    val plain  = gptOssBody(CompletionOptions())
+    val budget = Thinking.budget(1000).toOption.get
     ujson.read(plain).obj.keySet.filter(_.contains("reasoning")) shouldBe empty
-    gptOssBody(CompletionOptions().withBudgetTokens(Some(1000))) shouldBe plain
-    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Low).withBudgetTokens(Some(1000))) shouldBe
+    gptOssBody(CompletionOptions().withThinking(budget)) shouldBe plain
+    gptOssBody(CompletionOptions().withThinking(Thinking.Adaptive)) shouldBe plain
+    gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Low).withThinking(budget)) shouldBe
       gptOssBody(CompletionOptions().withReasoning(ReasoningEffort.Low))
   }
 

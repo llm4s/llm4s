@@ -1,6 +1,6 @@
 package org.llm4s.model
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, RequestAdjustment, RequestOption }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, RequestAdjustment, RequestOption, Thinking }
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.util.concurrent.ConcurrentHashMap
@@ -73,4 +73,48 @@ private[llm4s] object UnmappedOptions {
     options.reasoning.toList.map(_ =>
       RequestAdjustment.Dropped(RequestOption.Reasoning, s"reasoning effort is not sent to $model by this client")
     )
+
+  /** A `Dropped` for `thinking` when the caller set it, from a client that sends no thinking setting. */
+  def thinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
+    options.thinking.toList.map(_ =>
+      RequestAdjustment.Dropped(RequestOption.Thinking, s"a thinking setting is not sent to $model by this client")
+    )
+
+  /** [[reasoning]] and [[thinking]]: the report of a client that maps neither. */
+  def reasoningAndThinking(model: String, options: CompletionOptions): List[RequestAdjustment] =
+    reasoning(model, options) ++ thinking(model, options)
+}
+
+/**
+ * The shared pieces of mapping `reasoning` and `thinking` onto a provider's own levels (RFC 0008), so that every
+ * client resolves a level and reports the result the same way. The levels each provider accepts stay in its client.
+ */
+private[llm4s] object EffortMapping {
+
+  /** The level in `supported` nearest to `level`, the lower on a tie; `level` itself when supported. */
+  def nearest(level: ReasoningEffort, supported: Set[ReasoningEffort]): ReasoningEffort = {
+    val order = ReasoningEffort.values
+    val at    = order.indexOf(level)
+    order
+      .filter(supported.contains)
+      .minByOption(l => (math.abs(order.indexOf(l) - at), order.indexOf(l)))
+      .getOrElse(level)
+  }
+
+  /** An `Adjusted` on `Reasoning` when `level` was sent as `sent`, a provider value with a different name. */
+  def level(model: String, level: ReasoningEffort, sent: String): List[RequestAdjustment] =
+    if (sent == level.name) Nil
+    else
+      List(RequestAdjustment.Adjusted(RequestOption.Reasoning, level.name, sent, s"$model has no ${level.name} level"))
+
+  /**
+   * An `Adjusted` on `Reasoning` for a `reasoning` that `thinking = Off` overrode, on a provider whose one control
+   * serves both: the precedence rule on `CompletionOptions.withThinking`. `sent` is what went instead.
+   */
+  def overriddenByOff(options: CompletionOptions, sent: String): List[RequestAdjustment] =
+    if (!options.thinking.contains(Thinking.Off)) Nil
+    else
+      options.reasoning.toList.map(level =>
+        RequestAdjustment.Adjusted(RequestOption.Reasoning, level.name, sent, "thinking = Off takes precedence")
+      )
 }
