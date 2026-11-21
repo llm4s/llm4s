@@ -62,10 +62,10 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Adding a module
 
-Each step below is easy to miss because a missing one does not fail the build.
+Each step below is easy to miss because a missing one does not fail the build (step 3 now fails Quick Checks' `docsSourcesCheck`).
 1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit.
 2. Add a migration note in the CHANGELOG and docs.
-3. Add the module to the `docs` project's source list in `build.sbt`. Otherwise its Scaladoc is silently never generated.
+3. Add a published module to the `docs` project's `dependsOn` and source list in `build.sbt`, or its Scaladoc is never generated; `sbt docsSourcesCheck` fails without it.
 4. Register it in `hooks/pre-commit`.
 5. If it has an integration suite that needs a database, container, model server or API key, put the suite in `modules/it` with exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` enforces this. A store that needs none, such as SQLite, runs its suites in its own module.
 6. A provider module also goes into the root aggregate, `samples`, `it`, and `configPolicy` if it has chat providers.
@@ -172,7 +172,7 @@ sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
-sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks); sbt test and coverage leave them out
+sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks), in core and agent; sbt test and coverage leave them out
 sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
@@ -483,7 +483,8 @@ A test that measures how cost grows with input size (`LinearTime.assertLinear`, 
 ratio) is tagged `taggedAs(PerformanceTest)` (`org.llm4s.testutil`). `sbt test` and the coverage
 run exclude the tag - growth is platform-independent, so Windows and coverage instrumentation only
 multiplied its cost - and `sbt testPerformance` runs it (CI's ubuntu `Performance tests` job and a
-nightly run). Leave one untagged guard per spec: a single ~1 MB worst-case input under
+nightly run), only in the modules `performanceTestProjects` in `build.sbt` lists: a module whose
+tests start using the tag joins that list (`scripts/check-performance-tests.sh` fails otherwise). Leave one untagged guard per spec: a single ~1 MB worst-case input under
 `LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
 on a catastrophic (quadratic) regression.
 

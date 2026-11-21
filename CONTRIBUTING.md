@@ -219,7 +219,8 @@ See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 A test that checks how an operation's cost grows with its input - linear, not quadratic - with
 `LinearTime.assertLinear` (or any other timing ratio) is tagged `taggedAs(PerformanceTest)`, from
 `org.llm4s.testutil`. `sbt test` and the coverage run leave the tag out, and `sbt
-testPerformance` runs only it: CI runs it once, uninstrumented, in the ubuntu `Performance tests`
+testPerformance` runs only it, in the modules `performanceTestProjects` in `build.sbt` lists (core and agent; a
+module whose tests start using the tag joins the list, or `scripts/check-performance-tests.sh` fails Quick Checks): CI runs it once, uninstrumented, in the ubuntu `Performance tests`
 job and nightly, not on Windows or under coverage, where it cost most of each job's time and
 measured nothing more. Keep one ordinary test per such spec that pushes a single ~1 MB worst-case
 input through the same operation under a generous hang guard (`LinearTime.timed(label, hangGuard =
@@ -252,6 +253,12 @@ actors or threads mix in `TestTimeLimit` (`org.llm4s.testutil` in core's tests; 
 thread and fails it with `TestFailedDueToTimeoutException`. ZIO specs use
 `@@ TestAspect.timeout(...)`. Mix it into a new spec of that kind; a spec that legitimately needs
 longer overrides `timeLimit`.
+
+### Re-running a failed CI job
+
+When a job fails on something transient (a Maven Central 429, a runner or Docker Hub hiccup), re-run only the failed
+jobs - **Re-run failed jobs** on the run's page, or `gh run rerun <run-id> --failed` - not the whole run: a full
+re-run repeats some 150 runner minutes, and the project shares a 20-job concurrency limit with every other PR.
 
 ### Tests that need a real service
 

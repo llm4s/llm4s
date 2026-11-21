@@ -140,7 +140,7 @@ object Versions {
   // commons-pool2, gson, org.json and redis-authx-core besides slf4j-api, where Lettuce brings Netty and Reactor.
   val jedis = "8.0.2"
 
-  // Spring Boot: the starter is built against the oldest supported 3.x release. CI's "Spring Boot 3.x (latest)"
+  // Spring Boot: the starter is built against the oldest supported 3.x release. CI's "Spring Boot and Spring AI (latest)"
   // job runs the starter's specs again with `-Dllm4s.springBootVersion=<latest 3.x>`, so the supported range is
   // tested at both ends; nothing else reads the property.
   val springBootBaseline = "3.3.6"
@@ -150,12 +150,12 @@ object Versions {
 
   // Spring Boot 4: the same artifact, compiled against Boot 3 above, also carries a Boot 4 health indicator, compiled
   // against this release's spring-boot-health. `springBootStarterBoot4` runs the starter's specs on Boot 4: on this
-  // release by default, and CI's "Spring Boot 4.x" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
+  // release by default, and CI's "Spring Boot and Spring AI (latest)" job again with `-Dllm4s.springBoot4Version=<latest 4.x>`.
   val springBoot4Baseline = "4.0.8"
   val springBoot4         = sys.props.getOrElse("llm4s.springBoot4Version", springBoot4Baseline)
 
   // Spring AI (Apache-2.0), only llm4s-spring-ai (#2278), as a provided dependency. The module is built against the
-  // oldest supported 2.0.x release; CI's "Spring AI 2.0.x (latest)" job runs its specs again with
+  // oldest supported 2.0.x release; CI's "Spring Boot and Spring AI (latest)" job runs its specs again with
   // `-Dllm4s.springAiVersion=<latest 2.0.x>`, so the range docs/guide/spring-ai.md states is tested at both ends.
   val springAiBaseline = "2.0.0"
   val springAi         = sys.props.getOrElse("llm4s.springAiVersion", springAiBaseline)

@@ -1,8 +1,12 @@
 name: Benchmarks
 
+# Weekly on main, on each release tag and on demand. It used to run on every push to main, about 10 runner minutes a
+# merge for a JMH run on a shared runner, whose numbers are too noisy to compare merge by merge; a weekly run on the
+# same branch still shows a drift. Its smoke tests (`benchmarks/test`) also run in CI's test job on every pull request.
 on:
+  schedule:
+    - cron: "23 5 * * 1"  # 05:23 UTC every Monday
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
   workflow_dispatch:
 

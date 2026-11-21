@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/), not its own Scaladoc, and
   its CycloneDX SBOM and the signatures' checksums are no longer uploaded to Maven Central (SBOMs: GitHub Release); IDEs read the sources jar ([release guide](docs/reference/release.md#what-is-published-to-maven-central)).
+- **Changed** CI costs fewer runner minutes: the consumer builds share one job and one `publishM2`, the three Spring jobs one sbt job, MiMa and the config-policy CLIs moved into Quick Checks and the tests, `sbt testPerformance` runs only core and agent, and benchmarks run weekly ([contributing](CONTRIBUTING.md#re-running-a-failed-ci-job)).
 
 ## [0.6.0] - 2026-11-21
 

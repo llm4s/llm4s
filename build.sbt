@@ -116,9 +116,15 @@ addCommandAlias(
 // ---- Performance tier ----
 // Tests tagged `org.llm4s.testutil.PerformanceTest` check that an operation's cost grows linearly with its input
 // (`LinearTime.assertLinear`). `sbt test` excludes the tag (see `commonSettings`); this runs only the tagged tests, in
-// every module. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
-lazy val PerformanceTestTag = "org.llm4s.tags.PerformanceTest"
-addCommandAlias("testPerformance", s"testOnly -- -n $PerformanceTestTag")
+// the modules that have them: a `testOnly` across the whole build compiled every module's tests to run tests in two.
+// scripts/check-performance-tests.sh (Quick Checks) fails when a test elsewhere uses the tag, so a module whose tests
+// start using it is added here. CI runs it in the ubuntu-only `Performance tests` job and nightly (performance-nightly.yml).
+lazy val PerformanceTestTag      = "org.llm4s.tags.PerformanceTest"
+lazy val performanceTestProjects = Seq("core", "agent")
+addCommandAlias(
+  "testPerformance",
+  performanceTestProjects.map(p => s"$p/testOnly -- -n $PerformanceTestTag").mkString(";", ";", "")
+)
 
 // ---- Tiered test aliases ----
 // Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
@@ -250,6 +256,12 @@ Global / excludeLintKeys += coveragePolicy
 // build publishes to the docs that name it. See project/PublishedArtifacts.scala.
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
+)
+// The `docs` project's `docs/doc` is the site's one Scaladoc tree, from the sources it borrows (see `docs` below). A
+// published module missing from that list vanishes from the site silently; this fails instead. CI's ScalaDoc job used to
+// catch it by running `doc` on every module besides `docs/doc`.
+lazy val docsSourcesCheck = taskKey[Unit](
+  "Fail the build if a published module's sources are not in the docs project's aggregate Scaladoc"
 )
 // What a release must put on Maven Central, one `artifact <id>`, `gradle <id>`, `bom <id>` or `stub <id>` per line,
 // for scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`. `gradle` lines are the artifacts
@@ -464,6 +476,22 @@ lazy val llm4s = (project in file("."))
         Def.task((name.value, (publish / skip).value, description.value)).all(ScopeFilter(inAnyProject)).value
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
       PomDescriptions.check(described, streams.value.log)
+    },
+    docsSourcesCheck / aggregate := false,
+    docsSourcesCheck := {
+      val inDocs = (docs / Compile / sources).value.toSet
+      val modules = Def
+        .task((name.value, (publish / skip).value, (Compile / sources).value))
+        .all(ScopeFilter(inAnyProject -- inProjects(docs)))
+        .value
+      val published = modules.collect { case (n, false, srcs) if srcs.nonEmpty => (n, srcs) }
+      val missing   = published.collect { case (n, srcs) if srcs.exists(f => !inDocs(f)) => n }.sorted
+      if (missing.nonEmpty)
+        throw new MessageOnlyException(
+          s"Published, but not (or not wholly) in the docs project's Scaladoc: ${missing.mkString(", ")}. Add each to " +
+            "the `docs` project's dependsOn and Compile / sources in build.sbt, or its API is missing from the site."
+        )
+      streams.value.log.info(s"All ${published.size} published modules with sources are in the aggregate Scaladoc")
     },
     listPublishedArtifacts / aggregate := false,
     listPublishedArtifacts := {
@@ -2104,8 +2132,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     name := "llm4s-config-policy",
     commonSettings,
     publish / skip := true,
-    // Not measured: unpublished CLI tooling, verified end-to-end by the
-    // config-policy-check CI job rather than by unit-test coverage.
+    // Not measured: unpublished CLI tooling, verified end-to-end by ConfigPolicyCiSmokeSpec (the CLIs against the
+    // committed smoke config and each preset) rather than by unit-test coverage.
     coverageDisabled,
     // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
     // is forked. Keep the forked working directory at the repo root so the
