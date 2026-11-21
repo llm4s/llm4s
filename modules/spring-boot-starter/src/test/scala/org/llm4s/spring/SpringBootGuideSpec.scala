@@ -73,6 +73,7 @@ object SpringBootGuideSpec {
  * and every provider with the URL it uses. If one of them stops being true the guide is teaching something that does
  * not work: change the guide and the code together.
  */
+@org.llm4s.tags.DocsSpec
 class SpringBootGuideSpec extends AnyWordSpec with Matchers {
   import SpringBootGuideSpec._
 

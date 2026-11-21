@@ -3,7 +3,7 @@
 #
 # Each case commits a change to a scratch git repository seeded with this repo's ci.yml and checks the verdict: a
 # change under each watched path runs the tier, an unrelated change does not, and a ci.yml change runs it only when it
-# edits the workspace-changes or workspace-integration job. Also checks that ci.yml wires the verdict to the tier.
+# edits the changes, workspace-integration or All Tests Pass job. Also checks that ci.yml wires the verdict to the tier.
 #
 # No network. Usage: scripts/test-workspace-tier-changes.sh      (needs git and ruby, both on GitHub's runners)
 set -uo pipefail
@@ -102,16 +102,18 @@ label='ci.yml runs the tier on the verdict; All Tests Pass needs the detector on
 # shellcheck disable=SC2016 # the ${{ }} are GitHub expressions, matched literally
 if ruby -ryaml -e '
   jobs = YAML.load_file(ARGV[0])["jobs"]
-  wc, wi, atp = jobs.values_at("workspace-changes", "workspace-integration", "all-tests-pass")
+  wc, wi, atp = jobs.values_at("changes", "workspace-integration", "all-tests-pass")
   step = (wc["steps"] || []).find { |s| s["id"] == "diff" }
-  ok = wc["outputs"]["changed"] == "${{ steps.diff.outputs.changed }}" &&
-       step["run"].include?("scripts/workspace-tier-changes.sh HEAD^1 HEAD") &&
-       Array(wi["needs"]).include?("workspace-changes") &&
-       wi["if"].include?("needs.workspace-changes.outputs.changed == '"'"'true'"'"'") &&
+  script = File.read(File.join(File.dirname(ARGV[0]), "../../scripts/ci-changes.sh"))
+  ok = wc["outputs"]["workspace"] == "${{ steps.diff.outputs.workspace }}" &&
+       step["run"].include?("scripts/ci-changes.sh HEAD^1 HEAD") &&
+       script.match?(%r{workspace-tier-changes\.sh" "\$BASE" "\$HEAD" \| sed .s/\^changed=/workspace=/.}) &&
+       Array(wi["needs"]).include?("changes") &&
+       wi["if"].include?("needs.changes.outputs.workspace == '"'"'true'"'"'") &&
        wi["if"].include?("!cancelled()") &&
-       (Array(atp["needs"]) & %w[workspace-changes workspace-integration]).size == 2 &&
-       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ needs.workspace-changes.outputs.changed }}" == "true" && "${{ needs.workspace-integration.result }}" != "success"}) } &&
-       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ github.event_name }}" == "pull_request" && "${{ needs.workspace-changes.result }}" != "success"}) }
+       (Array(atp["needs"]) & %w[changes workspace-integration]).size == 2 &&
+       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ needs.changes.outputs.workspace }}" == "true" && "${{ needs.workspace-integration.result }}" != "success"}) } &&
+       atp["steps"].any? { |s| s["run"].to_s.include?(%q{"${{ github.event_name }}" == "pull_request" && "${{ needs.changes.result }}" != "success"}) }
   exit(ok ? 0 : 1)
 ' "$CI"; then ok "$label"; else bad "$label"; fi
 

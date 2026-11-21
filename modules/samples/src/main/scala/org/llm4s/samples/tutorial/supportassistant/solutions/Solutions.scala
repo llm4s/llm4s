@@ -1,10 +1,12 @@
 package org.llm4s.samples.tutorial.supportassistant.solutions
 
+import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.samples.tutorial.supportassistant.{ DeliveryEstimate, DeliveryQuery, Part1FirstCall, RefundRequest }
 import org.llm4s.samples.tutorial.supportassistant.Part3Tools.orders
+import org.llm4s.rag.RAG
 import org.llm4s.schema.*
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
@@ -42,4 +44,24 @@ object Part3Solution {
           DeliveryEstimate(order.orderId, if (order.status == "shipped") 2 else 4)
         }
     }
+}
+
+/** The solution to the tutorial's exercise 4 (`Part4Exercise.sources`). */
+object Part4Solution {
+
+  def sources(rag: RAG, question: String): Result[Seq[String]] =
+    rag.query(question).map(_.flatMap(_.metadata.get("docId")).distinct)
+}
+
+/** The solution to the tutorial's exercise 5 (`Part5Exercise.noPromises`). */
+object Part5Solution {
+
+  def noPromises: OutputGuardrail = new OutputGuardrail {
+    val name: String = "NoPromises"
+
+    def validate(value: String): Result[String] =
+      if (value.toLowerCase.contains("guarantee"))
+        Left(ValidationError.invalid("answer", "an answer must not guarantee anything"))
+      else Right(value)
+  }
 }

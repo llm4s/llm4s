@@ -49,6 +49,12 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       recoverable = false,
       retried = false
     ),
+    Row(
+      "ContentFilteredError",
+      ContentFilteredError.reply("Gemini", "SAFETY"),
+      recoverable = false,
+      retried = false
+    ),
     Row("ContextError", ContextError.tokenBudgetExceeded(200, 100), recoverable = false, retried = false),
     Row("ExecutionError", ExecutionError("failed", "run", Some(2)), recoverable = true, retried = true),
     Row("InvalidInputError", InvalidInputError("field", "value", "reason"), recoverable = false, retried = false),

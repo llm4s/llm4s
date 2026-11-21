@@ -117,9 +117,11 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
       completion.thinking shouldBe Some("91 = 7 x 13.")
       completion.message.thinking shouldBe Seq(ThinkingBlock.Text("91 = 7 x 13."))
       val usage = completion.usage.get
+      // xAI counts reasoning apart from completion_tokens, so nothing is taken out of it
       usage.thinkingTokens shouldBe Some(28)
       usage.completionTokens shouldBe 2
       usage.totalTokens shouldBe 40
+      usage.totalOutputTokens shouldBe 30
     }
 
   it should "leave thinking empty when the reply has none, or an empty one" in {
@@ -154,6 +156,7 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
       completion.content shouldBe "No."
       completion.usage.flatMap(_.thinkingTokens) shouldBe Some(28)
       completion.usage.map(_.promptTokens) shouldBe Some(10)
+      completion.usage.map(_.completionTokens) shouldBe Some(2)
     }
 
   // ---- reasoning_effort ----
@@ -200,17 +203,24 @@ class XaiClientSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---- penalties ----
 
-  "xAI on a reasoning model" should "leave out the penalties it rejects, with a warning once" in {
-    XaiDialect.warnedPenaltiesDropped.set(false)
+  "xAI on a reasoning model" should "leave out the penalties it rejects, and report each as dropped" in {
     val options = CompletionOptions().withPresencePenalty(0.5).withFrequencyPenalty(0.3)
     Seq("grok-4.7", "grok-4", "grok-3-mini", "grok-4.20-0309-reasoning", "grok-code-fast-1").foreach { model =>
       withClue(s"$model: ") {
         sentBodies(model, options).foreach { body =>
           body.obj.keySet should contain noneOf ("presence_penalty", "frequency_penalty")
         }
+        val body = ujson.Obj("presence_penalty" -> 0.5, "frequency_penalty" -> 0.3)
+        XaiDialect.addReasoning(body, model, options) shouldBe List(
+          RequestAdjustment
+            .Dropped(RequestOption.PresencePenalty, s"$model is a reasoning model, which rejects presence_penalty"),
+          RequestAdjustment.Dropped(
+            RequestOption.FrequencyPenalty,
+            s"$model is a reasoning model, which rejects frequency_penalty"
+          )
+        )
       }
     }
-    XaiDialect.warnedPenaltiesDropped.get shouldBe true
   }
 
   "xAI on a non-reasoning model" should "send the penalties as given" in {

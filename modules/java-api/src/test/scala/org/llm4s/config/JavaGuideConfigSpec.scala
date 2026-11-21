@@ -13,6 +13,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * the other guides that teach configuration (`DocumentedProviderConfigSpec`) sit here for the same reason. The
  * environment is injected with the real one switched off, so the cases do not depend on the machine's variables.
  */
+@org.llm4s.tags.DocsSpec
 class JavaGuideConfigSpec extends AnyWordSpec with Matchers {
 
   private val GuideFile = "docs/guide/java.md"

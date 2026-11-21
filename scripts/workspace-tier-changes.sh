@@ -13,7 +13,7 @@
 # the libraries only the workspace projects use. Renames are not folded: a watched file moved elsewhere counts as a change to its old
 # path.
 #
-# Usage: scripts/workspace-tier-changes.sh BASE HEAD      (CI passes HEAD^1 HEAD on the PR's merge commit)
+# Usage: scripts/workspace-tier-changes.sh BASE HEAD      (scripts/ci-changes.sh runs it, as its `workspace` decision)
 # Prints `changed=true` or `changed=false` on stdout, for $GITHUB_OUTPUT, and why on stderr. Needs git and ruby.
 set -euo pipefail
 
@@ -33,7 +33,7 @@ PATTERNS=(
   '^scripts/workspace-tier-changes\.sh$'
 )
 CI_FILE='.github/workflows/ci.yml'
-CI_JOBS='workspace-changes workspace-integration all-tests-pass'
+CI_JOBS='changes workspace-integration all-tests-pass'
 
 files="$(git diff --name-only --no-renames "$BASE" "$HEAD")"
 matched="$(printf '%s\n' "$files" | grep -E "$(IFS='|'; echo "${PATTERNS[*]}")" || true)"

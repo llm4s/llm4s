@@ -64,8 +64,25 @@ rest of #2330.
 
 Where a rewrite cannot be made safely, the rule reports a lint instead: a `copy` with a positional argument, a field
 that has no setter any more (`Completion.thinking`, `NamedProviderConfig.organization`), or a message extractor
-nested inside another pattern. A rewrite changes names, not types: a `String` that is now a `Secret`, or an epoch
-`Long` that is now an `Instant`, still needs a hand edit.
+nested inside another pattern. These 0.5 rules change names, not types; the `Secret` keys and the `Instant` of
+`Completion.created` are `Llm4sMigrate_1_0`'s.
+
+`Llm4sMigrate_1_0` runs every rule for the breaking changes since 0.5.1 (the notes in the
+[Migration Guide](migration)), and grows as the 1.0 breaks land:
+
+| Rule | Rewrites |
+|---|---|
+| `CopyToWithSetters_1_0` | `.copy(field = value)` to `.withField(value)` on the 95 types made growth-safe since 0.5.1 (`ToolRetryPolicy`, the OpenAI-compatible, Gemini, Vertex AI and Azure configs, `TraceEvent` and `AssistantError` cases, tool schemas, context types, ...); a `String` `apiKey` is wrapped in `Secret(...)`. Lints a positional `copy` and `new X(...)` |
+| `CredentialsToSecret` | `OpenAIConfig(apiKey = key, ...)` and `config.withApiKey(key)` to `Secret(key)` on the provider configs (`Some(Secret(key))` where the key is an `Option`), and a read of `config.apiKey` to `config.apiKey.reveal` |
+| `FromValuesKeyFirst` | `OpenAIConfig.fromValues(model, key, organization, baseUrl, ...)` to `fromValues(model, Secret(key), baseUrl, organization, ...)`, dropping a `None` organization; `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` to `fromValues(deployment, Secret(key), endpoint, apiVersion)` |
+| `CompletionCreatedToInstant` | `Completion(created = seconds)`, `withCreated(seconds)` and `toCompletion(seconds)` to `Instant.ofEpochSecond(seconds)` (`0L` to `Instant.EPOCH`), and a read of `completion.created` to `completion.created.getEpochSecond` |
+| `PositionalPatternsGainFields` | A positional pattern on one of the 41 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also `AgentStatus.Suspended`, `RunEvent.RunFailed`, the `TraceEvent` cases and the provider configs |
+| `DuplicateApisRemoved` | Deletes `import ServiceError.ServiceErrorOps`; `Llm4sConfig.loadTextEmbeddingModel()` to `textEmbeddingModel()` |
+| `RemovedApis_1_0` | Lint only: `org.llm4s.types.typeclass`, `CompletionChunk`/`ChunkDelta`, `OpenAIToolHelper`, `AnsiColors` and the embeddings sample's settings on `Llm4sConfig`, each with a link to its note |
+
+A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
+(Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
+rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-051-that-no-rule-automates).
 
 The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
 Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred
@@ -77,7 +94,9 @@ neither rewritten nor reported.
 Each rule is tested by `scalafixTests` (`sbt scalafixTests/test`): the files in `modules/scalafix-rules/input` are
 compiled with SemanticDB against llm4s-core 0.4.1 from Maven Central, each rule named in a file's header is run on
 it, and the result must equal the file of the same name in `modules/scalafix-rules/output`, which is compiled against
-the current sources.
+the current sources. `scalafixTests05` does the same for the `Llm4sMigrate_1_0` rules, with
+`modules/scalafix-rules/input-0.5` compiled against the 0.5.1 artifacts and its expected output under
+`output/.../fix/v1`.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

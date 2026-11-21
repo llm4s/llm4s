@@ -159,7 +159,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       val completion = result.value
       completion.content shouldBe "Hi"
       completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens, u.thinkingTokens)) shouldBe
-        Some((9, 30, 39, Some(20)))
+        Some((9, 10, 39, Some(20)))
     }
   }
 

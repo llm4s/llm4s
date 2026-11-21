@@ -97,6 +97,7 @@ map_file_to_project() {
     modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
     modules/spring-boot-starter/*)        echo "springBootStarter" ;;
     modules/secrets-vault/*)              echo "secretsVault" ;;
+    modules/secrets-aws/*)                echo "secretsAws" ;;
     modules/deploy-service/*)             echo "deployService" ;;
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
@@ -148,6 +149,8 @@ map_file_to_project() {
     modules/benchmarks-comparative/*)     echo "benchmarksComparative" ;;
     modules/scalafix-rules/rules/*)       echo "scalafixRules" ;;
     # The testkit projects: `scalafixTests/test` compiles the input and output and runs every rule on them.
+    modules/scalafix-rules/input-0.5/*|modules/scalafix-rules/tests-0.5/*) echo "scalafixTests05" ;;
+    modules/scalafix-rules/output/src/main/scala/fix/v1/*) echo "scalafixTests05" ;;
     modules/scalafix-rules/*)             echo "scalafixTests" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -299,6 +302,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE azureIdentity
       set_add DOWNSTREAM_COMPILE secretsVault
+      set_add DOWNSTREAM_COMPILE secretsAws
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
@@ -487,6 +491,9 @@ propagate_downstream() {
     secretsVault)
       set_add DOWNSTREAM_COMPILE it
       ;;
+    secretsAws)
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     cohere)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -637,6 +644,7 @@ propagate_downstream() {
       ;;
     scalafixRules)
       set_add DOWNSTREAM_COMPILE scalafixTests
+      set_add DOWNSTREAM_COMPILE scalafixTests05
       ;;
     repl)
       set_add DOWNSTREAM_COMPILE samples

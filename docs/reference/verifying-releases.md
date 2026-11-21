@@ -2,7 +2,7 @@
 layout: page
 title: Verifying Releases
 parent: Reference
-nav_order: 29
+nav_order: 30
 description: "How to check that an LLM4S jar, SBOM or container image was built by the project's release workflow: PGP signatures and SLSA build provenance."
 ---
 
@@ -32,7 +32,7 @@ key, and recorded in Sigstore's public transparency log. Each file is attested i
 it is uploaded. The attestations are listed at
 [github.com/llm4s/llm4s/attestations](https://github.com/llm4s/llm4s/attestations).
 
-Releases up to and including 0.5.1 were published before the workflow attested anything: they carry PGP
+Releases up to and including 0.6.0 were published before the workflow attested anything: they carry PGP
 signatures only, and `gh attestation verify` finds no attestation for them.
 
 ## The release signing key
@@ -102,7 +102,9 @@ It downloads each published jar (the POM for the BOM and the relocation stubs) f
 
 ## Check an SBOM
 
-The SBOMs and licence reports are assets of the GitHub Release for the tag ([Software Bill of Materials](sbom)):
+The SBOMs and licence reports are assets of the GitHub Release for the tag ([Software Bill of Materials](sbom)),
+and are attested there, by the release workflow's `sbom` job. They are not published to Maven Central: releases up to
+0.6.0 also uploaded a `-cyclonedx.json` beside each module there, which carries a PGP signature but no attestation.
 
 ```bash
 gh release download "v$VERSION" -R llm4s/llm4s -p "llm4s-core_3-$VERSION.bom.json"

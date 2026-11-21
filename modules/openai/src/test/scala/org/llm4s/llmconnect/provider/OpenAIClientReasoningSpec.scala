@@ -130,7 +130,7 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       .contains("reasoning_effort") shouldBe false
   }
 
-  it should "report the response's reasoning tokens as thinkingTokens, within completionTokens" in {
+  it should "report the response's reasoning tokens as thinkingTokens, taken out of completionTokens" in {
     val client = OpenAIClient.forTest(
       "o3-mini",
       transport(complete = _ => completionOf(okResponse)),
@@ -138,8 +138,22 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
     )
     val usage = client.complete(hello, CompletionOptions().withReasoning(ReasoningEffort.High)).value.usage.get
     usage.thinkingTokens shouldBe Some(32)
-    usage.completionTokens shouldBe 50
+    usage.completionTokens shouldBe 18
     usage.totalTokens shouldBe 60
+    usage.totalOutputTokens shouldBe 50
+  }
+
+  it should "count a reply's output once: completion 64 with 46 reasoning is 18 answer and 46 thinking" in {
+    // a real usage block (Groq openai/gpt-oss-20b, 2026-11), which follows OpenAI's format
+    val response =
+      """{"id":"c1","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
+        |"usage":{"prompt_tokens":81,"completion_tokens":64,"total_tokens":145,
+        |"completion_tokens_details":{"reasoning_tokens":46}}}""".stripMargin
+    val client = OpenAIClient.forTest("o3-mini", transport(complete = _ => completionOf(response)), openAI("o3-mini"))
+    val usage  = client.complete(hello, CompletionOptions()).value.usage.get
+    (usage.promptTokens, usage.completionTokens, usage.totalTokens, usage.thinkingTokens) shouldBe
+      ((81, 18, 145, Some(46)))
+    usage.totalOutputTokens shouldBe 64
   }
 
   // Azure: the model is a deployment name, which need not name the model behind it.

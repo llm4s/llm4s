@@ -73,7 +73,7 @@ Each item must be done before `T − 7 days`, or the post that needs it waits.
 | A no-key way to try LLM4S | [#2286](https://github.com/llm4s/llm4s/issues/2286) | The dev container and [Playground]({{ '/getting-started/playground' | relative_url }}) page are in; CI runs the page's commands in it |
 | A trademark and name-use policy the press kit can point to | [#2310](https://github.com/llm4s/llm4s/issues/2310) | Open |
 | The press kit | #2323 | [Page]({{ '/press/' | relative_url }}) is up with descriptions and fact sheet; SVG logos, wordmark, screenshots and clip still to make |
-| `llm4s-kotlin-api` on Maven Central | — | First published with 0.5.2; check it resolves before the r/Kotlin post |
+| `llm4s-kotlin-api` on Maven Central | — | First published with 0.6.0; check it resolves before the r/Kotlin post |
 
 ## Channels
 

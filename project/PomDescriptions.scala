@@ -106,6 +106,8 @@ object PomDescriptions {
       "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
     "llm4s-schema-iron" ->
       "JSON Schema bounds for LLM4S structured output and typed tools, derived from Iron refinement types.",
+    "llm4s-secrets-aws" ->
+      "AWS Secrets Manager API key provider for LLM4S: a provider's API key read with GetSecretValue, signed with SigV4 without the AWS SDK, and refreshed on an interval.",
     "llm4s-secrets-vault" ->
       "HashiCorp Vault API key provider for LLM4S: a provider's API key read from Vault's KV secrets engine and refreshed on an interval.",
     "llm4s-speech" ->

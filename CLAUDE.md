@@ -62,10 +62,11 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Adding a module
 
-Each step below is easy to miss because a missing one does not fail the build.
-1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit.
+Each step below is easy to miss because a missing one does not fail the build (step 3 now fails Quick Checks' `docsSourcesCheck`).
+1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit. CI runs a
+   module's tests only in its coverage leg, or, with no floor, in the `test` job's `TEST_MODULES`; `scripts/check-coverage-legs.sh` fails a module in neither.
 2. Add a migration note in the CHANGELOG and docs.
-3. Add the module to the `docs` project's source list in `build.sbt`. Otherwise its Scaladoc is silently never generated.
+3. Add a published module to the `docs` project's `dependsOn` and source list in `build.sbt`, or its Scaladoc is never generated; `sbt docsSourcesCheck` fails without it.
 4. Register it in `hooks/pre-commit`.
 5. If it has an integration suite that needs a database, container, model server or API key, put the suite in `modules/it` with exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` enforces this. A store that needs none, such as SQLite, runs its suites in its own module.
 6. A provider module also goes into the root aggregate, `samples`, `it`, and `configPolicy` if it has chat providers.
@@ -101,6 +102,7 @@ llm4s/
 │   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
 │   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
+│   ├── secrets-aws/           # AwsSecretsManagerApiKeyProvider: an API key read from AWS Secrets Manager, SigV4, no SDK (published)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
 │   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
@@ -128,7 +130,7 @@ llm4s/
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.6.0
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
@@ -171,7 +173,7 @@ sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
-sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks); sbt test and coverage leave them out
+sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks), in core and agent; sbt test and coverage leave them out
 sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
@@ -482,11 +484,16 @@ A test that measures how cost grows with input size (`LinearTime.assertLinear`, 
 ratio) is tagged `taggedAs(PerformanceTest)` (`org.llm4s.testutil`). `sbt test` and the coverage
 run exclude the tag - growth is platform-independent, so Windows and coverage instrumentation only
 multiplied its cost - and `sbt testPerformance` runs it (CI's ubuntu `Performance tests` job and a
-nightly run). Leave one untagged guard per spec: a single ~1 MB worst-case input under
+nightly run), only in the modules `performanceTestProjects` in `build.sbt` lists: a module whose
+tests start using the tag joins that list (`scripts/check-performance-tests.sh` fails otherwise). Leave one untagged guard per spec: a single ~1 MB worst-case input under
 `LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
 on a catastrophic (quadratic) regression.
 
-CI's Windows job runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
+On Linux CI runs each module's tests once, in its coverage leg or in the `test` job (`TEST_MODULES`).
+A suite that reads `docs/` (a guide's code blocks, links or tables) is annotated `@org.llm4s.tags.DocsSpec`, and its
+module listed in `docsTestProjects`: a docs-only PR runs only those (`sbt testDocs`), and
+`scripts/check-docs-tests.sh` fails an untagged one. On a PR, `scripts/ci-changes.sh` decides which test jobs run.
+CI's Windows job (pull requests and the nightly run, not pushes to main) runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
 separators, permissions, deleting or moving open files, processes and their arguments, SQLite files
 and locks, line endings written to files, temp files, the user's home), listed in
 `project/PlatformTests.scala` as `wholeModules` (every suite runs) and `suites` (named suites of

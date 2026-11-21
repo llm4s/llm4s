@@ -28,6 +28,7 @@ import scala.util.Using
  * each library's documentation, which the line under each quote links. `connect` needs a configured provider, so it
  * is compiled, not run.
  */
+@org.llm4s.tags.DocsSpec
 class PythonDevelopersGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "1. A first call" should "send the question and return the answer as a Right" in {

@@ -207,8 +207,10 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
-returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. They are part of
-`completionTokens`, not in addition to it. OpenAI's chat-completions API does not return the
+returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
+inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
+`thinkingTokens` (`totalTokens` is kept as reported, and `totalOutputTokens` is the two added
+together). OpenAI's chat-completions API does not return the
 reasoning text itself, so `Completion.thinking` stays empty.
 
 ### Streaming and token usage
@@ -1002,8 +1004,10 @@ What it does **not** do:
 
 - **No reasoning configuration.** `CompletionOptions.reasoning` is ignored; no
   `reasoning_effort` or similar field is sent, so a reasoning model runs at its vendor's default.
-- **No reasoning output.** A reply's `reasoning_content` or `reasoning` field is not read, so
-  `Completion.thinking` is empty and reasoning tokens are not reported separately.
+- **No reasoning text.** A reply's `reasoning_content` or `reasoning` field is not read, so
+  `Completion.thinking` is empty. Reasoning tokens are reported when the server sends OpenAI's
+  `usage.completion_tokens_details.reasoning_tokens`: they are `TokenUsage.thinkingTokens`, taken out
+  of `completionTokens`, which never includes them.
 - **No provider-specific fields.** Anything outside the standard reply - citations, search
   results, annotations - is dropped; `Completion` has no field for it.
 - **Text only.** Messages are sent as text.

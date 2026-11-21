@@ -4,7 +4,7 @@ title: Build a Support Assistant
 parent: Tutorials
 nav_order: 1
 has_children: true
-description: "Build a customer-support assistant with LLM4S, one part at a time: first call, typed answers, tools and an agent, with exercises a test suite checks."
+description: "Build a customer-support assistant with LLM4S, one part at a time: first call, typed answers, tools and an agent, help-centre answers, safety and memory, with exercises a test suite checks."
 search_title: "Tutorial: build a support assistant with LLM4S"
 ---
 
@@ -13,7 +13,8 @@ search_title: "Tutorial: build a support assistant with LLM4S"
 
 Acme Shop is a small online shop, and its customers write in about orders, deliveries and refunds. Over this series
 you build the assistant that answers them: first a plain answer, then a typed ticket the rest of the system can
-route, then an agent that looks up the order and the refund policy before it answers.
+route, then an agent that looks up the order and the refund policy before it answers, reads the help centre, and
+keeps personal data out of the model's sight.
 {: .fs-6 .fw-300 }
 
 ## The parts
@@ -23,9 +24,11 @@ route, then an agent that looks up the order and the refund policy before it ans
 | [1. First call](part-1-first-call) | An answer, then a streamed answer, from a configured provider | `Llm4sConfig`, `LLMConnect`, `Result` |
 | [2. Typed answers](part-2-typed-answers) | Classify a message into a ticket | structured output, `derives` schemas |
 | [3. Tools and an agent](part-3-tools) | Look up an order and the refund policy | typed tools, `ToolRegistry`, an agent |
+| [4. Help-centre answers](part-4-help-centre) | Answer from the help-centre articles, citing them | RAG: ingest, embed, retrieve, cite |
+| [5. Safety and memory](part-5-safety-memory) | Mask personal data, refuse prompt injection, remember the turn before | guardrails, `PIIMasker`, `continueConversation` |
 
-Still to come, tracked in [#2292](https://github.com/llm4s/llm4s/issues/2292): answers from the help-centre docs
-(RAG), safety and memory, testing with `llm4s-testkit` and a judge, and serving and observing the assistant.
+Still to come, tracked in [#2292](https://github.com/llm4s/llm4s/issues/2292): testing with `llm4s-testkit` and a
+judge, and serving and observing the assistant.
 
 ## How the series works
 
@@ -41,7 +44,7 @@ sbt "samples/runMain org.llm4s.samples.tutorial.supportassistant.Part1FirstCall"
 sbt "samples/runMain org.llm4s.samples.tutorial.supportassistant.Part1FirstCall --live"   # your provider
 ```
 
-Each part has a spec, `Part1Spec` to `Part3Spec`, that runs the part's code against scripted clients and checks that
+Each part has a spec, `Part1Spec` to `Part5Spec`, that runs the part's code against scripted clients and checks that
 every Scala block on its page is the code in the source file, word for word. CI runs them on every pull request, so
 the tutorial cannot drift from the library.
 
