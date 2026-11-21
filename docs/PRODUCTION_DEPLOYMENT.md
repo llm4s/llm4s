@@ -762,7 +762,8 @@ For manual tracking:
 completion.usage match {
   case Some(usage) =>
     val inputCost = usage.promptTokens * MODEL_INPUT_PRICE_PER_1K / 1000
-    val outputCost = usage.completionTokens * MODEL_OUTPUT_PRICE_PER_1K / 1000
+    // output as billed: the completion plus any thinking, which completionTokens leaves out
+    val outputCost = usage.totalOutputTokens * MODEL_OUTPUT_PRICE_PER_1K / 1000
     logger.info(s"Request cost: $$${inputCost + outputCost}")
   case None =>
     logger.warn("Usage data not available")

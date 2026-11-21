@@ -83,13 +83,32 @@ class OpenRouterDialectSpec extends AnyFlatSpec with Matchers with EitherValues 
     def reply(message: String, choiceExtra: String = "") =
       ujson.read(
         s"""{"id":"x","created":1,"model":"m","choices":[{"message":$message$choiceExtra}],
-           |"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3,"reasoning_tokens":7}}""".stripMargin
+           |"usage":{"prompt_tokens":1,"completion_tokens":9,"total_tokens":10,"reasoning_tokens":7}}""".stripMargin
       )
 
     client.parseCompletion(reply("""{"content":"a","thinking":"t1"}""")).thinking shouldBe Some("t1")
     client.parseCompletion(reply("""{"content":"a","reasoning":"t2"}""")).thinking shouldBe Some("t2")
     client.parseCompletion(reply("""{"content":"a"}""", ""","thinking":"t3"""")).thinking shouldBe Some("t3")
     client.parseCompletion(reply("""{"content":"a"}""")).usage.flatMap(_.thinkingTokens) shouldBe Some(7)
+  }
+
+  it should "take the reasoning tokens out of completion_tokens, read top-level or from completion_tokens_details" in {
+    val client = new OpenRouterClient(config("openai/o3"))
+    def usage(fields: String) =
+      client
+        .parseCompletion(
+          ujson.read(
+            s"""{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"a"}}],"usage":{$fields}}"""
+          )
+        )
+        .usage
+        .map(u => (u.completionTokens, u.thinkingTokens, u.totalTokens))
+
+    usage(""""prompt_tokens":81,"completion_tokens":64,"total_tokens":145,"reasoning_tokens":46""") shouldBe
+      Some((18, Some(46), 145))
+    usage(
+      """"prompt_tokens":81,"completion_tokens":64,"total_tokens":145,"completion_tokens_details":{"reasoning_tokens":46}"""
+    ) shouldBe Some((18, Some(46), 145))
   }
 
   it should "stream thinking deltas" in

@@ -132,6 +132,20 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
     "be a CLIENT span" in {
       kind(TraceEvent.CompletionReceived("chatcmpl-1", "gpt-4o", 0, "hi", at)) shouldBe SpanKind.CLIENT
     }
+
+    "report the output tokens as billed: the completion plus the thinking it leaves out" in {
+      val event = TraceEvent.CompletionReceived(
+        id = "chatcmpl-1",
+        model = "o3",
+        toolCalls = 0,
+        content = "hi",
+        timestamp = at,
+        usage = Some(TokenUsage(81, 18, 145, thinkingTokens = Some(46)))
+      )
+      val (_, attributes) = mapped(event)
+      long(attributes, "gen_ai.usage.input_tokens") shouldBe 81L
+      long(attributes, "gen_ai.usage.output_tokens") shouldBe 64L
+    }
   }
 
   "EmbeddingUsageRecorded" should {
@@ -177,6 +191,13 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "be an INTERNAL span" in {
       kind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "op", at)) shouldBe SpanKind.INTERNAL
+    }
+
+    "count thinking tokens in the output tokens, since completionTokens leaves them out" in {
+      val usage           = TokenUsage(81, 18, 145, thinkingTokens = Some(46))
+      val (_, attributes) = mapped(TraceEvent.TokenUsageRecorded(usage, "o3", "chat", at))
+      long(attributes, "gen_ai.usage.output_tokens") shouldBe 64L
+      long(attributes, "gen_ai.usage.total_tokens") shouldBe 145L
     }
   }
 
@@ -293,6 +314,40 @@ class OpenTelemetryEventAttributesSpec extends AnyWordSpec with Matchers:
 
     "be a CLIENT span" in {
       kind(image()) shouldBe SpanKind.CLIENT
+    }
+  }
+
+  "An agent's model call" should {
+
+    "count the call's thinking tokens in its output tokens" in {
+      val payload = ujson.Obj(
+        "agent" -> "a",
+        "model" -> "o3",
+        "usage" -> ujson.Obj(
+          "promptTokens"     -> 81,
+          "completionTokens" -> 18,
+          "totalTokens"      -> 145,
+          "thinkingTokens"   -> 46
+        )
+      )
+      val event = TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj("payload" -> payload), at)
+      val (_, attributes) = mapped(event)
+      long(attributes, "gen_ai.usage.input_tokens") shouldBe 81L
+      long(attributes, "gen_ai.usage.output_tokens") shouldBe 64L
+    }
+
+    "count none when the call reports no thinking" in {
+      val payload = ujson.Obj(
+        "model" -> "gpt-4o",
+        "usage" -> ujson.Obj(
+          "promptTokens"     -> 12,
+          "completionTokens" -> 7,
+          "totalTokens"      -> 19,
+          "thinkingTokens"   -> ujson.Null
+        )
+      )
+      val event = TraceEvent.CustomEvent(TraceAttributes.AgentModelCallCompleted, ujson.Obj("payload" -> payload), at)
+      long(mapped(event)._2, "gen_ai.usage.output_tokens") shouldBe 7L
     }
   }
 

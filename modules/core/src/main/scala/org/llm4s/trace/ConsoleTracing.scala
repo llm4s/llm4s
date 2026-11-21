@@ -141,6 +141,8 @@ class ConsoleTracing(val captureContent: Boolean) extends Tracing {
           println(s"${MAGENTA}Operation: ${e.operation}$RESET")
           println(s"${MAGENTA}Prompt Tokens: ${e.usage.promptTokens}$RESET")
           println(s"${MAGENTA}Completion Tokens: ${e.usage.completionTokens}$RESET")
+          e.usage.thinkingTokens.foreach(t => println(s"${MAGENTA}Thinking Tokens: $t$RESET"))
+          println(s"${MAGENTA}Output Tokens: ${e.usage.totalOutputTokens}$RESET")
           println(s"${MAGENTA}Total Tokens: ${e.usage.totalTokens}$RESET")
           println()
 

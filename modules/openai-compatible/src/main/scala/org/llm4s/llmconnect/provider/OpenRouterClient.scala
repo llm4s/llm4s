@@ -165,7 +165,8 @@ object OpenRouterClient {
  *  - an assistant turn always carries `content`, `""` or `null` when it has no text;
  *  - reasoning requested per underlying model family (see [[addReasoning]]);
  *  - thinking read from `thinking` or `reasoning` (on the message, then the
- *    choice, and on a streamed delta), and `usage.reasoning_tokens`; an assistant turn's
+ *    choice, and on a streamed delta), and `usage.reasoning_tokens` (else the standard
+ *    `completion_tokens_details` count, both inside `completion_tokens`); an assistant turn's
  *    thinking sent back as its `reasoning`, which OpenRouter documents for preserving reasoning;
  *  - `reasoning_details` read whole or streamed into opaque blocks and sent back unchanged (see
  *    [[decodeThinkingDetails]] and [[encodeThinking]]);
@@ -288,8 +289,13 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
     items.toSeq.map(item => ThinkingBlock.Opaque(OpenRouterDialect.ProviderId, item.render()))
   }
 
+  /** OpenRouter's top-level `usage.reasoning_tokens`, else the standard `completion_tokens_details` count. */
   override def reasoningTokens(usage: ujson.Value): Option[Int] =
-    usage.obj.get("reasoning_tokens").flatMap(_.numOpt).map(_.toInt)
+    usage.objOpt
+      .flatMap(_.get("reasoning_tokens"))
+      .flatMap(_.numOpt)
+      .map(_.toInt)
+      .orElse(OpenAICompatibleDialect.completionReasoningTokens(usage))
 
   override def parseToolCalls(toolCalls: ujson.Value): Seq[ToolCall] =
     StandardToolCallDeserializer.deserializeToolCalls(toolCalls)

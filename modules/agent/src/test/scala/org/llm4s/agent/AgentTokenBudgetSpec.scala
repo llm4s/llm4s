@@ -63,6 +63,25 @@ class AgentTokenBudgetSpec extends AnyFlatSpec with TestTimeLimit with Matchers 
     client.callCount shouldBe 2
   }
 
+  it should "count a reasoning model's thinking tokens, which completionTokens leaves out" in {
+    // an OpenAI-format reply after its client's conversion: 10 in, 5 answer and 45 reasoning tokens out (60 in all)
+    val reasoning = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 60, thinkingTokens = Some(45))
+    val client = ScriptedLLMClient.of(
+      calling(call("c1", "echo")).withUsage(reasoning),
+      calling(call("c2", "echo")).withUsage(reasoning),
+      CompletionFixture.simple("never sent")
+    )
+    val agent = built(Agent.builder("assistant", client).withTools(SpecTools.set(echo)))
+
+    // 60 after the first call is under 100, 120 after the second is not; counting 15 a call would allow a third
+    val result = agent.run(thread, "go", limited(100)).value
+
+    result.status shouldBe AgentStatus.TokenLimitReached
+    client.callCount shouldBe 2
+    tokens(result.usage) shouldBe 120L
+    result.usage.thinkingTokens shouldBe 90L
+  }
+
   it should "count only the run's own tokens, not the thread's earlier turns" in {
     val client = ScriptedLLMClient.of(CompletionFixture.simple("first"), CompletionFixture.simple("second"))
     val agent  = plain(client)

@@ -69,10 +69,12 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
     completion.content shouldBe "Hi"
     val usage = completion.usage.value
     usage.promptTokens shouldBe 12
-    usage.completionTokens shouldBe 40
-    // The service's own total: reasoning tokens are part of completion_tokens, not added to it.
-    usage.totalTokens shouldBe 52
+    // OpenAI counts the 24 reasoning tokens inside completion_tokens; completionTokens never includes them
+    usage.completionTokens shouldBe 16
     usage.thinkingTokens shouldBe Some(24)
+    usage.totalOutputTokens shouldBe 40
+    // The service's own total, kept as reported
+    usage.totalTokens shouldBe 52
     usage.cachedTokens shouldBe Some(8)
     completion.estimatedCost shouldBe defined
     // The usage-only chunk carries no choice, so it produces no StreamedChunk.

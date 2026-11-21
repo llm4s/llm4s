@@ -97,13 +97,8 @@ private[llm4s] object XaiDialect extends OpenAICompatibleDialect:
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content").filter(_.nonEmpty)
 
-  override def reasoningTokens(usage: ujson.Value): Option[Int] =
-    usage.objOpt
-      .flatMap(_.get("completion_tokens_details"))
-      .flatMap(_.objOpt)
-      .flatMap(_.get("reasoning_tokens"))
-      .flatMap(_.numOpt)
-      .map(_.toInt)
+  /** xAI counts reasoning apart from `completion_tokens` (its `total_tokens` includes it). */
+  override def reasoningInCompletion: Boolean = false
 
   /**
    * Sends `CompletionOptions.reasoning` as `reasoning_effort` where the model takes it, and drops

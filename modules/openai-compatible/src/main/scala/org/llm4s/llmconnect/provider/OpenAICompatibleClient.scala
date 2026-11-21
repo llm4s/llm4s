@@ -616,16 +616,24 @@ class OpenAICompatibleClient(
   private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
     cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
-  /** Token usage from a `usage` object, or from the first element of a `usage` array. */
+  /**
+   * Token usage from a `usage` object, or from the first element of a `usage` array. Reasoning
+   * tokens the provider counts inside `completion_tokens` ([[OpenAICompatibleDialect.reasoningInCompletion]])
+   * are taken out of `completionTokens`, so they are counted once, as `thinkingTokens`.
+   */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
     usage.objOpt.orElse(usage.arrOpt.flatMap(_.headOption).flatMap(_.objOpt)).map { u =>
       val prompt     = u("prompt_tokens").num.toInt
       val completion = u("completion_tokens").num.toInt
+      val reasoning  = dialect.reasoningTokens(ujson.Obj.from(u))
+      // TokenUsage.completionTokens never includes thinkingTokens: take them out where the provider counted them in
+      val answer =
+        if (dialect.reasoningInCompletion) math.max(0, completion - reasoning.fold(0)(math.max(0, _))) else completion
       TokenUsage(
         promptTokens = prompt,
-        completionTokens = completion,
+        completionTokens = answer,
         totalTokens = u.get("total_tokens").flatMap(_.numOpt).map(_.toInt).getOrElse(prompt + completion),
-        thinkingTokens = dialect.reasoningTokens(ujson.Obj.from(u))
+        thinkingTokens = reasoning
       )
     }
 

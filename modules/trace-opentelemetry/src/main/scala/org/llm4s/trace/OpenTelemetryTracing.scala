@@ -223,7 +223,7 @@ class OpenTelemetryTracing private[trace] (
         if (e.finishReasons.nonEmpty) builder.put(TraceAttributes.FinishReasons, e.finishReasons.asJava)
         e.usage.foreach { u =>
           builder.put(TraceAttributes.InputTokens, u.promptTokens.toLong)
-          builder.put(TraceAttributes.OutputTokens, u.completionTokens.toLong)
+          builder.put(TraceAttributes.OutputTokens, u.totalOutputTokens.toLong) // thinking included, as billed
         }
         e.options.foreach(requestParameters(builder, _))
         e.serverAddress.foreach(a => builder.put(TraceAttributes.ServerAddress, a))
@@ -282,7 +282,7 @@ class OpenTelemetryTracing private[trace] (
             .put("gen_ai.request.model", e.model)
             .put("operation", e.operation)
             .put("gen_ai.usage.input_tokens", e.usage.promptTokens.toLong)
-            .put("gen_ai.usage.output_tokens", e.usage.completionTokens.toLong)
+            .put("gen_ai.usage.output_tokens", e.usage.totalOutputTokens.toLong)
             .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
             .build()
         )
@@ -327,7 +327,10 @@ class OpenTelemetryTracing private[trace] (
         number("attempts").foreach(n => builder.put(TraceAttributes.Attempt, n))
         number("toolCalls").foreach(n => builder.put(TraceAttributes.ToolCalls, n))
         tokens("promptTokens").foreach(n => builder.put(TraceAttributes.InputTokens, n))
-        tokens("completionTokens").foreach(n => builder.put(TraceAttributes.OutputTokens, n))
+        // output tokens as billed: the completion plus any thinking, which completionTokens never includes
+        tokens("completionTokens")
+          .map(_ + tokens("thinkingTokens").getOrElse(0L))
+          .foreach(n => builder.put(TraceAttributes.OutputTokens, n))
         payload.flatMap(_.get("estimatedCost")).flatMap(_.numOpt).foreach(c => builder.put(TraceAttributes.CostUsd, c))
         payload
           .flatMap(_.get("provider"))
