@@ -444,6 +444,7 @@ lazy val llm4s = (project in file("."))
     llm4sOx,
     javaApi,
     javaRag,
+    reactor,
     springBootStarter,
     springBootStarterBoot4,
     springAi,
@@ -504,6 +505,13 @@ lazy val llm4s = (project in file("."))
       val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val described =
         Def.task((name.value, (publish / skip).value, description.value)).all(ScopeFilter(inAnyProject)).value
+      // `ci-release` publishes the root's aggregate only: a published module outside it is listed in the BOM but never
+      // reaches Central, as llm4s-reactor did in 0.6.0.
+      val aggregated =
+        Def.task(name.value).all(ScopeFilter(inAggregates(LocalRootProject, includeRoot = false))).value.toSet
+      val unaggregated = projects.collect { case (n, false) if !aggregated(n) => n }
+      if (unaggregated.nonEmpty)
+        sys.error(s"Published but not in the root aggregate, so never released: ${unaggregated.sorted.mkString(", ")}")
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
       PomDescriptions.check(described, streams.value.log)
     },
