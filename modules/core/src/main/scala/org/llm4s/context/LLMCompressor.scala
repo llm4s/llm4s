@@ -84,7 +84,7 @@ object LLMCompressor {
     logger.info(s"Starting LLM digest squeeze with cap: $capTokens tokens")
 
     // Find [HISTORY_SUMMARY] messages first
-    val (digestMessages, otherMessages) = messages.partition(isHistoryDigestMessage)
+    val digestMessages = messages.filter(isHistoryDigestMessage)
 
     if (digestMessages.isEmpty) {
       logger.debug("No [HISTORY_SUMMARY] messages found for digest compression")
@@ -102,7 +102,7 @@ object LLMCompressor {
 
     for {
       compressedDigests <- compressDigestMessages(digestMessages, llmClient)
-      finalMessages     = otherMessages ++ compressedDigests
+      finalMessages     = reinsertDigests(messages, compressedDigests)
       finalDigestTokens = compressedDigests.map(tokenCounter.countMessage).sum
       _                 = logger.info(s"Digest squeeze complete: $digestTokens → $finalDigestTokens tokens")
     } yield finalMessages
@@ -112,6 +112,14 @@ object LLMCompressor {
   private def isHistoryDigestMessage(message: Message): Boolean = message match {
     case s: SystemMessage => s.content.contains("[HISTORY_SUMMARY]")
     case _                => false
+  }
+
+  // `compressedDigests` has one entry per digest in `messages`, in the same order (compressDigestMessages
+  // maps each digest to exactly one replacement). Walking `messages` and substituting each digest in turn
+  // keeps every other message at its original position, instead of moving every digest to the end.
+  private def reinsertDigests(messages: Seq[Message], compressedDigests: Seq[Message]): Seq[Message] = {
+    val replacements = compressedDigests.iterator
+    messages.map(m => if (isHistoryDigestMessage(m)) replacements.next() else m)
   }
 
   private def compressDigestMessages(
