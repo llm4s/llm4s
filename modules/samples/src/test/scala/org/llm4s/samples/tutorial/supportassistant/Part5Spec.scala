@@ -14,6 +14,7 @@ import org.scalatest.matchers.should.Matchers
  * guardrails, replies and two-turn conversation, run against a scripted client; its page, compared with the code word
  * for word; and exercise 5, the solution and yours.
  */
+@org.llm4s.tags.DocsSpec
 class Part5Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   import Part5SafetyMemory.*
 

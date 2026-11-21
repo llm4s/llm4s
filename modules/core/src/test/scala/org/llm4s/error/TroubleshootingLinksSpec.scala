@@ -17,6 +17,7 @@ import scala.util.Using
  * matching anchor on the page, so renaming a heading cannot break a link, and the runtime errors say their next
  * step and link the entry whose symptom shows that exact text.
  */
+@org.llm4s.tags.DocsSpec
 class TroubleshootingLinksSpec extends AnyWordSpec with Matchers:
 
   private val Page = TroubleshootingLinks.PageUrl

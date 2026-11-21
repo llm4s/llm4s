@@ -14,6 +14,7 @@ import org.scalatest.matchers.should.Matchers
  * run against a scripted client; its page, compared with the code word for word; and exercise 2, the solution and
  * yours.
  */
+@org.llm4s.tags.DocsSpec
 class Part2Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   import Part2TypedAnswers.*
 

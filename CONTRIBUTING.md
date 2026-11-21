@@ -242,7 +242,7 @@ fails in Quick Checks otherwise. Details in the
 
 Every job in the workflows that run on pull requests (`ci.yml`, `dco.yml`, `secret-scan.yml`,
 `dependency-scan.yml`, `claude.yml`, `claude-external-pr-comment.yml`) sets `timeout-minutes` to
-about twice its usual duration on `main` - the `Test` matrix 40, the coverage legs 30, most others
+about twice its usual duration on `main` - the `Test` jobs 40, the coverage legs 30, most others
 10-20 - so a hung job fails in minutes instead of holding a runner and the merge queue for GitHub's
 default six hours. If a job's healthy runs grow towards its limit, raise the number on that job in
 the same PR, and say in the PR body how long recent runs took.

@@ -7,6 +7,7 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+@org.llm4s.tags.DocsSpec
 class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
 
   // This spec EXECUTES the testing guide's tool-calling example; the page's own copy is only

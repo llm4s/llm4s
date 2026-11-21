@@ -1,10 +1,24 @@
 name: CI
 
+# What runs where (the conditions are on the jobs; All Tests Pass knows which may be skipped, and when):
+#   - a pull request: everything but the main-only tiers, less what its change cannot affect (the `changes` job), and
+#     nothing at all on a draft. The `ready_for_review` type runs it when a draft is marked ready.
+#   - a push to main: the checks whose results main itself needs - Quick Checks, the coverage legs (Codecov compares
+#     a PR with main's coverage), the other modules' tests, Integration Tests - and the main-only tiers (Workspace,
+#     Ollama, MCP reference). The Windows, performance, ScalaDoc, consumer and Spring jobs, which every PR has already
+#     run on its own tree, wait for the nightly run.
+#   - the nightly run (`schedule`): every PR job, on main as it stands, so what a push to main leaves out still runs
+#     on main once a day. GitHub mails a scheduled run's failure to whoever last changed its cron line, as it does for
+#     the other nightly workflows.
+#   - a merge group, a manual run, and a release (release.yml calls this workflow on the tag): every PR job.
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "41 2 * * *"  # 02:41 UTC every day
   # A GitHub merge queue on main (#1638): the queue builds main plus the queued pull request(s) on a temporary
   # gh-readonly-queue/... branch and waits for the required checks to report on it, so this workflow must run there
   # too or the queue waits until its timeout. A no-op until a maintainer enables the queue (docs/reference/merge-queue.md).
@@ -25,8 +39,9 @@ on:
 # Concurrency settings to prevent conflicts
 concurrency:
   # For PRs, cancel duplicate runs. For pushes to main/master, queue them. A merge group's ref is its own temporary
-  # branch, unique per group, so it falls through to github.ref and is never cancelled by another group.
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+  # branch, unique per group, so it falls through to github.ref and is never cancelled by another group. The nightly
+  # run has a group of its own: sharing main's, it would replace a push run waiting there, or be replaced by one.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.event_name == 'schedule' && 'nightly' || github.ref }}
   # Only cancel in-progress runs for pull requests, not for pushes to main/master
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -37,12 +52,58 @@ concurrency:
 # setup-java's `cache: 'sbt'` held only what the first job to finish had resolved, the other jobs downloaded the rest
 # from Maven Central at once, and Quick Checks, Kotlin API and MiMa failed on HTTP 429 (.github/actions/restore-sbt-deps).
 # Each job's first sbt command, where dependencies resolve, runs under scripts/retry-on-transient-network.sh, which
-# retries a 429 after a minute: what a pull request adds to the build is still downloaded.
+# retries a 429 after a minute: what a pull request adds to the build is still downloaded. In the long test jobs that
+# first command is `resolveAll` alone, in a step of its own, and the tests run in the next step without the wrapper:
+# a retry then repeats the resolution, about a minute, not a 15-minute test run that happened to download something.
 # Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
 permissions:
   contents: read
 
 jobs:
+  # What a pull request's change needs (scripts/ci-changes.sh lists the paths behind each decision: `code`, `docs`,
+  # `windows`, `integration`, `consumers`, `workspace`, `performance`), and whether it is a draft. A change to a build
+  # file (build.sbt, project/, this workflow, ...) runs every job; a docs-only change runs Quick Checks, ScalaDoc and the
+  # suites that read docs/ (`Docs tests`). The checkout is the PR's merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's
+  # change. Every other job needs this one and reads its outputs; it runs only on a pull request, so on every other
+  # event they are empty, and each job's condition (`!= 'false'`, `!= 'true'`) then runs it. A draft pull request runs
+  # nothing else: every decision is false, and All Tests Pass is skipped rather than reporting a pass for tests that did
+  # not run. Marking it ready for review (`ready_for_review`) starts a full run.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    outputs:
+      draft: ${{ steps.diff.outputs.draft }}
+      code: ${{ steps.diff.outputs.code }}
+      docs: ${{ steps.diff.outputs.docs }}
+      windows: ${{ steps.diff.outputs.windows }}
+      integration: ${{ steps.diff.outputs.integration }}
+      consumers: ${{ steps.diff.outputs.consumers }}
+      workspace: ${{ steps.diff.outputs.workspace }}
+      performance: ${{ steps.diff.outputs.performance }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Decide what the change needs
+        id: diff
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$DRAFT" = true ]; then
+            echo "A draft pull request: no job runs until it is marked ready for review"
+            printf '%s\n' draft=true code=false docs=false windows=false integration=false consumers=false \
+              workspace=false performance=false >> "$GITHUB_OUTPUT"
+          else
+            echo draft=false >> "$GITHUB_OUTPUT"
+            scripts/ci-changes.sh HEAD^1 HEAD | tee -a "$GITHUB_OUTPUT"
+          fi
+
   # Checks that need no tests run: formatting, scalafix, compile, the build's policy checks and the scripts' own
   # tests. No job waits for it: the test, coverage and other jobs start alongside it, so a PR's wall clock is the
   # longest job, not Quick Checks plus the longest job. It used to gate them all, which put its ~10 minutes in
@@ -51,6 +112,9 @@ jobs:
   # a superseded run. It still gates the merge, through `All Tests Pass`.
   quick-checks:
     name: Quick Checks
+    needs: [changes]
+    # Not on a draft pull request (the `changes` job).
+    if: ${{ !cancelled() && needs.changes.outputs.draft != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -153,8 +217,11 @@ jobs:
         run: scripts/test-dependency-footprint.sh
 
       # Which pull requests run the workspace tier (#1982): scripts/workspace-tier-changes.sh against scratch git repos.
-      - name: Test the workspace-tier change detection
-        run: scripts/test-workspace-tier-changes.sh
+      # And which change-gated jobs a pull request runs (scripts/ci-changes.sh, the `changes` job), the same way.
+      - name: Test the change detection
+        run: |
+          scripts/test-workspace-tier-changes.sh
+          scripts/test-ci-changes.sh
 
       # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
       # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
@@ -330,6 +397,13 @@ jobs:
           scripts/test-check-performance-tests.sh
           scripts/check-performance-tests.sh --model target/build-model.json
 
+      # Fails when a suite that reads docs/ is not tagged DocsSpec, or is in a module `sbt testDocs` does not run: a
+      # docs-only pull request runs only those suites (the `Docs tests` job), so an untagged one would not run on it.
+      - name: Check every suite that reads docs/ is tagged DocsSpec
+        run: |
+          scripts/test-check-docs-tests.sh
+          scripts/check-docs-tests.sh --model target/build-model.json
+
       # docs/_data/capabilities.yml (from the provider descriptors discovery finds) and docs/_data/tested-versions.yml
       # (from Versions, Common and this workflow) are generated, and docs/reference/compatibility-matrix.md renders them
       # (#2290). Fails when the committed copies differ from what the code says now, so a new provider module or a
@@ -420,6 +494,12 @@ jobs:
 
   scaladoc:
     name: ScalaDoc
+    needs: [changes]
+    # On a pull request that changes code or docs (`changes`; not a draft), and not on a push to main: the nightly run
+    # runs it there.
+    if: >-
+      ${{ !cancelled() && (needs.changes.outputs.code != 'false' || needs.changes.outputs.docs != 'false') &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -484,6 +564,9 @@ jobs:
   # The legs are summarised by the `Code Coverage` job below, which `All Tests Pass` needs.
   coverage-leg:
     name: Code Coverage (${{ matrix.leg }})
+    needs: [changes]
+    # On a pull request only when it changes code (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     # Healthy legs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 30
@@ -539,6 +622,10 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
+      # `coverage` first: it adds scoverage's runtime to every project's dependencies.
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt coverage resolveAll
+
       - name: Run tests with coverage
         env:
           MODULES: ${{ join(matrix.modules, ' ') }}
@@ -551,7 +638,7 @@ jobs:
           args=()
           for m in $MODULES; do args+=("$m/test" "$m/coverageReport"); done
           echo "sbt coverage ${args[*]}"
-          scripts/retry-on-transient-network.sh sbt coverage "${args[@]}"
+          sbt coverage "${args[@]}"
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes a file to a flag whose
       # `paths` contain it, so a module uploaded under someone else's flag is worse than not uploaded. Flags are
@@ -1248,8 +1335,9 @@ jobs:
   # step, no checkout and no sbt, a few seconds instead of about two minutes.
   coverage:
     name: Code Coverage
-    needs: [coverage-leg]
-    if: always()
+    needs: [changes, coverage-leg]
+    # It runs when a leg fails, to report it (`!cancelled()`); on a pull request only when it changes code, as the legs.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1300,33 +1388,40 @@ jobs:
             modules/**/target/scala-3.7.1/scoverage-report/
           retention-days: 14
 
-  # Main test matrix. Ubuntu runs every test (`sbt test`). Windows runs `sbt testPlatform`: only the tests of what
-  # differs between platforms - file paths, separators, permissions and links, deleting or moving an open file,
-  # spawning processes and their argument parsing, SQLite files and their locks, line endings written to files,
-  # temporary files, the user's home - as project/PlatformTests.scala lists them. Pure JVM logic runs on the same
-  # JVM on both, so running all of it again on Windows cost some 15 minutes a PR and added no signal.
+  # The tests of the modules no coverage leg runs. Every module the root project aggregates is tested by exactly one of
+  # the four `Code Coverage (<leg>)` jobs, instrumented, or by this job, in TEST_MODULES below:
+  # scripts/check-coverage-legs.sh (Quick Checks) fails when one is in neither, or in both. This used to be `sbt test`,
+  # which ran every module's tests a second time, uninstrumented, after the legs had run them, and was the longest job
+  # of a run. Every module's main and test sources are still compiled by some job: Quick Checks compiles the main
+  # sources, and each leg and this job compile the tests they run.
   #
-  # The rule for new code: a test of platform-sensitive behaviour must run on Windows, so it goes in a module of
-  # `PlatformTests.wholeModules` or is named in `PlatformTests.suites`. scripts/check-platform-tests.sh (Quick
-  # Checks) enforces it for every main source that calls a platform-sensitive API, against
-  # scripts/platform-sensitive-sources.txt, and `sbt testPlatform` fails when a suite it names no longer exists.
+  # The JDK matrix has one entry: it is where project/CompatibilityMatrix.scala and scripts/check-doc-support.sh read
+  # which JDKs CI runs.
   test:
-    name: Test
+    name: Test (other modules, JDK ${{ matrix.java }})
+    needs: [changes]
+    # On a pull request only when it changes code (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     permissions:
       contents: read
     strategy:
-      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         java: [21]
+    env:
+      TEST_MODULES: >-
+        samples configPolicy it springBootStarterBoot4 knowledgegraphNeo4j benchmarks
+        workspaceShared workspaceRunner workspaceClient workspaceSamples
+        scalafixRules scalafixInput scalafixOutput scalafixTests scalafixInput05 scalafixTests05
+        bom relocationCore relocationWorkspaceClient relocationWorkspaceShared relocationTraceOpentelemetry
+        relocationKnowledgegraphNeo4j
 
-    runs-on: ${{ matrix.os }}
-    # Healthy runs take about 10-15 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    runs-on: ubuntu-latest
+    # Healthy runs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 40
-    
+
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      
+
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: 'temurin'
@@ -1334,32 +1429,87 @@ jobs:
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
-      
+
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       # The MCP Python SDK, pinned, for samples' PythonToolBridgeExampleSpec (#2333): it starts sentiment_tool.py with
       # the `python3` first on the PATH, so the venv goes there. Without it the spec is cancelled, not run.
       - name: Install the MCP Python SDK for the Python sidecar sample
-        if: runner.os == 'Linux'
         run: |
           python3 -m venv "$RUNNER_TEMP/mcp-venv"
           "$RUNNER_TEMP/mcp-venv/bin/pip" install --quiet -r modules/samples/src/main/python/requirements.txt
           echo "$RUNNER_TEMP/mcp-venv/bin" >> "$GITHUB_PATH"
 
-      # `sbt test` on ubuntu; `sbt testPlatform` on Windows (see above).
-      # Ubuntu's `sbt test` runs the unforked suites (samples, java-api, ...) inside the sbt JVM, and outgrew
-      # .sbtopts' 2 GB heap (OutOfMemoryError in the launcher from 00a4d3e8 on). The flag comes after .sbtopts'
-      # -J-Xmx2g, so it wins; local runs keep 2 GB.
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt resolveAll
+
+      # The unforked suites (samples, ...) run inside the sbt JVM, and outgrew .sbtopts' 2 GB heap (OutOfMemoryError in
+      # the launcher from 00a4d3e8 on). The flag comes after .sbtopts' -J-Xmx2g, so it wins; local runs keep 2 GB.
       - name: Run tests
-        # On Windows the step runs in PowerShell, which cannot run the bash retry wrapper; the one Windows leg is not part
-        # of the parallel burst that rate-limited the ubuntu jobs on 2026-11-20.
-        run: ${{ runner.os == 'Windows' && 'sbt testPlatform' || 'scripts/retry-on-transient-network.sh sbt -J-Xmx4g test' }}
-      
+        run: |
+          args=()
+          for m in $TEST_MODULES; do args+=("$m/test"); done
+          echo "sbt -J-Xmx4g ${args[*]}"
+          sbt -J-Xmx4g "${args[@]}"
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-reports-${{ matrix.os }}
+          name: test-reports-ubuntu
+          path: |
+            **/target/test-reports/
+            **/target/scala-3.7.1/test-reports/
+          retention-days: 5
+
+  # Windows runs `sbt testPlatform`: only the tests of what differs between platforms - file paths, separators,
+  # permissions and links, deleting or moving an open file, spawning processes and their argument parsing, SQLite files
+  # and their locks, line endings written to files, temporary files, the user's home - as project/PlatformTests.scala
+  # lists them. Pure JVM logic runs on the same JVM on both, so running all of it again on Windows cost some 15 minutes a
+  # PR and added no signal.
+  #
+  # The rule for new code: a test of platform-sensitive behaviour must run on Windows, so it goes in a module of
+  # `PlatformTests.wholeModules` or is named in `PlatformTests.suites`. scripts/check-platform-tests.sh (Quick
+  # Checks) enforces it for every main source that calls a platform-sensitive API, against
+  # scripts/platform-sensitive-sources.txt, and `sbt testPlatform` fails when a suite it names no longer exists.
+  test-windows:
+    name: Test (Windows)
+    needs: [changes]
+    # On a pull request only when it changes something Windows tests (`changes`: a whole module of PlatformTests, a
+    # source platform-sensitive-sources.txt lists, a suite it names, or a build file), and not on a push to main: the
+    # nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.windows != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    # Healthy runs take about 11-14 minutes.
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      # The step runs in PowerShell, which cannot run the bash retry wrapper; this job is not part of the parallel burst
+      # that rate-limited the ubuntu jobs on 2026-11-20.
+      - name: Run tests
+        run: sbt testPlatform
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-windows
           path: |
             **/target/test-reports/
             **/target/scala-3.7.1/test-reports/
@@ -1369,12 +1519,19 @@ jobs:
   # operation's cost grows with its input - linear, not quadratic - with `LinearTime.assertLinear`. `sbt test`
   # and the coverage run leave them out: algorithmic growth is the same on every platform, so running them on
   # Windows and under coverage instrumentation only multiplied their cost (they were most of each test job's
-  # time, #1932). Here they run once, uninstrumented, on Linux, in parallel with the other test jobs, and nightly
-  # in performance-nightly.yml. Gating, through `All Tests Pass`: it is the only check of linear-time growth;
+  # time, #1932). Here they run once, uninstrumented, on Linux, in parallel with the other test jobs: on a pull request
+  # that changes core, agent or a build file, and in the nightly run (which replaced performance-nightly.yml). Gating, through `All Tests Pass`: it is the only check of linear-time growth;
   # `sbt test` keeps only megabyte hang guards. `sbt testPerformance` compiles and runs only core and agent, the modules
   # with tagged tests (`performanceTestProjects` in build.sbt, checked by Quick Checks), not every module's tests.
   performance-tests:
     name: Performance tests
+    needs: [changes]
+    # Not on a draft, not on a push to main (the nightly run runs it there), and on a pull request only when it changes
+    # core, agent or media, or a build file (`changes`): the only modules with tagged tests, and what they test.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.draft != 'true' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') &&
+      needs.changes.outputs.performance != 'false' }}
     runs-on: ubuntu-latest
     # Healthy runs take about 10 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
     timeout-minutes: 30
@@ -1394,8 +1551,11 @@ jobs:
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt resolveAll
+
       - name: Run performance tests
-        run: scripts/retry-on-transient-network.sh sbt testPerformance
+        run: sbt testPerformance
 
       - name: Upload test reports
         if: failure()
@@ -1414,6 +1574,10 @@ jobs:
   # the same silent non-execution that #1143 was about.
   integration-tests:
     name: Integration Tests
+    needs: [changes]
+    # On a pull request only when it changes modules/it, deploy/, config/ or a module the @Docker suites reach
+    # (`changes`; never on a draft).
+    if: ${{ !cancelled() && needs.changes.outputs.integration != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1569,6 +1733,11 @@ jobs:
       # modules/it and slow the compile), and their floors are switched off for this run: a report here measures only
       # the integration suites, and each floor is enforced by the module's coverage leg on its own tests.
       # scripts/check-coverage-legs.sh checks this list against the upload steps below.
+      # With `coverage`, which adds scoverage's runtime to every project's dependencies: a superset of what the
+      # instrumented modules below need.
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt coverage resolveAll
+
       - name: Run containerised integration tests
         env:
           COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres secretsVault secretsAws
@@ -1608,7 +1777,7 @@ jobs:
             reports+=("$m/coverageReport")
           done
           echo "sbt ${settings[*]} testIntegration ${reports[*]}"
-          scripts/retry-on-transient-network.sh sbt "${settings[@]}" testIntegration "${reports[@]}"
+          sbt "${settings[@]}" testIntegration "${reports[@]}"
 
       # One upload per module in COVERAGE_MODULES, under the same flag as that module's coverage-leg upload.
       - name: Upload rag integration coverage to Codecov
@@ -1714,6 +1883,12 @@ jobs:
   # Quarkus extension and the samples' tests run against stub servers or FakeLlmClient: no model, no key, no Docker.
   consumers:
     name: Kotlin, Java and framework consumers
+    needs: [changes]
+    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
+    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     # Healthy runs take about 15 minutes.
     timeout-minutes: 35
@@ -1893,6 +2068,12 @@ jobs:
   # library again. Every step runs whatever the one before did, so one failure does not hide another.
   spring-compat:
     name: Spring Boot and Spring AI (latest)
+    needs: [changes]
+    # On a pull request only when it changes the Java, Kotlin, Spring or Quarkus modules, what they build on, or what
+    # this job checks (`changes`), and not on a push to main: the nightly run runs it there.
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.consumers != 'false' &&
+      !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     # Healthy runs take about 6 minutes.
     timeout-minutes: 20
@@ -1923,13 +2104,62 @@ jobs:
         if: ${{ !cancelled() }}
         run: scripts/retry-on-transient-network.sh sbt -Dllm4s.springAiVersion=2.0.2 springAi/test
 
-  # All tests must pass
+  # A pull request that changes docs and no code (`changes`: docs/, the top-level markdown, other workflows, scripts/...)
+  # skips the coverage legs and the other test jobs. A few dozen suites read docs/ - a guide's code blocks, links and
+  # tables tested against the code - so a docs-only change can still break them: this runs those, tagged DocsSpec
+  # (`sbt testDocs`, the modules in `docsTestProjects` in build.sbt). scripts/check-docs-tests.sh (Quick Checks) fails
+  # when a suite reads docs/ without the tag. On a change with code the coverage legs and `Test (other modules)` run
+  # these suites with all the others, so this job is skipped.
+  docs-tests:
+    name: Docs tests
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true' && needs.changes.outputs.code == 'false'
+    runs-on: ubuntu-latest
+    # Healthy runs take about 10 minutes: samples compiles most of the build.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
+
+      - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Resolve the dependencies
+        run: scripts/retry-on-transient-network.sh sbt resolveAll
+
+      # The unforked suites (samples, ...) run inside the sbt JVM: the same heap as `Test (other modules)`.
+      - name: Run the suites that read docs/
+        run: sbt -J-Xmx4g testDocs
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-docs
+          path: |
+            **/target/test-reports/
+            **/target/scala-3.7.1/test-reports/
+          retention-days: 5
+
+  # All tests must pass. The one check a merge needs (docs/reference/merge-queue.md), so it knows, job by job, when
+  # `skipped` is a pass: never for the jobs every event runs; on a push to main for those the nightly run takes there;
+  # on a pull request for a job its change does not need (`changes`). Skipped itself on a draft pull request, where
+  # nothing ran: neither a pass nor a failure.
   all-tests-pass:
     name: All Tests Pass
-    if: always()
-    # workspace-changes and workspace-integration run only where they apply (#1982): skipped is a pass for them, failed
-    # is not, so a PR that changes the workspace cannot merge with the live suites red.
-    needs: [quick-checks, test, performance-tests, coverage, scaladoc, integration-tests, consumers, spring-compat, workspace-changes, workspace-integration]
+    if: ${{ always() && needs.changes.outputs.draft != 'true' }}
+    # changes, workspace-integration and performance-tests run only where they apply (#1982): skipped is a pass for
+    # them, failed is not, so a PR that changes the workspace cannot merge with the live suites red.
+    needs: [changes, quick-checks, test, test-windows, performance-tests, coverage, scaladoc, docs-tests, integration-tests, consumers, spring-compat, workspace-integration]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1937,57 +2167,73 @@ jobs:
 
     steps:
       - name: Check all tests passed
+        env:
+          MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          CODE: ${{ needs.changes.outputs.code }}
+          DOCS: ${{ needs.changes.outputs.docs }}
+          WINDOWS: ${{ needs.changes.outputs.windows }}
+          INTEGRATION: ${{ needs.changes.outputs.integration }}
+          CONSUMERS: ${{ needs.changes.outputs.consumers }}
+          PERFORMANCE: ${{ needs.changes.outputs.performance }}
         run: |
-          if [[ "${{ needs.quick-checks.result }}" != "success" ]]; then
-            echo "Quick checks failed"
-            exit 1
+          failed=0
+          # require LABEL RESULT [SKIP_OK]: RESULT must be success, or skipped when SKIP_OK is true
+          require() {
+            if [[ "$2" == "success" || ( "$2" == "skipped" && "${3:-false}" == "true" ) ]]; then
+              echo "ok   $1: $2"
+            else
+              echo "::error::$1: $2"
+              failed=1
+            fi
+          }
+          # skip_ok DECISION...: true on a push to main, or when the `changes` job decided any of them false (on a pull
+          # request; elsewhere the decisions are empty)
+          skip_ok() {
+            local d
+            [[ "$MAIN_PUSH" == "true" ]] && { echo true; return; }
+            for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done
+            echo false
+          }
+          not_pr_skip() { local d; for d in "$@"; do [[ "$d" == "false" ]] && { echo true; return; }; done; echo false; }
+          require "Quick Checks" "${{ needs.quick-checks.result }}"
+          require "Test (other modules)" "${{ needs.test.result }}" "$(not_pr_skip "$CODE")"
+          require "Code Coverage" "${{ needs.coverage.result }}" "$(not_pr_skip "$CODE")"
+          require "Integration Tests" "${{ needs.integration-tests.result }}" "$(not_pr_skip "$INTEGRATION")"
+          require "Test (Windows)" "${{ needs.test-windows.result }}" "$(skip_ok "$WINDOWS")"
+          scaladoc_skip=false
+          if [[ "$MAIN_PUSH" == "true" || ( "$CODE" == "false" && "$DOCS" == "false" ) ]]; then scaladoc_skip=true; fi
+          require "ScalaDoc" "${{ needs.scaladoc.result }}" "$scaladoc_skip"
+          require "Kotlin, Java and framework consumers" "${{ needs.consumers.result }}" "$(skip_ok "$CONSUMERS")"
+          require "Spring Boot and Spring AI (latest)" "${{ needs.spring-compat.result }}" "$(skip_ok "$CONSUMERS")"
+          require "Performance tests" "${{ needs.performance-tests.result }}" "$(skip_ok "$PERFORMANCE")"
+          # Docs tests runs only on a pull request that changes docs and no code; anywhere else skipped is the pass.
+          if [[ "${{ needs.docs-tests.result }}" != "success" && "${{ needs.docs-tests.result }}" != "skipped" ]]; then
+            echo "::error::Docs tests: ${{ needs.docs-tests.result }}"
+            failed=1
           fi
-          if [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "Some tests failed"
-            exit 1
+          if [[ "$DOCS" == "true" && "$CODE" == "false" && "${{ needs.docs-tests.result }}" != "success" ]]; then
+            echo "::error::The change touches docs/ only, but Docs tests did not run and pass"
+            failed=1
           fi
-          if [[ "${{ needs.performance-tests.result }}" != "success" ]]; then
-            echo "Performance tests failed"
-            exit 1
-          fi
-          if [[ "${{ needs.coverage.result }}" != "success" ]]; then
-            echo "Coverage job failed"
-            exit 1
-          fi
-          if [[ "${{ needs.scaladoc.result }}" != "success" ]]; then
-            echo "ScalaDoc job failed"
-            exit 1
-          fi
-          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
-            echo "Integration tests failed"
-            exit 1
-          fi
-          if [[ "${{ needs.consumers.result }}" != "success" ]]; then
-            echo "Kotlin, Java and framework consumers failed"
-            exit 1
-          fi
-          if [[ "${{ needs.spring-compat.result }}" != "success" ]]; then
-            echo "Spring Boot and Spring AI (latest) tests failed"
-            exit 1
-          fi
-          if [[ "${{ needs.workspace-changes.result }}" != "success" && "${{ needs.workspace-changes.result }}" != "skipped" ]]; then
-            echo "Deciding whether the change touches the workspace failed"
-            exit 1
+          if [[ "${{ needs.changes.result }}" != "success" && "${{ needs.changes.result }}" != "skipped" ]]; then
+            echo "::error::Deciding what the change needs failed"
+            failed=1
           fi
           if [[ "${{ needs.workspace-integration.result }}" != "success" && "${{ needs.workspace-integration.result }}" != "skipped" ]]; then
-            echo "Workspace integration tests failed"
-            exit 1
+            echo "::error::Workspace integration tests failed"
+            failed=1
           fi
           # skipped passes only where the tier does not apply: on a pull request the detector must run, and a change that
           # touches the workspace must run the tier (a PR that disables either job's condition fails here)
-          if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.workspace-changes.result }}" != "success" ]]; then
-            echo "Deciding whether the pull request touches the workspace did not run"
-            exit 1
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ needs.changes.result }}" != "success" ]]; then
+            echo "::error::Deciding what the pull request needs did not run"
+            failed=1
           fi
-          if [[ "${{ needs.workspace-changes.outputs.changed }}" == "true" && "${{ needs.workspace-integration.result }}" != "success" ]]; then
-            echo "The change touches the workspace but Workspace Integration did not run and pass"
-            exit 1
+          if [[ "${{ needs.changes.outputs.workspace }}" == "true" && "${{ needs.workspace-integration.result }}" != "success" ]]; then
+            echo "::error::The change touches the workspace but Workspace Integration did not run and pass"
+            failed=1
           fi
+          if [[ "$failed" != 0 ]]; then exit 1; fi
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
@@ -2078,28 +2324,6 @@ jobs:
           PGVECTOR_PASSWORD: postgres
         run: scripts/retry-on-transient-network.sh sbt testOllama
 
-  # Whether a pull request touches the workspace, so the workspace tier runs on it (#1982). The checkout is the PR's
-  # merge commit, so its first parent is the base and HEAD^1..HEAD is exactly the PR's change; no PR context is read.
-  # scripts/workspace-tier-changes.sh lists the paths.
-  workspace-changes:
-    name: Workspace Changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-    outputs:
-      changed: ${{ steps.diff.outputs.changed }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 2
-
-      - name: Check whether the change touches the workspace
-        id: diff
-        run: scripts/workspace-tier-changes.sh HEAD^1 HEAD >> "$GITHUB_OUTPUT"
-
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
   # this one has to build the workspace-runner image first (apt + sdkman + the Scala 3
   # toolchain), which is far too slow for every PR. The image tag comes from the build
@@ -2108,15 +2332,15 @@ jobs:
     name: Workspace Integration
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    # On a push to main, on a pull request that changes the workspace (workspace-changes; All Tests Pass then requires
+    # On a push to main, on a pull request that changes the workspace (`changes`; All Tests Pass then requires
     # it to pass), and on demand: `gh workflow run ci.yml --ref <branch> -f tier=workspace`. Not on a merge group: the
-    # queued PR already ran it. `!cancelled()` because workspace-changes is skipped on every event but a pull request.
-    needs: [workspace-changes]
+    # queued PR already ran it. `!cancelled()` because `changes` is skipped on every event but a pull request.
+    needs: [changes]
     if: >-
       !cancelled() && (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         (github.event_name == 'workflow_dispatch' && (inputs.tier == 'all' || inputs.tier == 'workspace')) ||
-        needs.workspace-changes.outputs.changed == 'true')
+        needs.changes.outputs.workspace == 'true')
     permissions:
       contents: read
 

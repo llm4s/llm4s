@@ -13,6 +13,10 @@
 #     (`if: contains(matrix.modules, '<module>')`), uploading `<base>/target/scala-<version>/scoverage-report/scoverage.xml`
 #     under the codecov.yml flag whose path is `<base>/src/main/scala`, and no upload step names a module in no leg;
 #     so each flag is uploaded once, from the leg that owns the module;
+#   - every project the root project aggregates has its tests run by exactly one job: a coverage leg, or the `test`
+#     job, which runs the tests of the modules in its TEST_MODULES env (the modules no leg runs; `sbt test` used to run
+#     every module's tests again, uninstrumented). So a module in no leg and not in TEST_MODULES, whose tests would run
+#     nowhere, fails, and so does one in both, or a TEST_MODULES entry that is not a project;
 #   - the `integration-tests` job (#2349) is the one deliberate second uploader: the modules in its test step's
 #     COVERAGE_MODULES env (the explicit allow-list) are instrumented there, its test step switches their floors off
 #     (`coverageFailOnMinimum := false`, since those reports measure only the integration suites), and each has
@@ -56,6 +60,8 @@ EXEMPT = {
                            'coverage from the integration-tests job without enforcing the floor',
 }
 JOB = 'coverage-leg'
+TEST_JOB = 'test'
+TEST_LIST = 'TEST_MODULES'
 IT_JOB = 'integration-tests'
 IT_LIST = 'COVERAGE_MODULES'
 
@@ -208,11 +214,36 @@ measured.uniq.select { |m| projects.key?(m) && projects[m]['coverageFloor'] }.ea
   steps.each { |s| check_upload.(s, m, projects[m]) }
 end
 
+# The other modules' tests: every aggregated project is tested by one leg or by the test job, and not by both.
+test_job = (wf['jobs'] || {})[TEST_JOB]
+abort "#{workflow_file} has no job '#{TEST_JOB}'" unless test_job
+rest = (test_job['env'] || {})[TEST_LIST].to_s.split
+errors << "#{TEST_JOB} has no #{TEST_LIST} env (the modules no coverage leg tests)" if rest.empty?
+rest.group_by(&:itself).transform_values(&:size).each { |m, n| errors << "#{TEST_LIST} lists #{m} #{n} times" if n > 1 }
+rest.uniq.each do |m|
+  if !projects.key?(m)
+    errors << "#{m}, in #{TEST_JOB}'s #{TEST_LIST}, is not a project of this build"
+  elsif owner.key?(m)
+    errors << "#{m} is in #{TEST_JOB}'s #{TEST_LIST} and in leg #{owner[m].join(', ')}: its tests would run twice"
+  end
+end
+unless Array(test_job['steps']).any? { |s| s['run'].to_s.match?(/\$#{TEST_LIST}\b/) && s['run'].to_s.include?('/test') }
+  errors << "no step of #{TEST_JOB} runs `<module>/test` for each module in $#{TEST_LIST}"
+end
+root_id = model['root']
+aggregated = Array(projects.dig(root_id, 'aggregate'))
+errors << "the build model names no root project with an aggregate" if aggregated.empty?
+(aggregated - owner.keys - rest).sort.each do |m|
+  errors << "#{m} is aggregated by #{root_id} but no job runs its tests: add it to a coverage leg (if it has a " \
+            "coverage floor) or to #{TEST_JOB}'s #{TEST_LIST} in #{File.basename(workflow_file)}"
+end
+
 if errors.empty?
   puts "Coverage legs: #{legs.map { |l, ms| "#{l} (#{ms.size})" }.join(', ')}"
   puts "OK: each of the #{floors.size - EXEMPT.size} modules with a coverage floor is in exactly one leg with " \
        "one upload step; exempt: #{EXEMPT.keys.join(', ')}"
   puts "Also uploaded by #{IT_JOB}: #{measured.empty? ? 'none' : measured.join(', ')}"
+  puts "Tested by #{TEST_JOB}, outside the legs: #{rest.size} modules"
 else
   errors.each { |e| puts "FAIL: #{e}" }
   exit 1

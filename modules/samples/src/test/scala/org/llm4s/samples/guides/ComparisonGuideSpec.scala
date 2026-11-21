@@ -30,6 +30,7 @@ import java.time.Instant
  * was asked, so the checks are on what llm4s sends and returns, never on what a model says. The configuration and
  * RAG snippets need a provider, so they are compiled (as the bodies of `def`s) but not run.
  */
+@org.llm4s.tags.DocsSpec
 class ComparisonGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def completionOf(message: AssistantMessage): Completion =
