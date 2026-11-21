@@ -56,7 +56,9 @@ jobs:
         with:
           distribution: "temurin"
           java-version: 21
-          cache: "sbt"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -73,7 +75,7 @@ jobs:
 
       - name: Scan this commit
         run: |
-          sbt -batch publishedSboms
+          scripts/retry-on-transient-network.sh sbt -batch publishedSboms
           set +e
           scripts/osv-scan-sboms.sh target/sboms "$RUNNER_TEMP/osv-head.json"
           status=$?

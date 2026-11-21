@@ -138,7 +138,39 @@ _(Community projects will be featured here)_
 
 ### Success Stories
 
-Using LLM4S in production? We'd love to hear about it! Share your story in Discord.
+#### Scala Teams: an adopter that builds LLM4S too
+
+[Scala Teams](https://scalateams.com) uses LLM4S as the multi-provider LLM layer of **Spec Manager**, its AI
+spec-authoring and code-generation tool, on `llm4s-core` and `llm4s-anthropic` (since November 2026). It is the first
+organisation in [ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md).
+
+Its team also builds LLM4S itself:
+
+- **[Gordon Cooke](https://www.linkedin.com/in/gordoncooke/)** ([@jwgcooke](https://github.com/jwgcooke)), founder
+  of Scala Teams, proposed the provider-neutral cost controls of [#2115](https://github.com/llm4s/llm4s/issues/2115)
+  and wrote [RFC 0008: Generation controls and reported adjustments](../rfcs/0008-generation-controls)
+  ([#2445](https://github.com/llm4s/llm4s/pull/2445)), accepted for 1.0. He also fixed streamed Anthropic usage, so
+  input and cache token counts are read from `message_start` ([#2428](https://github.com/llm4s/llm4s/pull/2428)).
+- **Qasim Nadeem** ([@q-nadeem](https://github.com/q-nadeem)) is implementing RFC 0008, one stacked pull request at
+  a time.
+- **Shakeeb** works with them on the Scala Teams side of the RFC 0008 work.
+
+What RFC 0008 has delivered so far:
+
+- **Merged:** every `Completion` reports the options a provider could not honour, as `Completion.adjustments`
+  ([#2532](https://github.com/llm4s/llm4s/pull/2532)), and agent runs see them on each call's `ModelCallCompleted`
+  event ([#2617](https://github.com/llm4s/llm4s/pull/2617)).
+- **In review:** thinking and effort metadata in `ModelCapabilities`
+  ([#2618](https://github.com/llm4s/llm4s/pull/2618)), thinking separated from `ReasoningEffort`
+  ([#2619](https://github.com/llm4s/llm4s/pull/2619)), an explicit cache key for `CachingLLMClient`
+  ([#2620](https://github.com/llm4s/llm4s/pull/2620)), provider-side prompt caching
+  ([#2622](https://github.com/llm4s/llm4s/pull/2622)) and Gemini's `thinkingConfig`
+  ([#2623](https://github.com/llm4s/llm4s/pull/2623)).
+
+Thank you, Scala Teams! An adopter's entry says only what its authors wrote, and listing is not an endorsement.
+
+Using LLM4S in production? We'd love to hear about it! Add yourself to
+[ADOPTERS.md](https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md) by pull request, or share your story in Discord.
 
 ---
 

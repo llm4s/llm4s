@@ -105,6 +105,14 @@ class Llm4sChatModelSpec extends AnyFlatSpec with Matchers {
     metadata.getUsage.getNativeUsage shouldBe usage
   }
 
+  it should "report a reasoning reply's thinking in its completion tokens, as Spring AI's OpenAI binding does" in {
+    val usage     = TokenUsage(promptTokens = 81, completionTokens = 18, totalTokens = 145, thinkingTokens = Some(46))
+    val (_, chat) = model(Reply.text("ok").withUsage(usage))
+    val reported  = chat.call(new Prompt("hi")).getMetadata.getUsage
+    reported.getCompletionTokens shouldBe 64
+    reported.getTotalTokens shouldBe 145
+  }
+
   it should "report no usage when the llm4s client reported none" in {
     val (_, chat) = model(Reply.text("ok"))
     chat.call(new Prompt("hi")).getMetadata.getUsage.getTotalTokens shouldBe 0

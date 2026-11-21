@@ -66,6 +66,29 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
   }
 
+  // Message text is data: a tokenizer's special-token names in it (a web page about LLMs, a model card) are counted as
+  // ordinary text, never read as control tokens or refused.
+  it should "count text containing special-token names instead of failing" in {
+    val specials = "page <|endoftext|> more <|fim_prefix|> x <|fim_middle|> y <|fim_suffix|> z <|endofprompt|>"
+    Seq(ConversationTokenCounter.openAI(), ConversationTokenCounter.openAI_o200k()).foreach { result =>
+      val counter = result.fold(e => fail(e.message), identity)
+      counter.countMessage(ToolMessage(specials, "c1")) should be > counter.countMessage(ToolMessage("page", "c1"))
+      counter.countMessage(UserMessage(specials)) should be > 0
+      counter.countMessage(AssistantMessage(specials)) should be > 0
+      counter.countConversation(Conversation(Seq(UserMessage(specials)))) should be > 0
+    }
+  }
+
+  "Tokenizer.lookupStringTokenizer" should "encode special-token names as ordinary text" in {
+    val tokenizer = org.llm4s.context.tokens.Tokenizer
+      .lookupStringTokenizer(TokenizerId.CL100K_BASE)
+      .getOrElse(fail("cl100k_base missing"))
+    // `<|endoftext|>` as text is several ordinary tokens, never the single special token 100257
+    val tokens = tokenizer.encode("<|endoftext|>")
+    tokens.length should be > 1
+    tokens.map(_.tokenId) should not contain 100257
+  }
+
   "ConversationTokenCounter.openAI_o200k" should "create counter with o200k_base tokenizer" in {
     val result = ConversationTokenCounter.openAI_o200k()
 

@@ -27,4 +27,4 @@ mvn install
 ```
 
 The tests are `QuarkusUnitTest` applications over `llm4s-ollama` and a stub Ollama server on a loopback port: no model,
-no key, no Docker. CI's `Quarkus extension` job runs them, then builds and tests the sample against the extension.
+no key, no Docker. CI's `Kotlin, Java and framework consumers` job runs them, then builds and tests the sample against the extension.

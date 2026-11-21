@@ -82,8 +82,10 @@ fixture() { # <dir> [unsigned-file]
   mkdir -p "$d"
   for f in "llm4s-kotlin-api-$VERSION.pom" "llm4s-kotlin-api-$VERSION.jar" "llm4s-kotlin-api-$VERSION-sources.jar" \
     "llm4s-kotlin-api-$VERSION-javadoc.jar" "llm4s-kotlin-api-$VERSION.module"; do
-    echo "$f" > "$d/$f"; echo sum > "$d/$f.md5"; echo sum > "$d/$f.sha1"
-    [ "$f" = "${2:-}" ] || echo sig > "$d/$f.asc"
+    echo "$f" > "$d/$f"; echo sum > "$d/$f.md5"; echo sum > "$d/$f.sha1"; echo sum > "$d/$f.sha256"; echo sum > "$d/$f.sha512"
+    [ "$f" = "${2:-}" ] || {
+      echo sig > "$d/$f.asc"; echo sum > "$d/$f.asc.md5"; echo sum > "$d/$f.asc.sha1"; echo sum > "$d/$f.asc.sha256"
+    }
   done
   echo '<metadata/>' > "$d/maven-metadata.xml"
   echo '<metadata/>' > "$1/org/llm4s/llm4s-kotlin-api/maven-metadata.xml"
@@ -160,6 +162,11 @@ if grep -qx "$REL/llm4s-kotlin-api-$VERSION.pom.asc" <<<"$bundle" &&
   ok "the bundle holds the version directory with its signatures, and no maven-metadata.xml"
 else
   bad "the bundle holds the version directory with its signatures, and no maven-metadata.xml" "$bundle"
+fi
+if [ "$(grep -c . <<<"$bundle")" = 20 ] && ! grep -qE '\.asc\.|\.sha256$|\.sha512$' <<<"$bundle"; then
+  ok "the bundle is 20 files: five, each with .asc, .md5 and .sha1, and no checksum of a signature, SHA-256 or SHA-512"
+else
+  bad "the bundle is 20 files: five, each with .asc, .md5 and .sha1, and no checksum of a signature, SHA-256 or SHA-512" "$bundle"
 fi
 token="$(printf 'user:secret' | base64)"
 upload_call="$(grep -F "/api/v1/publisher/upload?name=llm4s-kotlin-api-$VERSION&publishingType=AUTOMATIC" <<<"$CALLS")"

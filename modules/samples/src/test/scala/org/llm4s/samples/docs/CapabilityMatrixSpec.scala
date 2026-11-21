@@ -17,6 +17,7 @@ import scala.jdk.CollectionConverters.*
  * The generated provider capability matrix (#2290): every in-repo provider module is discovered, every provider id it
  * registers is one row, and `docs/_data/capabilities.yml` is what the generator writes today.
  */
+@org.llm4s.tags.DocsSpec
 class CapabilityMatrixSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
   private val root: Path = CapabilityMatrix.repositoryRoot.value

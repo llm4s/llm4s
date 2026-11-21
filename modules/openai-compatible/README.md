@@ -110,7 +110,7 @@ val reply = for {
   the message's `thinking` and send it back on later turns. `CompletionOptions.reasoning` is sent by
   OpenRouter (`reasoning_effort` for OpenAI reasoning models, a `thinking` budget for Anthropic ones)
   and Z.ai (`reasoning_effort` or `thinking.type`, by GLM model family; GLM-5.3 cannot disable
-  thinking, so `ReasoningEffort.None` sends `low` and logs a warning once).
+  thinking, so `Thinking.Off` sends `low`, reported on the completion as adjusted).
 - **Model listing:** the generic provider, `deepseek`, `openrouter` and `mistral` can list models;
   `zai` and `cohere` cannot.
 

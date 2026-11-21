@@ -2,6 +2,7 @@ package org.llm4s.kotlin
 
 import org.llm4s.javaapi.JCompletionOptions
 import org.llm4s.javaapi.JReasoningEffort
+import org.llm4s.javaapi.JThinking
 
 /**
  * The options of a completion request, declared in Kotlin (#1495): a [JCompletionOptions] of the Java facade, for
@@ -17,7 +18,7 @@ import org.llm4s.javaapi.JReasoningEffort
  * ```
  *
  * A setting left unset keeps [base]'s value, or core's default without one (temperature `0.7`, top-p `1.0`, no
- * penalties, no token limit, reasoning level or thinking budget). A value no provider accepts - a negative
+ * penalties, no token limit, reasoning level or thinking mode). A value no provider accepts - a negative
  * temperature, a top-p outside `0..1`, a token count below `1` - throws `IllegalArgumentException`, as the Java builder
  * does.
  */
@@ -45,8 +46,8 @@ class CompletionOptionsSpec internal constructor() {
     /** The reasoning level to ask for. */
     var reasoning: JReasoningEffort? = null
 
-    /** An explicit thinking-token budget, at least `1`, overriding the one [reasoning] implies. */
-    var budgetTokens: Int? = null
+    /** How the model thinks: [JThinking.off], [JThinking.adaptive] or a [JThinking.budget]; it wins over [reasoning]. */
+    var thinking: JThinking? = null
 
     internal fun build(base: JCompletionOptions?): JCompletionOptions {
         var builder = base?.toBuilder() ?: JCompletionOptions.builder()
@@ -56,7 +57,7 @@ class CompletionOptionsSpec internal constructor() {
         presencePenalty?.let { builder = builder.presencePenalty(it) }
         frequencyPenalty?.let { builder = builder.frequencyPenalty(it) }
         reasoning?.let { builder = builder.reasoning(it) }
-        budgetTokens?.let { builder = builder.budgetTokens(it) }
+        thinking?.let { builder = builder.thinking(it) }
         return builder.build()
     }
 }

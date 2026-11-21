@@ -11,6 +11,7 @@ import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
 import java.time.Instant
 import scala.annotation.tailrec
 import scala.concurrent.duration.{ FiniteDuration, MILLISECONDS }
+import scala.util.{ Failure, Try }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
 
 /**
@@ -94,7 +95,27 @@ final class ReliableClient(
     if (!config.enabled) {
       underlying.streamComplete(conversation, options, onChunk)
     } else {
-      executeWithReliability(rateLimited(() => underlying.streamComplete(conversation, options, onChunk)))
+      // Once a chunk has reached the caller, a failure is returned rather than retried: a retry would
+      // deliver the reply again from the start and run (and bill) the call twice. A failure before the
+      // first chunk is retried as usual. `LLMClientRetry.streamCompleteWithRetry` keeps the same rule.
+      val delivered = new java.util.concurrent.atomic.AtomicBoolean(false)
+      // The caller's own onChunk threw: the client turns that into a Left, but it says nothing about the
+      // provider, so the circuit breaker counts it as neither success nor failure. It is rethrown unchanged.
+      val callerFailed = new java.util.concurrent.atomic.AtomicBoolean(false)
+      val tracking: StreamedChunk => Unit = { chunk =>
+        delivered.set(true)
+        Try(onChunk(chunk)) match {
+          case Failure(e) =>
+            callerFailed.set(true)
+            throw e
+          case _ => ()
+        }
+      }
+      executeWithReliability(
+        rateLimited(() => underlying.streamComplete(conversation, options, tracking)),
+        canRetry = () => !delivered.get(),
+        callerFailed = () => callerFailed.get()
+      )
     }
 
   override def getContextWindow(): Int     = underlying.getContextWindow()
@@ -107,7 +128,11 @@ final class ReliableClient(
   /**
    * Execute operation with retry, circuit breaker, and deadline.
    */
-  private def executeWithReliability[A](operation: () => Result[A]): Result[A] = {
+  private def executeWithReliability[A](
+    operation: () => Result[A],
+    canRetry: () => Boolean = () => true,
+    callerFailed: () => Boolean = () => false
+  ): Result[A] = {
     // Check circuit breaker state
     checkCircuitBreaker() match {
       case Left(error) =>
@@ -133,9 +158,9 @@ final class ReliableClient(
     // Apply deadline if configured
     val result = config.deadline match {
       case Some(deadline) =>
-        executeWithDeadlineAndRetry(tracked, deadline, cancelledAwaitingToken)
+        executeWithDeadlineAndRetry(tracked, deadline, cancelledAwaitingToken, canRetry)
       case None =>
-        executeWithRetry(tracked, attemptNumber = 1, cancelledAwaitingToken)
+        executeWithRetry(tracked, attemptNumber = 1, cancelledAwaitingToken, canRetry)
     }
 
     // Update circuit breaker state based on result. A call that only ever met the local rate
@@ -144,6 +169,13 @@ final class ReliableClient(
     result match {
       case Right(_) =>
         onSuccess()
+      // The caller's own callback failed, not the provider
+      case Left(_) if callerFailed() =>
+        onNeutralOutcome()
+      // The provider's content filter answered: it is healthy, and one user's blocked prompts must not open the
+      // breaker for every caller
+      case Left(_: ContentFilteredError) =>
+        onNeutralOutcome()
       case Left(e) if isLocalThrottle(e) && !providerFailed.get() =>
         onNeutralOutcome()
       // Cancelled while waiting for a local token after the provider had failed: that failure
@@ -167,7 +199,8 @@ final class ReliableClient(
   private def executeWithDeadlineAndRetry[A](
     operation: () => Result[A],
     deadline: FiniteDuration,
-    cancelledAwaitingToken: java.util.concurrent.atomic.AtomicBoolean
+    cancelledAwaitingToken: java.util.concurrent.atomic.AtomicBoolean,
+    canRetry: () => Boolean
   ): Result[A] = {
     val startTime  = nowMillis()
     val deadlineMs = startTime + deadline.toMillis
@@ -198,7 +231,7 @@ final class ReliableClient(
           success
 
         case Left(error) =>
-          decideRetry(attemptNumber, error) match {
+          (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
             case RetryDecision.Retry(delay) =>
               collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
@@ -240,7 +273,8 @@ final class ReliableClient(
   private def executeWithRetry[A](
     operation: () => Result[A],
     attemptNumber: Int,
-    cancelledAwaitingToken: java.util.concurrent.atomic.AtomicBoolean
+    cancelledAwaitingToken: java.util.concurrent.atomic.AtomicBoolean,
+    canRetry: () => Boolean
   ): Result[A] = {
     val result = CancelledError.whenInterrupted(
       try
@@ -258,7 +292,7 @@ final class ReliableClient(
         success
 
       case Left(error) =>
-        decideRetry(attemptNumber, error) match {
+        (if (canRetry()) decideRetry(attemptNumber, error) else RetryDecision.DoNotRetry) match {
           case RetryDecision.Retry(delay) =>
             // Record retry attempt
             collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
@@ -271,7 +305,7 @@ final class ReliableClient(
             }
 
             // Retry
-            executeWithRetry(operation, attemptNumber + 1, cancelledAwaitingToken)
+            executeWithRetry(operation, attemptNumber + 1, cancelledAwaitingToken, canRetry)
 
           case RetryDecision.DoNotRetry =>
             // Max attempts reached or non-retryable error - preserve original error

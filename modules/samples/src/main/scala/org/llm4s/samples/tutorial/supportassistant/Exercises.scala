@@ -1,6 +1,8 @@
 package org.llm4s.samples.tutorial.supportassistant
 
+import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.rag.RAG
 import org.llm4s.schema.*
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
@@ -59,4 +61,25 @@ object Part3Exercise {
    */
   def deliveryTool: Result[ToolFunction[DeliveryQuery, DeliveryEstimate]] =
     ??? // TODO: build the tool with Tool.of, reading `Part3Tools.orders`
+}
+
+object Part4Exercise {
+
+  /**
+   * Exercise 4: the help-centre articles that answer `question`, best first and each once, without asking the model:
+   * the `docId` of every passage `rag.query` retrieves. `sources(rag, "How long does express delivery take?")` starts
+   * with `delivery`.
+   */
+  def sources(rag: RAG, question: String): Result[Seq[String]] =
+    ??? // TODO: query the pipeline and read each passage's `docId`
+}
+
+object Part5Exercise {
+
+  /**
+   * Exercise 5: an output guardrail named `NoPromises` that refuses an answer containing the word "guarantee", in any
+   * case, with a `ValidationError` on the field `answer`, and lets every other answer through unchanged.
+   */
+  def noPromises: OutputGuardrail =
+    ??? // TODO: implement OutputGuardrail's `name` and `validate`
 }

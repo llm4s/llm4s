@@ -2,9 +2,18 @@ package org.llm4s.agent
 
 import org.llm4s.testutil.TestTimeLimit
 
-import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
+import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ModelCallCompleted, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, ApprovalMiddleware, GuardrailMiddleware, MiddlewareId }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  ApprovalMiddleware,
+  BoundaryResult,
+  GuardrailMiddleware,
+  MiddlewareId,
+  ModelContext,
+  ModelRequest,
+  ModelResponse
+}
 import org.llm4s.agent.graph.middleware.ToolCallRequest
 import org.llm4s.agent.graph.tool.{ ToolContext, ToolOutcome }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
@@ -366,4 +375,86 @@ class AgentEventsSpec extends AnyFlatSpec with TestTimeLimit with Matchers:
     }
     agentPayloads.map(_._1) should contain(AgentEvents.GuardrailBlocked.name)
     agentPayloads.foreach((_, p) => (p.render() should not).include(marker))
+  }
+
+  // RFC 0008 (#2115): what a call did not send as asked reaches an agent caller on the call's ModelCallCompleted
+  private def droppedTopP = RequestAdjustment.Dropped(RequestOption.TopP, "top_p not supported for test-model")
+  private def clamped = RequestAdjustment.Adjusted(RequestOption.Temperature, "2.5", "2.0", "test-model maximum is 2.0")
+
+  "ModelCallCompleted" should "carry its completion's adjustments, live and as stored" in {
+    def adjusted = Scripted(Right(answer("done").withAdjustments(List(droppedTopP, clamped))))
+    val (_, c)   = collect(agentWith(adjusted), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.adjustments } shouldBe
+      Vector(List(droppedTopP, clamped))
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val agent   = Agent.builder("assistant", adjusted).withRuntime(runtime).build().fold(e => fail(e.message), identity)
+    agent.run(ThreadId("adjusted"), "go").map(_.answer) shouldBe Right(Some("done"))
+    val stored = replayed(runtime, store, ThreadId("adjusted")).collect {
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        upickle.default.read[ModelCallCompleted](payload).adjustments
+    }
+    stored shouldBe Vector(List(droppedTopP, clamped))
+  }
+
+  it should "carry no adjustments when the completion reports none" in {
+    val (_, c) = collect(agentWith(Scripted(Right(answer("done")))), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.adjustments } shouldBe Vector(Nil)
+  }
+
+  it should "carry each attempt's own adjustments when a model wrapper calls twice" in {
+    val client = Scripted(Right(answer("first").withAdjustments(List(droppedTopP))), Right(answer("second")))
+    val twice = new AgentMiddleware:
+      val id = MiddlewareId("twice")
+      override def wrapModelCall(request: ModelRequest, context: ModelContext)(
+        next: ModelRequest => Result[ModelResponse]
+      ): Result[ModelResponse] = next(request).flatMap(_ => next(request))
+    val (result, c) = collect(agentWith(client).withMiddleware(twice), "go")
+    result.map(_.answer) shouldBe Right(Some("second"))
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.attempts -> m.adjustments } shouldBe
+      Vector(1 -> List(droppedTopP), 2 -> Nil)
+  }
+
+  it should "carry a hook's accounted call's adjustments, and none for usage recorded without a call" in {
+    val judge = Scripted(Right(answer("ok").withAdjustments(List(clamped))))
+    val judging = new AgentMiddleware:
+      val id = MiddlewareId("judge")
+      override def beforeAgent(input: String, context: ModelContext): Result[BoundaryResult] =
+        context.recordUsage("embedder", TokenUsage(7, 0, 7))
+        context.accounted(judge).complete(Conversation(Seq(UserMessage(input)))).map(_ => BoundaryResult(input))
+    val (_, c) = collect(agentWith(Scripted(Right(answer("done")))).withMiddleware(judging), "go")
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => (m.model, m.attempts, m.adjustments) } shouldBe
+      Vector(("embedder", 0, Nil), ("test-model", 0, List(clamped)), ("test-model", 1, Nil))
+  }
+
+  it should "not fail the call when a custom client leaves its adjustments null" in {
+    val nulls       = answer("done").withAdjustments(null)
+    val (result, c) = collect(agentWith(Scripted(Right(nulls))), "go")
+    result.map(_.answer) shouldBe Right(Some("done"))
+    c.all.collect { case AgentEvents.ModelCallCompleted(m) => m.adjustments } shouldBe Vector(Nil)
+    val withNullEntry = answer("done").withAdjustments(List(null, droppedTopP))
+    val (_, c2)       = collect(agentWith(Scripted(Right(withNullEntry))), "go")
+    c2.all.collect { case AgentEvents.ModelCallCompleted(m) => m.adjustments } shouldBe Vector(List(droppedTopP))
+  }
+
+  it should "store a custom client's adjustment with null fields as given, without failing the call" in {
+    val broken = List(
+      RequestAdjustment.Dropped(null, null),
+      RequestAdjustment.Adjusted(RequestOption.TopP, null, "1.0", null),
+      droppedTopP
+    )
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done").withAdjustments(broken))))
+      .withRuntime(runtime)
+      .build()
+      .fold(e => fail(e.message), identity)
+    agent.run(ThreadId("broken"), "go").map(_.answer) shouldBe Right(Some("done"))
+    val stored = replayed(runtime, store, ThreadId("broken")).collect {
+      case EventRecord(_, _, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+        // rendered and parsed again, as a store that keeps the payload as text does
+        upickle.default.read[ModelCallCompleted](ujson.read(payload.render())).adjustments
+    }
+    stored shouldBe Vector(broken)
   }

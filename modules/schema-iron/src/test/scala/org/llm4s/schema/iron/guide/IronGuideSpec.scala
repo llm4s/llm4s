@@ -17,6 +17,7 @@ import java.nio.file.{ Files, Path, Paths }
  * ignoring whitespace), its `json` block must be the properties of the schema that is derived, and its `sbt` block
  * must name this module's artifact. `DerivedSchemasGuideSpec` in llm4s-schema-derivation checks the rest of the page.
  */
+@org.llm4s.tags.DocsSpec
 class IronGuideSpec extends AnyFlatSpec with Matchers {
 
   object Refinements {

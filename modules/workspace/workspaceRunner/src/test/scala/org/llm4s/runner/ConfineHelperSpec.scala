@@ -147,4 +147,137 @@ class ConfineHelperSpec extends AnyFlatSpec with Matchers {
     val (dir, status) = fresh()
     run(status, system ++ List("--ro", dir.resolve("missing").toString), "/bin/true").exit shouldBe 0
   }
+
+  // ABI v6 scopes (#2009). Each case runs the same command at the kernel's ABI and with --max-abi 5 (the helper's first
+  // option after --status), where it must succeed: so a refusal is the scope's, and below v6 the helper behaves as
+  // before #2009.
+
+  private def report(extra: String*): Ran = {
+    val p   = new ProcessBuilder((List(helper.toString, "--report") ++ extra).asJava).start()
+    val out = new String(p.getInputStream.readAllBytes())
+    val err = new String(p.getErrorStream.readAllBytes())
+    Ran(p.waitFor(), out, err)
+  }
+
+  /** This kernel's Landlock ABI, as the helper reports it. */
+  private def kernelAbi: Int = {
+    val r = report()
+    withClue(s"--report: $r") {
+      r.exit shouldBe 0
+      Confiner.Protections.parse(r.out).map(_.abi).getOrElse(fail(s"not a report: ${r.out}"))
+    }
+  }
+
+  private def scopedKernel(): Unit = {
+    val abi = kernelAbi
+    info(s"Landlock ABI $abi, kernel ${System.getProperty("os.version")}")
+    assume(abi >= Confiner.Protections.ScopesAbi, s"Landlock ABI $abi has no scopes (kernel 6.12)")
+  }
+
+  private def BelowScopes: List[String] = List("--max-abi", (Confiner.Protections.ScopesAbi - 1).toString)
+
+  "llm4s-confine --report" should "name the kernel's ABI, with both scopes from v6 and none below" in {
+    val abi = kernelAbi
+    abi should be >= 3
+    val expected = if (abi >= 6) "abstract-unix-socket,signal" else "none"
+    report().out.trim shouldBe s"landlock-abi=$abi scopes=$expected"
+    report(BelowScopes: _*).out.trim shouldBe s"landlock-abi=${math.min(abi, 5)} scopes=none"
+    if (abi >= 6) report("--max-abi", "6").out.trim shouldBe "landlock-abi=6 scopes=abstract-unix-socket,signal"
+  }
+
+  it should "refuse an ABI below v3 as the sandbox does, and a bad --max-abi" in {
+    val r = report("--max-abi", "2")
+    r.exit shouldBe 125
+    r.err should include("Landlock ABI 2 is below the v3")
+    report("--max-abi", "x").exit shouldBe 125
+    report("--max-abi").exit shouldBe 125
+  }
+
+  "llm4s-confine with --max-abi" should "confine as at that ABI" in {
+    val (dir, status) = fresh()
+    Files.writeString(dir.resolve("f"), "hello")
+    val r = run(status, BelowScopes ++ system ++ List("--ro", dir.toString), "/bin/cat", dir.resolve("f").toString)
+    (r.exit, r.out) shouldBe ((0, "hello"))
+    run(status, BelowScopes ++ system, "/bin/cat", dir.resolve("f").toString).exit should not be 0
+  }
+
+  "llm4s-confine at Landlock ABI v6 or later" should "not let a command signal a process outside it (the runner)" in {
+    scopedKernel()
+    val (_, status) = fresh()
+    val target      = new ProcessBuilder("/bin/sleep", "60").start()
+    try {
+      val kill = List("/bin/sh", "-c", s"kill -TERM ${target.pid()}")
+      val r    = run(status, system, kill: _*)
+      withClue(s"kill: $r") {
+        r.exit should not be 0
+        r.err should include("not permitted")
+      }
+      target.isAlive shouldBe true
+      run(status, BelowScopes ++ system, kill: _*).exit shouldBe 0
+      target.waitFor(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+    } finally target.destroyForcibly(): Unit
+  }
+
+  it should "still let a command signal what it started itself" in {
+    scopedKernel()
+    val (_, status) = fresh()
+    run(status, system, "/bin/sh", "-c", "sleep 60 & kill -TERM $! && wait $!; test $? -eq 143").exit shouldBe 0
+  }
+
+  /** A python3 program connecting to abstract socket `name`: exit 0 when connected, 1 with the error otherwise. */
+  private def connectTo(name: String): List[String] =
+    List(
+      "/usr/bin/python3",
+      "-c",
+      "import socket, sys\n" +
+        "s = socket.socket(socket.AF_UNIX)\n" +
+        s"try: s.connect('\\0$name')\n" +
+        "except OSError as e: print(e, file=sys.stderr); sys.exit(1)\n"
+    )
+
+  it should "not let a command connect to an abstract Unix socket made outside it, even under --no-net" in {
+    scopedKernel()
+    assume(Files.isExecutable(Paths.get("/usr/bin/python3")), "python3 is not installed")
+    val (_, status) = fresh()
+    val name        = s"llm4s-confine-spec-${System.nanoTime()}"
+    // the listener, unconfined: binds, says so, and accepts until it is stopped
+    val server = new ProcessBuilder(
+      "/usr/bin/python3",
+      "-c",
+      "import socket, sys\n" +
+        "s = socket.socket(socket.AF_UNIX)\n" +
+        s"s.bind('\\0$name')\n" +
+        "s.listen(8)\n" +
+        "print('ready', flush=True)\n" +
+        "while True: s.accept()[0].close()\n"
+    ).start()
+    try {
+      new java.io.BufferedReader(new java.io.InputStreamReader(server.getInputStream)).readLine() shouldBe "ready"
+      val unconfined = new ProcessBuilder(connectTo(name).asJava).start()
+      unconfined.waitFor() shouldBe 0 // the control: the socket is there to connect to
+      for (grants <- List(system, system :+ "--no-net")) {
+        val r = run(status, grants, connectTo(name): _*)
+        withClue(s"connect ($grants): $r") {
+          r.exit shouldBe 1
+          r.err should include("not permitted")
+        }
+        run(status, BelowScopes ++ grants, connectTo(name): _*).exit shouldBe 0
+      }
+    } finally server.destroyForcibly(): Unit
+  }
+
+  it should "still let a command use an abstract Unix socket it made itself" in {
+    scopedKernel()
+    assume(Files.isExecutable(Paths.get("/usr/bin/python3")), "python3 is not installed")
+    val (_, status) = fresh()
+    val name        = s"llm4s-confine-own-${System.nanoTime()}"
+    val program = "import socket\n" +
+      "s = socket.socket(socket.AF_UNIX)\n" +
+      s"s.bind('\\0$name')\n" +
+      "s.listen(1)\n" +
+      "c = socket.socket(socket.AF_UNIX)\n" +
+      s"c.connect('\\0$name')\n"
+    val r = run(status, system :+ "--no-net", "/usr/bin/python3", "-c", program)
+    withClue(s"python: $r")(r.exit shouldBe 0)
+  }
 }

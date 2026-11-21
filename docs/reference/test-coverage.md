@@ -55,8 +55,8 @@ used, and mostly keep a module with the modules whose tests exercise its code (`
 Two such pairs are now split: `providerTestkit` no longer counts `rag`'s, `mcp`'s, `speech`'s and `image`'s tests
 (96.66% to 96.46%, floor 90), nor `agent` `observability`'s (93.19% to 93.14%, floor 90). Each leg uploads its modules' Codecov flags, and only
 those, so every flag is uploaded once. The `Code Coverage` job passes only when every leg does, and is what
-`All Tests Pass` waits for. It also writes the aggregate report from the legs' coverage data, which is informational
-only, because a build-wide average is not a meaningful gate.
+`All Tests Pass` waits for. Off pull requests it also writes the aggregate report from the legs' coverage data, which
+is informational only, because a build-wide average is not a meaningful gate; on a pull request it is the gate alone.
 
 `knowledgegraphNeo4j` and `benchmarks` declare floors but are in no leg, so CI does not currently enforce their
 floors. The benchmark workflow runs tests without coverage.

@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.media.MediaSource
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, UnmappedOptions }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
@@ -107,7 +107,20 @@ class OllamaClient(
   }
 
   private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    createRequestBody(conversation, options, stream = false).flatMap(body => send(body, options))
+    createRequestBody(conversation, options, stream = false).flatMap { body =>
+      val adjustments = unsent(options)
+      send(body, options).map(_.withAdjustments(adjustments))
+    }
+
+  // what the request does not send goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
+
+  /** What `options` asks for that the request does not send: Ollama's `think` is not mapped yet (RFC 0008). */
+  private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
+    val adjustments = UnmappedOptions.reasoningAndThinking(config.model, options)
+    adjustmentLog.record(config.model, adjustments)
+    adjustments
+  }
 
   private def send(requestBody: ujson.Obj, options: CompletionOptions): Result[Completion] = {
     val requestText = requestBody.render()
@@ -197,7 +210,10 @@ class OllamaClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    createRequestBody(conversation, options, stream = true).flatMap(stream(_, options, onChunk))
+    createRequestBody(conversation, options, stream = true).flatMap { body =>
+      val adjustments = unsent(options)
+      stream(body, options, onChunk).map(_.withAdjustments(adjustments))
+    }
   }
 
   private def stream(

@@ -107,7 +107,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: sbt
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -124,7 +126,7 @@ jobs:
           echo "image=$(echo "$REGISTRY/$name:$SHA" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build the image
-        run: sbt deployService/Docker/publishLocal
+        run: scripts/retry-on-transient-network.sh sbt deployService/Docker/publishLocal
 
       - name: Tag the image with the commit SHA
         env:

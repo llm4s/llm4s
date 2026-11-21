@@ -26,6 +26,7 @@ import scala.jdk.CollectionConverters.*
  * tenant headers and the model. It is in package `org.llm4s.config` because loading from a given source is not public
  * API. The environment is injected with the real one switched off.
  */
+@org.llm4s.tags.DocsSpec
 class ReferenceArchitectureGuideSpec extends AnyWordSpec with Matchers with EitherValues:
 
   private val Guide    = "docs/guide/reference-architecture.md"

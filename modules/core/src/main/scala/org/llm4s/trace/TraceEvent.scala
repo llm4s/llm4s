@@ -151,6 +151,7 @@ object TraceEvent {
       usage.foreach { u =>
         json("prompt_tokens") = u.promptTokens
         json("completion_tokens") = u.completionTokens
+        u.thinkingTokens.foreach(t => json("thinking_tokens") = t)
       }
       json
     }
@@ -323,8 +324,8 @@ object TraceEvent {
     def withSpan(span: Option[TraceSpan]): TokenUsageRecorded = copy(span = span)
 
     def eventType: String = "token_usage_recorded"
-    def toJson: ujson.Value = TraceSpan.annotate(
-      ujson.Obj(
+    def toJson: ujson.Value = {
+      val json = ujson.Obj(
         "event_type"        -> eventType,
         "timestamp"         -> timestamp.toString,
         "model"             -> model,
@@ -332,9 +333,11 @@ object TraceEvent {
         "prompt_tokens"     -> usage.promptTokens,
         "completion_tokens" -> usage.completionTokens,
         "total_tokens"      -> usage.totalTokens
-      ),
-      span
-    )
+      )
+      // the raw counts: thinking_tokens beside completion_tokens, which never includes it
+      usage.thinkingTokens.foreach(t => json("thinking_tokens") = t)
+      TraceSpan.annotate(json, span)
+    }
   }
 
   object TokenUsageRecorded {

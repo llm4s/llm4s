@@ -2,7 +2,7 @@ package org.llm4s.deploy
 
 import org.llm4s.agent.graph.{ GraphError, TenantId, ThreadCursor, ThreadId }
 import org.llm4s.agent.service.{ EntryId, QueueError }
-import org.llm4s.error.{ ConfigurationError, ValidationError }
+import org.llm4s.error.{ ConfigurationError, ContentFilteredError, ValidationError }
 import org.llm4s.testutil.TestTimeLimit
 import org.llm4s.trace.TraceContext
 import org.scalatest.BeforeAndAfterEach
@@ -256,6 +256,7 @@ class AgentServiceSpec extends AnyFlatSpec with TestTimeLimit with Matchers with
 
   "errorReply" should "map errors to statuses, keeping a server-side error's message out of the body" in {
     AgentService.statusOf(ValidationError("x", "bad")) shouldBe 400
+    AgentService.statusOf(ContentFilteredError.reply("Gemini", "SAFETY")) shouldBe 400
     AgentService.statusOf(GraphError.ThreadBusy("t", None, GraphError.BusyHolder.Unnamed)) shouldBe 409
     AgentService.statusOf(QueueError.TicketNotFound(EntryId.parse("1").toOption.get)) shouldBe 404
     AgentService.statusOf(QueueError.TicketExpired(EntryId.parse("1").toOption.get)) shouldBe 410

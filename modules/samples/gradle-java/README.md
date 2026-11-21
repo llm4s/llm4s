@@ -23,7 +23,7 @@ OpenAI), run the sample against a release:
 
 ```bash
 cd modules/samples/gradle-java
-OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.5.1
+OPENAI_API_KEY=sk-... gradle run -Pllm4sVersion=0.6.0
 ```
 
 Without `-Pllm4sVersion` the build uses `0.1.0-SNAPSHOT`, the code in this checkout, which you publish to your
@@ -65,5 +65,5 @@ another provider, swap it for that provider's module (`llm4s-ollama`, `llm4s-ant
 its OkHttp, Jackson and Kotlin standard library stay off the classpath
 ([#1496](https://github.com/llm4s/llm4s/issues/1496)).
 
-CI builds this project against the library on every pull request (the `Kotlin API` job does both), so it does
+CI builds this project against the library on every pull request (the `Kotlin, Java and framework consumers` job does both), so it does
 not drift from the API it demonstrates.

@@ -43,6 +43,62 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
     blockedWins.isDomainAllowed("example.com") shouldBe false
   }
 
+  // A trailing dot names the same host in DNS (the root), so `example.com.` must match what `example.com` matches.
+  it should "block a domain written with a trailing dot" in {
+    val config = HttpConfig(blockedDomains = Seq("example.com"))
+
+    config.isDomainAllowed("example.com.") shouldBe false
+    config.isDomainAllowed("EXAMPLE.COM.") shouldBe false
+    config.isDomainAllowed("www.example.com.") shouldBe false
+    config.isDomainAllowed("api.example.com.") shouldBe false
+    config.isDomainAllowed("example.com..") shouldBe false
+    config.isDomainAllowed("notexample.com.") shouldBe true
+    config.isDomainAllowed("other.org.") shouldBe true
+  }
+
+  it should "match a blocklist entry written with a trailing dot" in {
+    val config = HttpConfig(blockedDomains = Seq("example.com."))
+
+    config.isDomainAllowed("example.com") shouldBe false
+    config.isDomainAllowed("api.example.com") shouldBe false
+    config.isDomainAllowed("notexample.com") shouldBe true
+  }
+
+  it should "block the default blocklist's names written with a trailing dot" in {
+    val config = HttpConfig(blockInternalIPs = false)
+
+    config.isDomainAllowed("localhost.") shouldBe false
+    config.isDomainAllowed("LOCALHOST.") shouldBe false
+    config.isDomainAllowed("127.0.0.1.") shouldBe false
+    config.isDomainAllowed("0.0.0.0.") shouldBe false
+  }
+
+  it should "let an allowlisted domain through when written with a trailing dot" in {
+    val config = HttpConfig.restricted(Seq("example.com"))
+
+    config.isDomainAllowed("example.com.") shouldBe true
+    config.isDomainAllowed("api.example.com.") shouldBe true
+    config.isDomainAllowed("other.com.") shouldBe false
+    config.isDomainAllowed("notexample.com.") shouldBe false
+
+    val entryWithDot = HttpConfig.restricted(Seq("example.com."))
+    entryWithDot.isDomainAllowed("example.com") shouldBe true
+    entryWithDot.isDomainAllowed("api.example.com") shouldBe true
+    entryWithDot.isDomainAllowed("other.com") shouldBe false
+  }
+
+  it should "not let an entry that is only dots or www. match every host" in {
+    Seq(".", "..", "www.", "").foreach { entry =>
+      val blocked = HttpConfig(blockedDomains = Seq(entry))
+      blocked.isDomainAllowed("example.com") shouldBe true
+      blocked.isDomainAllowed("example.com.") shouldBe true
+
+      val allowed = HttpConfig.restricted(Seq(entry))
+      allowed.isDomainAllowed("example.com") shouldBe false
+      allowed.isDomainAllowed("example.com.") shouldBe false
+    }
+  }
+
   it should "restrict to allowed domains when specified" in {
     val config = HttpConfig(allowedDomains = Some(Seq("api.example.com", "data.example.org")))
 
@@ -91,6 +147,26 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
               result => fail(s"Expected Left but got Right: $result")
             )
         }
+      )
+  }
+
+  // `blockInternalIPs = false` and a `.invalid` host (RFC 2606, never resolves): only the blocklist can answer
+  // SSRF_BLOCKED here, so without the fix the call fails another way, network or not.
+  it should "reject a blocked domain written with a trailing dot before any request" in {
+    val config = HttpConfig(blockedDomains = Seq("blocked.invalid"), blockInternalIPs = false)
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool =>
+          Seq("http://blocked.invalid./", "https://www.blocked.invalid./path").foreach { url =>
+            tool
+              .handler(SafeParameterExtractor(ujson.Obj("url" -> url)))
+              .fold(
+                err => err should include("SSRF_BLOCKED"),
+                result => fail(s"Expected $url to be blocked but got Right: $result")
+              )
+          }
       )
   }
 

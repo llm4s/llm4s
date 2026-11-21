@@ -22,6 +22,7 @@ import java.nio.file.{ Files, Path, Paths }
  * Every `scala` block of the guide must appear in this file word for word (the first spec below checks it, ignoring
  * whitespace). Change the guide and this spec together.
  */
+@org.llm4s.tags.DocsSpec
 class CapabilitiesGuideSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
   // ---- Checked once at the edge, typed afterwards

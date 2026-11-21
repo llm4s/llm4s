@@ -727,9 +727,12 @@ under the home directory gets no home grant, and build tools run there cannot wr
 above it (with `readOnlyPaths = ["ro"]`, in the workspace root); the runner's own file operations still can. Landlock
 has no metadata rights, so `chmod`, `chown` and timestamps on a read-only path are not refused, only its content. An
 existing hard link into a read-only file can write it, and a read-only symlink protects its target, not the link.
-`/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Abstract Unix
-sockets stay reachable without network, and a command can signal the runner. A daemon a command starts (`setsid`)
-stays confined, and outlives the command unless the container gives commands cgroups (below). The runner's own
+`/proc` is readable: another process's `environ` and `mem` are not, but its `cmdline` and `status` are. Below
+Landlock ABI v6 (kernel 6.12), abstract Unix sockets stay reachable without network and a command can signal the
+runner; from v6 a command reaches only abstract sockets, and signals only processes, inside its own sandbox
+([#2009](https://github.com/llm4s/llm4s/issues/2009)). The runner logs at startup which of these apply. A daemon a command starts (`setsid`)
+stays confined, and outlives the command unless the container gives commands cgroups (below,
+[#2008](https://github.com/llm4s/llm4s/issues/2008)). The runner's own
 helper programs (the git configuration lister, `getfacl`, `setfacl`) run unconfined, so on Linux they are taken from
 `/usr/bin` or `/bin` only, never from `PATH`, which includes the writable home directory.
 

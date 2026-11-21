@@ -9,8 +9,11 @@
 # For each required workflow this checks:
 #   - it triggers on `merge_group` with `types: [checks_requested]`;
 #   - each required check (a job name) exists, and neither it nor anything it needs is skipped by an event condition,
-#     except a need the job runs without (`if: always()`) and whose `skipped` result its steps accept as a pass (the
-#     workspace tier, which runs only on PRs that change the workspace: #1982);
+#     except a need the job runs without: one whose `skipped` result its steps accept as a pass, in a job that runs
+#     regardless (`if: always()`; the workspace tier, which runs only on PRs that change the workspace: #1982), or any
+#     need of a job whose condition calls a status function (`always()`, `!cancelled()`), which GitHub evaluates even
+#     when a need was skipped - such as CI's `changes` job, which runs only on pull requests. Its outputs are then
+#     empty, and the job's condition must still let it run;
 #   - nothing in it reads `github.event.pull_request` unless its step or job runs only on pull_request;
 #   - its concurrency neither cancels a merge group nor shares a group with one (a group's ref is unique);
 #   - the DCO job does run dco-check on pull requests and reports on merge groups (it needs the pull request);
@@ -45,13 +48,16 @@ check = lambda do |label, ok, detail = nil|
 end
 
 # Evaluates an `if:` as GitHub would on a merge_group event, on the queue's temporary branch. Only literals, the
-# event name, the ref, the status functions and ==, !=, &&, ||, ! and parentheses are understood; anything else
-# (another context, a function) cannot be decided here, so it counts as skipping: such a condition on a required job
-# needs a look by hand, and this check should be taught it.
-runs_on_merge_group = lambda do |cond|
+# event name, the ref, the status functions, a need's result and outputs, and ==, !=, &&, ||, ! and parentheses are
+# understood; anything else (another context, a function) cannot be decided here, so it counts as skipping: such a
+# condition on a required job needs a look by hand, and this check should be taught it. A need's result is `skipped`
+# when its own condition skips it on a merge group (`skipped_needs`), else `success`; a need's outputs are then empty.
+runs_on_merge_group = lambda do |cond, skipped_needs = []|
   c = cond.to_s.strip
   next true if c.empty?
   c = c.sub(/\A\$\{\{(.*)\}\}\z/m, '\\1').strip
+  c = c.gsub(/\bneeds\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+/, "''")
+       .gsub(/\bneeds\.([A-Za-z0-9_-]+)\.result\b/) { skipped_needs.include?(Regexp.last_match(1)) ? "'skipped'" : "'success'" }
   e = c.gsub('github.event_name', "'merge_group'")
        .gsub('github.ref', "'refs/heads/gh-readonly-queue/main/pr-1-0000000'")
        .gsub(/\b(always|success)\(\)/, 'true').gsub(/\b(failure|cancelled)\(\)/, 'false')
@@ -62,7 +68,7 @@ runs_on_merge_group = lambda do |cond|
     false
   end
 end
-skips_merge_group = ->(cond) { !runs_on_merge_group.call(cond) }
+skips_merge_group = ->(cond, skipped_needs = []) { !runs_on_merge_group.call(cond, skipped_needs) }
 pr_only = ->(cond) { c = cond.to_s; c.include?("github.event_name == 'pull_request'") && !c.include?('||') }
 
 REQUIRED.each do |file, checks|
@@ -87,8 +93,10 @@ REQUIRED.each do |file, checks|
     # the required job and everything it needs, transitively, must run on a merge group - but a need it explicitly
     # passes when skipped (it runs regardless, and a step accepts that need's `skipped` result) may skip, and so may
     # whatever only that need needs
+    status_fn = ->(job) { job['if'].to_s.match?(/\b(always|cancelled)\(\)/) }
     tolerates = lambda do |job, need|
-      job['if'].to_s.strip.match?(/\A(\$\{\{\s*)?always\(\)(\s*\}\})?\z/) &&
+      next true if !job.equal?(jobs[id]) && status_fn.call(job) && skips_merge_group.call(jobs[need]['if'])
+      job['if'].to_s.match?(/\balways\(\)/) &&
         (job['steps'] || []).any? { |st| st['run'].to_s.include?(%("${{ needs.#{need}.result }}" != "skipped")) }
     end
     seen = []
@@ -99,7 +107,8 @@ REQUIRED.each do |file, checks|
       seen << j
       todo.concat(Array(jobs[j]['needs']).reject { |n| tolerates.call(jobs[j], n) })
     end
-    skipped = seen.select { |j| skips_merge_group.call(jobs[j]['if']) }
+    skipped_needs_of = ->(j) { Array(jobs[j]['needs']).select { |n| skips_merge_group.call(jobs[n]['if']) } }
+    skipped = seen.select { |j| skips_merge_group.call(jobs[j]['if'], skipped_needs_of.call(j)) }
     check.call("#{file}: '#{name}' and the #{seen.size - 1} job(s) it needs run on a merge group", skipped.empty?,
                "skipped by their if: #{skipped.map { |j| "#{j} (#{jobs[j]['if']})" }.join(', ')}")
   end

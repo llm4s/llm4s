@@ -89,6 +89,18 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     completion.usage shouldBe None
   }
 
+  it should "read the standard reasoning tokens on the generic dialect and take them out of completion_tokens" in {
+    // a Groq gpt-oss usage block (2026-11): completion 64 holds the 46 reasoning tokens
+    val usage =
+      ""","usage":{"prompt_tokens":81,"completion_tokens":64,"total_tokens":145,""" +
+        """"completion_tokens_details":{"reasoning_tokens":46}}"""
+
+    client
+      .consumeStream(200, stream(delta("ok", "\"stop\"", usage)), new StringBuilder, _ => ())
+      .value
+      .usage shouldBe Some(TokenUsage(81, 18, 145, Some(46)))
+  }
+
   it should "carry the dialect's reasoning tokens" in {
     val deepSeek =
       new DeepSeekClient(DeepSeekConfig(Secret("k"), "deepseek-reasoner", "http://localhost:1", 128000, 8192))
@@ -99,7 +111,7 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
     deepSeek
       .consumeStream(200, stream(delta("ok", "\"stop\"", usage)), new StringBuilder, _ => ())
       .value
-      .usage shouldBe Some(TokenUsage(4, 9, 13, Some(6)))
+      .usage shouldBe Some(TokenUsage(4, 3, 13, Some(6)))
   }
 
   it should "reach the caller of streamComplete, with one exchange recorded" in {

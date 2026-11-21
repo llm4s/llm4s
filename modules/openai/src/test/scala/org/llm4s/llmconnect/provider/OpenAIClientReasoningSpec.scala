@@ -4,7 +4,15 @@ import org.llm4s.security.Secret
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, UserMessage }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  Conversation,
+  ReasoningEffort,
+  RequestAdjustment,
+  RequestOption,
+  Thinking,
+  UserMessage
+}
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ completion => completionOf, transport }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.EitherValues
@@ -60,9 +68,33 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
     }
   }
 
-  it should "send no reasoning_effort for ReasoningEffort.None, leaving the model's default" in {
-    body("o3-mini", CompletionOptions().withReasoning(ReasoningEffort.None)).contains("reasoning_effort") shouldBe false
+  it should "send no reasoning_effort when neither reasoning nor thinking is set, leaving the model's default" in {
     body("o3-mini", CompletionOptions()).contains("reasoning_effort") shouldBe false
+  }
+
+  it should "send a level the model lacks as the nearest it takes, by its registry capabilities" in {
+    // o3-mini takes low, medium and high; gpt-5 adds minimal; gpt-5.2 adds xhigh
+    body("o3-mini", CompletionOptions().withReasoning(ReasoningEffort.Minimal))("reasoning_effort").str shouldBe "low"
+    body("o3-mini", CompletionOptions().withReasoning(ReasoningEffort.Max))("reasoning_effort").str shouldBe "high"
+    body("gpt-5", CompletionOptions().withReasoning(ReasoningEffort.Minimal))("reasoning_effort").str shouldBe "minimal"
+    body("gpt-5.2", CompletionOptions().withReasoning(ReasoningEffort.XHigh))("reasoning_effort").str shouldBe "xhigh"
+    body("gpt-5.2", CompletionOptions().withReasoning(ReasoningEffort.Max))("reasoning_effort").str shouldBe "xhigh"
+  }
+
+  it should "send Thinking.Off as none where the model can turn thinking off, else as its lowest level" in {
+    body("gpt-5.1", CompletionOptions().withThinking(Thinking.Off))("reasoning_effort").str shouldBe "none"
+    body("gpt-5", CompletionOptions().withThinking(Thinking.Off))("reasoning_effort").str shouldBe "minimal"
+    body("o3-mini", CompletionOptions().withThinking(Thinking.Off))("reasoning_effort").str shouldBe "low"
+    // Off wins over a level also set
+    body("gpt-5.1", CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High))(
+      "reasoning_effort"
+    ).str shouldBe "none"
+  }
+
+  it should "send nothing for an adaptive or budgeted thinking alone" in {
+    body("o3-mini", CompletionOptions().withThinking(Thinking.Adaptive)).contains("reasoning_effort") shouldBe false
+    body("o3-mini", CompletionOptions().withThinking(Thinking.budget(4096).toOption.get))
+      .contains("reasoning_effort") shouldBe false
   }
 
   it should "send reasoning_effort to the gpt-5 family, which the registry flags as reasoning models" in {
@@ -130,7 +162,7 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       .contains("reasoning_effort") shouldBe false
   }
 
-  it should "report the response's reasoning tokens as thinkingTokens, within completionTokens" in {
+  it should "report the response's reasoning tokens as thinkingTokens, taken out of completionTokens" in {
     val client = OpenAIClient.forTest(
       "o3-mini",
       transport(complete = _ => completionOf(okResponse)),
@@ -138,8 +170,22 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
     )
     val usage = client.complete(hello, CompletionOptions().withReasoning(ReasoningEffort.High)).value.usage.get
     usage.thinkingTokens shouldBe Some(32)
-    usage.completionTokens shouldBe 50
+    usage.completionTokens shouldBe 18
     usage.totalTokens shouldBe 60
+    usage.totalOutputTokens shouldBe 50
+  }
+
+  it should "count a reply's output once: completion 64 with 46 reasoning is 18 answer and 46 thinking" in {
+    // a real usage block (Groq openai/gpt-oss-20b, 2026-11), which follows OpenAI's format
+    val response =
+      """{"id":"c1","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
+        |"usage":{"prompt_tokens":81,"completion_tokens":64,"total_tokens":145,
+        |"completion_tokens_details":{"reasoning_tokens":46}}}""".stripMargin
+    val client = OpenAIClient.forTest("o3-mini", transport(complete = _ => completionOf(response)), openAI("o3-mini"))
+    val usage  = client.complete(hello, CompletionOptions()).value.usage.get
+    (usage.promptTokens, usage.completionTokens, usage.totalTokens, usage.thinkingTokens) shouldBe
+      ((81, 18, 145, Some(46)))
+    usage.totalOutputTokens shouldBe 64
   }
 
   // Azure: the model is a deployment name, which need not name the model behind it.
@@ -254,10 +300,76 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
       .foreach(m => withClue(m)(OpenAIReasoning.namedLikeReasoningModel(m) shouldBe false))
   }
 
-  "OpenAIReasoning.toSdk" should "map None to no parameter and the rest to their wire values" in {
-    OpenAIReasoning.toSdk(ReasoningEffort.None) shouldBe None
-    OpenAIReasoning.toSdk(ReasoningEffort.Low).map(_.asString()) shouldBe Some("low")
-    OpenAIReasoning.toSdk(ReasoningEffort.Medium).map(_.asString()) shouldBe Some("medium")
-    OpenAIReasoning.toSdk(ReasoningEffort.High).map(_.asString()) shouldBe Some("high")
+  "OpenAIReasoning.toSdk" should "map every level to its own wire value" in {
+    ReasoningEffort.values.foreach(level => OpenAIReasoning.toSdk(level).asString() shouldBe level.name)
+  }
+
+  private def plan(model: String, options: CompletionOptions, sendsEffort: Boolean = true) =
+    OpenAIReasoning.plan(model, options, OpenAIReasoning.capabilities(model, mrs), sendsEffort)
+
+  "OpenAIReasoning.plan" should "report a level it sends as another, and nothing for one it takes" in {
+    plan("o3-mini", CompletionOptions().withReasoning(ReasoningEffort.Max)).adjustments shouldBe List(
+      RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "o3-mini does not accept reasoning_effort max")
+    )
+    plan("o3-mini", CompletionOptions().withReasoning(ReasoningEffort.High)).adjustments shouldBe Nil
+  }
+
+  it should "send a level as asked to a model the registry does not know" in {
+    val unknown =
+      OpenAIReasoning.plan("o9-preview", CompletionOptions().withReasoning(ReasoningEffort.XHigh), None, true)
+    unknown.effort.map(_.asString()) shouldBe Some("xhigh")
+    unknown.adjustments shouldBe Nil
+  }
+
+  it should "report Thinking.Off only where it is not sent as none, and the level it overrode" in {
+    plan("gpt-5.1", CompletionOptions().withThinking(Thinking.Off)).adjustments shouldBe Nil
+    plan(
+      "o3-mini",
+      CompletionOptions().withThinking(Thinking.Off).withReasoning(ReasoningEffort.High)
+    ).adjustments shouldBe
+      List(
+        RequestAdjustment.Adjusted(
+          RequestOption.Thinking,
+          "Off",
+          "low",
+          "o3-mini cannot turn thinking off; its lowest effort is sent"
+        ),
+        RequestAdjustment.Adjusted(RequestOption.Reasoning, "high", "low", "thinking = Off takes precedence")
+      )
+  }
+
+  it should "send nothing for Thinking.Off where the model's lowest level is unknown, and say so" in {
+    val unknown = OpenAIReasoning.plan("o9-preview", CompletionOptions().withThinking(Thinking.Off), None, true)
+    unknown.effort shouldBe None
+    unknown.adjustments.map(_.option) shouldBe List(RequestOption.Thinking)
+    unknown.adjustments.head shouldBe a[RequestAdjustment.Dropped]
+  }
+
+  it should "call adaptive thinking not needed and drop a thinking budget" in {
+    plan("o3-mini", CompletionOptions().withThinking(Thinking.Adaptive)).adjustments shouldBe
+      List(RequestAdjustment.NotNeeded(RequestOption.Thinking, "o3-mini decides how much to think"))
+    plan("o3-mini", CompletionOptions().withThinking(Thinking.budget(4096).toOption.get)).adjustments shouldBe
+      List(RequestAdjustment.Dropped(RequestOption.Thinking, "OpenAI takes no thinking budget"))
+  }
+
+  it should "send nothing to a model that must not get reasoning_effort, reporting a thinking setting" in {
+    val nonReasoning = plan("gpt-4o", CompletionOptions().withThinking(Thinking.Off), sendsEffort = false)
+    nonReasoning.effort shouldBe None
+    nonReasoning.adjustments.map(_.getClass.getSimpleName) shouldBe List("NotNeeded")
+    plan("gpt-4o", CompletionOptions().withThinking(Thinking.Adaptive), sendsEffort = false).adjustments
+      .map(_.option) shouldBe List(RequestOption.Thinking)
+    plan("gpt-4o", CompletionOptions().withReasoning(ReasoningEffort.High), sendsEffort = false) shouldBe
+      OpenAIReasoning.EffortPlan(None, Nil)
+  }
+
+  "OpenAIClient's completion" should "carry the reasoning and thinking adjustments" in {
+    val client =
+      OpenAIClient.forTest("o3-mini", transport(complete = _ => completionOf(okResponse)), openAI("o3-mini"))
+    client
+      .complete(hello, CompletionOptions().withReasoning(ReasoningEffort.Max))
+      .value
+      .adjustments should contain(
+      RequestAdjustment.Adjusted(RequestOption.Reasoning, "max", "high", "o3-mini does not accept reasoning_effort max")
+    )
   }
 }

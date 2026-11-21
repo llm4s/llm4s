@@ -180,6 +180,20 @@ val ticket: Result[Ticket] = for {
   </div>
 </section>
 
+<section class="lp-section" aria-labelledby="adopters-heading">
+  <div class="lp-wrap">
+    <header class="lp-section__head lp-section__head--row">
+      <div>
+        <p class="lp-eyebrow">Adopters</p>
+        <h2 id="adopters-heading">Who uses LLM4S</h2>
+        <p>Organisations that build on LLM4S, in their own words. Some help build it too. Listing is not an endorsement.</p>
+      </div>
+      <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/community/#success-stories' | relative_url }}">Success stories</a> <a class="lp-btn lp-btn--primary" href="https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md#how-to-add-yourself">Add your organisation</a></p>
+    </header>
+    {% include adopters-grid.html %}
+  </div>
+</section>
+
 <section class="lp-section" aria-labelledby="showcase-heading">
   <div class="lp-wrap">
     <header class="lp-section__head lp-section__head--row">
@@ -289,6 +303,7 @@ val ticket: Result[Ticket] = for {
       <li class="is-done"><strong>0.4.x</strong><span>Artifacts renamed to <code>llm4s-*</code></span></li>
       <li class="is-done"><strong>0.5.0</strong><span>Modular artifacts, provider SPI, Java, Spring Boot, cats-effect and ZIO modules</span></li>
       <li class="is-done"><strong>0.5.1</strong><span>Multimodal messages, agent harness SPIs, Agent Skills</span></li>
+      <li class="is-done"><strong>0.6.0</strong><span>Subagents, durable multi-machine agents, Secret credentials, Kotlin API</span></li>
       <li><strong>Pre-1.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
       <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>
