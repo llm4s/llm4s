@@ -24,8 +24,9 @@ event mid-stream does from Ollama (read). This RFC writes the contract
 down and makes every chat provider keep it. It has five **parts**, shipped as the PRs in [Delivery](#delivery).
 
 - **Part 1: A typed finish reason.** `Completion` gains `finishReason: FinishReason` (`Stop`, `ToolCalls`, `Length`,
-  `ContentFilter`, `Other(raw)`). `StreamedChunk.finishReason` changes from `Option[String]` to
-  `Option[FinishReason]`. Each client maps its provider's reason; none hardcodes one.
+  `Other(raw)`). `StreamedChunk.finishReason` changes from `Option[String]` to `Option[FinishReason]`. Each client
+  maps its provider's reason; none hardcodes one. A content-filter finish is not a reason but a
+  `Left(ContentFilteredError)`, from every provider, as #2664 made it for Gemini and Vertex AI.
 - **Part 2: Stream endings.** A stream is `Right` only if the provider sent its end marker and no error. #2550 did
   this for the OpenAI-compatible client; Bedrock, watsonx and Perplexity already did. The rest follow.
 - **Part 3: Tool call arguments.** Arguments that are not a complete JSON object are a `Left`, never `{}`, never
@@ -44,7 +45,7 @@ main, not run; **(bytecode)** from the SDK jar the build resolves, not run.
 
 **A caller can't tell a finished answer from a cut one, and a cut tool call can run.** Reproduced on main on
 2026-11-05 (run). The first three rows are tests in `OpenAICompatibleStreamEndingSpec` (#2550) and the last in
-`ReliableClientStreamReplaySpec` (#2562, open); the `complete` and agent rows use the inputs shown and become tests in PR 3:
+`ReliableClientStreamReplaySpec` (#2562, merged); the `complete` and agent rows use the inputs shown and become tests in PR 3:
 
 | Input from provider | Expected | Got |
 |---|---|---|
@@ -73,7 +74,8 @@ live server; the table describes each response, and the same request reproduces 
 
 Two things follow. A reply can honestly be `Right("")` because the model spent its whole budget thinking, and
 `Completion` cannot say so. And the same Gemini situation is an `UnknownError` from `complete` and an empty success
-from `streamComplete`. A caller can't write one handler for both.
+from `streamComplete`. A caller can't write one handler for both. (#2563 and #2664 have since fixed the Gemini rows:
+both paths now give an empty `Right`.)
 
 **`Completion` has no finish reason.** `Completion` (`Completion.scala:27-37`) has none. Only `StreamedChunk` has one,
 as a raw provider string (`Completion.scala:219`). `StreamingAccumulator` records it (`StreamingAccumulator.scala:82`)
@@ -104,7 +106,7 @@ Read on main d928be4f4. "Ending enforced" means a stream with no end marker is a
 | `OpenAIClient` (OpenAI, Azure, Requesty; openai-java 4.69.3) | No (`OpenAIClient.scala:665-692`) | Raw string (`:364`). Fake streaming hardcodes `"stop"` (`:440`) | Not in llm4s (`:298-334`). The SDK stops at `[DONE]` and throws `SseException` on an `error` payload (bytecode). A stream that ends with neither: unverified | `complete` drops the call silently (`:733-752`). Stream: the accumulator, below |
 | `OpenAICompatibleClient` (DeepSeek, Mistral, Cohere, OpenRouter, xAI, Z.ai, generic) | No (`OpenAICompatibleClient.scala:539-565`) | Raw string (`:647`) | Yes, since #2550 (`:239-243`, `:253-256`) | `complete`: `{}` through `lenientToolCalls` (`OpenAICompatibleDialect.scala:191`, `:231-239`), pinned by `OpenAICompatibleDialectToolCallsSpec.scala:26-28`. OpenRouter overrides it and fails instead (`OpenRouterClient.scala:285-286`, `ToolCallDeserializer.scala:50-53`). Stream: the accumulator |
 | `AnthropicClient` (anthropic-java 2.65.0) | No, `stop_reason` is never read (`AnthropicClient.scala:725-773`) | Hardcoded `"stop"` on `message_stop` (`:485-494`); `message_delta`'s `stop_reason` is not passed on | Not in llm4s. The SDK throws `SseException` on an `error` event (bytecode). A stream that ends without `message_stop`: unverified | `complete`: `Left` on unreadable input (`:793-806`). Stream: a tool block starts as `ujson.Obj()` (`:477`), then the accumulator |
-| `GeminiClient`, `VertexAIClient` | No. A candidate with no `parts` throws, giving `UnknownError` (`GeminiClient.scala:459`, `VertexAIClient.scala:401`) (live) | Read (`GeminiClient.scala:520`, `VertexAIClient.scala:455`), but a chunk with no `parts` is dropped whole by the surrounding `Try` (`GeminiClient.scala:513`, `:526`; `VertexAIClient.scala:452`, `:459`), so `MAX_TOKENS` with no text is lost (live) | No (`GeminiClient.scala:249`, `VertexAIClient.scala:238`). An unreadable chunk is skipped (`GeminiClient.scala:240`, `VertexAIClient.scala:229`) | Arguments are native JSON in the envelope; too deep is refused (#1562). A cut function call: untested (Gemini returned 429 before capture) |
+| `GeminiClient`, `VertexAIClient` (no-parts and filter cases since fixed by #2563, #2664) | No. A candidate with no `parts` throws, giving `UnknownError` (`GeminiClient.scala:459`, `VertexAIClient.scala:401`) (live) | Read (`GeminiClient.scala:520`, `VertexAIClient.scala:455`), but a chunk with no `parts` is dropped whole by the surrounding `Try` (`GeminiClient.scala:513`, `:526`; `VertexAIClient.scala:452`, `:459`), so `MAX_TOKENS` with no text is lost (live) | No (`GeminiClient.scala:249`, `VertexAIClient.scala:238`). An unreadable chunk is skipped (`GeminiClient.scala:240`, `VertexAIClient.scala:229`) | Arguments are native JSON in the envelope; too deep is refused (#1562). A cut function call: untested (Gemini returned 429 before capture) |
 | `OllamaClient` | No, `done_reason` is not read (`OllamaClient.scala:367-380`) | Made up from `done`: `"tool_calls"` or `"stop"` (`:238`, `:251`), so a `length` end reads as `"stop"` | No (`:291`). A `{"error":...}` line is not checked for (read) | `Left` for anything but a JSON object (`:534-564`) |
 | `BedrockClient` | Only into the exchange log (`BedrockClient.scala:702`) | Raw `stopReason` (`:288`, `:375-378`) | Yes (`:383-386`) | `complete`: `Left` only when too deep (`:862-870`). Stream: a tool starts as `ujson.Obj()` (`:368`), then the accumulator. A `max_tokens` stop after a tool start gives `{}` (read) |
 | `WatsonXClient` | Checks error-class reasons (`WatsonXClient.scala:576`, `:488-490`), does not return the reason | Normalised string (`:642-655`) | Yes (`:475-485`) | `Left` unless a JSON object; absent or blank is `{}` (`:767-777`) |
@@ -136,9 +138,6 @@ enum FinishReason derives ReadWriter {
 
   /** An output limit was reached: max tokens, or the context window. The content is cut short. */
   case Length
-
-  /** The provider stopped or withheld output for safety, policy or recitation. */
-  case ContentFilter
 
   /** A reason this client has no mapping for, kept as the provider sent it. */
   case Other(raw: String)
@@ -179,24 +178,25 @@ The previous `apply` stays as an overload without defaults that forwards, as `CL
 | `Stop` | `stop` | `end_turn`, `stop_sequence` | `STOP` with no function call | `end_turn`, `stop_sequence` | `stop` | `completed`, no call |
 | `ToolCalls` | `tool_calls`, `function_call` | `tool_use` | `STOP` with a function call | `tool_use` | `stop` with a call | `completed`, with a call |
 | `Length` | `length` | `max_tokens`, `model_context_window_exceeded` | `MAX_TOKENS` | `max_tokens`, `model_context_window_exceeded` | `length` | `incomplete` |
-| `ContentFilter` | `content_filter` | `refusal` | `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII` | `guardrail_intervened`, `content_filtered` | none | none |
-| `Left` | `error` (and watsonx's `cancelled`, `time_limit`, as today) | an `error` event | `MALFORMED_FUNCTION_CALL` | an exception from the SDK | an `error` line | `failed` |
+| `Left(ContentFilteredError)` | `content_filter` | `refusal` | `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII` and the rest #2664 lists (done) | `guardrail_intervened`, `content_filtered` | none | none |
+| other `Left` | `error` (and watsonx's `cancelled`, `time_limit`, as today) | an `error` event | any other finish (`MALFORMED_FUNCTION_CALL`, `OTHER`, ...) with no text and no call: `ValidationError` (done in #2664). With text it is `Right`, `Other(raw)` | an exception from the SDK | an `error` line | `failed` |
 
 The vendor values in this table come from the vendors' documentation, except those the clients already read
 (`WatsonXClient.scala:648-655`, Groq's `length` and Gemini's `MAX_TOKENS` (live)). Each mapping PR checks its row
 against captured replies. Any other value is `Other(raw)`, so a new provider value never fails a call.
 
-**Gemini, specifically.** A candidate with a `finishReason` and no `parts` is a reply, not a malformed one. `complete`
-returns `Right` with empty content, `finishReason = Length` and the reported thought tokens, instead of
-`UnknownError` (live). The stream records the reason from a chunk that has no `parts`, instead of dropping the chunk.
-Both paths then give the same answer for the same reply. #2563 (open) already fixes `complete` for Gemini and Vertex AI; PR 2 builds on it.
+**Gemini, specifically.** A candidate with a `finishReason` and no `parts` is a reply, not a malformed one. #2563 and
+#2664 (merged) made both paths of Gemini and Vertex AI return `Right` with empty content for it when it finished
+`STOP`, `MAX_TOKENS` or `CONTINUATION`, instead of `UnknownError` (live); a content-filter finish is a
+`ContentFilteredError`, and any other finish with no text and no call a `ValidationError`. PR 2 adds
+`finishReason = Length` for `MAX_TOKENS`.
 
 **Where it is read.**
 
 - `TracingLLMClient` reports the `Completion`'s reason for `complete` as well as for streams, so
   `TraceEvent.CompletionReceived.finishReasons` (`TraceEvent.scala:109`) and the OpenTelemetry attribute stop being
   empty for non-streamed calls. `finishReasons` stays `Seq[String]`, filled with the mapped name (`stop`, `length`,
-  `tool_calls`, `content_filter`, or `Other`'s raw value).
+  `tool_calls`, or `Other`'s raw value).
 - **Agent runs.** `AgentEvents.ModelCallCompleted` (`AgentEventPayloads.scala:33-41`) gains
   `finishReason: Option[FinishReason] = None`, filled from the call's `Completion`. A stored event written before the
   field existed still reads, as `None`. This follows RFC 0008's `adjustments` on the same event. The agent's own
@@ -272,7 +272,7 @@ After the first chunk, the failure is returned as is.
 `LLMClientRetry.streamCompleteWithRetry` keeps this rule with its `chunkEmitted` flag
 (`LLMClientRetry.scala:121-133`). `ReliableClient.streamComplete` does not: it passes the caller's `onChunk` straight
 to each attempt (`ReliableClient.scala:89-97`), so a retry after a partial stream delivers the start again. On main,
-the caller saw "HelHello" while the `Completion` said "Hello" (run). The fix is #2562 (open). This RFC
+the caller saw "HelHello" while the `Completion` said "Hello" (run). The fix is #2562 (merged). This RFC
 states the rule so that every retrying layer, now and later, is held to it.
 
 Part 2 makes this rule matter more. Once a cut stream is a `Left(NetworkError)`, which is retryable, more streams reach
@@ -293,7 +293,7 @@ enum ContractCase {
   case MalformedArguments  // Left
   case StreamEndsEarly     // stream only: Left
   case ErrorEvent          // stream only: Left
-  case ContentFiltered     // Right, FinishReason.ContentFilter, where the provider has one
+  case ContentFiltered     // Left(ContentFilteredError), where the provider has a filter
 }
 
 def assertModelCallContract(
@@ -366,11 +366,10 @@ Anthropic take a base URL; Bedrock's endpoint override is unverified.
     already fail it);
   - an error event or line on Gemini, Vertex AI or Ollama streams;
   - any tool call with unparseable arguments, or in a `Length` reply, on every client. On `OpenAIClient` such a call
-    was dropped; on the OpenAI-compatible clients it was `{}`.
-
-  One call that was a `Left` becomes a `Right`: Gemini and Vertex AI `complete` on a candidate with no `parts`
-  (`UnknownError` today, `Right` with `Length` after). Retries change for `ReliableClient` streams: none after the
-  first chunk.
+    was dropped; on the OpenAI-compatible clients it was `{}`;
+  - a content-filter finish on OpenAI, the OpenAI-compatible clients, Anthropic and Bedrock (`content_filter`,
+    `refusal`, guardrail reasons): a `ContentFilteredError`, as on Gemini and Vertex AI since #2664, where today it is
+    a finished `Completion` with whatever content arrived.
 - **Wire formats:** a `ModelCallCompleted` written before the change reads with `finishReason = None`. No checkpoint
   or config key changes.
 
@@ -384,7 +383,6 @@ client.streamComplete(conversation, options, chunk => chunk.finishReason.foreach
 client.complete(conversation, options).map { c =>
   c.finishReason match {
     case FinishReason.Length        => warn()            // content is cut short
-    case FinishReason.ContentFilter => refuse()
     case FinishReason.Stop | FinishReason.ToolCalls | FinishReason.Other(_) => ()
   }
 }
@@ -404,12 +402,13 @@ A custom `OpenAICompatibleDialect` that overrides `parseToolCalls` returns `Resu
 
 Code that relied on a cut stream or a cut tool call coming back as `Right` gets a `Left`. For a stream it is a
 retryable `NetworkError`; for a tool call it is a `ProcessingError`. Raising `maxTokens` is the usual fix for the
-second.
+second. Code that read the partial content of a filtered OpenAI, Anthropic or Bedrock reply matches
+`Left(ContentFilteredError)` instead; the text a stream already delivered stays delivered.
 
 The CHANGELOG gets **Added** (`FinishReason`, `Completion.finishReason`), **Changed** (`StreamedChunk.finishReason`,
-the tool-argument rule, stream endings per client) and **Fixed** (`ReliableClient` re-delivery, Gemini `parts`)
-entries, and lines under `### Breaking changes` for `StreamedChunk.finishReason`, `StreamingToolArgumentParser.parse`
-and the dialect methods. `docs/reference/migration.md` gets one section. `docs/guide/writing-a-provider.md` states
+the tool-argument rule, stream endings per client, content filtering on the other providers) entries, and lines under
+`### Breaking changes` for `StreamedChunk.finishReason`, `StreamingToolArgumentParser.parse`, the dialect methods and
+content filtering. `ContentFilteredError`'s Scaladoc, written for Gemini today, becomes provider-neutral. `docs/reference/migration.md` gets one section. `docs/guide/writing-a-provider.md` states
 the contract and the conformance check.
 
 ## Delivery
@@ -418,7 +417,9 @@ Already done or in progress, no RFC needed:
 
 - **#2550 (merged, a2edf440b).** The OpenAI-compatible client fails a stream with no `finish_reason` or `[DONE]`, or
   with an error event.
-- **`ReliableClient` re-delivery (#2562, open).** No retry after the first chunk.
+- **`ReliableClient` re-delivery (#2562, merged).** No retry after the first chunk.
+- **Gemini and Vertex AI (#2563, #2664, merged).** A candidate with no `parts` is an empty answer, and a content-filter
+  finish or a blocked prompt a `ContentFilteredError`, on both paths.
 
 Under this RFC, each PR with its own review:
 
@@ -429,8 +430,10 @@ Under this RFC, each PR with its own review:
    (Anthropic, Gemini and Vertex AI, Ollama, Bedrock, `ScriptedLLMClient`, `FakeLlmClients`), so PR 1 changes them all, but the
    clients PR 2 maps write `Other(raw)` (or `Other("")` with no raw value) on both paths until then. No release between
    PR 1 and PR 2 reports a `Stop` the provider didn't send.
-2. **PR 2 (Part 1, the rest).** Anthropic (`stop_reason`, `message_delta`), Gemini and Vertex AI (the `parts` fix,
-   `MAX_TOKENS`), Ollama (`done_reason`), Bedrock. Each adds its fixtures to the suite.
+2. **PR 2 (Part 1, the rest).** Anthropic (`stop_reason`, `message_delta`), Gemini and Vertex AI (`MAX_TOKENS`),
+   Ollama (`done_reason`), Bedrock. OpenAI's and the compatible clients' `content_filter`, Anthropic's `refusal` and
+   Bedrock's guardrail reasons become `ContentFilteredError`; #2664 left them a finished `Completion`. Each adds its
+   fixtures to the suite, and PR 2 adds the `ContentFiltered` case.
 3. **PR 3 (Part 3).** The tool-argument rules, in the accumulator, the dialect and `OpenAIClient`. The spec change
    above, agreed first. Adds `NoArgumentToolCall`, `ToolCallCutByLimit` and `MalformedArguments` to the suite.
 4. **PR 4 (Part 2).** End markers and error events for Anthropic, OpenAI, Gemini, Vertex AI and Ollama. Adds
@@ -465,6 +468,7 @@ This RFC's own PR also adds its row to `docs/rfcs/README.md`.
    `Left` under rule 2, or a tolerated keep-alive? There is no evidence either way yet.
 6. **Agent behaviour on `Length`.** Should an agent run whose last answer was cut end `Completed`, or should
    `AgentStatus` say so? This touches the agent runtime's owners and could be its own RFC.
-7. **`ContentFilter` as `Right`.** The draft returns it as a `Right` with whatever content arrived. A `Left` is also
-   defensible: the caller asked for an answer and got none. Maintainers decide.
+7. **Content filter: decided.** #2664 made it a `Left(ContentFilteredError)` for Gemini and Vertex AI, whether or not
+   text came first, and neutral for `ReliableClient`'s breaker. This RFC takes that rule for every provider, so
+   `FinishReason` has no `ContentFilter` case.
 8. **A Scalafix rule** in `modules/scalafix-rules` for the silent `contains("stop")` case, or the migration note only?
