@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
   now cancels it on the runner too; it used to keep running, with any daemon it started [#2656](https://github.com/llm4s/llm4s/pull/2656).
 
+### Tools
+
+- **Fixed** the Windows workspace command policy no longer reads the `C:` in a `findstr /IC:text` switch as a drive
+  path; a real drive path in a `/IG:` value is still confined [#1738](https://github.com/llm4s/llm4s/issues/1738), [#2625](https://github.com/llm4s/llm4s/pull/2625).
+
 ### Build & tooling
 
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
