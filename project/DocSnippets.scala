@@ -50,6 +50,7 @@ object DocSnippets {
     "guide/kafka.md",
     "guide/prompts.md",
     "guide/providers.md",
+    "guide/rag-evaluation.md",
     "guide/reference-architecture.md",
     "guide/replacing-a-python-sidecar.md",
     "guide/tapir-tools.md",
