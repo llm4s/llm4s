@@ -21,8 +21,6 @@ import java.time.Instant
 
 object StarterContractSpec {
 
-  val closes = new AtomicInteger(0)
-
   def client(onClose: () => Unit = () => ()): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
       Right(Completion("id", Instant.EPOCH, "mock", "m", AssistantMessage("mock")))
@@ -33,15 +31,24 @@ object StarterContractSpec {
     override def close(): Unit               = onClose()
   }
 
+  /** Closes of [[CloseCountingBeans]]' client only: SpringProvidersSpec also uses [[UserBeans]], and may run alongside. */
+  val lifecycleCloses = new AtomicInteger(0)
+
+  /** One client bean whose close only the lifecycle test counts. */
+  @Configuration
+  class CloseCountingBeans {
+    @Bean def countedClient(): JLlmClient = JLlmClientTestFactory.create(client { () =>
+      lifecycleCloses.incrementAndGet(); ()
+    })
+  }
+
   /**
    * Deliberately NOT named llm4sClient/llm4sTemplate/llmHealthIndicator, so only
    * @ConditionalOnMissingBean (not bean-name overriding) can make the auto-configured beans back off.
    */
   @Configuration
   class UserBeans {
-    @Bean def myOwnClient(): JLlmClient = JLlmClientTestFactory.create(client { () =>
-      closes.incrementAndGet(); ()
-    })
+    @Bean def myOwnClient(): JLlmClient                   = JLlmClientTestFactory.create(client())
     @Bean def myOwnTemplate(c: JLlmClient): LLM4STemplate = StarterTestSupport.template(c)
     @Bean def myOwnIndicator(c: JLlmClient): LlmIndicator = StarterTestSupport.indicator(c)
   }
@@ -314,9 +321,11 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
   // ---- lifecycle --------------------------------------------------------------------------
 
   "context shutdown" should "close the JLlmClient bean exactly once" in {
-    closes.set(0)
-    runner.withUserConfiguration(classOf[UserBeans]).run(ctx => ctx.getBean(classOf[JLlmClient]) should not be null)
-    closes.get shouldBe 1
+    lifecycleCloses.set(0)
+    runner
+      .withUserConfiguration(classOf[CloseCountingBeans])
+      .run(ctx => ctx.getBean(classOf[JLlmClient]) should not be null)
+    lifecycleCloses.get shouldBe 1
   }
 
   it should "have a destroy method for the auto-configured client bean (Spring infers close())" in {
