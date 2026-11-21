@@ -10,8 +10,9 @@
 #
 #   - every test source that reads docs/ is a tagged suite, or a helper that only tagged suites use. A source reads docs/
 #     when a code line (not a comment) has a string literal naming a path under docs/ that exists in this repository
-#     (`"docs/guide/x.md"`, `s"docs/tutorials/$page"`, `"docs/_data"`); a test's own fixture paths (`"docs/a.txt"`) do
-#     not exist, so they do not count. A source that declares no suite (`class <Name>Spec|Suite`) is a helper, and
+#     (`"docs/guide/x.md"`, `s"docs/tutorials/$page"`, `"docs/_data"`), or builds one in steps
+#     (`root.resolve("docs").resolve("guide")`, `/ "docs" / "guide"`); a test's own fixture paths (`"docs/a.txt"`,
+#     a `"docs"` directory it creates) do not exist under docs/, so they do not count. A source that declares no suite (`class <Name>Spec|Suite`) is a helper, and
 #     every source in the same module that names one of its top-level types or members reads docs/ in turn;
 #   - every module with a tagged suite is one `sbt testDocs` runs, and every module it runs has one.
 #
@@ -45,6 +46,8 @@ TAG = 'org.llm4s.tags.DocsSpec'
 ALIAS = 'testDocs'
 COMMENT = %r{\A\s*(//|/?\*)}
 LITERAL = /(?:\bs)?"docs\/([^"\/$]+)/ # the first path segment under docs/
+# The same path built in steps: `.resolve("docs").resolve("guide")`, `/ "docs" / "guide"`, `Paths.get("docs", "guide")`
+CHAINED = /"docs"\s*\)?\s*(?:\.resolve\(\s*|\/\s*|,\s*)s?"([^"\/$]+)/
 TAGGED = /@(?:org\.llm4s\.tags\.)?DocsSpec\b/
 SUITE = /^\s*(?:@[\w.]+(?:\([^)]*\))?\s+)*(?:final\s+)?class\s+(\w+(?:Spec|Suite))\b/
 
@@ -55,7 +58,9 @@ owner = lambda do |f|
 end
 code_lines = ->(text) { text.each_line.reject { |l| l.match?(COMMENT) } }
 reads_docs = lambda do |text|
-  code_lines.(text).any? { |l| l.scan(LITERAL).flatten.any? { |seg| File.exist?(File.join(root, 'docs', seg)) } }
+  code_lines.(text).any? do |l|
+    (l.scan(LITERAL) + l.scan(CHAINED)).flatten.any? { |seg| File.exist?(File.join(root, 'docs', seg)) }
+  end
 end
 
 sources = {} # file => text, test sources of the build's projects

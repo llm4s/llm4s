@@ -74,6 +74,16 @@ printf '@org.llm4s.tags.DocsSpec\nclass RagGuideSpec { val t = read("docs/guide/
   > "$WORK/repo/modules/rag/src/test/scala/c/RagGuideSpec.scala"
 expect_fail "a tagged suite in a module the alias skips fails" "RagGuideSpec.scala is tagged DocsSpec, but .* does not run rag"
 
+fixture "$GOOD"
+printf 'class ChainedSpec { val t = read(root.resolve("docs").resolve("guide").resolve("a.md")) }\n' \
+  > "$WORK/repo/modules/core/src/test/scala/a/ChainedSpec.scala"
+expect_fail "a suite that builds a docs/ path with chained resolve calls must be tagged" "ChainedSpec.scala reads docs/ but is not tagged"
+
+fixture "$GOOD"
+printf 'class SandboxSpec { val d = root.resolve("docs"); val r = Seq("src", "docs") }\n' \
+  > "$WORK/repo/modules/rag/src/test/scala/c/SandboxSpec.scala"
+expect_pass "a directory of its own named docs does not count"
+
 fixture "$GOOD;rag/testOnly -- -n $TAG"
 expect_fail "an alias module with no tagged suite fails" "runs rag, which has no suite tagged DocsSpec"
 

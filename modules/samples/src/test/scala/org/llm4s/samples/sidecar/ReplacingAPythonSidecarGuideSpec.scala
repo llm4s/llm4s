@@ -20,6 +20,7 @@ import java.nio.file.{ Files, Path, Paths }
  * client without sending a request. The page's Python listing must be the committed `sentiment_tool.py`, so the
  * script the sample and `PythonToolBridgeExampleSpec` run is the one readers copy.
  */
+@org.llm4s.tags.DocsSpec
 class ReplacingAPythonSidecarGuideSpec extends AnyFlatSpec with Matchers {
 
   private val root: Path =
