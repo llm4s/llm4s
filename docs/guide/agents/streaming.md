@@ -64,10 +64,31 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
+
+`adjustments` is the call's `Completion.adjustments` ([RFC 0008](../../rfcs/0008-generation-controls)): each
+requested option the provider or model did not send as asked. An agent run returns no `Completion`, so this is
+where an agent caller finds them, one call at a time. An empty list means nothing was reported, not that every
+option was sent: some omissions are not reported yet. Like every durable event, a call's `ModelCallCompleted` is
+stored only when its task commits, so the adjustments of a task that fails are not seen.
+
+```scala
+import org.llm4s.llmconnect.model.RequestAdjustment
+
+agent
+  .stream(ThreadId("t1"), "Summarise the report") {
+    case AgentEvents.ModelCallCompleted(m) =>
+      m.adjustments.foreach {
+        case RequestAdjustment.Dropped(option, reason) => println(s"${m.model} did not send $option: $reason")
+        case _                                         => ()
+      }
+    case _ => ()
+  }
+  .flatMap(_.await())
+```
 
 **Live** events are for watching. They carry content, have no `seq`, and are never stored or replayed.
 
@@ -341,8 +362,8 @@ turn had already ended; an interrupt of the thread calling `cancel()` does not c
 and is kept. A listener that throws from `onEvent` - or sets its own thread's interrupt flag -
 cancels the turn, and `onError` receives what it threw, or a `CancelledError`. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
 that calls the model's `complete`, so its stream carries no text deltas; pass `streaming = true`
-for them. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for middleware, a
-system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
+for them, or `streaming(true)` to `Llm4s.agentBuilder`, which also sets a system prompt, guardrails and a context
+window. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for other middleware or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
 `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`. The Java sample in
 `modules/samples/gradle-java` streams a turn's text.
 
@@ -354,7 +375,8 @@ run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails i
 `LLMException`, as in fs2 and ZIO. So does a delivery that dies of a fatal error (an
 `OutOfMemoryError`, a `LinkageError`): the Java listener then hears no terminal callback, and the flow -
 or `run`, `continueConversation`, `resume` or `recover` - ends with the facade's report of it instead of
-suspending.
+suspending. An agent from the [`agent { ... }` block](../java#an-agent-block) streams text deltas when the block
+calls `streaming()`.
 
 ```kotlin
 val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)

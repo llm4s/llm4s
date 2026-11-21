@@ -427,4 +427,16 @@ class EffectKeySpec extends AnyFlatSpec with Matchers with EitherValues {
     commit.releasesEffect(TaskId("5.0"), "any") shouldBe false
     commit.releasesEffect(TaskId("updateState"), "") shouldBe true
   }
+
+  "KeyDigest" should "keep the digests it has always produced, byte for byte (#2633)" in {
+    // pinned from the String.format encoder these replaced: a recorded key must still match after an upgrade
+    KeyDigest.of(Seq.empty) shouldBe "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    KeyDigest.of(Seq("x", "é𝄞")) shouldBe "6848b7b0862ca6afca91a8dcd0bf6e511d22c171691a67c91d9fd4f68702f599"
+    KeyDigest.of(Seq("tool", "c1", """{"q":1}""")) shouldBe
+      "2eee8bbb42b9e613b018f6f264e425ad1b67800f0037c57dd0fc474b263e355c"
+    // an unpaired surrogate: 0xFF, then the UTF-16 code units
+    KeyDigest.of(Seq("a\uD800")) shouldBe "151be10609c9ad6bb9161fa033fdb244d799311e172a7534ebad78815e09d4a3"
+    KeyDigest.hex(Array[Byte](0, 1, 0x0f, 0x10, 0x7f, -128, -1)) shouldBe "00010f107f80ff"
+    KeyDigest.hex(Array.emptyByteArray) shouldBe ""
+  }
 }

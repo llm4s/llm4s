@@ -73,7 +73,7 @@ final class OpenAIConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers with 
   // ---- the value reaches the call ----
 
   private def openAIConfig(baseUrl: String, timeouts: ProviderTimeouts): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).value.withTimeouts(timeouts)
+    OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).value.withTimeouts(timeouts)
 
   "A configured request timeout" should "end a completion from a server that never answers" in {
     LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>

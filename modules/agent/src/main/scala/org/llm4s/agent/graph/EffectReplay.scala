@@ -35,14 +35,37 @@ private[graph] object KeyDigest:
    * equal objects built in another order would otherwise digest apart.
    */
   def canonical(json: ujson.Value): String =
-    def sorted(value: ujson.Value): ujson.Value = value match
-      case null               => ujson.Null // a Java caller's null hashes as JSON null
-      case ujson.Obj(members) => ujson.Obj.from(members.toSeq.sortBy(_._1).map((k, v) => k -> sorted(v)))
-      case ujson.Arr(items)   => ujson.Arr.from(items.map(sorted))
-      case other              => other
-    ujson.write(sorted(json), escapeUnicode = true)
+    val out = new java.io.StringWriter()
+    sortedInto(json, ujson.Renderer(out, indent = -1, escapeUnicode = true))
+    out.toString
+
+  /**
+   * `value` into `to`, each object's members in key order: what `ujson.write` renders of a copy sorted first, as
+   * `ujson.Value.transform` walks it, but with no copy of the tree (#2642). A tool loop digests the conversation every
+   * step, and the copy was its largest allocation.
+   */
+  private def sortedInto[T](value: ujson.Value, to: upickle.core.Visitor[?, T]): T = value match
+    case null => to.visitNull(-1) // a Java caller's null hashes as JSON null
+    case ujson.Obj(members) =>
+      val obj = to.visitObject(members.size, jsonableKeys = true, -1).narrow
+      // by pair, not by key: a Java caller's null member is not found by key
+      members.toArray.sortBy(_._1).foreach { (key, member) =>
+        obj.visitKeyValue(obj.visitKey(-1).visitString(key, -1))
+        obj.visitValue(sortedInto(member, obj.subVisitor), -1)
+      }
+      obj.visitEnd(-1)
+    case ujson.Arr(items) =>
+      val arr = to.visitArray(items.length, -1).narrow
+      items.foreach(item => arr.visitValue(sortedInto(item, arr.subVisitor), -1))
+      arr.visitEnd(-1)
+    case scalar => scalar.transform(to)
 
   def encoded(text: String): Array[Byte] =
+    // text with no surrogate cannot hold an unpaired one, and `getBytes` gives the same UTF-8 without a new encoder
+    if !text.exists(Character.isSurrogate) then text.getBytes(StandardCharsets.UTF_8)
+    else strictlyEncoded(text)
+
+  private def strictlyEncoded(text: String): Array[Byte] =
     val encoder = StandardCharsets.UTF_8
       .newEncoder()
       .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
@@ -55,7 +78,10 @@ private[graph] object KeyDigest:
       // each UTF-16 code unit as is: a charset would replace an unpaired surrogate too
       case None => Array(0xff.toByte) ++ text.toArray.flatMap(c => Array((c >> 8).toByte, c.toByte))
 
-  def hex(bytes: Array[Byte]): String = bytes.map(b => f"${b & 0xff}%02x").mkString
+  // lower case, like the per-byte `%02x` it replaced, without a String.format per byte (#2633)
+  private val lowerHex = java.util.HexFormat.of()
+
+  def hex(bytes: Array[Byte]): String = lowerHex.formatHex(bytes)
 
 /**
  * One external effect, the identity its replay evidence is kept under (design §4.24): the SHA-256 of

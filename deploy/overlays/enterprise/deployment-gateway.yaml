@@ -1,0 +1,35 @@
+# The service calls the default provider section of application.conf (the gateway), with its gateway key read from a
+# file that rotates in place.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm4s-deploy-service
+spec:
+  template:
+    spec:
+      securityContext:
+        # A Secret volume's files belong to root; the pod's group, given to them here, lets the non-root user read the
+        # key. llm4s logs once that the file is group-readable: the group is this pod's own.
+        fsGroup: 1001
+      containers:
+        - name: service
+          env:
+            - name: LLM4S_SERVICE_MODEL
+              value: provider
+            - name: JAVA_OPTS
+              value: "-Dconfig.file=/etc/llm4s/application.conf"
+          volumeMounts:
+            - name: llm4s-config
+              mountPath: /etc/llm4s
+              readOnly: true
+            - name: gateway-key
+              mountPath: /var/run/secrets/llm4s
+              readOnly: true
+      volumes:
+        - name: llm4s-config
+          configMap:
+            name: llm4s-app-config
+        - name: gateway-key
+          secret:
+            secretName: llm4s-gateway-key
+            defaultMode: 288 # 0440 in octal, written in decimal so that no YAML parser reads it as 440

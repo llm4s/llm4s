@@ -399,7 +399,11 @@ in the request body you record; send them in headers.
 
 `org.llm4s.http.Llm4sHttpClient` is the JDK-backed HTTP client (`Llm4sHttpClient.create()`), with
 `get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
-as a constructor parameter so tests can inject a stub.
+as a constructor parameter so tests can inject a stub. When `LlmClientOptions.httpClient` is set, send your requests
+through that client and do not close it - the caller owns it; otherwise build your own and close it in
+`releaseResources`. A provider that does so opts in by overriding `features` with
+`ProviderFeatures.default.withCustomHttpClient(true)` and runs `assertUsesSuppliedHttpClient` in its module spec;
+`customHttpClient` defaults to `false`, which a client built on a vendor SDK keeps.
 
 ```scala
 def post(
@@ -481,6 +485,10 @@ A config that does not override `withApiKeyProvider` keeps returning `this`: its
 held when the section was loaded, and a rotated key only after a reload. A provider whose spec does not require
 an API key refuses `apiKeyFile`. Prove support with `assertHonoursApiKeyProvider`.
 
+An embedding provider gets the same from its block's `apiKeyFile` (or the vendor's shared one) through
+`EmbeddingProviderConfig.apiKeyProvider`: read the key per request with `cfg.currentApiKey()`, which falls back
+to `cfg.apiKey`, rather than `cfg.apiKey` itself. Prove it with `assertEmbeddingHonoursApiKeyProvider`.
+
 ### `HttpErrorMapper`
 
 ```scala
@@ -534,8 +542,32 @@ RequestTransformer.adjusted(service) { (modelId, caps) =>
 ```
 
 `TransformationResult.transform(modelId, options, messages, transformer, dropUnsupported)` runs
-the option and message transforms in one call and returns the transformed `options`, `messages`
-and `requiresFakeStreaming`.
+the option and message transforms in one call and returns the transformed `options`, `messages`,
+`requiresFakeStreaming` and `adjustments`.
+
+**Reporting adjustments** ([RFC 0008](../rfcs/0008-generation-controls)). A caller learns which
+requested options were not sent as asked from `Completion.adjustments`, a list of
+`RequestAdjustment` (`Dropped`, `Adjusted`, `NotNeeded`, each naming a `RequestOption`). Your client:
+
+- calls `transform` with `dropUnsupported = true` (the default), and puts `t.adjustments` on every
+  `Completion` it returns, streamed or not: `completion.withAdjustments(t.adjustments)`;
+- adds a `Dropped` for an option its own request mapping cannot send, rather than ignoring it.
+
+An `OpenAICompatibleDialect` does the second through `addReasoning`, which returns what it could not
+send: the standard one reports a set `reasoning` or `thinking` as `Dropped`, and an override that sends them returns
+`List.empty`, or an `Adjusted` for a level it sent as another. `OpenAICompatibleClient` puts the list on the
+`Completion`. `org.llm4s.model.EffortMapping` (`private[llm4s]`) holds the shared pieces llm4s's own clients use: the
+nearest level a model accepts, and the reports for a changed level and for a level `thinking = Off` overrode.
+
+A `RequestTransformer` of your own reports nothing yet. The hook that turns the transformer's drops into
+adjustments, `adjustOptions`, is `private[llm4s]`, so only llm4s's own transformers fill
+`t.adjustments`; with yours the list is empty, and a `Left` from your `transformOptions` still fails the
+request. Report what your request mapping drops as above.
+
+An agent stores each call's adjustments in its durable `ModelCallCompleted` event, so a `reason`,
+`requested` or `sent` string names an option, a model or a value, never request or response content.
+
+The transform never logs. llm4s's own clients log each adjustment at WARN once per model and option.
 
 ### `EmbeddingProvider`
 
@@ -616,7 +648,9 @@ final class AcmeClient(
     completeWithMetrics {
       TransformationResult
         .transform(config.model, options, conversation.messages, transformer)
-        .flatMap(t => send(AcmeWire.encode(config.model, t.messages, t.options)))
+        .flatMap(t =>
+          send(AcmeWire.encode(config.model, t.messages, t.options)).map(_.withAdjustments(t.adjustments))
+        )
     }
 
   def streamComplete(
@@ -714,7 +748,7 @@ It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertContentParts` (each `ContentPartCase` your client declares reaches a local server with its payload; every other fails with `UnsupportedContentPartError` and sends nothing), `assertHonoursApiKeyProvider` (two requests with the key rotated between them carry the old key and then the new), `assertEmbeddingHonoursApiKeyProvider` (the same for `embed`), `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`, `assertUsesSuppliedHttpClient` (a client built with `LlmClientOptions.withHttpClient` sends `complete` and `streamComplete` through it, and does not close it). Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
 | `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |
@@ -860,10 +894,12 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
       `apiKeyEnv` names the same variable
 - [ ] defaults (base URL, model) on the spec, not in `reference.conf`
 - [ ] provider-specific keys declared as `ProviderConfigKey` extras
-- [ ] `ProviderFeatures` honest about streaming and tool calling
+- [ ] `ProviderFeatures` honest about streaming, tool calling and `customHttpClient` (opt in only when `LlmClientOptions.httpClient` is honoured)
 - [ ] client built on `BaseLifecycleLLMClient`, errors via `HttpErrorMapper`, cost via
       `CostEstimator`, exchanges via `ProviderExchangeRecorder`
 - [ ] no exceptions escape, no environment reads
+- [ ] `t.adjustments` on every `Completion`, streamed or not, plus a `Dropped` for each option the
+      request mapping cannot send ([reporting adjustments](#requesttransformer-and-transformationresult))
 - [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
       explicit registration, the config-to-client round trip and the credential binding
 - [ ] a chat provider that takes tools runs `assertOneToolResultPerCall`

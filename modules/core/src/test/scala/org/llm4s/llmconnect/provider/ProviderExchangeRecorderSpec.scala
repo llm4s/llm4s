@@ -153,6 +153,28 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     ids.foreach(id => UUID.fromString(id).toString shouldBe id)
   }
 
+  it should "use the injected clock and id generator instead of the real ones when given" in {
+    val sink      = new CollectingSink
+    val fixedTime = Instant.parse("2024-01-01T00:00:00Z")
+    val fixedId   = "fixed-exchange-id"
+
+    ProviderExchangeRecorder.record(
+      ProviderExchangeLogging.enabled(sink),
+      "openai",
+      Some("gpt-4o"),
+      fixedTime.minusSeconds(1),
+      "req",
+      None,
+      success,
+      clock = () => fixedTime,
+      idGenerator = () => fixedId
+    )
+
+    val exchange = onlyExchange(sink)
+    exchange.completedAt shouldBe fixedTime
+    exchange.exchangeId shouldBe fixedId
+  }
+
   // ---- outcome
 
   it should "record a Right result as a Success with no error message, whatever the payload" in {

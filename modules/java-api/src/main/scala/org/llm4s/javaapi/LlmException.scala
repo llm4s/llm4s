@@ -85,6 +85,7 @@ private[javaapi] object LlmErrorKinds {
     classOf[ValidationError]             -> LlmErrorKind.VALIDATION,
     classOf[InvalidInputError]           -> LlmErrorKind.VALIDATION,
     classOf[UnsupportedContentPartError] -> LlmErrorKind.VALIDATION,
+    classOf[ContentFilteredError]        -> LlmErrorKind.VALIDATION,
     classOf[ConfigurationError]          -> LlmErrorKind.CONFIGURATION,
     classOf[CancelledError]              -> LlmErrorKind.CANCELLED,
     classOf[ContextError]                -> LlmErrorKind.OTHER,

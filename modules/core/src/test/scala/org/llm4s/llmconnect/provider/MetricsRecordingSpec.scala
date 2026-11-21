@@ -90,6 +90,24 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     tokenCall._4 shouldBe 50  // output tokens
   }
 
+  it should "count thinking tokens as output tokens, since completionTokens leaves them out" in {
+    val mockMetrics = new MockMetricsCollector()
+    val client      = new TestMetricsClient(mockMetrics)
+
+    // an OpenAI reasoning reply after its client's conversion: 64 output tokens, 46 of them reasoning
+    val usage = TokenUsage(promptTokens = 81, completionTokens = 18, totalTokens = 145, thinkingTokens = Some(46))
+    client.testWithMetrics(
+      provider = "openai",
+      model = "o3",
+      f = Right(usage),
+      extractUsage = (u: TokenUsage) => Some(u),
+      extractCost = (_: TokenUsage) => None
+    )
+
+    mockMetrics.tokenCalls.head._3 shouldBe 81
+    mockMetrics.tokenCalls.head._4 shouldBe 64
+  }
+
   it should "record cost when extractCost function is provided" in {
     val mockMetrics = new MockMetricsCollector()
     val client      = new TestMetricsClient(mockMetrics)

@@ -16,9 +16,12 @@ repositories {
 }
 
 dependencies {
-    // The POM brings llm4s-core, llm4s-agent and the provider modules, and the Scala 3 library at the
-    // version they were built with: nothing here pins any of them.
+    // The POM brings llm4s-core, llm4s-agent and the Scala 3 library at the version they were built with: nothing
+    // here pins any of them.
     implementation("org.llm4s:llm4s-java-api_3:$llm4sVersion")
+    // The provider module the sample calls (application.conf's openai-main section and its openai/ embeddings).
+    // llm4s-java-api brings no provider (#1496): declare the ones you use, llm4s-ollama, llm4s-anthropic, ...
+    implementation("org.llm4s:llm4s-openai_3:$llm4sVersion")
 
     // llm4s logs through SLF4J and ships no logging backend; without one SLF4J prints a warning and drops the logs.
     runtimeOnly("ch.qos.logback:logback-classic:1.5.34")

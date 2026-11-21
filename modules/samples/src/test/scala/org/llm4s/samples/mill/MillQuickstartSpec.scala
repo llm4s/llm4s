@@ -16,6 +16,7 @@ import java.nio.file.{ Files, Path, Paths }
  * it and runs its test against the published release. What this spec checks, on every build, is that the page shows
  * the committed files, and that the committed `application.conf` selects the sections the page says it does.
  */
+@org.llm4s.tags.DocsSpec
 class MillQuickstartSpec extends AnyFlatSpec with Matchers {
 
   private val root: Path =

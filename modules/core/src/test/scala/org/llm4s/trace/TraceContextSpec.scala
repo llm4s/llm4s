@@ -59,6 +59,10 @@ class TraceContextSpec extends AnyFlatSpec with Matchers with EitherValues:
     TraceContext.rootFor("run-1") shouldBe TraceContext.rootFor("run-1")
     TraceContext.rootFor("run-1").traceId should not be TraceContext.rootFor("run-2").traceId
     TraceContext.parse(TraceContext.rootFor("run-1").traceParent).isRight shouldBe true
+    // pinned from the String.format encoder the digest used before #2633: derived ids never move across an upgrade
+    TraceContext.rootFor("run-1").traceId shouldBe "503a5152f54a37fc9996c1c20f7cbd18"
+    TraceContext.rootFor("run-1").spanId shouldBe "1dd2f34725c5d86b"
+    TraceContext.rootFor("run-1").spanFor("step-1").spanId shouldBe "f684b188216efabe"
     val r = TraceContext.random()
     TraceContext.parse(r.traceParent).value shouldBe r
     r should not be TraceContext.random()

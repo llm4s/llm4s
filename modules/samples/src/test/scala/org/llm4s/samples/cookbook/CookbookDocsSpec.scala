@@ -17,6 +17,7 @@ import scala.jdk.CollectionConverters._
  * examples index. The checks fail when a page is missing, out of order or lacks a section, when a page's program is not
  * what the source file says, when a recipe file is not registered in [[Cookbook]], or when a recipe fails.
  */
+@org.llm4s.tags.DocsSpec
 class CookbookDocsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val indexPage = "docs/examples/cookbook.md"

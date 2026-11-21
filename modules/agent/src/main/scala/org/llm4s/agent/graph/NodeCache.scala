@@ -8,11 +8,7 @@ import scala.jdk.CollectionConverters.*
 /** The hex SHA-256 of a string's UTF-8 bytes. */
 private[graph] object Sha256:
   def hex(text: String): String =
-    MessageDigest
-      .getInstance("SHA-256")
-      .digest(text.getBytes(StandardCharsets.UTF_8))
-      .map(b => f"$b%02x")
-      .mkString
+    org.llm4s.util.Hex.of(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)))
 
 /**
  * One node's cache of results by input, bounded and least-recently-used. `ticker` is a monotonic

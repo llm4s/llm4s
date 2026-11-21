@@ -28,6 +28,25 @@ class HealthProperties {
   @BeanProperty var probeTimeout: Duration = Duration.ofSeconds(10)
 }
 
+/** The auto-configured agent (`llm4s.agent.*`, #2279). */
+class AgentProperties {
+
+  /** Whether to register the `llm4sAgent` bean; `false` registers none, the tools bean still. */
+  @BeanProperty var enabled: Boolean = true
+
+  /** The agent's id, as its runs and traces name it. */
+  @BeanProperty var id: String = "assistant"
+
+  /** The system prompt, sent first on every model call; none when empty. */
+  @BeanProperty var systemPrompt: String = ""
+
+  /** Whether the agent's model calls stream, so `JAgent.stream` carries the answer's text deltas. */
+  @BeanProperty var streaming: Boolean = false
+
+  /** The most model calls and tool rounds one turn may take before it ends `STEP_LIMIT_REACHED`; at least 1. */
+  @BeanProperty var maxSteps: Int = 50
+}
+
 @ConfigurationProperties(prefix = "llm4s")
 class Llm4sProperties {
 
@@ -50,4 +69,6 @@ class Llm4sProperties {
   @BeanProperty var async: AsyncProperties = new AsyncProperties
 
   @BeanProperty var health: HealthProperties = new HealthProperties
+
+  @BeanProperty var agent: AgentProperties = new AgentProperties
 }

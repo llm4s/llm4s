@@ -3,7 +3,7 @@
 # <meta name="description"> (#2314). jekyll-seo-tag falls back to the site-wide description when a page sets none, so
 # a page without its own description looks like every other page in a search result.
 #
-# Pages checked: docs/index.md and every page under docs/{getting-started,guide,examples,reference,migrations,
+# Pages checked: docs/index.md and every page under docs/{getting-started,guide,examples,reference,migrations,scala-ai,
 # advanced,api,community}. Scaladoc, design records and the other top-level pages are out of scope.
 #
 # Two modes, one rule set:
@@ -48,7 +48,7 @@ import html, os, pathlib, re, sys
 from collections import defaultdict
 
 MODE, SITE, BASELINE = os.environ["MODE"], os.environ["SITE"], os.environ["BASELINE"]
-SECTIONS = ("getting-started", "guide", "examples", "reference", "migrations", "advanced", "api", "community")
+SECTIONS = ("getting-started", "guide", "examples", "reference", "migrations", "scala-ai", "advanced", "api", "community")
 DENY = {"home", "index", "overview"}
 DESC_MIN, DESC_MAX = 50, 170
 SEARCH_TITLE_MAX, TITLE_MAX = 60, 70

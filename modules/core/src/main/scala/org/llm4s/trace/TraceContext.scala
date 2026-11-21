@@ -77,7 +77,7 @@ object TraceContext:
     def ids(length: Int): String =
       val bytes = new Array[Byte](length / 2)
       entropy.nextBytes(bytes)
-      nonZero(bytes.map(b => f"${b & 0xff}%02x").mkString, length)
+      nonZero(lowerHex.formatHex(bytes), length)
     new TraceContext(ids(32), ids(16), sampled = true)
 
   /**
@@ -99,12 +99,11 @@ object TraceContext:
       _ != '0'
     ))
 
+  // lower case, like the per-byte `%02x` it replaced, without a String.format per byte (#2633)
+  private val lowerHex = java.util.HexFormat.of()
+
   private def digest(text: String): String =
-    MessageDigest
-      .getInstance("SHA-256")
-      .digest(text.getBytes(StandardCharsets.UTF_8))
-      .map(b => f"${b & 0xff}%02x")
-      .mkString
+    lowerHex.formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)))
 
   // an all-zero id is invalid; a digest or random draw that produces one (2^-64 at worst) is moved off it
   private def nonZero(id: String, length: Int): String =

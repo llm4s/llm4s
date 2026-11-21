@@ -87,7 +87,9 @@ Measures whether all information needed to answer was retrieved.
 
 ### Overall RAGAS Score
 
-The harmonic mean of all metrics, providing a single quality score. This is what the benchmarking harness uses for ranking.
+The mean of the metrics that could be computed for a sample, providing a single quality score. This is what the benchmarking harness uses for ranking.
+
+A metric is computed only when the sample has the inputs it needs: Context Precision and Context Recall need a `groundTruth`, so a sample without one is scored on Faithfulness and Answer Relevancy alone.
 
 ---
 
@@ -95,17 +97,15 @@ The harmonic mean of all metrics, providing a single quality score. This is what
 
 ### Basic Evaluation
 
+The evaluator needs a chat client (the judge for every metric) and an embedding client (for
+Answer Relevancy). `RAGASFactory.fromConfigs` builds both from the default chat provider and the
+configured embeddings:
+
 ```scala
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.evaluation._
-import org.llm4s.llmconnect.LLMConnect
-
-// Initialize
-val llm = Llm4sConfig
-  .provider()
-  .flatMap(LLMConnect.getClient)
-  .fold(_ => ???, identity)
-val evaluator = new RAGASEvaluator(llm)
+import org.llm4s.types.Result
 
 // Create an evaluation sample
 val sample = EvalSample(
@@ -115,29 +115,50 @@ val sample = EvalSample(
   groundTruth = Some("Scala is a programming language.")
 )
 
-// Evaluate
-val result = evaluator.evaluate(sample)
+// Build the evaluator and evaluate
+val result: Result[EvalResult] = for {
+  registryService <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registryService
+  providerCfg <- Llm4sConfig.defaultProvider()
+  embedding   <- Llm4sConfig.embeddings()
+  evaluator   <- RAGASFactory.fromConfigs(providerCfg, embedding)
+  evalResult  <- evaluator.evaluate(sample)
+} yield evalResult
 
-result.foreach { metrics =>
-  println(s"Faithfulness: ${metrics.faithfulness}")
-  println(s"Answer Relevancy: ${metrics.answerRelevancy}")
-  println(s"Context Precision: ${metrics.contextPrecision}")
-  println(s"Context Recall: ${metrics.contextRecall}")
-  println(s"Overall RAGAS: ${metrics.ragasScore}")
+result.foreach { evalResult =>
+  evalResult.getMetric("faithfulness").foreach(m => println(s"Faithfulness: ${m.score}"))
+  evalResult.getMetric("answer_relevancy").foreach(m => println(s"Answer Relevancy: ${m.score}"))
+  evalResult.getMetric("context_precision").foreach(m => println(s"Context Precision: ${m.score}"))
+  evalResult.getMetric("context_recall").foreach(m => println(s"Context Recall: ${m.score}"))
+  println(s"Overall RAGAS: ${evalResult.ragasScore}")
 }
 ```
+
+`getMetric` returns `None` for a metric that was not computed (see above). To list every computed
+metric, iterate `evalResult.metrics`, whose elements carry `metricName` and `score`.
+
+If you already have the clients, `RAGASFactory.create(llmClient, embeddingClient, embeddingModelConfig)`
+(or `RAGASEvaluator(...)`) builds the evaluator directly, as
+`modules/samples/src/main/scala/org/llm4s/samples/rag/RAGASEvaluationExample.scala` does.
 
 ### Batch Evaluation
 
-```scala
-val samples = Seq(sample1, sample2, sample3)
-val results = evaluator.evaluateBatch(samples)
+`evaluateBatch` returns an `EvalSummary`: the per-sample results, the average of each metric, and
+the average RAGAS score.
 
-results.foreach { allMetrics =>
-  val avgRagas = allMetrics.map(_.ragasScore).sum / allMetrics.size
-  println(s"Average RAGAS Score: $avgRagas")
-}
+```scala
+import org.llm4s.rag.evaluation._
+
+def printSummary(evaluator: RAGASEvaluator, samples: Seq[EvalSample]): Unit =
+  evaluator.evaluateBatch(samples).foreach { summary =>
+    println(s"Samples evaluated: ${summary.sampleCount}")
+    summary.averages.foreach { case (metric, avg) => println(s"  $metric: $avg") }
+    println(s"Average RAGAS Score: ${summary.overallRagasScore}")
+  }
 ```
+
+A sample on which every metric fails is left out of the summary; the batch fails only when every
+sample fails.
 
 ---
 
@@ -265,21 +286,33 @@ Compares embedding quality across providers.
 
 ### Custom Benchmark Suite
 
-```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.rag.benchmark._
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+`BenchmarkRunner` takes a chat client, an embedding client, and `resolveEmbeddingProvider`, which
+returns the embedding configuration for a provider an experiment names (each experiment's
+`embeddingConfig`; the default is OpenAI). It also needs a `ModelRegistryService` in scope.
 
-// Initialize clients
-val llm = Llm4sConfig
-  .provider()
-  .flatMap(LLMConnect.getClient)
-  .fold(_ => ???, identity)
-val embed = Llm4sConfig
-  .embeddings()
-  .flatMap { case (provider, cfg) => EmbeddingClient.from(provider, cfg) }
-  .fold(_ => ???, identity)
-val runner = new BenchmarkRunner(llm, embed)
+```scala
+import org.llm4s.chunking.ChunkerFactory
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.benchmark._
+import org.llm4s.types.Result
+import org.llm4s.vectorstore.FusionStrategy
+
+// Initialize the runner
+val runner: Result[BenchmarkRunner] = for {
+  registryService <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registryService
+  providerCfg <- Llm4sConfig.defaultProvider()
+  llm         <- LLMConnect.getClient(providerCfg)
+  embedding   <- Llm4sConfig.embeddings()
+  (embeddingProvider, embeddingCfg) = embedding
+  embed <- EmbeddingClient.from(embeddingProvider, embeddingCfg)
+  resolveEmbedding = (name: String) =>
+    if (name.equalsIgnoreCase(embeddingProvider)) Right(embeddingCfg)
+    else Left(ConfigurationError(s"No embedding configuration for provider '$name'"))
+} yield BenchmarkRunner(llm, embed, resolveEmbedding)
 
 // Define custom experiments
 val experiments = Seq(
@@ -305,10 +338,10 @@ val suite = BenchmarkSuite(
   datasetPath = "path/to/dataset.jsonl"
 )
 
-// Run and report
-val results = runner.runSuite(suite)
-println(BenchmarkReport.console(results))
-BenchmarkReport.save(results, "data/results/my-comparison.json") // returns Result[Unit]
+// Run and report: runSuite returns a Result, so report on its value
+val results: Result[BenchmarkResults] = runner.flatMap(_.runSuite(suite))
+results.foreach(r => println(BenchmarkReport.console(r)))
+val saved: Result[Unit] = results.flatMap(r => BenchmarkReport.save(r, "data/results/my-comparison.json"))
 ```
 
 ### Custom Dataset Format
@@ -474,12 +507,52 @@ When you update your document corpus, re-run benchmarks to verify quality.
 
 ## API Reference
 
+The signatures below are copied from `modules/rag/src/main/scala/org/llm4s/rag/`; Scaladoc and
+method bodies are omitted.
+
 ### RAGASEvaluator
 
 ```scala
-class RAGASEvaluator(llmClient: LLMClient) {
-  def evaluate(sample: EvalSample): Result[RAGASMetrics]
-  def evaluateBatch(samples: Seq[EvalSample]): Result[Seq[RAGASMetrics]]
+class RAGASEvaluator(
+  llmClient: LLMClient,
+  embeddingClient: EmbeddingClient,
+  embeddingModelConfig: EmbeddingModelConfig,
+  metrics: Seq[RAGASMetric] = Seq.empty, // empty: faithfulness, answer relevancy, context precision and recall
+  options: EvaluatorOptions = EvaluatorOptions(),
+  private val tracer: Option[Tracing] = None
+) {
+  def getActiveMetrics: Seq[RAGASMetric]
+  def evaluate(sample: EvalSample): Result[EvalResult]
+  def evaluateBatch(samples: Seq[EvalSample]): Result[EvalSummary]
+  def evaluateDataset(dataset: TestDataset): Result[EvalSummary]
+  def evaluateMetric(sample: EvalSample, metricName: String): Result[MetricResult]
+  def withMetrics(metricNames: Set[String]): RAGASEvaluator
+  def withOptions(newOptions: EvaluatorOptions): RAGASEvaluator
+  def withTracing(newTracer: Tracing): RAGASEvaluator
+}
+```
+
+### RAGASFactory
+
+```scala
+object RAGASFactory {
+  def fromConfigs(
+    providerCfg: ProviderConfig,
+    embedding: (String, EmbeddingProviderConfig)
+  )(using ModelRegistryService, ProviderRegistry): Result[RAGASEvaluator]
+
+  def create(
+    llmClient: LLMClient,
+    embeddingClient: EmbeddingClient,
+    embeddingModelConfig: EmbeddingModelConfig
+  ): RAGASEvaluator
+
+  def withMetrics(
+    llmClient: LLMClient,
+    embeddingClient: EmbeddingClient,
+    embeddingModelConfig: EmbeddingModelConfig,
+    metricNames: Set[String] // faithfulness, answer_relevancy, context_precision, context_recall
+  ): RAGASEvaluator
 }
 ```
 
@@ -490,29 +563,78 @@ final case class EvalSample(
   question: String,
   answer: String,
   contexts: Seq[String],
-  groundTruth: Option[String] = None
+  groundTruth: Option[String] = None,
+  metadata: Map[String, String] = Map.empty
 )
 ```
 
-### RAGASMetrics
+### EvalResult, MetricResult and EvalSummary
 
 ```scala
-final case class RAGASMetrics(
-  faithfulness: Option[Double],
-  answerRelevancy: Option[Double],
-  contextPrecision: Option[Double],
-  contextRecall: Option[Double]
+final case class EvalResult(
+  sample: EvalSample,
+  metrics: Seq[MetricResult],
+  ragasScore: Double, // mean of the computed metrics
+  evaluatedAt: Long = System.currentTimeMillis()
 ) {
-  def ragasScore: Double  // Harmonic mean of available metrics
+  def getMetric(name: String): Option[MetricResult]
 }
+
+final case class MetricResult(
+  metricName: String,
+  score: Double,
+  details: Map[String, Any] = Map.empty
+)
+
+final case class EvalSummary(
+  results: Seq[EvalResult],
+  averages: Map[String, Double], // metric name -> average score
+  overallRagasScore: Double,
+  sampleCount: Int
+)
 ```
 
 ### BenchmarkRunner
 
 ```scala
-class BenchmarkRunner(llmClient: LLMClient, embeddingClient: EmbeddingClient) {
-  def runSuite(suite: BenchmarkSuite): BenchmarkResults
-  def runExperiment(config: RAGExperimentConfig, dataset: Dataset): ExperimentResult
+class BenchmarkRunner(
+  llmClient: LLMClient,
+  embeddingClient: EmbeddingClient,
+  resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
+  datasetManager: DatasetManager = DatasetManager(),
+  val options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
+)(using ModelRegistryService) {
+  def runSuite(suite: BenchmarkSuite): Result[BenchmarkResults]
+  def runExperiment(config: RAGExperimentConfig, dataset: TestDataset): Result[ExperimentResult]
+  def quickTest(config: RAGExperimentConfig, datasetPath: String, sampleCount: Int = 5): Result[ExperimentResult]
+  def compareConfigs(
+    config1: RAGExperimentConfig,
+    config2: RAGExperimentConfig,
+    datasetPath: String,
+    sampleCount: Option[Int] = None
+  ): Result[ExperimentComparison]
+}
+
+object BenchmarkRunner {
+  def apply(
+    llmClient: LLMClient,
+    embeddingClient: EmbeddingClient,
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
+    options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
+  )(using ModelRegistryService): BenchmarkRunner
+}
+```
+
+### BenchmarkReport
+
+```scala
+object BenchmarkReport {
+  def console(results: BenchmarkResults): String
+  def consoleDetailed(results: BenchmarkResults): String
+  def json(results: BenchmarkResults, pretty: Boolean = true): String
+  def markdown(results: BenchmarkResults): String
+  def save(results: BenchmarkResults, path: String, format: ReportFormat = ReportFormat.Json): Result[Unit]
+  def comparison(comparison: ExperimentComparison): String
 }
 ```
 

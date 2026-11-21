@@ -272,4 +272,4 @@ billed calls; a suite whose key is missing is skipped, or fails under `LLM4S_IT_
 ## See Also
 
 - [Examples](/examples/) - Working code examples
-- [API Reference](/api/llm-client) - Complete API documentation
+- [API Reference](/api/) - Complete API documentation

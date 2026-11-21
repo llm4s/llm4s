@@ -44,6 +44,60 @@ nav_order: 4
 - Inject typed settings into core services rather than reading env vars or `ConfigSource.default` from library code.
 - Replace `try/catch` with `Try(...).toResult` and combinators on `Result[A]`.
 
+## Migration rules
+
+`modules/scalafix-rules` holds semantic Scalafix rules that rewrite *user* code across llm4s's breaking changes
+([#2330](https://github.com/llm4s/llm4s/issues/2330)). They are not published yet: publishing them as
+`org.llm4s::llm4s-scalafix` with the release workflow, and the one-line command in each migration guide, are the
+rest of #2330.
+
+`Llm4sMigrate_0_5` runs every rule for the [0.4.1 to 0.5.0 guide](../migrations/0-4-1-to-0-5-0):
+
+| Rule | Rewrites |
+|---|---|
+| `CopyToWithSetters` | `.copy(maxTokens = Some(500), temperature = 0.2)` on a growth-prone type to `.withMaxTokens(500).withTemperature(0.2)`; `message.copy(contentOpt = Some(t))` to `message.withContent(t)` |
+| `MillisToFiniteDuration` | `CrawlerConfig(delayMs = 500, timeoutMs = 30000)` to `CrawlerConfig(delay = 500.millis, timeout = 30.seconds)` (also `UrlLoader`, `HttpConfig`, `ShellConfig` and the search tool configs), `RateLimitError("openai", 1000L)` to `RateLimitError("openai", 1.second)`, and a read of `config.timeoutMs` to `config.timeout.toMillis` |
+| `IsRecoverableToTotal` | `error.isRecoverable` to `LLMError.isRecoverable(error)` |
+| `MovedConfigLoaders` | `Llm4sConfig.loadBraveSearchTool()` (and the DuckDuckGo and Exa loaders) to `ToolsConfigLoader`, `Llm4sConfig.metrics()` to `MetricsConfigLoader.default()`, `Llm4sConfig.pgSearchIndex()` to `PgSearchIndexConfigLoader.default()` |
+| `MessageExtractorToTypePattern` | `case UserMessage(content) =>` to `case userMessage: UserMessage =>`, reading `userMessage.content` in the guard and body (also `ToolMessage(content, toolCallId)`) |
+| `RemovedApis` | Lint only: the orchestration package (`PlanRunner`, `DAG`, `TypedAgent`, `CancellationToken`), `org.llm4s.types.AgentId` and `PlanId`, and `getToolDefinitionsSafe`, each with a link to the guide section |
+
+Where a rewrite cannot be made safely, the rule reports a lint instead: a `copy` with a positional argument, a field
+that has no setter any more (`Completion.thinking`, `NamedProviderConfig.organization`), or a message extractor
+nested inside another pattern. These 0.5 rules change names, not types; the `Secret` keys and the `Instant` of
+`Completion.created` are `Llm4sMigrate_1_0`'s.
+
+`Llm4sMigrate_1_0` runs every rule for the breaking changes since 0.5.1 (the notes in the
+[Migration Guide](migration)), and grows as the 1.0 breaks land:
+
+| Rule | Rewrites |
+|---|---|
+| `CopyToWithSetters_1_0` | `.copy(field = value)` to `.withField(value)` on the 95 types made growth-safe since 0.5.1 (`ToolRetryPolicy`, the OpenAI-compatible, Gemini, Vertex AI and Azure configs, `TraceEvent` and `AssistantError` cases, tool schemas, context types, ...); a `String` `apiKey` is wrapped in `Secret(...)`. Lints a positional `copy` and `new X(...)` |
+| `CredentialsToSecret` | `OpenAIConfig(apiKey = key, ...)` and `config.withApiKey(key)` to `Secret(key)` on the provider configs (`Some(Secret(key))` where the key is an `Option`), and a read of `config.apiKey` to `config.apiKey.reveal` |
+| `FromValuesKeyFirst` | `OpenAIConfig.fromValues(model, key, organization, baseUrl, ...)` to `fromValues(model, Secret(key), baseUrl, organization, ...)`, dropping a `None` organization; `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` to `fromValues(deployment, Secret(key), endpoint, apiVersion)` |
+| `CompletionCreatedToInstant` | `Completion(created = seconds)`, `withCreated(seconds)` and `toCompletion(seconds)` to `Instant.ofEpochSecond(seconds)` (`0L` to `Instant.EPOCH`), and a read of `completion.created` to `completion.created.getEpochSecond` |
+| `PositionalPatternsGainFields` | A positional pattern on one of the 41 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also `AgentStatus.Suspended`, `RunEvent.RunFailed`, the `TraceEvent` cases and the provider configs |
+| `DuplicateApisRemoved` | Deletes `import ServiceError.ServiceErrorOps`; `Llm4sConfig.loadTextEmbeddingModel()` to `textEmbeddingModel()` |
+| `RemovedApis_1_0` | Lint only: `org.llm4s.types.typeclass`, `CompletionChunk`/`ChunkDelta`, `OpenAIToolHelper`, `AnsiColors` and the embeddings sample's settings on `Llm4sConfig`, each with a link to its note |
+
+A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
+(Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
+rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-051-that-no-rule-automates).
+
+The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
+Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred
+types, so the rules match on the symbols the source names. Scala 3's SemanticDB also records no symbol for some
+calls, such as the `copy` in `CompletionOptions().copy(maxTokens = Some(500))`; the rules then read the method from a
+named argument's symbol (`CompletionOptions#copy().(maxTokens)`), so a positional `copy` on such a receiver is
+neither rewritten nor reported.
+
+Each rule is tested by `scalafixTests` (`sbt scalafixTests/test`): the files in `modules/scalafix-rules/input` are
+compiled with SemanticDB against llm4s-core 0.4.1 from Maven Central, each rule named in a file's header is run on
+it, and the result must equal the file of the same name in `modules/scalafix-rules/output`, which is compiled against
+the current sources. `scalafixTests05` does the same for the `Llm4sMigrate_1_0` rules, with
+`modules/scalafix-rules/input-0.5` compiled against the 0.5.1 artifacts and its expected output under
+`output/.../fix/v1`.
+
 ## Notes
 - CI and pre-commit run scalafix checks.
 - If you hit a false positive (e.g. a doc comment containing a banned token), prefer a `// scalafix:off DisableSyntax.<RuleId>` over loosening the regex.

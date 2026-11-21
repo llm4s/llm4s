@@ -22,6 +22,12 @@ import java.time.Instant
  * @param citations The sources the model cited in its answer, when the provider reports them
  *                  (see [[Citation]]); empty for a model that does not search or does not cite,
  *                  and for a completion assembled from streamed chunks, which carry none.
+ * @param adjustments The requested options the client reports it could not honour as asked, each
+ *                    dropped, adjusted or not needed (see [[RequestAdjustment]]). Streamed and
+ *                    non-streamed calls report the same; a completion assembled from streamed
+ *                    chunks has none, since chunks carry none. Coverage is growing under RFC 0008, so an
+ *                    empty list means nothing was reported, not that every option was sent: see
+ *                    [[RequestAdjustment]] for what is reported today.
  */
 @Stable
 final case class Completion private (
@@ -33,19 +39,21 @@ final case class Completion private (
   toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
   estimatedCost: Option[Double],
-  citations: List[Citation]
+  citations: List[Citation],
+  adjustments: List[RequestAdjustment]
 ) {
-  def withId(id: String): Completion                               = copy(id = id)
-  def withCreated(created: Instant): Completion                    = copy(created = created)
-  def withContent(content: String): Completion                     = copy(content = content)
-  def withModel(model: String): Completion                         = copy(model = model)
-  def withMessage(message: AssistantMessage): Completion           = copy(message = message)
-  def withToolCalls(toolCalls: List[ToolCall]): Completion         = copy(toolCalls = toolCalls)
-  def withUsage(usage: TokenUsage): Completion                     = copy(usage = Some(usage))
-  def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
-  def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
-  def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
-  def withCitations(citations: List[Citation]): Completion         = copy(citations = citations)
+  def withId(id: String): Completion                                    = copy(id = id)
+  def withCreated(created: Instant): Completion                         = copy(created = created)
+  def withContent(content: String): Completion                          = copy(content = content)
+  def withModel(model: String): Completion                              = copy(model = model)
+  def withMessage(message: AssistantMessage): Completion                = copy(message = message)
+  def withToolCalls(toolCalls: List[ToolCall]): Completion              = copy(toolCalls = toolCalls)
+  def withUsage(usage: TokenUsage): Completion                          = copy(usage = Some(usage))
+  def withUsage(usage: Option[TokenUsage]): Completion                  = copy(usage = usage)
+  def withEstimatedCost(estimatedCost: Double): Completion              = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[Double]): Completion      = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
+  def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
 
   /**
    * Extract content as text (for compatibility)
@@ -99,9 +107,27 @@ object Completion {
     toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[Double] = None,
-    citations: List[Citation] = List.empty
+    citations: List[Citation] = List.empty,
+    adjustments: List[RequestAdjustment] = List.empty
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations)
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, adjustments)
+
+  /**
+   * The `apply` before `adjustments` was added, with none. Kept for Java and Kotlin, which pass every
+   * argument because they do not see Scala's defaults.
+   */
+  def apply(
+    id: String,
+    created: Instant,
+    content: String,
+    model: String,
+    message: AssistantMessage,
+    toolCalls: List[ToolCall],
+    usage: Option[TokenUsage],
+    estimatedCost: Option[Double],
+    citations: List[Citation]
+  ): Completion =
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, List.empty)
 }
 
 /**
@@ -110,9 +136,12 @@ object Completion {
  * @param promptTokens Number of tokens in the prompt (input).
  * @param completionTokens Number of tokens in the completion (output).
  * @param totalTokens Total tokens (prompt + completion).
- * @param thinkingTokens Optional number of tokens used for thinking/reasoning.
- *                       Present when using reasoning modes with Claude or o1/o3 models.
- *                       These tokens count toward billing but are separate from completion tokens.
+ * @param thinkingTokens Optional number of tokens used for thinking/reasoning, billed as output.
+ *                       They are never part of `completionTokens`: a provider that counts them inside
+ *                       its completion count (OpenAI's `reasoning_tokens`, and servers that copy its
+ *                       format) has them subtracted by its client, while Gemini and xAI already count
+ *                       them apart. `totalTokens` is kept as the provider reported it.
+ *                       [[totalOutputTokens]] is the two added together.
  * @param cachedTokens Optional number of tokens served from the provider's prompt cache (cache read).
  *                     When present, these tokens are billed at the cheaper cache-read rate.
  * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
@@ -141,7 +170,7 @@ final case class TokenUsage private (
     copy(cacheCreationTokens = cacheCreationTokens)
 
   /**
-   * Total output tokens including thinking.
+   * Total output tokens: the completion plus any thinking, which `completionTokens` never includes.
    *
    * For billing purposes, thinking tokens are typically billed at the same rate as output tokens.
    */

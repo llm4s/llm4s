@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.config
 import org.llm4s.annotation.Stable
 import org.llm4s.security.Secret
 import org.llm4s.http.HttpNetworkSettings
+import org.llm4s.llmconnect.auth.ApiKeyProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -26,6 +27,8 @@ import org.llm4s.types.Result
  * @param googleSearch whether to ground answers in Google Search: the section's `googleSearch` key. When set,
  *                 every request carries Gemini's `google_search` tool, the model may search before answering,
  *                 and the sources it used arrive on `Completion.citations`. Off by default; billed by Google.
+ * @param apiKeyProvider asked for the key on every request instead of sending `apiKey`, so a rotated key is
+ *                 used without rebuilding the client (#2477): a section's `apiKeyFile` sets one
  */
 @Stable
 final case class GeminiConfig private (
@@ -36,13 +39,16 @@ final case class GeminiConfig private (
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts,
   googleSearch: Boolean,
-  override val network: HttpNetworkSettings
+  override val network: HttpNetworkSettings,
+  override val apiKeyProvider: Option[ApiKeyProvider]
 ) extends ProviderConfig:
-  override val providerId: ProviderId                                  = ProviderId("gemini")
-  override def endpointUrl: Option[String]                             = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig                  = copy(model = model)
-  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig  = copy(timeouts = timeouts)
-  override def withNetwork(network: HttpNetworkSettings): GeminiConfig = copy(network = network)
+  override val providerId: ProviderId                                     = ProviderId("gemini")
+  override def endpointUrl: Option[String]                                = Some(baseUrl)
+  override def withModel(model: String): GeminiConfig                     = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig     = copy(timeouts = timeouts)
+  override def withNetwork(network: HttpNetworkSettings): GeminiConfig    = copy(network = network)
+  override def withApiKeyProvider(provider: ApiKeyProvider): GeminiConfig = copy(apiKeyProvider = Some(provider))
+  def withApiKeyProvider(provider: Option[ApiKeyProvider]): GeminiConfig  = copy(apiKeyProvider = provider)
 
   def withApiKey(apiKey: Secret): GeminiConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): GeminiConfig                  = copy(baseUrl = baseUrl)
@@ -51,7 +57,8 @@ final case class GeminiConfig private (
   def withGoogleSearch(enabled: Boolean): GeminiConfig            = copy(googleSearch = enabled)
   override def toString: String =
     s"GeminiConfig(apiKey=$apiKey, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion, googleSearch=$googleSearch)"
+      s"reserveCompletion=$reserveCompletion, googleSearch=$googleSearch${apiKeyProvider
+          .fold("")(p => s", apiKeyProvider=$p")})"
 
 object GeminiConfig {
 
@@ -87,7 +94,8 @@ object GeminiConfig {
       reserveCompletion,
       timeouts,
       googleSearch,
-      network = HttpNetworkSettings.default
+      network = HttpNetworkSettings.default,
+      apiKeyProvider = None
     )
 
   /**

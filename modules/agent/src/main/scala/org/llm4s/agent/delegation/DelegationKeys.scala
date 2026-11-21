@@ -57,7 +57,7 @@ private[agent] object DelegationKeys:
   /** The SHA-256 of `input`'s canonical encoding, in hex: what [[input]] records. */
   def digest(input: AgentInput): String =
     val bytes = upickle.default.write(input).getBytes(java.nio.charset.StandardCharsets.UTF_8)
-    java.security.MessageDigest.getInstance("SHA-256").digest(bytes).map(b => f"${b & 0xff}%02x").mkString
+    org.llm4s.util.Hex.of(java.security.MessageDigest.getInstance("SHA-256").digest(bytes))
 
   /**
    * The child threads whose roll-up this turn's committed results already counted (design 4.42), on the parent's

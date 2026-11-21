@@ -132,6 +132,10 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
+    "declare that the SDK ignores a supplied HTTP client (#2341)" in {
+      expectations.foreach((descriptor, _, _) => descriptor.features.customHttpClient shouldBe false)
+    }
+
     "declare a model lister where the provider has one" in {
       OpenAIProvider.modelLister shouldBe defined
       RequestyProvider.modelLister shouldBe defined
@@ -166,7 +170,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     def openAIClientAt(baseUrl: String): LLMClient =
       OpenAIConfig
-        .fromValues("gpt-4o", Secret("sk-test"), None, baseUrl)
+        .fromValues("gpt-4o", Secret("sk-test"), baseUrl, None)
         .flatMap(OpenAIClient(_)) match
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
@@ -191,6 +195,17 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       }
     }
 
+    "send the key its ApiKeyProvider holds at each request, for azure (#2477)" in {
+      val respond = LocalProviderTestServer.sendJsonResponse(_, 200, LocalProviderTestServer.openAICompletion("ok"))
+      assertHonoursApiKeyProvider(respond) { (baseUrl, keys) =>
+        val azure = section(AzureProvider)
+        AzureProvider
+          .buildConfig("rotation", azure.withExtras(azure.extras.updated(AzureProvider.EndpointKey, baseUrl)))
+          .flatMap(config => AzureProvider.buildClient(config.withApiKeyProvider(keys), LlmClientOptions.default))
+          .fold(error => fail(error.message), identity)
+      }
+    }
+
     "send the content parts Chat Completions takes and refuse the rest before sending (#1913)" in {
       val supported = Seq(
         ContentPartCase.UserImageUrl,
@@ -209,13 +224,13 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       )(openAIClientAt)
       assertContentParts("openai", respond)(supported*)(openAIClientAt)
       assertContentParts("requesty", respond)(supported*) { baseUrl =>
-        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), None, baseUrl).toOption.get
+        val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", Secret("rq-key"), baseUrl).toOption.get
         RequestyProvider.buildClient(config, LlmClientOptions.default).toOption.get
       }
       assertContentParts("azure", respond)(supported*) { baseUrl =>
         val config =
           AzureConfig
-            .fromValues("my-deploy", baseUrl, Secret("azure-key"), AzureConfig.DEFAULT_API_VERSION)
+            .fromValues("my-deploy", Secret("azure-key"), baseUrl, AzureConfig.DEFAULT_API_VERSION)
             .toOption
             .get
         AzureProvider.buildClient(config, LlmClientOptions.default).toOption.get
@@ -275,6 +290,20 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
         val config =
           EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
         assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config))
+      }
+    }
+
+    "send the key its ApiKeyProvider holds at each request, so a rotated apiKeyFile is used (#2478)" in {
+      assertEmbeddingHonoursApiKeyProvider(
+        LocalProviderTestServer.sendJsonResponse(
+          _,
+          200,
+          """{"data":[{"embedding":[0.1,0.2]}],"usage":{"prompt_tokens":1,"total_tokens":1}}"""
+        )
+      ) { (baseUrl, keys) =>
+        val config =
+          EmbeddingProviderConfig(baseUrl = baseUrl, model = "text-embedding-3-small", apiKey = Secret("test-key"))
+        assertBuildsEmbeddingProvider(OpenAIEmbeddingProvider, config.withApiKeyProvider(keys))
       }
     }
   }

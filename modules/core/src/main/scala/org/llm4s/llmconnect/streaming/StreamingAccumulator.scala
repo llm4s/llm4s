@@ -208,6 +208,10 @@ final class StreamingAccumulator private () {
    * can pass each part as it arrives. When no report states a total, the completion's total is
    * prompt plus completion plus thinking tokens.
    *
+   * A report's `completionTokens` of zero is read as not stated, so the earlier value is kept, although a
+   * reasoning-only reply can report zero (its client takes the reasoning tokens out of the completion). The
+   * clients that take them out report usage once per stream, so the earlier value is the initial zero.
+   *
    * @param usage the usage as the provider reported it, in llm4s's terms: `thinkingTokens` the
    *              reasoning tokens, `cachedTokens` the prompt tokens read from the provider's
    *              prompt cache, `cacheCreationTokens` those written to it

@@ -1,0 +1,11 @@
+model_list:
+  # The name the app asks for (its section's `model`) and the provider model behind it. Switching the vendor, the
+  # region or the deployment is a change here, not in the app.
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  # Requests without this key (or, with LiteLLM's database, a virtual key made from it) are refused.
+  master_key: os.environ/LITELLM_MASTER_KEY

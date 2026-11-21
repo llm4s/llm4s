@@ -89,4 +89,35 @@ class ScoreNormalisationSpec extends AnyFlatSpec with Matchers with ScalaCheckPr
   it should "give an empty channel a normaliser that does not fail" in {
     ScoreNormalisation.over(Seq.empty)(0.7) shouldBe 1.0
   }
+
+  it should "interpolate explicit hit scores and negative-score midpoints" in {
+    val normalise = ScoreNormalisation.over(Seq(2.0, 4.0, 10.0))
+    normalise(2.0) shouldBe 0.1 +- Tolerance
+    normalise(4.0) shouldBe 0.325 +- Tolerance
+    normalise(10.0) shouldBe 1.0 +- Tolerance
+    ScoreNormalisation.over(Seq(-2.0, 2.0))(0.0) shouldBe 0.55 +- Tolerance
+    ScoreNormalisation.over(Seq(-6.0, -2.0))(-4.0) shouldBe 0.55 +- Tolerance
+  }
+
+  it should "produce the same interpolation for every ordering of the observed scores" in {
+    Seq(2.0, 4.0, 10.0).permutations.foreach { scores =>
+      val normalise = ScoreNormalisation.over(scores)
+      normalise(2.0) shouldBe 0.1 +- Tolerance
+      normalise(4.0) shouldBe 0.325 +- Tolerance
+      normalise(10.0) shouldBe 1.0 +- Tolerance
+    }
+  }
+
+  it should "map unseen query values to one for empty and constant-score channels" in {
+    for (scores <- Seq(Seq.empty[Double], Seq(4.0), Seq(4.0, 4.0, 4.0))) {
+      val normalise = ScoreNormalisation.over(scores)
+      Seq(-2.0, 4.0, 10.0).foreach(score => normalise(score) shouldBe 1.0)
+    }
+  }
+
+  it should "extrapolate without clamping values outside the observed score range" in {
+    val normalise = ScoreNormalisation.over(Seq(2.0, 6.0))
+    normalise(0.0) shouldBe -0.35 +- Tolerance
+    normalise(8.0) shouldBe 1.45 +- Tolerance
+  }
 }

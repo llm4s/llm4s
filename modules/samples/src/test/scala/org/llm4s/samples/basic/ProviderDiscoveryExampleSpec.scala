@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
  *  - Explicit registry contains only the manually provided module.
  *  - Diagnostic report flags (hasFailures, hasCollisions) and output formatting behave as expected.
  */
+@org.llm4s.tags.DocsSpec
 class ProviderDiscoveryExampleSpec extends AnyFlatSpec with Matchers {
 
   "ProviderDiscoveryExample" should "discover providers from the classpath without failures" in {

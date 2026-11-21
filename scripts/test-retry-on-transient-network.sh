@@ -7,6 +7,8 @@
 #   - a transient download error is retried, at most RETRY_MAX times, and the last attempt's own exit status wins;
 #   - nothing else is ever retried: a formatting error, a test failure, an unknown command, a marker that is not
 #     on an `[error]` line, a marker in a run that exited 0;
+#   - a rate limit or server error (429, 502-504) is retried with the longer rate-limit backoff, while a missing
+#     artifact, a 404 and a 500 are not;
 #   - the bounds hold (RETRY_MAX is capped at 5, one wait at 120 s) and bad settings are refused.
 set -uo pipefail
 
@@ -139,6 +141,58 @@ plan "0\nshould not run"
 rc=$(RETRY_BACKOFF_SECONDS=-1 run); expect "a negative backoff is refused" 2 0 "$rc"
 PATH="$WORK/bin:$PATH" "$WRAPPER" > /dev/null 2>&1; rc=$?
 [ "$rc" = 2 ] && pass "no command is refused" || fail "no command is refused" "exit $rc"
+
+# 15. Maven Central's rate limit, as the MiMa job printed it on 2026-11-20 (job 136603391059): retried, and with the
+#     longer rate-limit backoff (60 s, then 120 s), not the 15 s and 30 s of a network blip.
+RATE_LIMITED='[error] sbt.librarymanagement.ResolveException: Error downloading org.apache.pekko:pekko-stream_3:1.7.1
+[error]   not found: /home/runner/.ivy2/localorg.apache.pekko/pekko-stream_3/1.7.1/ivys/ivy.xml
+[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 429 for URL: https://repo1.maven.org/maven2/org/apache/pekko/pekko-stream_3/1.7.1/pekko-stream_3-1.7.1.pom) while downloading https://repo1.maven.org/maven2/org/apache/pekko/pekko-stream_3/1.7.1/pekko-stream_3-1.7.1.pom
+[error]   not found: https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/org.apache.pekko/pekko-stream_3/1.7.1/ivys/ivy.xml
+[error]   not found: https://repo.typesafe.com/typesafe/ivy-releases/org.apache.pekko/pekko-stream_3/1.7.1/ivys/ivy.xml'
+plan "1\n$RATE_LIMITED" "1\n$RATE_LIMITED" "0\nresolved"
+rc=$(run); expect "a 429 from Maven Central is retried until it passes" 0 3 "$rc"
+[ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "60 120 " ] && pass "a 429 waits 60 s, then 120 s" || fail "a 429 waits 60 s, then 120 s" "$(tr '\n' ' ' < "$SLEEP_LOG")"
+
+# 16. The same for the other 429 releases of 2026-11-20 (the llm4s-rag 0.5.1 baseline of the scalafix tests, and the
+#     Scala 2.13 compiler bridge), sbt-coloured, and for "Too Many Requests" and a 502/503/504 from the CDN.
+for line in \
+  "[${ESC}[0m${ESC}[31merror${ESC}[0m]   download error: Caught java.io.IOException (Server returned HTTP response code: 429 for URL: https://repo1.maven.org/maven2/org/llm4s/llm4s-rag_3/0.5.1/llm4s-rag_3-0.5.1.pom) while downloading https://repo1.maven.org/maven2/org/llm4s/llm4s-rag_3/0.5.1/llm4s-rag_3-0.5.1.pom" \
+  "[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 429 for URL: https://repo1.maven.org/maven2/org/scala-lang/scala2-sbt-bridge/2.13.14/scala2-sbt-bridge-2.13.14.pom) while downloading https://repo1.maven.org/maven2/org/scala-lang/scala2-sbt-bridge/2.13.14/scala2-sbt-bridge-2.13.14.pom" \
+  "[error]   download error: Caught java.io.IOException (429 Too Many Requests) while downloading https://repo1.maven.org/maven2/x.pom" \
+  "[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 502 for URL: https://repo1.maven.org/maven2/x.pom)" \
+  "[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 503 for URL: https://repo1.maven.org/maven2/x.pom)" \
+  "[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 504 for URL: https://repo1.maven.org/maven2/x.pom)"; do
+  plan "1\n$line" "0\nok"
+  label="$(printf %s "$line" | grep -oE "response code: [0-9]+|Too Many Requests") for $(printf %s "$line" | grep -oE "[^/]+\.pom" | head -1)"
+  rc=$(run); expect "retried: $label" 0 2 "$rc"
+  [ "$(cat "$SLEEP_LOG")" = "60" ] || fail "rate-limit backoff for: $line" "slept $(cat "$SLEEP_LOG")"
+done
+
+# 17. A missing artifact is not a rate limit: "Error downloading" with only "not found" lines fails at once, and so does
+#     a 404 or a 500 (an error in the repository, not a pause that clears).
+for line in \
+  '[error] sbt.librarymanagement.ResolveException: Error downloading org.llm4s:llm4s-nope_3:0.5.1\n[error]   not found: https://repo1.maven.org/maven2/org/llm4s/llm4s-nope_3/0.5.1/llm4s-nope_3-0.5.1.pom' \
+  '[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 404 for URL: https://repo1.maven.org/maven2/x.pom)' \
+  '[error]   download error: Caught java.io.IOException (Server returned HTTP response code: 500 for URL: https://repo1.maven.org/maven2/x.pom)'; do
+  plan "1\n$line"
+  label="$(printf %b "$line" | grep -oE "response code: [0-9]+|not found" | head -1) for $(printf %b "$line" | grep -oE "[^/]+\.pom" | head -1)"
+  rc=$(run); expect "not retried: $label" 1 1 "$rc"
+done
+
+# 18. A 429 marker outside an [error] line (a test's own log) is ignored, like every other marker.
+plan "1\n[info] - should map HTTP response code: 429 to RateLimitError *** FAILED ***\n[error] Failed tests:"
+rc=$(run); expect "a 429 in a test name is not retried" 1 1 "$rc"
+
+# 19. The rate-limit backoff is bounded like the other: a bad value is refused, a large one is capped at 120 s, and it
+#     is never shorter than RETRY_BACKOFF_SECONDS.
+plan "0\nshould not run"
+rc=$(RATE_LIMIT_BACKOFF_SECONDS=soon run); expect "a non-numeric RATE_LIMIT_BACKOFF_SECONDS is refused" 2 0 "$rc"
+plan "1\n$RATE_LIMITED"
+rc=$(RATE_LIMIT_BACKOFF_SECONDS=9999 run)
+[ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "120 120 " ] && pass "the rate-limit wait is capped at 120 s" || fail "the rate-limit wait is capped at 120 s" "$(tr '\n' ' ' < "$SLEEP_LOG")"
+plan "1\n$RATE_LIMITED"
+rc=$(RETRY_BACKOFF_SECONDS=90 RATE_LIMIT_BACKOFF_SECONDS=10 run)
+[ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "90 120 " ] && pass "the rate-limit wait is never shorter than the ordinary one" || fail "the rate-limit wait is never shorter than the ordinary one" "$(tr '\n' ' ' < "$SLEEP_LOG")"
 
 if [ "$FAILED" -ne 0 ]; then
   echo

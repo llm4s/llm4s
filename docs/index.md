@@ -34,6 +34,15 @@ libraryDependencies ++= Seq(
   </div>
 </section>
 
+{%- assign latest_post = site.posts | first %}
+{%- if latest_post %}
+<section class="lp-news-strip" aria-label="Latest news">
+  <div class="lp-wrap">
+    <p><strong>Latest:</strong> <a href="{{ latest_post.url | relative_url }}">{{ latest_post.title }}</a> ({{ latest_post.date | date: "%-d %B %Y" }}) &middot; <a href="{{ '/news/' | relative_url }}">All news</a> &middot; <a href="{{ '/feed.xml' | relative_url }}">Subscribe (Atom)</a></p>
+  </div>
+</section>
+{%- endif %}
+
 {% include stats-band.html %}
 
 <section class="lp-section" aria-labelledby="why-heading">
@@ -158,6 +167,7 @@ val ticket: Result[Ticket] = for {
     <header class="lp-section__head">
       <p class="lp-eyebrow">Use cases</p>
       <h2 id="usecases-heading">What teams build with it</h2>
+      <p>Short answers, each with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card lp-card--flat"><h3>Assistants inside JVM services</h3><p>Support, operations and internal assistants that run in your Spring Boot, Pekko or plain JVM service, with guardrails on what goes in and comes out.</p></li>
@@ -167,6 +177,20 @@ val ticket: Result[Ticket] = for {
       <li class="lp-card lp-card--flat"><h3>Developer tooling</h3><p>Issue triage, coding agents and MCP servers that expose your systems to any MCP-capable client.</p></li>
       <li class="lp-card lp-card--flat"><h3>Voice and multimodal apps</h3><p>Speech to text, text to speech, image generation and vision, behind the same typed API.</p></li>
     </ul>
+  </div>
+</section>
+
+<section class="lp-section" aria-labelledby="adopters-heading">
+  <div class="lp-wrap">
+    <header class="lp-section__head lp-section__head--row">
+      <div>
+        <p class="lp-eyebrow">Adopters</p>
+        <h2 id="adopters-heading">Who uses LLM4S</h2>
+        <p>Organisations that build on LLM4S, in their own words. Some help build it too. Listing is not an endorsement.</p>
+      </div>
+      <p class="lp-actions"><a class="lp-btn lp-btn--ghost" href="{{ '/community/#success-stories' | relative_url }}">Success stories</a> <a class="lp-btn lp-btn--primary" href="https://github.com/llm4s/llm4s/blob/main/ADOPTERS.md#how-to-add-yourself">Add your organisation</a></p>
+    </header>
+    {% include adopters-grid.html %}
   </div>
 </section>
 
@@ -279,6 +303,7 @@ val ticket: Result[Ticket] = for {
       <li class="is-done"><strong>0.4.x</strong><span>Artifacts renamed to <code>llm4s-*</code></span></li>
       <li class="is-done"><strong>0.5.0</strong><span>Modular artifacts, provider SPI, Java, Spring Boot, cats-effect and ZIO modules</span></li>
       <li class="is-done"><strong>0.5.1</strong><span>Multimodal messages, agent harness SPIs, Agent Skills</span></li>
+      <li class="is-done"><strong>0.6.0</strong><span>Subagents, durable multi-machine agents, Secret credentials, Kotlin API</span></li>
       <li><strong>Pre-1.0</strong><span>Designs final, MiMa compatibility baseline set</span></li>
       <li><strong>1.0</strong><span>Frozen, binary-compatible surface across 1.x</span></li>
     </ol>

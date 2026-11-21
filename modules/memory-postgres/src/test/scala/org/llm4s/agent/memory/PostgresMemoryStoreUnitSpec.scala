@@ -262,7 +262,8 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
 
   it should "store a memory successfully" in {
     setupMockExecution()
-    (() => mockStmt.executeUpdate()).expects().returning(1)
+    (() => mockStmt.addBatch()).expects()
+    (() => mockStmt.executeBatch()).expects().returning(Array(1))
     val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
 
@@ -302,7 +303,8 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
 
   it should "execute store() logic and handle DB failure" in {
     setupMockExecution()
-    (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
+    (() => mockStmt.addBatch()).expects()
+    (() => mockStmt.executeBatch()).expects().throws(new SQLException("Mock DB Error"))
 
     val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)

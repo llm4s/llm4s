@@ -35,8 +35,10 @@ the [Java guide](/guide/java).
 ## The coordinate
 
 LLM4S is published for **Scala 3 only**, and Maven does **not** add the Scala cross-version suffix: the artifact is
-`org.llm4s:llm4s-java-api_3`, and you write the `_3` yourself. Its POM brings `llm4s-core`, `llm4s-agent` and the
-provider modules, so it is the one llm4s dependency a Java project needs.
+`org.llm4s:llm4s-java-api_3`, and you write the `_3` yourself. Its POM brings `llm4s-core` and `llm4s-agent`; beside it
+you declare the provider module you call, here `llm4s-openai_3` (`llm4s-ollama_3`, `llm4s-anthropic_3`, ... for the
+others), so no other vendor's SDK reaches your classpath. Up to 0.5.x the facade brought every provider module
+([#1496](https://github.com/llm4s/llm4s/issues/1496)).
 
 ## The pom.xml
 
@@ -109,6 +111,11 @@ provider modules, so it is the one llm4s dependency a Java project needs.
       <version>${llm4s.version}</version>
     </dependency>
     <dependency>
+      <groupId>org.llm4s</groupId>
+      <artifactId>llm4s-openai_3</artifactId>
+      <version>${llm4s.version}</version>
+    </dependency>
+    <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
       <version>1.5.34</version>
@@ -149,6 +156,8 @@ What each part is for:
 
 - **`llm4s-java-api_3`** is the library. Change `llm4s.version` to move to another release; every llm4s artifact is
   released at the same version.
+- **`llm4s-openai_3`** is the provider module `application.conf` names. For another provider, declare its module
+  instead; a typed builder or section whose module is missing fails with a `CONFIGURATION` error naming it.
 - **`logback-classic`** is the logging backend. llm4s logs through SLF4J and ships none; without one SLF4J prints a
   single "no SLF4J providers were found" warning and drops the logs.
 - **`scala3-library_3`** in `dependencyManagement` pins the Scala 3 library. Several llm4s modules may ask for
@@ -159,8 +168,8 @@ What each part is for:
   versions of one library, so a conflict shows up at build time and not as a `NoSuchMethodError` at run time.
   When it fails, it names the library and both paths: add a `dependencyManagement` entry for it, as for
   `scala3-library_3`, or an exclusion.
-- **The other `dependencyManagement` entries** settle the conflicts the enforcer finds today: the OpenAI and
-  Anthropic SDKs ask for different Jackson, Kotlin, error-prone and Swagger versions, and pureconfig for an older
+- **The other `dependencyManagement` entries** settle the conflicts the enforcer finds today: the OpenAI SDK
+  (and the Anthropic SDK, if you add `llm4s-anthropic_3`) asks for different Jackson, Kotlin, error-prone and Swagger versions, and pureconfig for an older
   Typesafe Config and SLF4J than llm4s. Each pin is the newest version any of them asks for; the Jackson and Kotlin
   BOMs pin every artifact of those families at once.
 - **`exec-maven-plugin`** gives `mvn exec:java`, which runs the `main` class.

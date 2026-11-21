@@ -1,8 +1,12 @@
 name: Benchmarks
 
+# Weekly on main, on each release tag and on demand. It used to run on every push to main, about 10 runner minutes a
+# merge for a JMH run on a shared runner, whose numbers are too noisy to compare merge by merge; a weekly run on the
+# same branch still shows a drift. Its smoke tests (`benchmarks/test`) also run in CI's test job on every pull request.
 on:
+  schedule:
+    - cron: "23 5 * * 1"  # 05:23 UTC every Monday
   push:
-    branches: [ main, master ]
     tags: [ 'v*' ]
   workflow_dispatch:
 
@@ -28,12 +32,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Run benchmark smoke tests
-        run: sbt "benchmarks/test"
+        run: scripts/retry-on-transient-network.sh sbt "benchmarks/test"
 
   jmh-run:
     name: JMH Benchmark Run
@@ -50,12 +56,14 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
-          cache: 'sbt'
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
       - name: Compile benchmarks
-        run: sbt "benchmarks/Jmh/compile"
+        run: scripts/retry-on-transient-network.sh sbt "benchmarks/Jmh/compile"
 
       - name: Run JMH benchmarks
         run: |
