@@ -1,0 +1,126 @@
+name: Publish Kotlin API
+
+# org.llm4s:llm4s-kotlin-api, built by Gradle (modules/kotlin-api), not sbt, so `sbt ci-release` does not publish it
+# (#1494). release.yml calls this after `publish`; it is its own workflow so that it can also be run by hand for a tag
+# whose sbt artifacts are already on Central (Actions > Publish Kotlin API > Run workflow, tag `v0.6.0`), when the
+# release run's `publish-kotlin` failed. Re-running that failed job would use the tag's copy of the workflow and
+# scripts; dispatching this one builds the tag's code with the current publication rules. It is safe to re-run:
+# scripts/publish-kotlin-api.sh exits 0 when the version is already on Central or on its way there.
+#
+# The version is the tag's, the one sbt-dynver gave the sbt artifacts; the job checks the two agree before building.
+# The Kotlin build compiles against llm4s-java-api_3 at that version, published to this runner's local Maven
+# repository from the tag's commit, rather than waiting for Central to serve it.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The release tag, such as v0.6.0"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag whose Kotlin artifact to publish, such as v0.6.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-kotlin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # the Sigstore certificate that signs the provenance
+      attestations: write  # SLSA build provenance for the Kotlin publication (#2305)
+    env:
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Check the tag
+        run: |
+          case "$TAG" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "'$TAG' is not a release tag such as v0.6.0"; exit 1 ;; esac
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0  # Needed for sbt-dynver, and for the commit this workflow is defined at
+
+      # The library is built from the tag; the scripts that check and upload the publication come from the commit
+      # this workflow runs at, copied out of the checkout so that sbt-dynver still sees a clean tree at the tag. From
+      # release.yml the two are the same commit. Dispatched by hand for an earlier tag, the upload follows the current
+      # rules (no checksums of signatures, no .sha256/.sha512) while the artifact stays the tag's code.
+      - name: Take the publication scripts from this workflow's commit
+        run: |
+          mkdir -p "$RUNNER_TEMP/scripts"
+          for s in check-kotlin-publication.sh publish-kotlin-api.sh; do
+            git show "$GITHUB_SHA:scripts/$s" > "$RUNNER_TEMP/scripts/$s"
+            chmod +x "$RUNNER_TEMP/scripts/$s"
+          done
+
+      - name: Setup JVM
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: "21"
+          distribution: "temurin"
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: '8.11.1'
+          cache-provider: basic
+
+      - name: Check sbt released the tag's version
+        run: |
+          # `print` writes `<project> / version` then the value on its own line, indented with a tab (`\t0.5.1`), and
+          # on the runner the last line can be a bare `ESC[0J`. Strip escapes, keep the last version line, trim it:
+          # reading the last line failed 0.5.0's publish-kotlin, and a `^[0-9]` match failed 0.5.1's.
+          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
+          if [ "$SBT_VERSION" != "$VERSION" ]; then
+            echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
+            exit 1
+          fi
+
+      - name: Publish the library to the local Maven repository
+        run: sbt publishM2
+        env:
+          SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
+
+      - name: Build and sign the Kotlin publication
+        working-directory: modules/kotlin-api
+        # PGP_SECRET is the base64 of the armored secret key sbt-ci-release signs with; Gradle's in-memory signer takes
+        # the armored key itself, as the `signingKey` property (build.gradle.kts), so it is decoded here.
+        run: |
+          ORG_GRADLE_PROJECT_signingKey="$(printf '%s' "$PGP_SECRET" | base64 --decode)"
+          export ORG_GRADLE_PROJECT_signingKey
+          gradle publishMavenPublicationToStagingRepository -Pllm4sVersion="$VERSION"
+        env:
+          PGP_SECRET: ${{ secrets.PGP_SECRET }}
+          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.PGP_PASSPHRASE }}
+
+      - name: Check the publication
+        run: REQUIRE_SIGNATURES=1 "$RUNNER_TEMP/scripts/check-kotlin-publication.sh" "$VERSION" modules/kotlin-api/build/staging-deploy
+
+      - name: Attest build provenance of the Kotlin publication
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            modules/kotlin-api/build/staging-deploy/**/*.jar
+            modules/kotlin-api/build/staging-deploy/**/*.pom
+
+      - name: Upload to Maven Central
+        run: |
+          "$RUNNER_TEMP/scripts/publish-kotlin-api.sh" "$VERSION" modules/kotlin-api/build/staging-deploy
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}

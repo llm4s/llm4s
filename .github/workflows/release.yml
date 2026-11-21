@@ -118,90 +118,20 @@ jobs:
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
 
-  # org.llm4s:llm4s-kotlin-api, built by Gradle (modules/kotlin-api), not sbt, so `sbt ci-release` does not publish it
-  # (#1494). It runs after `publish` and is its own job, so a failure here can be re-run alone: `publish` cannot be
-  # re-run once the sbt artifacts are on Central. `github-release` waits for both, so a Release is announced only
-  # when every artifact of the version, the Kotlin one included, is on its way to Central.
-  #
-  # The version is the tag's, the one sbt-dynver gave the sbt artifacts; the job checks the two agree before building.
-  # The Kotlin build compiles against llm4s-java-api_3 at that version, published to this runner's local Maven
-  # repository from the same commit, rather than waiting for Central to serve it.
+  # org.llm4s:llm4s-kotlin-api, built by Gradle: publish-kotlin.yml, which can also be run by hand for a tag (#1494).
+  # It runs after `publish` and is its own job, so a failure here can be re-run alone: `publish` cannot be re-run once
+  # the sbt artifacts are on Central. `github-release` waits for both, so a Release is announced only when every
+  # artifact of the version, the Kotlin one included, is on its way to Central.
   publish-kotlin:
     needs: publish
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/publish-kotlin.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
     permissions:
       contents: read
-      id-token: write  # the Sigstore certificate that signs the provenance
-      attestations: write  # SLSA build provenance for the Kotlin publication (#2305)
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0  # Needed for sbt-dynver
-
-      - name: Setup JVM
-        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          java-version: "21"
-          distribution: "temurin"
-
-      - name: Restore the sbt dependency cache
-        uses: ./.github/actions/restore-sbt-deps
-
-      - name: Setup sbt
-        uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
-        with:
-          gradle-version: '8.11.1'
-          cache-provider: basic
-
-      - name: Check sbt released the tag's version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # `print` writes `<project> / version` then the value on its own line, indented with a tab (`\t0.5.1`), and
-          # on the runner the last line can be a bare `ESC[0J`. Strip escapes, keep the last version line, trim it:
-          # reading the last line failed 0.5.0's publish-kotlin, and a `^[0-9]` match failed 0.5.1's.
-          SBT_VERSION="$(sbt -batch -no-colors -error 'print ThisBuild / version' | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' | grep -E '^[[:space:]]*[0-9]+\.[0-9]+\.[0-9]+' | tail -1 | tr -d '[:space:]')"
-          if [ "$SBT_VERSION" != "$VERSION" ]; then
-            echo "sbt's version is '$SBT_VERSION', the tag's is '$VERSION': the Kotlin artifact would not match the release."
-            exit 1
-          fi
-
-      - name: Publish the library to the local Maven repository
-        run: sbt publishM2
-        env:
-          SBT_OPTS: "-Xmx4G -XX:+UseG1GC"
-
-      - name: Build and sign the Kotlin publication
-        working-directory: modules/kotlin-api
-        # PGP_SECRET is the base64 of the armored secret key sbt-ci-release signs with; Gradle's in-memory signer takes
-        # the armored key itself, as the `signingKey` property (build.gradle.kts), so it is decoded here.
-        run: |
-          ORG_GRADLE_PROJECT_signingKey="$(printf '%s' "$PGP_SECRET" | base64 --decode)"
-          export ORG_GRADLE_PROJECT_signingKey
-          gradle publishMavenPublicationToStagingRepository -Pllm4sVersion="${GITHUB_REF_NAME#v}"
-        env:
-          PGP_SECRET: ${{ secrets.PGP_SECRET }}
-          ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.PGP_PASSPHRASE }}
-
-      - name: Check the publication
-        run: REQUIRE_SIGNATURES=1 scripts/check-kotlin-publication.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
-
-      - name: Attest build provenance of the Kotlin publication
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            modules/kotlin-api/build/staging-deploy/**/*.jar
-            modules/kotlin-api/build/staging-deploy/**/*.pom
-
-      - name: Upload to Maven Central
-        run: scripts/publish-kotlin-api.sh "${GITHUB_REF_NAME#v}" modules/kotlin-api/build/staging-deploy
-        env:
-          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
-          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+      id-token: write
+      attestations: write
 
   # Publish the GitHub Release. This is what makes a release visible in the repo UI and
   # what notifies anyone watching "Releases only" -- neither happened automatically
