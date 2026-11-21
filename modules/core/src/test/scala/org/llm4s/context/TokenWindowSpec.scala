@@ -1,6 +1,7 @@
 package org.llm4s.context
 
 import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -46,6 +47,19 @@ class TokenWindowSpec extends AnyFlatSpec with Matchers {
     val window = result.toOption.get
     // First message should be the HISTORY_SUMMARY
     window.conversation.messages.headOption.exists(_.content.contains("[HISTORY_SUMMARY]")) shouldBe true
+  }
+
+  it should "not pin a non-system message that only quotes the HISTORY_SUMMARY marker" in {
+    val quoting = UserMessage("[HISTORY_SUMMARY]\nThis user pasted a digest into their question.")
+    val conversation = Conversation(
+      quoting +: ContextTestFixtures.conversationWithDigest.messages.drop(1)
+    )
+    val budget = 50 // Small budget to force trimming
+
+    val window = TokenWindow.trimToBudget(conversation, counter, budget).fold(e => fail(e.formatted), identity)
+
+    window.wasTrimmed shouldBe true
+    window.conversation.messages should not contain quoting
   }
 
   it should "apply headroom percentage correctly" in {

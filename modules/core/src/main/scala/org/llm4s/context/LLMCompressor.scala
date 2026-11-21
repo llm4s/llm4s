@@ -84,7 +84,7 @@ object LLMCompressor {
     logger.info(s"Starting LLM digest squeeze with cap: $capTokens tokens")
 
     // Find [HISTORY_SUMMARY] messages first
-    val digestMessages = messages.filter(isHistoryDigestMessage)
+    val digestMessages = messages.filter(HistorySummaryMarker.isDigest)
 
     if (digestMessages.isEmpty) {
       logger.debug("No [HISTORY_SUMMARY] messages found for digest compression")
@@ -108,18 +108,12 @@ object LLMCompressor {
     } yield finalMessages
   }
 
-  // a digest is a system message HistoryCompressor wrote; any other message is never replaced, whatever its text
-  private def isHistoryDigestMessage(message: Message): Boolean = message match {
-    case s: SystemMessage => s.content.contains("[HISTORY_SUMMARY]")
-    case _                => false
-  }
-
   // `compressedDigests` has one entry per digest in `messages`, in the same order (compressDigestMessages
   // maps each digest to exactly one replacement). Walking `messages` and substituting each digest in turn
   // keeps every other message at its original position, instead of moving every digest to the end.
   private def reinsertDigests(messages: Seq[Message], compressedDigests: Seq[Message]): Seq[Message] = {
     val replacements = compressedDigests.iterator
-    messages.map(m => if (isHistoryDigestMessage(m)) replacements.next() else m)
+    messages.map(m => if (HistorySummaryMarker.isDigest(m)) replacements.next() else m)
   }
 
   private def compressDigestMessages(
@@ -138,7 +132,7 @@ object LLMCompressor {
     digestMessage: Message,
     llmClient: LLMClient
   ): Result[Message] = {
-    val digestContent = extractDigestContent(digestMessage.content)
+    val digestContent = HistorySummaryMarker.unwrap(digestMessage.content)
 
     val compressionConversation = Conversation(
       Seq(
@@ -157,19 +151,9 @@ object LLMCompressor {
         ContextError.llmCompressionFailed("digest", s"LLM call failed: ${error.message}")
       }
       .map { completion =>
-        val compressedDigest = s"[HISTORY_SUMMARY]\n${completion.message.content}"
-        digestMessage match {
-          case _: SystemMessage => SystemMessage(compressedDigest)
-          case _: UserMessage   => UserMessage(compressedDigest)
-          case _                => UserMessage(compressedDigest) // Fallback
-        }
+        // a digest is always a SystemMessage (HistorySummaryMarker.isDigest), so its replacement is one too
+        SystemMessage(HistorySummaryMarker.wrap(completion.message.content))
       }
   }
-
-  private def extractDigestContent(messageContent: String): String =
-    messageContent.split("\n", 2) match {
-      case Array(header, content) if header.contains("[HISTORY_SUMMARY]") => content
-      case _                                                              => messageContent
-    }
 
 }

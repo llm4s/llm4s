@@ -162,8 +162,9 @@ object TokenWindow {
     )
   }
 
-  private def isHistoryDigestMessage(message: Message): Boolean =
-    message.content.contains("[HISTORY_SUMMARY]")
+  // A digest is a SystemMessage HistoryCompressor wrote, starting with the marker; a message of
+  // another type, or one that only mentions the marker, is never pinned (#2505).
+  private def isHistoryDigestMessage(message: Message): Boolean = HistorySummaryMarker.isDigest(message)
 
   private def findRecentMessagesThatFit(
     messages: Seq[Message],
