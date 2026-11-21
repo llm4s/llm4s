@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, StreamedChunk, ThinkingBlock, ToolCall }
+import org.llm4s.llmconnect.model.{ AssistantMessage, FinishReason, StreamedChunk, ThinkingBlock, ToolCall }
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Try
@@ -150,9 +150,11 @@ private[provider] object GeminiThoughtSignatures {
    * first carrying the text and the thought, the last carrying the finish reason; or a single chunk when
    * there is no call.
    */
-  def chunks(parsed: Parsed, messageId: String, finishReason: Option[String]): Seq[StreamedChunk] = {
-    val content = Option.when(parsed.text.nonEmpty)(parsed.text)
-    val thought = Option.when(parsed.thought.nonEmpty)(parsed.thought)
+  def chunks(parsed: Parsed, messageId: String, rawFinishReason: Option[String]): Seq[StreamedChunk] = {
+    // the raw finishReason until RFC 0009 PR 2 maps it
+    val finishReason = rawFinishReason.map(FinishReason.Other(_))
+    val content      = Option.when(parsed.text.nonEmpty)(parsed.text)
+    val thought      = Option.when(parsed.thought.nonEmpty)(parsed.thought)
     if (parsed.calls.isEmpty)
       Seq(
         StreamedChunk(

@@ -426,7 +426,9 @@ class WatsonXClient(
           toolCalls.foreach { call =>
             emit(StreamedChunk(id = responseId, content = None, toolCall = Some(call), finishReason = None))
           }
-          emit(StreamedChunk(id = responseId, content = None, toolCall = None, finishReason = Some(reason)))
+          emit(
+            StreamedChunk(id = responseId, content = None, toolCall = None, finishReason = Some(toFinishReason(reason)))
+          )
           accumulator.updateTokens(promptTokens, generatedTokens)
         }
       }
@@ -578,9 +580,8 @@ class WatsonXClient(
           val message = choice.get("message").flatMap(_.objOpt)
           for {
             toolCalls <- parseToolCalls(message.flatMap(_.get("tool_calls")), callIdPrefix())
-            _ <- checkFinishReason(
-              choice.get("finish_reason").flatMap(_.strOpt).map(normalizeFinishReason).getOrElse("")
-            )
+            reason = choice.get("finish_reason").flatMap(_.strOpt).map(normalizeFinishReason).getOrElse("")
+            _ <- checkFinishReason(reason)
           } yield {
             val text     = message.flatMap(_.get("content")).flatMap(_.strOpt).getOrElse("")
             val thinking = message.flatMap(reasoningText).getOrElse("")
@@ -593,7 +594,8 @@ class WatsonXClient(
               usage = usage,
               model = config.model,
               message = AssistantMessage(Some(text).filter(_.nonEmpty), toolCalls).withThinking(thinking),
-              estimatedCost = usage.flatMap(estimateCost)
+              estimatedCost = usage.flatMap(estimateCost),
+              finishReason = toFinishReason(reason)
             )
           }
       }
@@ -649,6 +651,17 @@ object WatsonXClient {
    * reading (the abnormal-ending check, messages, `StreamedChunk.finishReason`) uses this form.
    */
   private[provider] def normalizeFinishReason(raw: String): String = raw.trim.toLowerCase(java.util.Locale.ROOT)
+
+  /**
+   * A normalised `finish_reason` as a [[FinishReason]] (RFC 0009): `stop`, `tool_calls` and `length` mapped, anything
+   * else kept as `Other`, and none (`""`) as `Other("")`.
+   */
+  private[provider] def toFinishReason(normalized: String): FinishReason = normalized match {
+    case "stop"                         => FinishReason.Stop
+    case "tool_calls" | "function_call" => FinishReason.ToolCalls
+    case "length"                       => FinishReason.Length
+    case other                          => FinishReason.Other(other)
+  }
 
   /**
    * The `finish_reason` values that mean a generation did not finish: `error`, `cancelled` and

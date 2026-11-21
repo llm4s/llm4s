@@ -131,14 +131,23 @@ class JlamaClientSpec extends AnyWordSpec with Matchers:
         .streamComplete(hello, CompletionOptions(), chunks += _)
         .fold(e => fail(e.message), identity)
       chunks.flatMap(_.content) shouldBe Seq("A", "B", "C")
-      chunks.last.finishReason shouldBe Some("stop")
+      chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       chunks.map(_.id).distinct shouldBe Seq(completion.id)
       completion.content shouldBe "ABC"
     }
 
     "report a reply cut off by the token limit as length" in {
       val chunks = mutable.Buffer.empty[StreamedChunk]
-      client(new ScriptedEngine(finish = JlamaFinish.Length)).streamComplete(hello, CompletionOptions(), chunks += _)
-      chunks.last.finishReason shouldBe Some("length")
+      val result =
+        client(new ScriptedEngine(finish = JlamaFinish.Length)).streamComplete(hello, CompletionOptions(), chunks += _)
+      chunks.last.finishReason shouldBe Some(FinishReason.Length)
+      result.map(_.finishReason) shouldBe Right(FinishReason.Length)
+    }
+
+    // RFC 0009: complete reports the engine's finish too, a limit as Length
+    "give complete the engine's finish, Length at the limit and Stop otherwise" in {
+      client(new ScriptedEngine(finish = JlamaFinish.Length)).complete(hello).map(_.finishReason) shouldBe
+        Right(FinishReason.Length)
+      client(new ScriptedEngine()).complete(hello).map(_.finishReason) shouldBe Right(FinishReason.Stop)
     }
   }

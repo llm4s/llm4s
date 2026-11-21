@@ -57,7 +57,7 @@ object BasicStreamingExample {
           chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
 
           // Show finish reason
-          chunk.finishReason.foreach(reason => logger.info("[Stream finished: {}]", reason))
+          chunk.finishReason.foreach(reason => logger.info("[Stream finished: {}]", reason.name))
         }
       )
       _ = {

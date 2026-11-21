@@ -241,9 +241,9 @@ class OpenAICompatibleClient(
             details ++= streamedThinkingDetails(json)
             if (failure.isEmpty)
               parseStreamingChunks(json, toolCalls).foreach { chunk =>
-                chunk.finishReason.filter(_.nonEmpty).foreach { reason =>
+                chunk.finishReason.foreach { reason =>
                   ended = true
-                  if (reason == "error")
+                  if (reason == FinishReason.Other("error"))
                     failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
                 }
                 accumulator.addChunk(chunk)
@@ -578,7 +578,8 @@ class OpenAICompatibleClient(
       toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
-      citations = parseCitations(message)
+      citations = parseCitations(message),
+      finishReason = ChatCompletionsFinishReason.of(choice).getOrElse(FinishReason.Other(""))
     )
   }
 
@@ -670,7 +671,7 @@ class OpenAICompatibleClient(
       case Some(choice) =>
         val delta        = choice.obj.getOrElse("delta", ujson.Obj())
         val content      = delta.obj.get("content").flatMap(dialect.decodeContent)
-        val finishReason = choice.obj.get("finish_reason").flatMap(_.strOpt).filter(_ != "null")
+        val finishReason = ChatCompletionsFinishReason.of(choice)
         val thinking     = dialect.thinking(delta)
         val chunkId      = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 

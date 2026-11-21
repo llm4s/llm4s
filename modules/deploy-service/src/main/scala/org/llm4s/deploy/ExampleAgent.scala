@@ -55,7 +55,8 @@ final class DemoModel(toolDelay: FiniteDuration) extends LLMClient:
       model = "demo",
       message = message,
       toolCalls = message.toolCalls.toList,
-      usage = Some(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0))
+      usage = Some(TokenUsage(promptTokens = 0, completionTokens = 0, totalTokens = 0)),
+      finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
 
 /** The example service's agent: one id, the configured model, and the demo model's `pause` tool. */

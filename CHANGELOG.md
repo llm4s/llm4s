@@ -16,9 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
   [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
+- `StreamedChunk.finishReason` is an `Option[FinishReason]`, no longer an `Option[String]`; a positional
+  pattern on `Completion` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
+  [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
 
 ### Providers
 
+- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
+  traces too; which clients map it is in the [migration note](docs/reference/migration.md#finish-reasons-are-typed-2613) ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1) [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Added** `ModelCapabilities` reads the thinking and effort metadata: `supportsAdaptiveThinking`, `supportsOutputConfig`,
   `supportedReasoningEfforts`, `supportsThinkingOff`, and `supportsBudgetThinking`, which the overrides file's new patch
   entries set to `false` for Claude Opus 4.7/4.8 and Fable 5 ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 3) [#2115](https://github.com/llm4s/llm4s/issues/2115).

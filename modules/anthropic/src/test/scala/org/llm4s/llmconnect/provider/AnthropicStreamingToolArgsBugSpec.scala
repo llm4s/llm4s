@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import org.llm4s.llmconnect.model.{ StreamedChunk, ToolCall }
+import org.llm4s.llmconnect.model.{ FinishReason, StreamedChunk, ToolCall }
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 
 /**
@@ -37,7 +37,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
       id = msgId,
       content = None,
       toolCall = None,
-      finishReason = Some("end_turn")
+      finishReason = Some(FinishReason.Other("end_turn"))
     )
 
   "StreamingAccumulator" should "assemble tool-call arguments from fragments" in {

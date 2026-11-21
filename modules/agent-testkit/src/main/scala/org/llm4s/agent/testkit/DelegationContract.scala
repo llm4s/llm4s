@@ -191,7 +191,8 @@ object DelegationContract:
       model = "contract-model",
       message = message,
       toolCalls = message.toolCalls.toList,
-      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15))
+      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15)),
+      finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
 
   final private case class Text(text: String) derives ReadWriter

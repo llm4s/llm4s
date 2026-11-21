@@ -102,7 +102,7 @@ class BedrockStreamingWireSpec extends AnyWordSpec with Matchers {
     c.message.toolCalls shouldBe c.toolCalls
     c.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((7, 3))
     chunks.flatMap(_.content).mkString shouldBe "Hello wörld ☃"
-    chunks.flatMap(_.finishReason) shouldBe List("tool_use")
+    chunks.flatMap(_.finishReason) shouldBe List(FinishReason.Other("tool_use")) // mapped in RFC 0009 PR 2
   }
 
   private type Result[A] = org.llm4s.types.Result[A]

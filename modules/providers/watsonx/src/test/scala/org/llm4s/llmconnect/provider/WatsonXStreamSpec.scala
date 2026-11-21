@@ -79,14 +79,14 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
 
   /** What a run observed, comparable across runs. */
   private case class Observed(
-    chunks: List[(Option[String], Option[String])],
+    chunks: List[(Option[String], Option[FinishReason])],
     content: String,
     usage: Option[(Int, Int, Int)]
   )
 
   private def run(in: InputStream): (Either[org.llm4s.error.LLMError, Observed], StubHttp) =
     val http   = streaming(streamOf(in))
-    val chunks = ListBuffer.empty[(Option[String], Option[String])]
+    val chunks = ListBuffer.empty[(Option[String], Option[FinishReason])]
     val result = new WatsonXClient(config, httpClient = http)
       .streamComplete(hi, CompletionOptions(), c => chunks += ((c.content, c.finishReason)))
       .map(c =>
@@ -98,7 +98,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     run(bytes(text))._1.getOrElse(fail(s"expected success for: ${text.take(80)}"))
 
   private val expected = Observed(
-    chunks = List((Some("Héllo 🌍"), None), (Some(" wörld"), None), (None, Some("stop"))),
+    chunks = List((Some("Héllo 🌍"), None), (Some(" wörld"), None), (None, Some(FinishReason.Stop))),
     content = "Héllo 🌍 wörld",
     usage = Some((7, 2, 9))
   )
@@ -154,7 +154,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   test("empty choices, an empty object and an empty-text event emit no chunk and do not fail") {
     val text = Seq("""{"choices":[]}""", "{}", event("", "not_finished"), event("x", "stop"))
     val seen = observe(sse(text))
-    seen.chunks shouldBe List((Some("x"), None), (None, Some("stop")))
+    seen.chunks shouldBe List((Some("x"), None), (None, Some(FinishReason.Stop)))
   }
 
   private val normalStops = Seq("stop", "length", "tool_calls", "something_new", "ERROR_X")
@@ -163,7 +163,13 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   test("a normal finish reason is delivered normalised (trimmed, lower case) and the stream succeeds") {
     normalStops.foreach { reason =>
       val seen = observe(sse(Seq(event("a", "not_finished"), event("", reason))))
-      withClue(reason)(seen.chunks.last shouldBe ((None, Some(reason.trim.toLowerCase))))
+      // normalised (trimmed, lower case), then mapped as RFC 0009's chat-completions row
+      val expected = reason.trim.toLowerCase match
+        case "stop"       => FinishReason.Stop
+        case "length"     => FinishReason.Length
+        case "tool_calls" => FinishReason.ToolCalls
+        case other        => FinishReason.Other(other)
+      withClue(reason)(seen.chunks.last shouldBe ((None, Some(expected))))
     }
   }
 
@@ -323,7 +329,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     completion.toolCalls shouldBe List(expectedCall)
     completion.message.toolCalls shouldBe Seq(expectedCall)
     chunks.flatMap(_.toolCall) shouldBe Seq(expectedCall)
-    chunks.last.finishReason shouldBe Some("tool_calls")
+    chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
     chunks.indexWhere(_.toolCall.isDefined) should be < chunks.indexWhere(_.finishReason.isDefined)
   }
 

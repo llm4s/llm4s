@@ -48,7 +48,7 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       onChunk(StreamedChunk("c-1", Some("answer")))
-      onChunk(StreamedChunk("c-1", None, finishReason = Some("length")))
+      onChunk(StreamedChunk("c-1", None, finishReason = Some(FinishReason.Length)))
       result
     }
     def getContextWindow(): Int                 = 1000
@@ -81,8 +81,38 @@ class TracingLLMClientSpec extends AnyWordSpec with Matchers {
       e.usage shouldBe Some(TokenUsage(3, 2, 5))
       e.options shouldBe Some(options)
       e.input shouldBe conversation.messages
-      e.finishReasons shouldBe empty
+      e.finishReasons shouldBe Seq("stop") // the Completion's reason; Stop by default
       e.content shouldBe "answer"
+    }
+
+    // RFC 0009: a non-streamed call reports its reason too, as the mapped name; an unknown one is left out
+    "trace a completion's finish reason, leaving out an empty Other" in {
+      def reasonsOf(reason: FinishReason) = {
+        val tracing = new Recording
+        TracingLLMClient(new Stub(Right(completion.withFinishReason(reason))), tracing).complete(conversation, options)
+        tracing.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].finishReasons
+      }
+      reasonsOf(FinishReason.Length) shouldBe Seq("length")
+      reasonsOf(FinishReason.ToolCalls) shouldBe Seq("tool_calls")
+      reasonsOf(FinishReason.Other("content_filter")) shouldBe Seq("content_filter")
+      reasonsOf(FinishReason.Other("")) shouldBe empty
+    }
+
+    "keep a stream's reason when a later chunk carries an empty one" in {
+      val emptyLast = new Stub(Right(completion.withFinishReason(FinishReason.Other("")))) {
+        override def streamComplete(
+          conversation: Conversation,
+          options: CompletionOptions,
+          onChunk: StreamedChunk => Unit
+        ): Result[Completion] = {
+          onChunk(StreamedChunk("c-1", Some("answer"), finishReason = Some(FinishReason.Length)))
+          onChunk(StreamedChunk("c-1", None, finishReason = Some(FinishReason.Other(""))))
+          Right(completion.withFinishReason(FinishReason.Other("")))
+        }
+      }
+      val tracing = new Recording
+      TracingLLMClient(emptyLast, tracing).streamComplete(conversation, options, _ => ())
+      tracing.events.loneElement.asInstanceOf[TraceEvent.CompletionReceived].finishReasons shouldBe Seq("length")
     }
 
     "trace a streamed completion with its finish reason, passing every chunk on" in {

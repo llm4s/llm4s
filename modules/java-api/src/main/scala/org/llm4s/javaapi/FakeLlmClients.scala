@@ -68,7 +68,13 @@ private[javaapi] object FakeLlmClients {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       complete(conversation, options).map { completion =>
-        onChunk(StreamedChunk(id = completion.id, content = Some(completion.content), finishReason = Some("stop")))
+        onChunk(
+          StreamedChunk(
+            id = completion.id,
+            content = Some(completion.content),
+            finishReason = Some(completion.finishReason)
+          )
+        )
         completion
       }
 

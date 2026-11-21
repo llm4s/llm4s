@@ -227,7 +227,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val client = ScriptedLLMClient.sequence(Reply.text("hello"))
     val chunks = ArrayBuffer.empty[StreamedChunk]
     client.streamComplete(conversation("q"), options, chunks += _).value
-    chunks.last.finishReason shouldBe Some("stop")
+    chunks.last.finishReason shouldBe Some(FinishReason.Stop)
     chunks.last.content shouldBe None
     chunks.init.flatMap(_.finishReason) shouldBe empty
   }
@@ -240,9 +240,17 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     val result = client.streamComplete(conversation("q"), options, chunks += _).value
     chunks.flatMap(_.toolCall).map(_.name).toList shouldBe List("one", "two")
     chunks.flatMap(_.toolCall).map(_.id).toList shouldBe List("call-1-1", "call-1-2")
-    chunks.last.finishReason shouldBe Some("tool_calls")
+    chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
     chunks.flatMap(_.content) shouldBe empty
     result.toolCalls.map(_.id) shouldBe List("call-1-1", "call-1-2")
+    result.finishReason shouldBe FinishReason.ToolCalls
+  }
+
+  // RFC 0009: the same scripted reply has the same reason from complete and from a stream
+  it should "report ToolCalls for a reply with calls and Stop for text, from complete as from a stream" in {
+    val client = ScriptedLLMClient.sequence(Reply.toolCalls(ToolCall("", "one", ujson.Obj())), Reply.text("done"))
+    client.complete(conversation("q"), options).value.finishReason shouldBe FinishReason.ToolCalls
+    client.complete(conversation("q"), options).value.finishReason shouldBe FinishReason.Stop
   }
 
   it should "give every chunk the id of the completion" in {
@@ -275,7 +283,7 @@ class ScriptedLLMClientSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "send no text chunk for a reply with empty text" in {
     val chunks = ArrayBuffer.empty[StreamedChunk]
     ScriptedLLMClient.sequence(Reply.text("")).streamComplete(conversation("q"), options, chunks += _).value
-    chunks.map(_.finishReason) shouldBe List(Some("stop"))
+    chunks.map(_.finishReason) shouldBe List(Some(FinishReason.Stop))
   }
 
   "the configuration" should "report a 128000-token context window and reserve 4096 by default" in {

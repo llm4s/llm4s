@@ -75,7 +75,7 @@ class OpenTelemetryGenAiSpansSpec extends AnyWordSpec with Matchers:
       onChunk: StreamedChunk => Unit
     ): Result[Completion] =
       onChunk(StreamedChunk("chatcmpl-1", Some(Answer)))
-      onChunk(StreamedChunk("chatcmpl-1", None, finishReason = Some("stop")))
+      onChunk(StreamedChunk("chatcmpl-1", None, finishReason = Some(FinishReason.Stop)))
       answer
     def getContextWindow(): Int                 = 128000
     def getReserveCompletion(): Int             = 4096

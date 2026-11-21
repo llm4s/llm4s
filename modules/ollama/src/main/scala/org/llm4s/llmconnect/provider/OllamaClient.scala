@@ -264,7 +264,7 @@ class OllamaClient(
                     case Left(error) => failure = Some(error)
                     case Right(calls) =>
                       sawCalls = sawCalls || calls.nonEmpty
-                      val finish = if (done) Some(if (sawCalls) "tool_calls" else "stop") else None
+                      val finish = Option.when(done)(OllamaClient.finishReason(json, sawCalls))
                       val head = StreamedChunk(
                         id = id,
                         content = contentOpt,
@@ -408,7 +408,8 @@ class OllamaClient(
         message = (if (calls.isEmpty) AssistantMessage(content)
                    else AssistantMessage(Some(content).filter(_.nonEmpty), calls))
           .withThinking(OllamaClient.thinking(json.obj.get("message")).getOrElse("")),
-        estimatedCost = cost
+        estimatedCost = cost,
+        finishReason = OllamaClient.finishReason(json, calls.nonEmpty)
       )
     }
   }
@@ -564,6 +565,18 @@ object OllamaClient {
         case None => Right(ids.nextId())
       }
     } yield ToolCall(id, name, args)
+
+  /**
+   * The reply's [[FinishReason]] from its last line's `done_reason` (RFC 0009): `stop` is `ToolCalls` when the reply
+   * called a tool and `Stop` otherwise, `length` is `Length`, any other value `Other`, and none `Other("")`.
+   */
+  private[provider] def finishReason(json: ujson.Value, calledTools: Boolean): FinishReason =
+    json.obj.get("done_reason").flatMap(_.strOpt).filter(_.nonEmpty) match {
+      case Some("stop")   => if (calledTools) FinishReason.ToolCalls else FinishReason.Stop
+      case Some("length") => FinishReason.Length
+      case Some(other)    => FinishReason.Other(other)
+      case None           => FinishReason.Other("")
+    }
 
   /** The `thinking` of a reply's `message`, or of one streamed line; none when absent, null or empty. */
   private[provider] def thinking(message: Option[ujson.Value]): Option[String] =

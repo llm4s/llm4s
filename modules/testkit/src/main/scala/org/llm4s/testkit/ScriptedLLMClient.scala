@@ -1,7 +1,14 @@
 package org.llm4s.testkit
 
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
+import org.llm4s.llmconnect.model.{
+  AssistantMessage,
+  Completion,
+  CompletionOptions,
+  Conversation,
+  FinishReason,
+  StreamedChunk
+}
 import org.llm4s.types.Result
 import java.time.Instant
 
@@ -163,7 +170,9 @@ final class ScriptedLLMClient private (
         toolCalls = calls
       ),
       toolCalls = calls,
-      usage = reply.usage
+      usage = reply.usage,
+      // as a provider would report it, on complete and stream alike
+      finishReason = if (calls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
     )
   }
 
@@ -174,7 +183,7 @@ final class ScriptedLLMClient private (
     val last = StreamedChunk(
       id,
       None,
-      finishReason = Some(if (completion.toolCalls.isEmpty) "stop" else "tool_calls")
+      finishReason = Some(completion.finishReason)
     )
     text ++ tools ++ List(last)
   }

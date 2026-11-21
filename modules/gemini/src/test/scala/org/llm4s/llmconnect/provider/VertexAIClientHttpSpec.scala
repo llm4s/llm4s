@@ -131,6 +131,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     result.isRight shouldBe true
     result.toOption.get.content shouldBe "Hello!"
+    // RFC 0009 PR 1: the raw finishReason, not a Stop the client did not map (PR 2 maps it)
+    result.toOption.get.finishReason shouldBe FinishReason.Other("STOP")
   }
 
   it should "report the sources of a grounded answer as citations (#1216)" in {
@@ -515,7 +517,7 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     }
     completion.content shouldBe ""
     completion.usage shouldBe Some(noPartsUsage)
-    chunks.flatMap(_.finishReason) shouldBe List("MAX_TOKENS")
+    chunks.flatMap(_.finishReason) shouldBe List(FinishReason.Other("MAX_TOKENS")) // mapped in RFC 0009 PR 2
     chunks.flatMap(_.content) shouldBe empty
   }
 
