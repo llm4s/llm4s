@@ -67,11 +67,11 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
 
         closing(VectorStoreFactory.create(config))(_.close()) { store =>
           store.upsert(record) shouldBe Right(())
-          store.get("persist-config").toOption.flatten.map(_.id) shouldBe Some("persist-config")
+          store.get("persist-config").map(_.map(_.id)) shouldBe Right(Some("persist-config"))
         }
 
         closing(VectorStoreFactory.create(config))(_.close()) { store =>
-          store.get("persist-config").toOption.flatten.map(_.content) shouldBe Some(Some("file backed config"))
+          store.get("persist-config").map(_.map(_.content)) shouldBe Right(Some(Some("file backed config")))
         }
       }
     }
@@ -80,7 +80,8 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
       expectQdrant(
         VectorStoreFactory.create(VectorStoreFactory.Config(VectorStoreFactory.Backend.Qdrant)),
         "http://localhost:6333",
-        "vectors"
+        "vectors",
+        expectKey = false
       )
     }
 
@@ -91,7 +92,7 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
         options = Map("collectionName" -> "docs")
       )
 
-      expectQdrant(VectorStoreFactory.create(config), "http://qdrant.example:6333", "docs")
+      expectQdrant(VectorStoreFactory.create(config), "http://qdrant.example:6333", "docs", expectKey = false)
     }
 
     "return a Qdrant store for a URL and an apiKey secret" in {
@@ -104,7 +105,28 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
         )
         .withSecret("apiKey", Secret("test-key"))
 
-      expectQdrant(VectorStoreFactory.create(config), "https://example.qdrant.io", "cloud-docs")
+      expectQdrant(VectorStoreFactory.create(config), "https://example.qdrant.io", "cloud-docs", expectKey = true)
+    }
+
+    "pass the provider name's path and connection string through to the store" in {
+      withTempDb("factory-provider-") { path =>
+        val record = VectorRecord("persist-provider", Array(0.5f, 0.5f), Some("by provider name"))
+
+        closing(VectorStoreFactory.create("SQLite", path = Some(path.toString)))(_.close()) { store =>
+          store.upsert(record) shouldBe Right(())
+        }
+
+        closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
+          store.get("persist-provider").map(_.map(_.content)) shouldBe Right(Some(Some("by provider name")))
+        }
+      }
+
+      expectQdrant(
+        VectorStoreFactory.create("Qdrant", connectionString = Some("http://qdrant.example:6335")),
+        "http://qdrant.example:6335",
+        "vectors",
+        expectKey = false
+      )
     }
   }
 
@@ -116,11 +138,11 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
 
         closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
           store.upsert(record) shouldBe Right(())
-          store.get("persist-sqlite").toOption.flatten.map(_.content) shouldBe Some(Some("file backed sqlite"))
+          store.get("persist-sqlite").map(_.map(_.content)) shouldBe Right(Some(Some("file backed sqlite")))
         }
 
         closing(VectorStoreFactory.sqlite(path.toString))(_.close()) { store =>
-          store.get("persist-sqlite").toOption.flatten.map(_.id) shouldBe Some("persist-sqlite")
+          store.get("persist-sqlite").map(_.map(_.id)) shouldBe Right(Some("persist-sqlite"))
         }
       }
     }
@@ -129,14 +151,15 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
   "VectorStoreFactory qdrant shortcuts" should {
 
     "build an offline store from qdrant(collection)" in {
-      expectQdrant(VectorStoreFactory.qdrant("docs"), "http://localhost:6333", "docs")
+      expectQdrant(VectorStoreFactory.qdrant("docs"), "http://localhost:6333", "docs", expectKey = false)
     }
 
     "build an offline store from qdrant(url, collection)" in {
       expectQdrant(
         VectorStoreFactory.qdrant("http://qdrant.example:6334", "remote-docs"),
         "http://qdrant.example:6334",
-        "remote-docs"
+        "remote-docs",
+        expectKey = false
       )
     }
 
@@ -144,7 +167,8 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
       expectQdrant(
         VectorStoreFactory.qdrantCloud("https://cloud.example.qdrant.io", Secret("cloud-key")),
         "https://cloud.example.qdrant.io",
-        "vectors"
+        "vectors",
+        expectKey = true
       )
     }
   }
@@ -156,9 +180,9 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
         closing(KeywordIndex.sqlite(path.toString))(_.close()) { index =>
           index.index(KeywordDocument("doc-1", "The factory stores vectors")) shouldBe Right(())
 
-          val found = index.search("factory", topK = 5)
-          found.isRight shouldBe true
-          found.toOption.get.map(_.id) should contain("doc-1")
+          index.search("factory", topK = 5).map(_.map(_.id)) should matchPattern {
+            case Right(ids: Seq[?]) if ids.contains("doc-1") =>
+          }
         }
       }
     }
@@ -166,22 +190,40 @@ class VectorStoreFactorySpec extends AnyWordSpec with Matchers {
 
   "HybridSearcher.sqlite" should {
 
-    "return a searcher that can be closed" in {
+    "write the vector store and keyword index to their own files" in {
       withTempDbs("hybrid-vector-", "hybrid-keyword-") { (vectorPath, keywordPath) =>
+        val record = VectorRecord("hybrid-vec", Array(0.3f, 0.7f), Some("hybrid vector"))
+
         closing(HybridSearcher.sqlite(vectorPath.toString, keywordPath.toString))(_.close()) { searcher =>
-          searcher.vectorStore should not be null
-          searcher.keywordIndex should not be null
-          searcher.close()
+          searcher.vectorStore.upsert(record) shouldBe Right(())
+          searcher.keywordIndex.index(KeywordDocument("hybrid-doc", "The hybrid searcher indexes keywords")) shouldBe
+            Right(())
+        }
+
+        closing(VectorStoreFactory.sqlite(vectorPath.toString))(_.close()) { store =>
+          store.get("hybrid-vec").map(_.map(_.content)) shouldBe Right(Some(Some("hybrid vector")))
+        }
+
+        closing(KeywordIndex.sqlite(keywordPath.toString))(_.close()) { index =>
+          index.search("keywords", topK = 5).map(_.map(_.id)) should matchPattern {
+            case Right(ids: Seq[?]) if ids.contains("hybrid-doc") =>
+          }
         }
       }
     }
   }
 
-  private def expectQdrant(opened: Result[VectorStore], baseUrl: String, collectionName: String): Unit =
+  private def expectQdrant(
+    opened: Result[VectorStore],
+    baseUrl: String,
+    collectionName: String,
+    expectKey: Boolean
+  ): Unit =
     opened match {
       case Right(store: QdrantVectorStore) =>
         store.baseUrl shouldBe baseUrl
         store.collectionName shouldBe collectionName
+        withClue("hasApiKey: ")(store.hasApiKey shouldBe expectKey)
         store.close()
       case Right(other) =>
         fail(s"Expected QdrantVectorStore, got ${other.getClass.getName}")
