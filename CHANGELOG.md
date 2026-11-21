@@ -7,14 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<!-- The net change since 0.5.1, by area. Add an entry to its area's list; a follow-up to unreleased work edits
+<!-- The net change since 0.6.0, by area. Add an entry to its area's list; a follow-up to unreleased work edits
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
+
+
+## [0.6.0] - 2026-11-21
+
+### Highlights
+
+0.6.0 makes the agent runtime ready to deploy and widens who can use llm4s. Agents gain typed subagents (child
+threads, token budgets, supervision, nested streams) and production adapters: a PostgreSQL checkpointer shared across
+machines, a durable run queue with workers, and one OpenTelemetry trace per run. Credentials are `Secret`s and can come
+from a file or an `ApiKeyProvider`; console and OpenTelemetry tracing withhold message content unless you opt in. New
+providers and features: xAI, Perplexity, keyless Entra ID for Azure OpenAI, web search for Anthropic and Gemini, one
+proxy and CA setting for every client, and your own HTTP client. The Java facade gains agents, streaming, annotated
+tools and RAG (`llm4s-java-rag`), and `llm4s-kotlin-api` is published for the first time. New experimental modules
+include `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-schema-iron`, `llm4s-tapir`,
+`llm4s-repl`, `llm4s-sttp`, `llm4s-spring-ai`, `llm4s-jlama` (an in-process local model) and `llm4s-secrets-vault`, along
+with the Elasticsearch/OpenSearch and Redis vector stores and `llm4s-doctor`. A `Completion` reports the options a provider
+could not honour (`adjustments`), and thinking tokens are counted once in usage and cost. Many data types are now
+growth-safe (private constructors and `with*` setters), which breaks `copy` and positional patterns: read the
+[migration guide](docs/reference/migration.md) before upgrading. 0.6.0 sets no MiMa baseline.
 
 ### Breaking changes
 
 - `TokenUsage.completionTokens` no longer includes reasoning tokens for OpenAI, OpenAI-compatible and Perplexity replies,
   and output token counts (`UsageSummary.outputTokens`, token budgets, metrics, OpenTelemetry, Langfuse, Spring AI) include
   thinking for every provider; [migration](docs/reference/migration.md#completiontokens-no-longer-includes-thinking-tokens-2564).
+- A Gemini or Vertex AI reply a content filter stopped, or a blocked prompt, is a `Left(ContentFilteredError)`, not a
+  partial answer or `UnknownError`; [migration](docs/reference/migration.md#a-gemini-reply-a-content-filter-stopped-is-an-error-2563).
 - A `Llm4sHttpClient` passed to an SDK-free provider client is no longer closed with it, and `LlmClientOptions` and
   `ProviderFeatures` gain a field; [migration](docs/reference/migration.md#a-supplied-http-client-is-the-callers-to-close-2341).
 - `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;
@@ -748,7 +769,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usage and 401/429/500 mapped alike, an unreachable or silent server a retryable error, config errors naming the section,
   a section reloaded from system properties, and failover through `ReliableClient` plus a fallback provider
   [#380](https://github.com/llm4s/llm4s/issues/380).
-- **Fixed** `llm4s-kotlin-api` is published, first in 0.5.2: the release's version check now reads sbt's tab-indented
+- **Fixed** `llm4s-kotlin-api` is published, first in 0.6.0: the release's version check now reads sbt's tab-indented
   version, which left Kotlin out of 0.5.0 and 0.5.1.
 - **Added** `@Cloud` smoke suites for Azure OpenAI (classic, custom-domain and `/openai/v1` endpoints), Requesty, the generic
   `openai-compatible` provider (Groq, plus a keyless local run), Voyage embeddings and Vertex AI, and Mistral dialect checks [#1213](https://github.com/llm4s/llm4s/issues/1213).
@@ -1701,7 +1722,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/llm4s/llm4s/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/llm4s/llm4s/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/llm4s/llm4s/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/llm4s/llm4s/compare/v0.4.0...v0.4.1

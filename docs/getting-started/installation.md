@@ -258,11 +258,11 @@ what is on `main`, build it and publish it to your local repository:
 ```bash
 git clone https://github.com/llm4s/llm4s && cd llm4s
 sbt publishLocal   # for sbt; use `sbt publishM2` for Maven or Gradle (mavenLocal())
-sbt version        # prints the version it published, for example 0.5.1+12-abc12345-SNAPSHOT
+sbt version        # prints the version it published, for example 0.6.0+12-abc12345-SNAPSHOT
 ```
 
 Then depend on that version, for example
-`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.5.1+12-abc12345-SNAPSHOT"` (use the one `sbt version`
+`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.6.0+12-abc12345-SNAPSHOT"` (use the one `sbt version`
 printed). This guide describes the latest release; `main` may have modules and configuration that it does not
 have yet.
 
@@ -641,12 +641,7 @@ Ox `Flow` of a streamed reply, bounded fan-out, races and retries to direct-styl
 functions, and `Flow`s of an agent turn's events. It is a Kotlin artifact, so it has **no** `_3` suffix, and it is
 released at the same version as every other llm4s module, so the BOM manages it too:
 
-{: .warning }
-> **`llm4s-kotlin-api` {{ site.data.project.latest_release }} is not on Maven Central yet.** A fault in the release
-> workflow left it out of the 0.5.0 and 0.5.1 releases; the fix is pending
-> ([#1976](https://github.com/llm4s/llm4s/pull/1976)). Until a release includes it, the coordinates below do not
-> resolve (the BOM lists it, but every other entry of the BOM resolves). Build it locally instead, as described
-> below the snippet; it then depends on the released `llm4s-java-api_3`.
+It is on Maven Central from 0.6.0; a release workflow fault left it out of 0.5.0 and 0.5.1.
 
 ```kotlin
 // build.gradle.kts
@@ -659,7 +654,7 @@ dependencies {
 
 Without the BOM, write the version on it: `implementation("org.llm4s:llm4s-kotlin-api:{{ site.data.project.latest_release }}")`.
 It runs on JDK 21, like the Java facade it wraps. The module is built by Gradle (`modules/kotlin-api`), not sbt, so
-`sbt publishLocal` does not build it. To build it, check out the release tag (`git checkout v{{ site.data.project.latest_release }}`)
+`sbt publishLocal` does not build it. To build it yourself, check out the release tag (`git checkout v{{ site.data.project.latest_release }}`)
 and run `gradle publishToMavenLocal -Pllm4sVersion={{ site.data.project.latest_release }}` in `modules/kotlin-api`,
 then add `mavenLocal()` to your repositories; it depends on `llm4s-java-api_3` at that version, which is on Maven
 Central. Without `-Pllm4sVersion` it builds at `0.1.0-SNAPSHOT`; to try it from `main`, run `sbt publishM2` first and
@@ -1100,8 +1095,6 @@ sbt compile
 - With Maven or Gradle, write the Scala suffix yourself: `llm4s-core_3`, not `llm4s-core` (the BOM, `llm4s-bom`,
   has none)
 - No snapshots are published: to use `main`, build it locally (see [Unreleased changes](#unreleased-changes-main))
-- `llm4s-kotlin-api` is not on Maven Central for {{ site.data.project.latest_release }} yet (see
-  [For Kotlin](#for-kotlin-coroutines-and-flow))
 
 ---
 

@@ -129,7 +129,7 @@ llm4s/
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.6.0
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
