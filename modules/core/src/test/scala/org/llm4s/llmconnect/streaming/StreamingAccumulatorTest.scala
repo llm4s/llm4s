@@ -60,7 +60,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.isComplete shouldBe false
 
-    accumulator.addChunk(StreamedChunk("msg-1", None, None, Some("stop")))
+    accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(FinishReason.Stop)))
     accumulator.isComplete shouldBe true
   }
 
@@ -86,7 +86,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-456", Some("Hello "), None, None))
     accumulator.addChunk(StreamedChunk("msg-456", Some("world!"), None, None))
     accumulator.updateTokens(10, 5)
-    accumulator.addChunk(StreamedChunk("msg-456", None, None, Some("stop")))
+    accumulator.addChunk(StreamedChunk("msg-456", None, None, Some(FinishReason.Stop)))
 
     val completion = accumulator.toCompletion
     completion.isRight shouldBe true
@@ -223,7 +223,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("Let me calculate...")))
     accumulator.addChunk(StreamedChunk("msg-1", Some("The answer is 42."), None, None, None))
-    accumulator.addChunk(StreamedChunk("msg-1", None, None, Some("stop"), None))
+    accumulator.addChunk(StreamedChunk("msg-1", None, None, Some(FinishReason.Stop), None))
 
     val completion = accumulator.toCompletion
     completion.isRight shouldBe true
@@ -238,7 +238,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
   test("a stream without thinking leaves the message's thinking empty") {
     val accumulator = StreamingAccumulator.create()
-    accumulator.addChunk(StreamedChunk("msg-1", Some("Hi"), None, Some("stop"), None))
+    accumulator.addChunk(StreamedChunk("msg-1", Some("Hi"), None, Some(FinishReason.Stop), None))
     accumulator.toCompletion.map(_.message.thinking) shouldBe Right(Seq.empty)
   }
 

@@ -32,7 +32,40 @@ and [the remaining config, model and util types](#config-model-and-util-types-ar
 [`completionTokens` no longer includes thinking tokens](#completiontokens-no-longer-includes-thinking-tokens-2564);
 [a Gemini reply a content filter stopped is an error](#a-gemini-reply-a-content-filter-stopped-is-an-error-2563); and
 [`llm4s-java-api` and the Spring Boot starter no longer bring the provider modules](#llm4s-java-api-and-the-spring-boot-starter-no-longer-bring-the-provider-modules-1496).
-Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
+Since 0.6.0, [`budgetTokens` and `ReasoningEffort.None` are replaced by `Thinking`](#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115),
+and [finish reasons are typed](#finish-reasons-are-typed-2613).
+
+## Finish reasons are typed (#2613)
+
+`Completion` gains `finishReason: FinishReason`, and `StreamedChunk.finishReason` changes from `Option[String]` to
+`Option[FinishReason]` ([RFC 0009](../rfcs/0009-model-call-contract) PR 1). `FinishReason` is `Stop`, `ToolCalls`,
+`Length` or `Other(raw)`; `name` gives the chat-completions string (`stop`, `tool_calls`, `length`) or the raw value.
+
+```scala
+// Before: a provider string, streams only
+client.streamComplete(conversation, options, chunk => chunk.finishReason.foreach(r => if (r == "length") warn()))
+
+// After: one type, on the Completion too
+client.complete(conversation, options).map { c =>
+  if (c.finishReason == FinishReason.Length) warn() // the content is cut short
+}
+```
+
+- **Check every comparison against a string literal**: `chunk.finishReason.contains("stop")` still compiles, because
+  `Option.contains` widens its argument, and is now always `false`. Write `contains(FinishReason.Stop)`.
+- `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
+- A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
+  From 0.6.0, add the `_` by hand; the `PositionalPatternsGainFields` Scalafix rule rewrites only 0.5.1's nine-field
+  pattern, adding both fields since then.
+- `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
+  one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
+- Until RFC 0009 PR 2, Gemini, Vertex AI and Bedrock report `Other` with their raw value and Anthropic `Other("")`,
+  and a Spring AI model's reason is always `Other(raw)`, since Spring AI has no common vocabulary. So match `Stop` only
+  where the client maps it: OpenAI, Azure, the OpenAI-compatible clients, watsonx, Perplexity, Ollama and Jlama.
+- Behaviour that changes with the reason: tracing reports it for `complete`, where it reported none, and an Anthropic
+  stream traces none until PR 2, where it traced a made-up `stop`; OpenAI's fake
+  streaming (o1) ends with the reply's own reason, not `stop`; Ollama reads `done_reason`, where it guessed `stop` or
+  `tool_calls` from `done`; and Perplexity reports an `incomplete` reply that has a call as `Length`, not `ToolCalls`.
 
 ## Changes since 0.5.1 that no rule automates
 

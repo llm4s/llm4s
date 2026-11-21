@@ -102,7 +102,7 @@ object LLMConnectTestFixtures {
     id = "msg-123",
     content = Some("!"),
     toolCall = None,
-    finishReason = Some("stop")
+    finishReason = Some(FinishReason.Stop)
   )
 
   val streamChunkWithThinking: StreamedChunk = StreamedChunk(

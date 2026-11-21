@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  FinishReason,
   StreamedChunk,
   TokenUsage,
   ToolCall
@@ -86,6 +87,7 @@ object SpringAiLlmClient {
     private var id: Option[String]        = None
     private var model: Option[String]     = None
     private var usage: Option[TokenUsage] = None
+    private var finish: Option[String]    = None
 
     /**
      * The chunks of one streamed response. A response with no generation, as some models send last with the usage
@@ -101,13 +103,14 @@ object SpringAiLlmClient {
         case Some(generation) =>
           SpringAiMapping.toolCalls(generation.getOutput).map { received =>
             val piece  = Option(generation.getOutput.getText).getOrElse("")
-            val finish = Option(generation.getMetadata).flatMap(m => Option(m.getFinishReason)).filter(_.nonEmpty)
+            val reason = Option(generation.getMetadata).flatMap(m => Option(m.getFinishReason)).filter(_.nonEmpty)
             val fresh  = received.filterNot(c => calls.exists(_.id == c.id))
+            reason.foreach(r => finish = Some(r))
             text.append(piece)
             calls = calls ++ fresh
             val chunkId = id.getOrElse("")
-            val textChunk = Option.when(piece.nonEmpty || finish.nonEmpty)(
-              StreamedChunk(chunkId, Option(piece).filter(_.nonEmpty), finishReason = finish)
+            val textChunk = Option.when(piece.nonEmpty || reason.nonEmpty)(
+              StreamedChunk(chunkId, Option(piece).filter(_.nonEmpty), finishReason = reason.map(FinishReason.Other(_)))
             )
             textChunk.toSeq ++ fresh.map(c => StreamedChunk(chunkId, None, toolCall = Some(c)))
           }
@@ -123,7 +126,9 @@ object SpringAiLlmClient {
         model = model.getOrElse(""),
         message = AssistantMessage(contentOpt = Option(content).filter(_.nonEmpty), toolCalls = calls),
         toolCalls = calls.toList,
-        usage = usage
+        usage = usage,
+        // Spring AI's reason as the model reported it: it has no common vocabulary to map
+        finishReason = FinishReason.Other(finish.getOrElse(""))
       )
     }
   }

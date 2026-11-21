@@ -28,6 +28,9 @@ import java.time.Instant
  *                    chunks has none, since chunks carry none. Coverage is growing under RFC 0008, so an
  *                    empty list means nothing was reported, not that every option was sent: see
  *                    [[RequestAdjustment]] for what is reported today.
+ * @param finishReason Why the model's turn ended (RFC 0009). `Stop` unless the client sets it; a client that read no
+ *                     reason sets `FinishReason.Other("")`. A completion assembled from streamed chunks carries the
+ *                     last reason a chunk had that was not empty.
  */
 @Stable
 final case class Completion private (
@@ -40,7 +43,8 @@ final case class Completion private (
   usage: Option[TokenUsage],
   estimatedCost: Option[Double],
   citations: List[Citation],
-  adjustments: List[RequestAdjustment]
+  adjustments: List[RequestAdjustment],
+  finishReason: FinishReason
 ) {
   def withId(id: String): Completion                                    = copy(id = id)
   def withCreated(created: Instant): Completion                         = copy(created = created)
@@ -54,6 +58,7 @@ final case class Completion private (
   def withEstimatedCost(estimatedCost: Option[Double]): Completion      = copy(estimatedCost = estimatedCost)
   def withCitations(citations: List[Citation]): Completion              = copy(citations = citations)
   def withAdjustments(adjustments: List[RequestAdjustment]): Completion = copy(adjustments = adjustments)
+  def withFinishReason(finishReason: FinishReason): Completion          = copy(finishReason = finishReason)
 
   /**
    * Extract content as text (for compatibility)
@@ -108,9 +113,52 @@ object Completion {
     usage: Option[TokenUsage] = None,
     estimatedCost: Option[Double] = None,
     citations: List[Citation] = List.empty,
-    adjustments: List[RequestAdjustment] = List.empty
+    adjustments: List[RequestAdjustment] = List.empty,
+    finishReason: FinishReason = FinishReason.Stop
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, adjustments)
+    new Completion(
+      id,
+      created,
+      content,
+      model,
+      message,
+      toolCalls,
+      usage,
+      estimatedCost,
+      citations,
+      adjustments,
+      finishReason
+    )
+
+  /**
+   * The `apply` before `finishReason` was added, with `FinishReason.Stop`. Kept for Java and Kotlin, which pass every
+   * argument because they do not see Scala's defaults.
+   */
+  def apply(
+    id: String,
+    created: Instant,
+    content: String,
+    model: String,
+    message: AssistantMessage,
+    toolCalls: List[ToolCall],
+    usage: Option[TokenUsage],
+    estimatedCost: Option[Double],
+    citations: List[Citation],
+    adjustments: List[RequestAdjustment]
+  ): Completion =
+    new Completion(
+      id,
+      created,
+      content,
+      model,
+      message,
+      toolCalls,
+      usage,
+      estimatedCost,
+      citations,
+      adjustments,
+      FinishReason.Stop
+    )
 
   /**
    * The `apply` before `adjustments` was added, with none. Kept for Java and Kotlin, which pass every
@@ -127,7 +175,19 @@ object Completion {
     estimatedCost: Option[Double],
     citations: List[Citation]
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations, List.empty)
+    new Completion(
+      id,
+      created,
+      content,
+      model,
+      message,
+      toolCalls,
+      usage,
+      estimatedCost,
+      citations,
+      List.empty,
+      FinishReason.Stop
+    )
 }
 
 /**
@@ -236,7 +296,7 @@ object EmbeddingUsage {
  * @param id Unique identifier for the stream.
  * @param content Optional text content delta.
  * @param toolCall Optional tool call information.
- * @param finishReason Optional reason for stream completion.
+ * @param finishReason Why the model's turn ended, on the chunk that reports it (RFC 0009).
  * @param thinkingDelta Optional thinking/reasoning content delta.
  *                      Present when streaming extended thinking content.
  */
@@ -245,18 +305,18 @@ final case class StreamedChunk private (
   id: String,
   content: Option[String],
   toolCall: Option[ToolCall],
-  finishReason: Option[String],
+  finishReason: Option[FinishReason],
   thinkingDelta: Option[String]
 ) {
-  def withId(id: String): StreamedChunk                               = copy(id = id)
-  def withContent(content: String): StreamedChunk                     = copy(content = Some(content))
-  def withContent(content: Option[String]): StreamedChunk             = copy(content = content)
-  def withToolCall(toolCall: ToolCall): StreamedChunk                 = copy(toolCall = Some(toolCall))
-  def withToolCall(toolCall: Option[ToolCall]): StreamedChunk         = copy(toolCall = toolCall)
-  def withFinishReason(finishReason: String): StreamedChunk           = copy(finishReason = Some(finishReason))
-  def withFinishReason(finishReason: Option[String]): StreamedChunk   = copy(finishReason = finishReason)
-  def withThinkingDelta(thinkingDelta: String): StreamedChunk         = copy(thinkingDelta = Some(thinkingDelta))
-  def withThinkingDelta(thinkingDelta: Option[String]): StreamedChunk = copy(thinkingDelta = thinkingDelta)
+  def withId(id: String): StreamedChunk                                   = copy(id = id)
+  def withContent(content: String): StreamedChunk                         = copy(content = Some(content))
+  def withContent(content: Option[String]): StreamedChunk                 = copy(content = content)
+  def withToolCall(toolCall: ToolCall): StreamedChunk                     = copy(toolCall = Some(toolCall))
+  def withToolCall(toolCall: Option[ToolCall]): StreamedChunk             = copy(toolCall = toolCall)
+  def withFinishReason(finishReason: FinishReason): StreamedChunk         = copy(finishReason = Some(finishReason))
+  def withFinishReason(finishReason: Option[FinishReason]): StreamedChunk = copy(finishReason = finishReason)
+  def withThinkingDelta(thinkingDelta: String): StreamedChunk             = copy(thinkingDelta = Some(thinkingDelta))
+  def withThinkingDelta(thinkingDelta: Option[String]): StreamedChunk     = copy(thinkingDelta = thinkingDelta)
 
   /**
    * Check if this chunk contains thinking content.
@@ -276,7 +336,7 @@ object StreamedChunk {
     id: String,
     content: Option[String],
     toolCall: Option[ToolCall] = None,
-    finishReason: Option[String] = None,
+    finishReason: Option[FinishReason] = None,
     thinkingDelta: Option[String] = None
   ): StreamedChunk =
     new StreamedChunk(id, content, toolCall, finishReason, thinkingDelta)

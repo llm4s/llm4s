@@ -123,7 +123,7 @@ A runnable example of both directions, with no API key, is
 | `ChatOptions` stop sequences, top-k | — | Refused with a `VALIDATION` error: no llm4s client sends them |
 | `ToolCallingChatOptions` tool callbacks | `ToolFunction`s | Name, description and input schema (object, string with `enum`, number, integer, boolean, array) |
 | `ChatResponseMetadata` id, model, usage | `Completion` id, model, `TokenUsage` | Prompt, completion and total tokens; cache read and write tokens |
-| `ChatGenerationMetadata` finish reason | — | `TOOL_CALLS` when the reply calls tools, else `STOP`; llm4s's `Completion` has no finish reason |
+| `ChatGenerationMetadata` finish reason | `Completion.finishReason` | `ToolCalls`, or an unmapped reason on a reply with calls, is `TOOL_CALLS`; `Length` is `LENGTH`; another raw reason passes through; none read is `STOP`. A Spring AI model's reason comes back as `Other(raw)` |
 | `EmbeddingRequest` texts | one llm4s embedding request | Texts in order; the request's options are not read |
 | Advisors, memory advisors, `VectorStore`, evaluators | — | Stay on the Spring AI side, over the adapted model |
 

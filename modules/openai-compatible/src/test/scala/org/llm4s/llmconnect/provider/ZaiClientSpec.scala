@@ -510,7 +510,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks(0).finishReason shouldBe Some("stop")
+    chunks(0).finishReason shouldBe Some(FinishReason.Stop)
   }
 
   it should "ignore null finish reason" in {
@@ -679,7 +679,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
         }
       }
 
-      val finishReason = choice.obj.get("finish_reason").flatMap(_.strOpt).filter(_ != "null")
+      val finishReason = ChatCompletionsFinishReason.of(choice)
 
       val toolCalls = delta.obj.get("tool_calls").map(_.arr).getOrElse(Seq.empty).collect {
         case call if call.obj.contains("function") =>

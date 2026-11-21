@@ -89,7 +89,7 @@ object TraceEvent {
    * @param streamed      whether the completion was streamed (`streamComplete`)
    * @param duration      how long the call took; the event's `timestamp` is its end
    * @param responseModel the model that answered, when the provider reported it
-   * @param finishReasons why the model stopped, as the provider reported it
+   * @param finishReasons why the model stopped: the `FinishReason`'s name (`stop`, `length`, `tool_calls`, or a raw value)
    * @param usage         the call's token usage, when the provider reported it
    * @param options       the options the request was sent with
    * @param input         the request's messages: message content, which backends record only when told to; not

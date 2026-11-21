@@ -39,6 +39,13 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
 
   private case class Run(result: Either[org.llm4s.error.LLMError, Completion], chunks: List[StreamedChunk])
 
+  /** RFC 0009's chat-completions row, for a value in any case and padding. */
+  private def expectedReason(raw: String): FinishReason = raw.trim.toLowerCase match
+    case "stop"       => FinishReason.Stop
+    case "length"     => FinishReason.Length
+    case "tool_calls" => FinishReason.ToolCalls
+    case other        => FinishReason.Other(other)
+
   private def stream(events: String): Run =
     val chunks = ListBuffer.empty[StreamedChunk]
     val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(events))))
@@ -58,7 +65,7 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
       withClue(s"terminal '$terminal': ") {
         run.result.map(_.content) shouldBe Right("one two three")
         run.chunks.flatMap(_.content) shouldBe List("one ", "two ", "three")
-        run.chunks.map(_.finishReason) shouldBe List(None, None, None, Some(terminal.trim.toLowerCase))
+        run.chunks.map(_.finishReason) shouldBe List(None, None, None, Some(expectedReason(terminal)))
       }
     }
   }
@@ -88,7 +95,7 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
       val run = stream(event("a", None) + event("b", Some(reason)))
       withClue(s"'$reason': ") {
         run.result.map(_.content) shouldBe Right("ab")
-        run.chunks.last.finishReason shouldBe Some("brand_new")
+        run.chunks.last.finishReason shouldBe Some(FinishReason.Other("brand_new"))
       }
     }
   }
@@ -116,4 +123,17 @@ class WatsonXFinishReasonSpec extends AnyFunSuite with Matchers:
   test("complete: a missing or blank finish_reason is fine") {
     nonStream(None).map(_.content) shouldBe Right("Hello")
     nonStream(Some("")).map(_.content) shouldBe Right("Hello")
+  }
+
+  test("complete: the Completion carries the mapped reason; none read is Other(\"\")") {
+    Seq("STOP", "length", " Tool_Calls ", "brand_new").foreach { reason =>
+      withClue(s"'$reason': ")(nonStream(Some(reason)).map(_.finishReason) shouldBe Right(expectedReason(reason)))
+    }
+    nonStream(None).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+    // the older chat-completions name for a tool call (RFC 0009's chat-completions row)
+    nonStream(Some("function_call")).map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
+  }
+
+  test("stream: the Completion carries the last chunk's reason") {
+    stream(event("a", None) + event("b", Some("LENGTH"))).result.map(_.finishReason) shouldBe Right(FinishReason.Length)
   }

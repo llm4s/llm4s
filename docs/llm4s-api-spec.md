@@ -122,7 +122,7 @@ case class StreamedChunk(
   id: String,
   content: Option[String],
   toolCall: Option[ToolCall] = None,
-  finishReason: Option[String] = None
+  finishReason: Option[FinishReason] = None // Stop, ToolCalls, Length or Other(raw) (RFC 0009)
 )
 ```
 

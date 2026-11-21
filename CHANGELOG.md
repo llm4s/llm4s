@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Thinking.budget(n)`, `Thinking.Off`); Java's `budgetTokens` and `JReasoningEffort.NONE` likewise give way to
   `JThinking`. On OpenAI, `Thinking.Off` asks for the lowest effort where `None` sent none (RFC 0008, PR 4);
   [migration](docs/reference/migration.md#budgettokens-and-reasoningeffortnone-are-replaced-by-thinking-2115).
+- `StreamedChunk.finishReason` is an `Option[FinishReason]`, no longer an `Option[String]`; a positional
+  pattern on `Completion` gains a field ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1);
+  [migration](docs/reference/migration.md#finish-reasons-are-typed-2613).
 
 ### Providers
 
@@ -38,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Core
 
+- **Added** `Completion.finishReason` (`FinishReason`: `Stop`, `ToolCalls`, `Length`, `Other(raw)`), on `complete` and in
+  traces too; which clients map it is in the [migration note](docs/reference/migration.md#finish-reasons-are-typed-2613) ([RFC 0009](docs/rfcs/0009-model-call-contract.md) PR 1) [#2613](https://github.com/llm4s/llm4s/issues/2613).
+- **Changed** with `Completion.finishReason` (#2613): Ollama reads `done_reason` instead of reporting `stop` for every finished reply,
+  Anthropic streams no longer trace `"stop"` before PR 2 maps them, and Perplexity's `incomplete` with a tool call is `Length` [#2613](https://github.com/llm4s/llm4s/issues/2613).
 - **Fixed** `LLMCompressor.squeezeDigest` keeps each compressed `[HISTORY_SUMMARY]` digest in its original position instead of
   moving every digest to the end of the conversation [#2481](https://github.com/llm4s/llm4s/issues/2481).
 - **Fixed** `HistoryCompressor`, `LLMCompressor` and `TokenWindow` recognise a history digest the same way: a `SystemMessage`

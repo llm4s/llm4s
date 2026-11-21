@@ -3,7 +3,7 @@ package org.llm4s.trace
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.ProviderConfig
-import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, FinishReason, StreamedChunk }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -47,13 +47,13 @@ final class TracingLLMClient private (
     options: CompletionOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val finishReason = new AtomicReference[Option[String]](None)
+    val finishReason = new AtomicReference[Option[FinishReason]](None)
     val startedAt    = System.nanoTime()
     val result = underlying.streamComplete(
       conversation,
       options,
       chunk => {
-        Option(chunk).flatMap(_.finishReason).filter(_.nonEmpty).foreach(r => finishReason.set(Some(r)))
+        Option(chunk).flatMap(_.finishReason).filter(_.name.nonEmpty).foreach(r => finishReason.set(Some(r)))
         onChunk(chunk)
       }
     )
@@ -75,7 +75,7 @@ final class TracingLLMClient private (
     result: Result[Completion],
     duration: FiniteDuration,
     streamed: Boolean,
-    finishReason: Option[String]
+    finishReason: Option[FinishReason]
   ): Result[Completion] = {
     val at = Instant.now()
     val event: TraceEvent = result match {
@@ -91,7 +91,8 @@ final class TracingLLMClient private (
           streamed = streamed,
           duration = Some(duration),
           responseModel = Option(completion.model).filter(_.nonEmpty),
-          finishReasons = finishReason.toSeq,
+          // a stream's last chunk reason, else the Completion's; an empty Other (none read) is left out
+          finishReasons = finishReason.orElse(Option(completion.finishReason)).map(_.name).filter(_.nonEmpty).toSeq,
           usage = completion.usage,
           options = Some(options),
           input = conversation.messages

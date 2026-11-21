@@ -26,8 +26,8 @@ import scala.util.{ Failure, Success, Try }
  * its options' temperature, top-p, max tokens, presence and frequency penalties and tool definitions are sent. The model
  * is the llm4s client's own, so a model named in the options is not sent; the response's metadata names the model that
  * answered. Stop sequences and top-k, which no llm4s client sends, are refused rather than dropped. The reply's tool
- * calls come back as the `AssistantMessage`'s, with finish reason `TOOL_CALLS`, for Spring AI's tool-calling advisor to
- * run; this model never runs a tool itself.
+ * calls come back as the `AssistantMessage`'s, for Spring AI's tool-calling advisor to run, with the completion's finish
+ * reason (`TOOL_CALLS` for a reply with calls); this model never runs a tool itself.
  *
  * `call` throws an [[org.llm4s.javaapi.LlmException LlmException]] carrying the llm4s error; `stream` signals it as the
  * `Flux`'s error. `stream` emits a response per streamed piece of text, then one with no text that carries the tool calls,

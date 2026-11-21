@@ -173,7 +173,7 @@ class WatsonXChatOverHttpSpec
         val expected   = ToolCall("call-7", "add", ujson.Obj("a" -> 12, "b" -> 34))
         completion.toolCalls.loneElement shouldBe expected
         chunks.flatMap(_.toolCall).loneElement shouldBe expected
-        chunks.flatMap(_.finishReason).last shouldBe "tool_calls"
+        chunks.flatMap(_.finishReason).last shouldBe FinishReason.ToolCalls
         completion.usage.map(_.totalTokens) shouldBe Some(29)
 
         val sent = server.modelRequests.loneElement

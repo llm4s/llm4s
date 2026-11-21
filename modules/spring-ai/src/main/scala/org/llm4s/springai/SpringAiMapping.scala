@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  FinishReason,
   Message,
   SystemMessage,
   TokenUsage,
@@ -53,9 +54,25 @@ import scala.util.Try
  */
 private[springai] object SpringAiMapping {
 
-  /** The finish reasons Spring AI's own models report, which its tool-calling advisor reads. */
+  /** The finish reasons Spring AI's own models report. */
   val ToolCallsFinish: String = "TOOL_CALLS"
   val StopFinish: String      = "STOP"
+  val LengthFinish: String    = "LENGTH"
+
+  /**
+   * The completion's [[FinishReason]] in Spring AI's names: `Length` is `LENGTH`, and a reply with calls that its
+   * client did not map (`Other`, until RFC 0009 PR 2) is `TOOL_CALLS`, as Spring AI's own models report one. Any other
+   * raw reason passes through, and none read is `STOP`.
+   */
+  // An empty `Other("")` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
+  // RFC 0009 PR 2); Spring AI has no "unknown", so with no tool call it is reported as STOP, as it was before #2613.
+  def finishOf(completion: Completion): String = completion.finishReason match {
+    case FinishReason.ToolCalls                                 => ToolCallsFinish
+    case FinishReason.Length                                    => LengthFinish
+    case FinishReason.Other(_) if completion.toolCalls.nonEmpty => ToolCallsFinish
+    case FinishReason.Other(raw) if raw.nonEmpty                => raw
+    case _                                                      => StopFinish
+  }
 
   // ---- Spring AI -> llm4s -------------------------------------------------------------------------------------------
 
@@ -190,7 +207,7 @@ private[springai] object SpringAiMapping {
       id = completion.id,
       model = completion.model,
       usage = completion.usage,
-      finish = Some(if (completion.toolCalls.nonEmpty) ToolCallsFinish else StopFinish)
+      finish = Some(finishOf(completion))
     )
 
   /** One streamed piece of text, with no metadata yet: the last response of a stream carries it. */
@@ -205,7 +222,7 @@ private[springai] object SpringAiMapping {
       id = completion.id,
       model = completion.model,
       usage = completion.usage,
-      finish = Some(if (completion.toolCalls.nonEmpty) ToolCallsFinish else StopFinish)
+      finish = Some(finishOf(completion))
     )
 
   private def response(
@@ -347,7 +364,11 @@ private[springai] object SpringAiMapping {
               model = meta.flatMap(m => Option(m.getModel)).getOrElse(""),
               message = AssistantMessage(contentOpt = Option(text).filter(_.nonEmpty), toolCalls = calls),
               toolCalls = calls.toList,
-              usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage)
+              usage = meta.flatMap(m => Option(m.getUsage)).flatMap(tokenUsage),
+              // Spring AI's reason as the model reported it: it has no common vocabulary to map
+              finishReason = FinishReason.Other(
+                Option(generation.getMetadata).flatMap(m => Option(m.getFinishReason)).getOrElse("")
+              )
             )
           }
     }

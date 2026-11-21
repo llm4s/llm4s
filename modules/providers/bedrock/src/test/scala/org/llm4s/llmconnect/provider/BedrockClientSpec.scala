@@ -260,7 +260,7 @@ class BedrockClientSpec extends AnyWordSpec with Matchers {
         completion.content shouldBe "Hello!"
         completion.model shouldBe Model
         completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((10, 5))
-        chunks.last.finishReason shouldBe Some("end_turn")
+        chunks.last.finishReason shouldBe Some(FinishReason.Other("end_turn")) // mapped in RFC 0009 PR 2
       }
     }
 

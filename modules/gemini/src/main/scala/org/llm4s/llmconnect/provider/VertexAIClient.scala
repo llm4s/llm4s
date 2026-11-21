@@ -462,7 +462,9 @@ class VertexAIClient(
             message = message,
             usage = usageOpt,
             estimatedCost = cost,
-            citations = GeminiGrounding.citations(candidate)
+            citations = GeminiGrounding.citations(candidate),
+            // the raw finishReason until RFC 0009 PR 2 maps it
+            finishReason = GeminiBlocked.finishReason(json).map(FinishReason.Other(_)).getOrElse(FinishReason.Other(""))
           )
         )
       }
