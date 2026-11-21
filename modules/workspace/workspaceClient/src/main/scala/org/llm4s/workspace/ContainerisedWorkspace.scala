@@ -457,7 +457,7 @@ class ContainerisedWorkspace(
    * response, which the runner sends by its commit deadline, before this deadline, so the caller never stops waiting
    * while a change it cannot see may still commit. The interrupt is kept for the caller either way.
    */
-  private def awaitResponse(
+  private[workspace] def awaitResponse(
     command: WorkspaceAgentCommand,
     future: CompletableFuture[WorkspaceAgentResponse]
   ): Try[WorkspaceAgentResponse] = {
@@ -469,7 +469,7 @@ class ContainerisedWorkspace(
     }
     @scala.annotation.tailrec
     def await(interrupted: Boolean): (Try[WorkspaceAgentResponse], Boolean) =
-      scala.util.control.Exception.allCatch.withTry(
+      ContainerisedWorkspace.catchingInterrupts.withTry(
         future.get(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
       ) match {
         case scala.util.Failure(_: InterruptedException) if !cancellable => await(interrupted = true)
@@ -647,6 +647,17 @@ class ContainerisedWorkspace(
 }
 
 object ContainerisedWorkspace {
+
+  /**
+   * Catches every failure of a wait, an interrupt among them: `allCatch` rethrows an `InterruptedException`
+   * (`Exception.shouldRethrow`), which would skip the cancellation of the command a caller gave up on.
+   */
+  private val catchingInterrupts: scala.util.control.Exception.Catch[Nothing] =
+    new scala.util.control.Exception.Catch(
+      scala.util.control.Exception.allCatcher[Nothing],
+      None,
+      _.isInstanceOf[scala.util.control.ControlThrowable]
+    )
 
   /**
    * What `docker run` needs for a cgroup per command (design §4.39, #2008): a private cgroup namespace, and for the

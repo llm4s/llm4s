@@ -121,8 +121,10 @@ class CommandCgroupsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "say where commands' cgroups are made when they are in force" in {
-    CommandCgroups.report(Right(CommandCgroups(java.nio.file.Paths.get("/sys/fs/cgroup")))) should
-      (include("cgroup of its own under /sys/fs/cgroup").and(include("killed whole")))
+    // the path as the platform prints it: `\sys\fs\cgroup` on Windows, where the spec also runs
+    val root = java.nio.file.Paths.get("/sys/fs/cgroup")
+    CommandCgroups.report(Right(CommandCgroups(root))) should
+      (include(s"cgroup of its own under $root").and(include("killed whole")))
   }
 
   "A command's cgroup" should "be made under the runner's, killed by cgroup.kill, and removed once empty" in {
