@@ -20,3 +20,4 @@
 - [ ] Every commit is signed off (`git commit -s`, see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#developer-certificate-of-origin-dco))
 - [ ] If this changes a Frozen module's public API, a module's tier, an SPI or a wire format: links the accepted [RFC](https://github.com/llm4s/llm4s/blob/main/docs/rfcs/README.md)
 - [ ] Updated `CHANGELOG.md` under `[Unreleased]` if this adds a feature, fixes a bug, or introduces a breaking change
+- [ ] A source break (a `### Breaking changes` entry) adds or updates a [Scalafix migration rule](https://llm4s.org/reference/scalafix#migration-rules) in `modules/scalafix-rules`, or this PR says why it cannot be automated

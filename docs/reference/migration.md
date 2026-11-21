@@ -52,11 +52,13 @@ client.complete(conversation, options).map { c =>
 ```
 
 - **Check every comparison against a string literal**: `chunk.finishReason.contains("stop")` still compiles, because
-  `Option.contains` widens its argument, and is now always `false`. Write `contains(FinishReason.Stop)`.
+  `Option.contains` widens its argument, and is now always `false`. Write `contains(FinishReason.Stop)`. The
+  `FinishReasonTyped` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites these comparisons, a reason set
+  from a literal, and any other read to `.map(_.name)`, which keeps its `Option[String]` type.
 - `StreamedChunk(..., finishReason = Some("stop"))` and `withFinishReason("stop")` take a `FinishReason` instead.
 - A positional pattern on `Completion` gains a field: `case Completion(id, _, content, _, _, _, _, _, _, _, _)`.
-  From 0.6.0, add the `_` by hand; the `PositionalPatternsGainFields` Scalafix rule rewrites only 0.5.1's nine-field
-  pattern, adding both fields since then.
+  The `PositionalPatternsGainFields` Scalafix rule adds it to 0.6.0's ten-field pattern, and both fields since 0.5.1 to
+  its nine-field one.
 - `Completion(...)` with named arguments keeps compiling and gets `FinishReason.Stop`. A client or fake that builds
   one sets the reason it read; one it did not read is `FinishReason.Other("")`, which tracing leaves out.
 - Until RFC 0009 PR 2, Gemini, Vertex AI and Bedrock report `Other` with their raw value and Anthropic `Other("")`,
@@ -76,21 +78,27 @@ client.complete(conversation, options).map { c =>
 The Scalafix rule `Llm4sMigrate_1_0` ([Scalafix](scalafix#migration-rules)) rewrites the mechanical source breaks
 below: `.copy` on the newly growth-safe types, `String` API keys of the provider configs, the `fromValues` argument
 order, `Completion.created`, positional patterns on types that gained fields, the `ServiceErrorOps` import and
-`loadTextEmbeddingModel`. It reports the removed APIs it cannot replace. These need a hand edit:
+`loadTextEmbeddingModel`, and since 0.6.0 `ReasoningEffort.None` and the string comparisons of
+`StreamedChunk.finishReason`. It reports the removed APIs it cannot replace, and `budgetTokens`. It assumes 0.5.x code:
+on 0.6.x, run only the rules for the breaks since 0.6.0 ([Scalafix](scalafix#migration-rules)). These need a hand edit:
 
 - Behaviour and configuration, not source: a supplied HTTP client is the caller's to close (#2341), the proxy settings
   (#2273), the file tools' default `blockedPaths` (#1408), console and OpenTelemetry tracing content, span names and
   kinds (#2311, #2275, #2531, #2137), `RetentionPolicy.maxAge` (#2130), and the dependencies `llm4s-java-api` and the
   Spring Boot starter no longer bring (#1496), `TokenUsage.completionTokens`, which no longer includes thinking
-  tokens (#2564), and a Gemini or Vertex AI reply a content filter stopped, now a `ContentFilteredError` (#2563).
-- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`) and `StreamEvent` (`Nested`), an
+  tokens (#2564), a Gemini or Vertex AI reply a content filter stopped, now a `ContentFilteredError` (#2563), what
+  `Thinking.Off` sends on OpenAI and Anthropic (#2115), and the finish reasons the clients now map (#2613).
+- New cases and methods: exhaustive matches on `AgentStatus` (`TokenLimitReached`), `StreamEvent` (`Nested`) and
+  `ReasoningEffort` (`Minimal`, `XHigh`, `Max`; reported), an
   `OpenAICompatibleDialect` that overrides `addReasoning` (now returns `List[RequestAdjustment]`, #2115), and
   a `Checkpointer` of your own (`sweep`, `threads`, `incompleteThreads`, `latestOfRuns`, `children`, the fenced
   `deleteThread`).
 - Types that changed: `LLMClientPekko.streamComplete`'s `Future[Done]` (#1848), `LLM4STemplate.completeAsync`'s
   failure (#2276), `new X(...)` and a positional `copy` on a growth-safe type (reported), `MemoryManagerConfig`
   (was a class with no `copy`), and a key passed by position or another credential that is now a `Secret` (Langfuse,
-  search-tool and store keys, `VectorStoreFactory.Config.withSecret`).
+  search-tool and store keys, `VectorStoreFactory.Config.withSecret`), `withBudgetTokens(n)`, whose replacement
+  `Thinking.budget(n)` is a `Result` (reported), and a `StreamedChunk` finish reason set from a `String` that is not a
+  literal (reported).
 - Removed or moved: `WorkspaceTools` (#1906), and `UsingOps` and `ModelSelector`, which need `llm4s-agent-tools` and
   `llm4s-rag` (#2358).
 
@@ -550,6 +558,14 @@ A stored or hand-written `"none"` no longer reads as a `ReasoningEffort`: the re
 `"none" is no longer a ReasoningEffort; use Thinking.Off`, and `ReasoningEffort.fromString("none")` returns `None`.
 An exhaustive `match` on `ReasoningEffort` (or a Java `switch`, a Kotlin `when`, on `JReasoningEffort`) needs cases
 for the three new levels.
+
+The `ThinkingReplacesBudgetTokens` Scalafix rule ([Scalafix](scalafix#migration-rules)) rewrites
+`withReasoning(ReasoningEffort.None)` and `CompletionOptions(reasoning = Some(ReasoningEffort.None))` to
+`Thinking.Off`. It reports, without rewriting, a budget (its replacement is a `Result`), any other use of
+`ReasoningEffort.None`, and a `match` on `ReasoningEffort` with no catch-all. `Thinking.Off` takes precedence over
+`reasoning`, where `None` was only a `reasoning` level that a later `withReasoning(High)` replaced: the rule reports a
+chain that sets `withReasoning` again instead of rewriting it, but check options that are changed later through a
+`val`. Java and Kotlin sources need a hand edit.
 
 ## Smaller breaks since 0.4.1
 
