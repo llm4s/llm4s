@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model.{
   AssistantMessage,
   CompletionOptions,
   Conversation,
+  FinishReason,
   StreamedChunk,
   SystemMessage,
   TokenUsage,
@@ -87,6 +88,7 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
     done.id shouldBe "resp-1"
     done.model shouldBe "spring-model"
     done.usage shouldBe Some(TokenUsage(10, 2, 12, cachedTokens = Some(3), cacheCreationTokens = Some(1)))
+    done.finishReason shouldBe FinishReason.Other("STOP") // Spring AI's reason as the model sent it, never a guess
     model.prompts.head.getUserMessage.getText shouldBe "What is 2+2?"
   }
 
@@ -258,9 +260,10 @@ class SpringAiLlmClientSpec extends AnyFlatSpec with Matchers with EitherValues 
 
     chunks.result().map(c => (c.content, c.finishReason)) shouldBe Vector(
       (Some("Hel"), None),
-      (Some("lo"), Some("STOP"))
+      (Some("lo"), Some(FinishReason.Other("STOP"))) // Spring AI's reason as the model sent it
     )
     done.content shouldBe "Hello"
+    done.finishReason shouldBe FinishReason.Other("STOP")
     done.model shouldBe "spring-model"
     done.id shouldBe "resp-1"
     done.usage shouldBe Some(TokenUsage(3, 2, 5))

@@ -42,7 +42,7 @@ class StreamingRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
         onChunk(StreamedChunk("s", Some("Hello")))
         onChunk(StreamedChunk("s", Some("")))
         onChunk(StreamedChunk("s", Some(" world")))
-        onChunk(StreamedChunk("s", None, finishReason = Some("stop")))
+        onChunk(StreamedChunk("s", None, finishReason = Some(FinishReason.Stop)))
         Right(
           Completion(
             id = "s",

@@ -499,7 +499,8 @@ curl https://api.anthropic.com/v1/messages \
                   id = currentMessageId.getOrElse(""),
                   content = None,
                   toolCall = None,
-                  finishReason = Some("stop")
+                  // stop_reason is read in RFC 0009 PR 2; until then no reason, not a made-up "stop"
+                  finishReason = Some(FinishReason.Other(""))
                 )
                 accumulator.addChunk(chunk)
                 onChunk(chunk)
@@ -785,7 +786,8 @@ curl https://api.anthropic.com/v1/messages \
         message = message,
         usage = Some(tokenUsage),
         estimatedCost = cost,
-        citations = AnthropicWebSearch.citations(contentBlocks)
+        citations = AnthropicWebSearch.citations(contentBlocks),
+        finishReason = FinishReason.Other("") // stop_reason is read in RFC 0009 PR 2
       )
   }
 

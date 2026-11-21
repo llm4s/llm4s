@@ -652,7 +652,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     chunks.map(_.toolCall.map(_.id)) shouldBe Seq(Some("a"), Some("b"))
     chunks.map(_.content) shouldBe Seq(Some("hi"), None)
     chunks.map(_.thinkingDelta) shouldBe Seq(Some("hmm"), None)
-    chunks.map(_.finishReason) shouldBe Seq(None, Some("STOP"))
+    chunks.map(_.finishReason) shouldBe Seq(None, Some(FinishReason.Other("STOP"))) // mapped in RFC 0009 PR 2
   }
 
   it should "make a single chunk when there is no function call, even for an empty part" in {
@@ -662,7 +662,7 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
     chunks should have size 1
     chunks.head.content shouldBe None
-    chunks.head.finishReason shouldBe Some("STOP")
+    chunks.head.finishReason shouldBe Some(FinishReason.Other("STOP")) // mapped in RFC 0009 PR 2
   }
 
   // -------------------------------------------------------------------------

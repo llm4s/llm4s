@@ -186,7 +186,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
 
     http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2026-09-25")
     chunks.flatMap(_.content).mkString shouldBe "Hello"
-    chunks.map(_.finishReason) shouldBe Seq(None, None, Some("stop"))
+    chunks.map(_.finishReason) shouldBe Seq(None, None, Some(FinishReason.Stop))
     completion.content shouldBe "Hello"
     completion.model shouldBe "ibm/granite-13b-instruct-v2"
     completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((7, 2))

@@ -119,7 +119,8 @@ final class JlamaClient private[provider] (
                 completionTokens = generation.generatedTokens,
                 totalTokens = generation.promptTokens + generation.generatedTokens
               )
-            )
+            ),
+            finishReason = finishReason(generation.finish)
           )
         )
 
@@ -155,10 +156,10 @@ object JlamaClient:
     if Thread.currentThread().isInterrupted then throw new Stopped
     onToken(token)
 
-  private[provider] def finishReason(finish: JlamaFinish): String =
+  private[provider] def finishReason(finish: JlamaFinish): FinishReason =
     finish match
-      case JlamaFinish.Length => "length"
-      case _                  => "stop"
+      case JlamaFinish.Length => FinishReason.Length
+      case _                  => FinishReason.Stop
 
   private val ToolsUnsupported: String =
     "llm4s-jlama does not support tool calling: send no tools, or use a provider that does (Ollama, a cloud provider)"

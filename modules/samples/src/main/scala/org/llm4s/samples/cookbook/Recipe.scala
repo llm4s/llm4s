@@ -79,7 +79,8 @@ final class ScriptedClient(reply: (Conversation, Int) => Result[AssistantMessage
         content = message.content,
         model = "scripted",
         message = message,
-        toolCalls = message.toolCalls.toList
+        toolCalls = message.toolCalls.toList,
+        finishReason = if (message.toolCalls.nonEmpty) FinishReason.ToolCalls else FinishReason.Stop
       )
     }
   }

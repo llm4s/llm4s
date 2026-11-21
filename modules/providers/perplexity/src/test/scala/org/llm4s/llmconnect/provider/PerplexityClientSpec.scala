@@ -313,6 +313,20 @@ class PerplexityClientSpec extends AnyWordSpec with Matchers:
       )
     }
 
+    // RFC 0009: complete reports the reason too, the same as the stream
+    "report the finish reason: incomplete is Length, a call ToolCalls, otherwise Stop" in {
+      completeWith(response(s"[${textMessage("partial")}]", status = "incomplete"))._2.map(_.finishReason) shouldBe
+        Right(FinishReason.Length)
+      completeWith(response("""[{"type":"function_call","call_id":"c","name":"n","arguments":"{}"}]"""))._2
+        .map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
+      completeWith(response(s"[${textMessage("done")}]"))._2.map(_.finishReason) shouldBe Right(FinishReason.Stop)
+    }
+
+    "report Other(\"\") for a reply with no status, since no reason was read" in {
+      completeWith(s"""{"id":"r","output":[${textMessage("done")}]}""")._2.map(_.finishReason) shouldBe
+        Right(FinishReason.Other(""))
+    }
+
     "fail a failed response with Perplexity's code and message, and any other unfinished status" in {
       val failed =
         """{"id":"r","status":"failed","output":[],"error":{"code":"model_error","message":"upstream broke"}}"""

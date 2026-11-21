@@ -60,7 +60,7 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers with EitherVa
       completion.model shouldBe "mistral-small-latest"
       completion.usage shouldBe Some(TokenUsage(12, 7, 19))
       chunks.flatMap(_.content).mkString shouldBe "Bonjour le monde"
-      chunks.flatMap(_.finishReason) shouldBe Seq("stop")
+      chunks.flatMap(_.finishReason) shouldBe Seq(FinishReason.Stop)
     }
     ujson.read(requestBody)("stream").bool shouldBe true
     ujson.read(requestBody)("model").str shouldBe "mistral-small-latest"

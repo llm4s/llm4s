@@ -374,11 +374,12 @@ class OpenAIClient private[provider] (
     onChunk: StreamedChunk => Unit
   ): Unit = {
     known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
-      val delta        = known(choice._delta())
-      val calls        = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
-      val contentOpt   = delta.flatMap(d => known(d._content()))
-      val finishReason = known(choice._finishReason()).map(_.asString())
-      val chunkId      = known(chunk._id()).getOrElse("")
+      val delta      = known(choice._delta())
+      val calls      = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
+      val contentOpt = delta.flatMap(d => known(d._content()))
+      val finishReason =
+        known(choice._finishReason()).map(_.asString()).filter(_.nonEmpty).map(ChatCompletionsFinishReason(_))
+      val chunkId = known(chunk._id()).getOrElse("")
 
       emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
     }
@@ -424,7 +425,7 @@ class OpenAIClient private[provider] (
     chunkId: String,
     contentOpt: Option[String],
     toolCalls: Seq[ToolCall],
-    finishReason: Option[String],
+    finishReason: Option[FinishReason],
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
   ): Unit = {
@@ -453,7 +454,7 @@ class OpenAIClient private[provider] (
         id = completion.id,
         content = contentOpt,
         toolCall = completion.toolCalls.headOption,
-        finishReason = Some("stop")
+        finishReason = Some(completion.finishReason) // the reply's own reason, not a made-up "stop"
       )
     )
     completion.toolCalls.drop(1).foreach { tc =>
@@ -725,7 +726,8 @@ class OpenAIClient private[provider] (
    * failing the whole call.
    */
   private def convertFromOpenAIFormat(response: ChatCompletion): Completion = {
-    val message   = known(response._choices()).flatMap(_.asScala.headOption).flatMap(c => known(c._message()))
+    val choice    = known(response._choices()).flatMap(_.asScala.headOption)
+    val message   = choice.flatMap(c => known(c._message()))
     val toolCalls = message.map(extractToolCalls).getOrElse(Seq.empty)
     val content   = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
@@ -747,7 +749,13 @@ class OpenAIClient private[provider] (
       toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = cost,
-      citations = message.map(extractCitations).getOrElse(List.empty)
+      citations = message.map(extractCitations).getOrElse(List.empty),
+      finishReason = choice
+        .flatMap(c => known(c._finishReason()))
+        .map(_.asString())
+        .filter(_.nonEmpty)
+        .map(ChatCompletionsFinishReason(_))
+        .getOrElse(FinishReason.Other(""))
     )
   }
 

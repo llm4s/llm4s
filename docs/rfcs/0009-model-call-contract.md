@@ -230,7 +230,7 @@ What each client needs:
 | `OpenAIClient` | Unverified for a stream that ends with neither `[DONE]` nor a reason. PR 4 checks it in llm4s rather than relying on the SDK | SDK throws (bytecode); covered by the suite in PR 5 | PR 1 (fake streaming stops hardcoding `"stop"`) |
 | `AnthropicClient` | Missing in llm4s; PR 4 requires `message_stop` | SDK throws (bytecode); covered by the suite | PR 2 (read `message_delta.stop_reason`) |
 | `GeminiClient`, `VertexAIClient` | Missing (`GeminiClient.scala:249`); PR 4 | Unverified: llm4s has no handling for an error object mid-stream. PR 4 adds it | PR 2 |
-| `OllamaClient` | Missing (`OllamaClient.scala:291`); PR 4 requires `done: true` | Missing (read); PR 4 | PR 2 (read `done_reason`) |
+| `OllamaClient` | Missing (`OllamaClient.scala:291`); PR 4 requires `done: true` | Missing (read); PR 4 | Done in PR 1 (`done_reason`) |
 
 ### Part 3: Tool call arguments
 
@@ -425,15 +425,18 @@ Under this RFC, each PR with its own review:
 
 1. **PR 1 (Part 1, core).** `FinishReason`, `Completion.finishReason`, typed `StreamedChunk.finishReason`, the
    accumulator carrying it, `TracingLLMClient` reading it for `complete`. Mapped for the chat-completions clients
-   (OpenAI-compatible, OpenAI including fake streaming, watsonx) and Perplexity. The conformance suite lands here with
-   the `CleanText`, `TextCutByLimit` and `ToolCall` cases. Typing `StreamedChunk.finishReason` touches every producer
-   (Anthropic, Gemini and Vertex AI, Ollama, Bedrock, `ScriptedLLMClient`, `FakeLlmClients`), so PR 1 changes them all, but the
-   clients PR 2 maps write `Other(raw)` (or `Other("")` with no raw value) on both paths until then. No release between
-   PR 1 and PR 2 reports a `Stop` the provider didn't send.
+   (OpenAI-compatible, OpenAI including fake streaming, watsonx), Perplexity, Jlama, and Ollama (`done_reason`): Ollama
+   moved here from PR 2 because it made `stop` up from `done`. Typing `StreamedChunk.finishReason` touches every
+   producer (Anthropic, Gemini and Vertex AI, Bedrock, `ScriptedLLMClient`, `FakeLlmClients`), so PR 1 changes them
+   all, but the clients PR 2 maps write `Other(raw)` on both paths until then, and Anthropic, whose `stop_reason`
+   PR 2 reads, `Other("")`. No
+   release between PR 1 and PR 2 reports a `Stop` the provider didn't send. The Spring AI bridge has no common
+   vocabulary to map, so it keeps Spring AI's raw reason.
 2. **PR 2 (Part 1, the rest).** Anthropic (`stop_reason`, `message_delta`), Gemini and Vertex AI (`MAX_TOKENS`),
-   Ollama (`done_reason`), Bedrock. OpenAI's and the compatible clients' `content_filter`, Anthropic's `refusal` and
-   Bedrock's guardrail reasons become `ContentFilteredError`; #2664 left them a finished `Completion`. Each adds its
-   fixtures to the suite, and PR 2 adds the `ContentFiltered` case.
+   Bedrock. OpenAI's and the compatible clients' `content_filter`, Anthropic's `refusal` and Bedrock's guardrail
+   reasons become `ContentFilteredError`; #2664 left them a finished `Completion`. The conformance suite lands here,
+   moved from PR 1 because it needs fixtures in every provider module, with the `CleanText`, `TextCutByLimit`,
+   `ToolCall` and `ContentFiltered` cases.
 3. **PR 3 (Part 3).** The tool-argument rules, in the accumulator, the dialect and `OpenAIClient`. The spec change
    above, agreed first. Adds `NoArgumentToolCall`, `ToolCallCutByLimit` and `MalformedArguments` to the suite.
 4. **PR 4 (Part 2).** End markers and error events for Anthropic, OpenAI, Gemini, Vertex AI and Ollama. Adds

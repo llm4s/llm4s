@@ -588,7 +588,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         completion.toolCalls.head.arguments shouldBe ujson.Obj("location" -> "Paris")
         (completion.toolCalls.head.id should fullyMatch).regex(callId)
         chunks.flatMap(_.toolCall) should have size 1
-        chunks.last.finishReason shouldBe Some("tool_calls")
+        chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
         completion.usage.map(_.totalTokens) shouldBe Some(15)
       }
     }
@@ -608,7 +608,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         completion.thinking shouldBe Some("The user wants Paris weather.")
         completion.message.thinking shouldBe Seq(ThinkingBlock.Text("The user wants Paris weather."))
         completion.toolCalls.map(_.name) shouldBe List("get_weather")
-        chunks.last.finishReason shouldBe Some("tool_calls")
+        chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
       }
     }
 
@@ -618,7 +618,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
         result.toOption.get.content shouldBe "Hello"
         result.toOption.get.toolCalls shouldBe Nil
-        chunks.last.finishReason shouldBe Some("stop")
+        chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       }
     }
 
@@ -756,6 +756,60 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         result.isLeft shouldBe true
         result.left.toOption.get shouldBe a[ProcessingError]
         chunks.flatMap(_.content) should not contain "never read"
+      }
+    }
+  }
+
+  // RFC 0009's Ollama row: the reason comes from `done_reason`, never guessed from `done`
+  "the finish reason" should {
+
+    def last(doneReason: Option[String]): ujson.Value = {
+      val json = doneLine()
+      json.obj.remove("done_reason")
+      doneReason.foreach(r => json("done_reason") = r)
+      json
+    }
+
+    "be Stop for done_reason stop, or ToolCalls when the reply called a tool" in {
+      OllamaClient.finishReason(last(Some("stop")), calledTools = false) shouldBe FinishReason.Stop
+      OllamaClient.finishReason(last(Some("stop")), calledTools = true) shouldBe FinishReason.ToolCalls
+    }
+
+    "be Length for done_reason length, even with a call" in {
+      OllamaClient.finishReason(last(Some("length")), calledTools = false) shouldBe FinishReason.Length
+      OllamaClient.finishReason(last(Some("length")), calledTools = true) shouldBe FinishReason.Length
+    }
+
+    "keep any other value as Other, and none as Other(\"\")" in {
+      OllamaClient.finishReason(last(Some("load")), calledTools = false) shouldBe FinishReason.Other("load")
+      OllamaClient.finishReason(last(None), calledTools = false) shouldBe FinishReason.Other("")
+    }
+
+    "come from a non-streaming reply's done_reason, on the Completion" in {
+      def withReason(content: String, doneReason: Option[String], calls: ujson.Value*): String = {
+        val json = ujson.read(reply(content, calls*))
+        doneReason.foreach(r => json("done_reason") = r)
+        ujson.write(json)
+      }
+      withOllama(
+        withReason("cut", Some("length")),
+        withReason("", Some("stop"), call("get_weather", ujson.Obj("location" -> "Paris"))),
+        withReason("done", Some("stop")),
+        withReason("done", None)
+      ) { (client, _) =>
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Length)
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Stop)
+        ask(client).map(_.finishReason) shouldBe Right(FinishReason.Other(""))
+      }
+    }
+
+    "end a streamed reply cut at the limit with Length, on the chunk and the Completion" in {
+      withOllama(ndjson(line("Hel"), last(Some("length")))) { (client, _) =>
+        val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+        val result = client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), chunks += _)
+        chunks.last.finishReason shouldBe Some(FinishReason.Length)
+        result.map(_.finishReason) shouldBe Right(FinishReason.Length)
       }
     }
   }

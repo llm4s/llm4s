@@ -38,8 +38,9 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
       http.lastBody("stream").bool shouldBe true
       chunks.flatMap(_.content) shouldBe List("Hi", " there")
       chunks.head.id shouldBe "resp_s"
-      chunks.last.finishReason shouldBe Some("stop")
+      chunks.last.finishReason shouldBe Some(FinishReason.Stop)
       val completion = result.fold(e => fail(e.message), identity)
+      completion.finishReason shouldBe FinishReason.Stop
       completion.content shouldBe "Hi there"
       completion.citations.map(_.url) shouldBe List("https://a.example/1", "https://b.example/2")
       completion.usage.map(_.totalTokens) shouldBe Some(17)
@@ -62,15 +63,25 @@ class PerplexityStreamSpec extends AnyWordSpec with Matchers:
       val done                = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]")
       val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
       chunks.flatMap(_.toolCall) shouldBe List(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "Oslo")))
-      chunks.last.finishReason shouldBe Some("tool_calls")
+      chunks.last.finishReason shouldBe Some(FinishReason.ToolCalls)
       result.map(_.toolCalls.map(_.id)) shouldBe Right(List("call_1"))
+      result.map(_.finishReason) shouldBe Right(FinishReason.ToolCalls)
+    }
+
+    // RFC 0009: `incomplete` is a limit, so Length even with a call in it (a cut call is PR 3's to refuse)
+    "end an incomplete response with a call as length, not tool_calls" in {
+      val done = response(s"[${functionCall("call_1", "get_weather", """{"city":"Oslo"}""")}]", status = "incomplete")
+      val (_, result, chunks) = streamed(sse(created, completedEvent(done)))
+      chunks.last.finishReason shouldBe Some(FinishReason.Length)
+      result.map(_.finishReason) shouldBe Right(FinishReason.Length)
     }
 
     "end an incomplete response with finish reason length" in {
       val (_, result, chunks) =
         streamed(sse(delta("cut"), completedEvent(response(s"[${textMessage("cut")}]", status = "incomplete"))))
       result.map(_.content) shouldBe Right("cut")
-      chunks.last.finishReason shouldBe Some("length")
+      chunks.last.finishReason shouldBe Some(FinishReason.Length)
+      result.map(_.finishReason) shouldBe Right(FinishReason.Length)
     }
 
     "ignore blank data, [DONE], comments and anything after response.completed" in {

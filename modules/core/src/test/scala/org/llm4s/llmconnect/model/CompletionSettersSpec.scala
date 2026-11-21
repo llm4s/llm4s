@@ -189,7 +189,7 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
     id: String = "s-1",
     content: Option[String] = Some("delta"),
     toolCall: Option[ToolCall] = Some(sampleToolCall),
-    finishReason: Option[String] = Some("stop"),
+    finishReason: Option[FinishReason] = Some(FinishReason.Stop),
     thinkingDelta: Option[String] = Some("hmm")
   ): StreamedChunk =
     StreamedChunk(
@@ -225,12 +225,12 @@ class CompletionSettersSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set and clear the finish reason, with both overloads" in {
-    fullChunk.withFinishReason("length") shouldBe chunk(finishReason = Some("length"))
-    fullChunk.withFinishReason(Some("length")) shouldBe chunk(finishReason = Some("length"))
+    fullChunk.withFinishReason(FinishReason.Length) shouldBe chunk(finishReason = Some(FinishReason.Length))
+    fullChunk.withFinishReason(Some(FinishReason.Length)) shouldBe chunk(finishReason = Some(FinishReason.Length))
     fullChunk.withFinishReason(None) shouldBe chunk(finishReason = None)
 
-    bareChunk.withFinishReason("stop").finishReason shouldBe Some("stop")
-    bareChunk.withFinishReason("stop").withFinishReason(None) shouldBe bareChunk
+    bareChunk.withFinishReason(FinishReason.Stop).finishReason shouldBe Some(FinishReason.Stop)
+    bareChunk.withFinishReason(FinishReason.Stop).withFinishReason(None) shouldBe bareChunk
   }
 
   it should "set and clear the thinking delta, with both overloads" in {

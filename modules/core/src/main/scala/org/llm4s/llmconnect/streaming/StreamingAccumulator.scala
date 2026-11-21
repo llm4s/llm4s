@@ -19,17 +19,17 @@ import scala.collection.mutable
 @Stable
 final class StreamingAccumulator private () {
 
-  private val contentBuilder                   = new StringBuilder()
-  private val thinkingBuilder                  = new StringBuilder()
-  private val toolCalls                        = mutable.ArrayBuffer[ToolCall]()
-  private var messageId: Option[String]        = None
-  private var finishReason: Option[String]     = None
-  private var promptTokens: Int                = 0
-  private var completionTokens: Int            = 0
-  private var thinkingTokens: Int              = 0
-  private var cachedTokens: Option[Int]        = None
-  private var cacheCreationTokens: Option[Int] = None
-  private var reportedTotal: Option[Int]       = None
+  private val contentBuilder                     = new StringBuilder()
+  private val thinkingBuilder                    = new StringBuilder()
+  private val toolCalls                          = mutable.ArrayBuffer[ToolCall]()
+  private var messageId: Option[String]          = None
+  private var finishReason: Option[FinishReason] = None
+  private var promptTokens: Int                  = 0
+  private var completionTokens: Int              = 0
+  private var thinkingTokens: Int                = 0
+  private var cachedTokens: Option[Int]          = None
+  private var cacheCreationTokens: Option[Int]   = None
+  private var reportedTotal: Option[Int]         = None
 
   // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
   // back in the order the stream first named them - the provider's index order - rather than
@@ -79,7 +79,8 @@ final class StreamingAccumulator private () {
     }
 
     // Update finish reason
-    chunk.finishReason.foreach(reason => finishReason = Some(reason))
+    // an empty reason (none read) never replaces a real one, as in tracing
+    chunk.finishReason.foreach(reason => if (reason.name.nonEmpty || finishReason.isEmpty) finishReason = Some(reason))
   }
 
   /**
@@ -167,7 +168,9 @@ final class StreamingAccumulator private () {
         content = contentBuilder.toString(),
         model = "unknown",
         message = message,
-        usage = usage
+        usage = usage,
+        // the last reason a chunk carried; none read is Other(""), never a Stop the provider didn't send
+        finishReason = finishReason.getOrElse(FinishReason.Other(""))
       )
     )
   }

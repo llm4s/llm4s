@@ -66,7 +66,7 @@ object StreamingExample {
             chunk.finishReason.foreach { reason =>
               // Ensure we break the line after streaming finishes
               println()
-              logger.info("[Stream finished: {}]", reason)
+              logger.info("[Stream finished: {}]", reason.name)
             }
           }
         )

@@ -118,7 +118,12 @@ class BedrockContentPartsSpec extends AnyFlatSpec with Matchers with EitherValue
     blocks(1)("text").str shouldBe "caption"
   }
 
-  "complete" should "refuse null parts as invalid, also on its logging path, and never throw" in {
+  // RFC 0009 PR 1: the raw stopReason, not a Stop the client did not map (PR 2 maps it)
+  "complete" should "report the reply's stopReason as Other" in {
+    send(Conversation(Seq(UserMessage("hi"))))._2.map(_.finishReason) shouldBe Right(FinishReason.Other("end_turn"))
+  }
+
+  it should "refuse null parts as invalid, also on its logging path, and never throw" in {
     Seq(UserMessage(null: Vector[ContentPart]), UserMessage(Vector(ContentPart.Text("x"), null))).foreach { message =>
       val (sent, result) = send(Conversation(Seq(message)))
       sent shouldBe None

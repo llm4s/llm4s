@@ -222,8 +222,7 @@ class PerplexityClient(
       val whole = if (reply.text.nonEmpty) reply else reply.copy(text = streamed.result())
       val id    = if (whole.id.nonEmpty) whole.id else responseId
       whole.toolCalls.foreach(call => onChunk(StreamedChunk(id = id, content = None, toolCall = Some(call))))
-      val reason = if (whole.toolCalls.nonEmpty) "tool_calls" else if (whole.incomplete) "length" else "stop"
-      onChunk(StreamedChunk(id = id, content = None, finishReason = Some(reason)))
+      onChunk(StreamedChunk(id = id, content = None, finishReason = Some(finishReasonOf(whole))))
       completion(whole.copy(id = id))
     }
   }
@@ -243,9 +242,20 @@ class PerplexityClient(
       toolCalls = reply.toolCalls,
       usage = reply.usage,
       estimatedCost = reply.cost.orElse(reply.usage.flatMap(CostEstimator.estimate(config.model, _))),
-      citations = reply.citations
+      citations = reply.citations,
+      finishReason = finishReasonOf(reply)
     )
   }
+
+  /**
+   * The reply's [[FinishReason]] (RFC 0009): `incomplete` (a limit) is `Length`, even with a call in it; `completed`
+   * with a call is `ToolCalls`, without one `Stop`; a reply with no `status` is `Other("")`, since none was read.
+   */
+  private def finishReasonOf(reply: Reply): FinishReason =
+    if (!reply.statusRead) FinishReason.Other("")
+    else if (reply.incomplete) FinishReason.Length
+    else if (reply.toolCalls.nonEmpty) FinishReason.ToolCalls
+    else FinishReason.Stop
 
   private[provider] def createRequestBody(
     conversation: Conversation,
@@ -374,7 +384,8 @@ object PerplexityClient {
     citations: List[Citation],
     usage: Option[TokenUsage],
     cost: Option[Double],
-    incomplete: Boolean
+    incomplete: Boolean,
+    statusRead: Boolean
   )
 
   private def isAnthropic(model: String): Boolean =
@@ -500,7 +511,8 @@ object PerplexityClient {
         citations = citations,
         usage = usage.flatMap(parseUsage),
         cost = usage.flatMap(parseCost),
-        incomplete = status.contains("incomplete")
+        incomplete = status.contains("incomplete"),
+        statusRead = status.isDefined
       )
     }
 

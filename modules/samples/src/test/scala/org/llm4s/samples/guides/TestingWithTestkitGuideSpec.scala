@@ -118,7 +118,7 @@ class TestingWithTestkitGuideSpec extends AnyFlatSpec with Matchers with EitherV
     client.streamComplete(conversation, options, chunks += _)
 
     chunks.flatMap(_.content).mkString shouldBe "Hello, world"
-    chunks.last.finishReason shouldBe Some("stop")
+    chunks.last.finishReason shouldBe Some(FinishReason.Stop)
   }
 
   "The page" should "show only code that this spec contains" in {

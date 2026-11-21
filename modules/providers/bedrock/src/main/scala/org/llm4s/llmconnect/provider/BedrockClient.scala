@@ -401,7 +401,7 @@ class BedrockClient(
               drain()
             case StreamSignal.Stop(reason) =>
               stopped = true
-              emit(StreamedChunk(messageId, None, None, Some(reason)))
+              emit(StreamedChunk(messageId, None, None, Some(FinishReason.Other(reason)))) // mapped in RFC 0009 PR 2
               drain()
             case StreamSignal.Usage(input, output) =>
               accumulator.updateTokens(input, output)
@@ -653,7 +653,12 @@ class BedrockClient(
         message = message,
         toolCalls = toolCalls,
         usage = usage,
-        estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+        estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u)),
+        // the raw stopReason until RFC 0009 PR 2 maps it
+        finishReason = Option(response.stopReasonAsString())
+          .filter(_.nonEmpty)
+          .map(FinishReason.Other(_))
+          .getOrElse(FinishReason.Other(""))
       )
     }
   }

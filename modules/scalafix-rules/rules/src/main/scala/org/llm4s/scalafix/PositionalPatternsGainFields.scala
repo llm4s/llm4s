@@ -56,7 +56,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/agent/harness/HarnessProfile"                        -> (12 -> 13),
     "org/llm4s/config/ProvidersConfigModel.NamedProviderConfig"     -> (8  -> 9),
     "org/llm4s/llmconnect/LlmClientOptions"                         -> (2  -> 3),
-    "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 10),
+    "org/llm4s/llmconnect/model/Completion"                         -> (9  -> 11),
     "org/llm4s/llmconnect/config/AnthropicConfig"                   -> (7  -> 10),
     "org/llm4s/llmconnect/config/AzureConfig"                       -> (7  -> 10),
     "org/llm4s/llmconnect/config/CohereConfig"                      -> (6  -> 8),
