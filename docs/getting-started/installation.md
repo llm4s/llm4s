@@ -258,11 +258,11 @@ what is on `main`, build it and publish it to your local repository:
 ```bash
 git clone https://github.com/llm4s/llm4s && cd llm4s
 sbt publishLocal   # for sbt; use `sbt publishM2` for Maven or Gradle (mavenLocal())
-sbt version        # prints the version it published, for example 0.5.1+12-abc12345-SNAPSHOT
+sbt version        # prints the version it published, for example 0.6.0+12-abc12345-SNAPSHOT
 ```
 
 Then depend on that version, for example
-`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.5.1+12-abc12345-SNAPSHOT"` (use the one `sbt version`
+`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.6.0+12-abc12345-SNAPSHOT"` (use the one `sbt version`
 printed). This guide describes the latest release; `main` may have modules and configuration that it does not
 have yet.
 
@@ -1082,8 +1082,6 @@ sbt compile
 - With Maven or Gradle, write the Scala suffix yourself: `llm4s-core_3`, not `llm4s-core` (the BOM, `llm4s-bom`,
   has none)
 - No snapshots are published: to use `main`, build it locally (see [Unreleased changes](#unreleased-changes-main))
-- `llm4s-kotlin-api` is not on Maven Central for {{ site.data.project.latest_release }} yet (see
-  [For Kotlin](#for-kotlin-coroutines-and-flow))
 
 ---
 

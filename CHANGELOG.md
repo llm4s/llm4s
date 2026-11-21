@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
      its feature's entry instead. Rules: CLAUDE.md, "Reading files and output efficiently". -->
 
 
-## [0.6.0] - 2026-11-08
+## [0.6.0] - 2026-11-21
 
 ### Highlights
 
@@ -22,8 +22,10 @@ from a file or an `ApiKeyProvider`; console and OpenTelemetry tracing withhold m
 providers and features: xAI, Perplexity, keyless Entra ID for Azure OpenAI, web search for Anthropic and Gemini, one
 proxy and CA setting for every client, and your own HTTP client. The Java facade gains agents, streaming, annotated
 tools and RAG (`llm4s-java-rag`), and `llm4s-kotlin-api` is published for the first time. New experimental modules
-include `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-schema-iron`, `llm4s-tapir` and
-`llm4s-repl`, along with the Elasticsearch/OpenSearch and Redis vector stores and `llm4s-doctor`. Many data types are now
+include `llm4s-ox`, `llm4s-reactor`, `llm4s-capabilities`, `llm4s-prompt`, `llm4s-schema-iron`, `llm4s-tapir`,
+`llm4s-repl`, `llm4s-sttp`, `llm4s-spring-ai`, `llm4s-jlama` (an in-process local model) and `llm4s-secrets-vault`, along
+with the Elasticsearch/OpenSearch and Redis vector stores and `llm4s-doctor`. A `Completion` reports the options a provider
+could not honour (`adjustments`), and thinking tokens are counted once in usage and cost. Many data types are now
 growth-safe (private constructors and `with*` setters), which breaks `copy` and positional patterns: read the
 [migration guide](docs/reference/migration.md) before upgrading. 0.6.0 sets no MiMa baseline.
 
@@ -32,6 +34,8 @@ growth-safe (private constructors and `with*` setters), which breaks `copy` and 
 - `TokenUsage.completionTokens` no longer includes reasoning tokens for OpenAI, OpenAI-compatible and Perplexity replies,
   and output token counts (`UsageSummary.outputTokens`, token budgets, metrics, OpenTelemetry, Langfuse, Spring AI) include
   thinking for every provider; [migration](docs/reference/migration.md#completiontokens-no-longer-includes-thinking-tokens-2564).
+- A Gemini or Vertex AI reply a content filter stopped, or a blocked prompt, is a `Left(ContentFilteredError)`, not a
+  partial answer or `UnknownError`; [migration](docs/reference/migration.md#a-gemini-reply-a-content-filter-stopped-is-an-error-2563).
 - A `Llm4sHttpClient` passed to an SDK-free provider client is no longer closed with it, and `LlmClientOptions` and
   `ProviderFeatures` gain a field; [migration](docs/reference/migration.md#a-supplied-http-client-is-the-callers-to-close-2341).
 - `RerankProviderConfig` (`llm4s-rag`) has a private constructor and `copy`, and gains `apiKeyProvider`; use its `with*` setters;

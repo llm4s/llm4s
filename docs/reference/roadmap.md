@@ -17,7 +17,7 @@ LLM4S has broad, working framework functionality today: multi-provider clients (
 
 | | |
 |---|---|
-| **Latest release tag** | v0.6.0 (2026-11-08) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
+| **Latest release tag** | v0.6.0 (2026-11-21) · see the [CHANGELOG](https://github.com/llm4s/llm4s/blob/main/CHANGELOG.md) |
 | **Release sequence** | 0.4.x: coordinate rename and fixes (**done**) → **0.5.0**: modularisation complete, separate artifacts published (**done**), → **0.6.0**: subagents, production agent adapters, the Kotlin API (**done**) → a pre-1.0 release: designs final, MiMa baseline set → **1.0**: frozen surface, after it has survived two releases |
 | **Main branch** | Work after 0.6.0; see the CHANGELOG's `Unreleased` section |
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |

@@ -31,7 +31,7 @@ It is experimental. For an application, use `LLMClient` and the [agent](../guide
 
 ## The dependency
 
-`llm4s-repl` is new: it is published from the first release after {{ site.data.project.latest_release }}. It depends on
+`llm4s-repl` is new: it is published from 0.6.0. It depends on
 `llm4s-core`, `llm4s-schema-derivation` (for `extract`) and `llm4s-testkit` (for the offline session). Add the
 provider module you want to call, as for any llm4s application ([Installation](installation)).
 

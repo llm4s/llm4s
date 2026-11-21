@@ -5,7 +5,7 @@
 # Until the compatibility baseline is set (#1281) every line before it is "pre-baseline: latest only".
 lines:
   - version: "0.6.0"
-    released: "2026-11-08"
+    released: "2026-11-21"
     status: "latest"
     note: "Pre-baseline: the only line that gets fixes."
   - version: "0.5.1"
