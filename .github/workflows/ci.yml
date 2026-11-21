@@ -1444,7 +1444,7 @@ jobs:
       TEST_MODULES: >-
         samples configPolicy it springBootStarterBoot4 knowledgegraphNeo4j benchmarks
         workspaceShared workspaceRunner workspaceClient workspaceSamples
-        scalafixRules scalafixInput scalafixOutput scalafixTests scalafixInput05 scalafixTests05
+        scalafixRules scalafixInput scalafixOutput scalafixTests scalafixInput05 scalafixTests05 scalafixInput06 scalafixTests06
         bom relocationCore relocationWorkspaceClient relocationWorkspaceShared relocationTraceOpentelemetry
         relocationKnowledgegraphNeo4j
 

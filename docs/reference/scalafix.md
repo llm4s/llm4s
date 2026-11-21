@@ -68,7 +68,7 @@ nested inside another pattern. These 0.5 rules change names, not types; the `Sec
 `Completion.created` are `Llm4sMigrate_1_0`'s.
 
 `Llm4sMigrate_1_0` runs every rule for the breaking changes since 0.5.1 (the notes in the
-[Migration Guide](migration)), and grows as the 1.0 breaks land:
+[Migration Guide](migration)), those since 0.6.0 among them, and grows as the 1.0 breaks land:
 
 | Rule | Rewrites |
 |---|---|
@@ -76,13 +76,21 @@ nested inside another pattern. These 0.5 rules change names, not types; the `Sec
 | `CredentialsToSecret` | `OpenAIConfig(apiKey = key, ...)` and `config.withApiKey(key)` to `Secret(key)` on the provider configs (`Some(Secret(key))` where the key is an `Option`), and a read of `config.apiKey` to `config.apiKey.reveal` |
 | `FromValuesKeyFirst` | `OpenAIConfig.fromValues(model, key, organization, baseUrl, ...)` to `fromValues(model, Secret(key), baseUrl, organization, ...)`, dropping a `None` organization; `AzureConfig.fromValues(deployment, endpoint, key, apiVersion)` to `fromValues(deployment, Secret(key), endpoint, apiVersion)` |
 | `CompletionCreatedToInstant` | `Completion(created = seconds)`, `withCreated(seconds)` and `toCompletion(seconds)` to `Instant.ofEpochSecond(seconds)` (`0L` to `Instant.EPOCH`), and a read of `completion.created` to `completion.created.getEpochSecond` |
-| `PositionalPatternsGainFields` | A positional pattern on one of the 41 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also `AgentStatus.Suspended`, `RunEvent.RunFailed`, the `TraceEvent` cases and the provider configs |
+| `PositionalPatternsGainFields` | A positional pattern on one of the 42 types whose extractor gained fields since 0.5.1 gets a `_` for each: `case ServiceError(m, s, p, r)` to `case ServiceError(m, s, p, r, _)`, also `AgentStatus.Suspended`, `RunEvent.RunFailed`, the `TraceEvent` cases, the provider configs and `ModelCapabilities`; 0.6.0's ten-field `Completion` pattern gains `finishReason` |
 | `DuplicateApisRemoved` | Deletes `import ServiceError.ServiceErrorOps`; `Llm4sConfig.loadTextEmbeddingModel()` to `textEmbeddingModel()` |
 | `RemovedApis_1_0` | Lint only: `org.llm4s.types.typeclass`, `CompletionChunk`/`ChunkDelta`, `OpenAIToolHelper`, `AnsiColors` and the embeddings sample's settings on `Llm4sConfig`, each with a link to its note |
+| `ThinkingReplacesBudgetTokens` | Since 0.6.0: `withReasoning(ReasoningEffort.None)` and `CompletionOptions(reasoning = Some(ReasoningEffort.None))` to `Thinking.Off`. Lints `budgetTokens` and `withBudgetTokens` (`Thinking.budget(n)` is a `Result`), any other `ReasoningEffort.None`, and a `match` on `ReasoningEffort` with no catch-all, which needs `Minimal`, `XHigh` and `Max` |
+| `FinishReasonTyped` | Since 0.6.0: `chunk.finishReason.contains("stop")`, `== Some("length")`, `exists(_ == "tool_calls")` and `case Some("stop")` to the `FinishReason` cases; `withFinishReason("stop")` and `StreamedChunk(..., finishReason = Some("stop"))` likewise (another literal to `FinishReason.Other(...)`); any other read to `chunk.finishReason.map(_.name)`, which keeps its type. Lints a reason set from a non-literal `String` |
 
 A key passed by position (`OpenAIConfig("sk-...", "gpt-4o")`), and the other credentials that became `Secret`s
 (Langfuse, search-tool and store keys), still need a hand edit. The breaks that change behaviour or add cases have no
 rule: see [Changes since 0.5.1 that no rule automates](migration#changes-since-051-that-no-rule-automates).
+
+`Llm4sMigrate_1_0` assumes code compiled against 0.5.x. `CredentialsToSecret`, `CompletionCreatedToInstant` and
+`FromValuesKeyFirst` cannot tell 0.6.x code, where the key is already a `Secret` and `created` an `Instant`, from
+0.5.x code (Scalafix sees no types from Scala 3 dependencies), and would rewrite it again: `config.apiKey.reveal` to
+`config.apiKey.reveal.reveal`. Code on 0.6.x runs the rules for the breaks since 0.6.0 by name instead:
+`ThinkingReplacesBudgetTokens`, `FinishReasonTyped` and `PositionalPatternsGainFields`.
 
 The rules are compiled with scalac 2.13, the only compiler `scalafix-core` is published for; they read the SemanticDB of Scala 3 sources. Scalafix's
 Scala 3 support resolves the symbol at each name, which every rule here relies on, but has no synthetics or inferred
@@ -96,7 +104,8 @@ compiled with SemanticDB against llm4s-core 0.4.1 from Maven Central, each rule 
 it, and the result must equal the file of the same name in `modules/scalafix-rules/output`, which is compiled against
 the current sources. `scalafixTests05` does the same for the `Llm4sMigrate_1_0` rules, with
 `modules/scalafix-rules/input-0.5` compiled against the 0.5.1 artifacts and its expected output under
-`output/.../fix/v1`.
+`output/.../fix/v1`, and `scalafixTests06` for the breaks since 0.6.0, with `modules/scalafix-rules/input-0.6`
+compiled against the 0.6.0 artifacts and its expected output under `output/.../fix/v06`.
 
 ## Notes
 - CI and pre-commit run scalafix checks.

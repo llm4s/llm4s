@@ -474,6 +474,8 @@ lazy val llm4s = (project in file("."))
     scalafixTests,
     scalafixInput05,
     scalafixTests05,
+    scalafixInput06,
+    scalafixTests06,
     deployService,
     examplesHttp,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
@@ -3235,12 +3237,15 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 // against the *old* release (llm4s-core 0.4.1 from Maven Central), `scalafixOutput` is what the rules must produce,
 // compiled against this checkout, and `scalafixTests` runs every rule on the input and compares the result with the
 // output. `scalafixInput05` and `scalafixTests05` are the same for the rules from 0.5.x (`Llm4sMigrate_1_0`), whose
-// input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`. Neither input nor output is formatted (.scalafmt.conf excludes them), because the rules' output is
-// compared byte for byte.
+// input compiles against the 0.5.1 artifacts; their expected output is in `scalafixOutput` too, under `fix/v1`.
+// `scalafixInput06` and `scalafixTests06` test the `Llm4sMigrate_1_0` rules for the breaks since 0.6.0 on code compiled
+// against the 0.6.0 artifacts, with the expected output under `fix/v06`. Neither input nor output is formatted
+// (.scalafmt.conf excludes them), because the rules' output is compared byte for byte.
 lazy val scalafixScala213 = "2.13.14"
 lazy val scalafixVersion  = "0.12.1"
 lazy val scalafixOldLlm4s = "0.4.1"
 lazy val scalafix05Llm4s  = "0.5.1"
+lazy val scalafix06Llm4s  = "0.6.0"
 lazy val scalafixTestLayout: Seq[Def.Setting[_]] = Seq(
   publish / skip       := true,
   mimaFailOnNoPrevious := false,
@@ -3294,6 +3299,15 @@ lazy val scalafixInput05 = (project in file("modules/scalafix-rules/input-0.5"))
     )
   )
 
+lazy val scalafixInput06 = (project in file("modules/scalafix-rules/input-0.6"))
+  .settings(
+    scalafixTestLayout,
+    semanticdbEnabled := true,
+    libraryDependencies ++= Seq("core", "openai-compatible", "openai", "anthropic", "gemini", "rag", "agent").map(m =>
+      "org.llm4s" %% s"llm4s-$m" % scalafix06Llm4s
+    )
+  )
+
 lazy val scalafixTests = (project in file("modules/scalafix-rules/tests"))
   .dependsOn(scalafixRules)
   .enablePlugins(ScalafixTestkitPlugin)
@@ -3333,6 +3347,27 @@ lazy val scalafixTests05 = (project in file("modules/scalafix-rules/tests-0.5"))
     scalafixTestkitInputClasspath          := (scalafixInput05 / Compile / fullClasspath).value,
     scalafixTestkitInputScalacOptions      := (scalafixInput05 / Compile / scalacOptions).value,
     scalafixTestkitInputScalaVersion       := (scalafixInput05 / Compile / scalaVersion).value,
+    Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
+    Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
+  )
+
+lazy val scalafixTests06 = (project in file("modules/scalafix-rules/tests-0.6"))
+  .dependsOn(scalafixRules)
+  .enablePlugins(ScalafixTestkitPlugin)
+  .settings(
+    scalafixTestLayout,
+    scalaVersion       := scalafixScala213,
+    crossScalaVersions := Seq(scalafixScala213),
+    semanticdbEnabled  := false,
+    libraryDependencies ++= Seq(
+      ("ch.epfl.scala" % "scalafix-testkit" % scalafixVersion % Test).cross(CrossVersion.full),
+      Deps.scalatest   % Test
+    ),
+    scalafixTestkitOutputSourceDirectories := (scalafixOutput / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputSourceDirectories  := (scalafixInput06 / Compile / unmanagedSourceDirectories).value,
+    scalafixTestkitInputClasspath          := (scalafixInput06 / Compile / fullClasspath).value,
+    scalafixTestkitInputScalacOptions      := (scalafixInput06 / Compile / scalacOptions).value,
+    scalafixTestkitInputScalaVersion       := (scalafixInput06 / Compile / scalaVersion).value,
     Test / test                            := (Test / test).dependsOn(scalafixOutput / Compile / compile).value,
     Test / testOnly                        := (Test / testOnly).dependsOn(scalafixOutput / Compile / compile).evaluated
   )

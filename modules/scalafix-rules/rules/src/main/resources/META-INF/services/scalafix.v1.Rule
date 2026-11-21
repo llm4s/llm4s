@@ -13,3 +13,5 @@ org.llm4s.scalafix.CompletionCreatedToInstant
 org.llm4s.scalafix.PositionalPatternsGainFields
 org.llm4s.scalafix.DuplicateApisRemoved
 org.llm4s.scalafix.RemovedApis_1_0
+org.llm4s.scalafix.ThinkingReplacesBudgetTokens
+org.llm4s.scalafix.FinishReasonTyped

@@ -10,13 +10,14 @@ import scalafix.v1._
  * binds the old fields by position gets one `_` per new field: `case ServiceError(message, status, provider,
  * requestId)` becomes `case ServiceError(message, status, provider, requestId, _)` (#2266),
  * `case RunEvent.RunFailed(message, usage)` becomes `case RunEvent.RunFailed(message, usage, _)` (#2049), and
- * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with any other number of arguments is
- * left alone.
+ * `case AgentStatus.Suspended(a, q, m, b)` gains `delegated` (#2050). A pattern with 0.6.0's arity gets a `_` for each
+ * field added since 0.6.0: `Completion`'s ten fields gain `finishReason` (#2613), and `ModelCapabilities` gains the
+ * five thinking and effort fields (#2115). A pattern with any other number of arguments is left alone.
  */
 class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainFields") {
 
   override def description: String =
-    "Adds a _ for each field appended since llm4s 0.5.1 to positional patterns on the types that gained fields"
+    "Adds a _ for each field appended since llm4s 0.5.1 (or 0.6.0) to positional patterns on the types that gained fields"
 
   override def fix(implicit doc: SemanticDocument): Patch =
     doc.tree.collect { case p: Pat.Extract =>
@@ -24,10 +25,9 @@ class PositionalPatternsGainFields extends SemanticRule("PositionalPatternsGainF
       Migration
         .symbolOf(p.fun)
         .map(s => Migration.owner(s))
-        .flatMap(PositionalPatternsGainFields.arity.get)
+        .flatMap(PositionalPatternsGainFields.gained(_, args.size))
         .collect {
-          case (before, after) if args.size == before && args.nonEmpty && !args.exists(_.is[Pat.SeqWildcard]) =>
-            Patch.addRight(args.last, ", _" * (after - before))
+          case added if args.nonEmpty && !args.exists(_.is[Pat.SeqWildcard]) => Patch.addRight(args.last, ", _" * added)
         }
         .getOrElse(Patch.empty)
     }.asPatch
@@ -71,6 +71,7 @@ object PositionalPatternsGainFields {
     "org/llm4s/llmconnect/provider/OpenAICompatibleClient.Settings" -> (8  -> 9),
     "org/llm4s/llmconnect/spi/ProviderConfigSpec"                   -> (8  -> 9),
     "org/llm4s/llmconnect/spi/ProviderFeatures"                     -> (2  -> 3),
+    "org/llm4s/model/ModelCapabilities"                             -> (18 -> 23),
     "org/llm4s/model/TransformationResult"                          -> (3  -> 4),
     "org/llm4s/reranker/RerankProviderConfig"                       -> (3  -> 4),
     "org/llm4s/toolapi/SafeParameterExtractor"                      -> (1  -> 2),
@@ -83,4 +84,16 @@ object PositionalPatternsGainFields {
     "org/llm4s/trace/TraceEvent.TokenUsageRecorded"                 -> (4  -> 5),
     "org/llm4s/vectorstore/VectorStoreFactory.Config"               -> (4  -> 5)
   )
+
+  /**
+   * Each type's extractor arity in 0.6.0 and on main, where 0.6.0's differs from 0.5.1's: a pattern written against
+   * 0.6.0 does not have 0.5.1's arity, so the two maps never both match.
+   */
+  val arity06: Map[String, (Int, Int)] = Map(
+    "org/llm4s/llmconnect/model/Completion" -> (10 -> 11)
+  )
+
+  /** The number of fields a pattern of `size` arguments on `owner` lacks, if it has 0.5.1's or 0.6.0's arity. */
+  def gained(owner: String, size: Int): Option[Int] =
+    List(arity, arity06).flatMap(_.get(owner)).collectFirst { case (before, after) if before == size => after - before }
 }
