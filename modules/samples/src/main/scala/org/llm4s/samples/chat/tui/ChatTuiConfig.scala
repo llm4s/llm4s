@@ -120,19 +120,19 @@ object ChatTuiConfig:
         requireKey("OPENAI_API_KEY").flatMap { apiKey =>
           val baseUrl = getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL)
           val org     = get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
-          OpenAIConfig.fromValues(model, apiKey, org, baseUrl)
+          OpenAIConfig.fromValues(model, apiKey, baseUrl, org)
         }
 
       case "openrouter" =>
         requireKey("OPENROUTER_API_KEY").flatMap { apiKey =>
           val baseUrl = getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL)
-          OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
+          OpenAIConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "requesty" =>
         requireKey("REQUESTY_API_KEY").flatMap { apiKey =>
           val baseUrl = getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL)
-          OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
+          OpenAIConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "anthropic" =>

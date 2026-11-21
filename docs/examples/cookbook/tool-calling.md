@@ -18,7 +18,7 @@ Give an agent an exchange-rate tool of its own and the built-in calculator, and 
 
 The model cannot know today's exchange rate, and is unreliable at arithmetic. Give it tools: it asks for the
 rate, the agent runs the tool and shows the model the result, then the model asks the calculator to multiply, and
-answers from that. `ToolBuilder` defines a tool from a name, a description, a parameter schema and a handler that
+answers from that. {% include api.html t="org.llm4s.toolapi.ToolBuilder" %} defines a tool from a name, a description, a parameter schema and a handler that
 returns `Either[String, A]`; the calculator comes from `llm4s-agent-tools`. The agent loops until the model answers
 without asking for a tool.
 

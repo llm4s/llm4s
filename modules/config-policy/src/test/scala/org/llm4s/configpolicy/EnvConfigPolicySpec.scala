@@ -43,18 +43,14 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
 
     it("should fail with its own message when the provider is unset (#2504)") {
       val p = PolicyBuilder.allowedProviders(Set("openai"), Set("prod"))
-      val result = p.evaluate(base.copy(provider = None), "prod")
-      result.isInstanceOf[PolicyFail] shouldBe true
-      result.asInstanceOf[PolicyFail].reason shouldBe "provider is not set (env 'prod')"
+      p.evaluate(base.copy(provider = None), "prod") shouldBe PolicyFail("allowed-providers", "provider is not set (env 'prod')")
     }
   }
 
   describe("PolicyBuilder.allowedModels") {
     it("should fail with its own message when the model is unset (#2504)") {
       val p = PolicyBuilder.allowedModels(Set("gpt-4o-mini"), Set("prod"))
-      val result = p.evaluate(base.copy(model = None), "prod")
-      result.isInstanceOf[PolicyFail] shouldBe true
-      result.asInstanceOf[PolicyFail].reason shouldBe "model is not set (env 'prod')"
+      p.evaluate(base.copy(model = None), "prod") shouldBe PolicyFail("allowed-models", "model is not set (env 'prod')")
     }
 
     it("should keep model matching case-sensitive (#2504)") {

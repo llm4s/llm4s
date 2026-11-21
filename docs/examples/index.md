@@ -48,6 +48,7 @@ and is run in CI:
 | Category | Count | Description |
 |----------|-------|-------------|
 | [Playground](#playground) | 1 | Offline demo — no API key needed |
+| [Jupyter Notebooks](#jupyter-notebooks) | 2 | Almond notebooks, offline: completion, streaming, structured output, a tool, RAG |
 | [Java Offline Example](#java-offline-example) | 1 | Test application code with a scripted model |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
 | [Agent Examples](#agent-examples) | 10 | Multi-turn agents, persistence, built-in tools, the harness exit examples |
@@ -66,6 +67,17 @@ and is run in CI:
 
 ---
 
+## Jupyter Notebooks
+
+**Files:** [`modules/samples/notebooks`](https://github.com/llm4s/llm4s/tree/main/modules/samples/notebooks)
+
+Two notebooks for the [Almond](https://almond.sh) Scala kernel. `getting-started.ipynb` makes a completion, streams an
+answer into one updating cell output, reads structured output with `derives SchemaOf` and runs a typed tool;
+`rag.ipynb` embeds a handful of documents into the in-memory vector store, searches them and answers a question. Both
+run with `ScriptedLLMClient`, without an API key or network access beyond Maven Central, and CI executes them.
+
+See [Jupyter Notebooks](../guide/notebooks) for installing Almond, configuration inside a notebook and known limits.
+
 ## Java Offline Example
 
 **File:** [`JavaOfflineExample.java`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/java/org/llm4s/samples/java/JavaOfflineExample.java)
@@ -80,6 +92,21 @@ sbt "samples/testOnly org.llm4s.samples.java.JavaOfflineExampleSpec"
 ```
 
 See [Testing your Java code](../guide/java#testing-your-code) for scripting replies, failures and checking calls.
+
+## Java AI Service Example
+
+**File:** [`JavaAiServiceExample.java`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/java/org/llm4s/samples/java/JavaAiServiceExample.java)
+
+An annotated `SupportAssistant` interface that `Llm4s.aiService` implements: a templated system message, an enum and a
+record as return types, an `LlmResult` for explicit failure handling and a `@MemoryId` conversation, all answered by
+`FakeLlmClient`, without an API key or network access.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.java.JavaAiServiceExample"
+sbt "samples/testOnly org.llm4s.samples.java.JavaAiServiceExampleSpec"
+```
+
+See [Java AI services](../guide/java-ai-services) for the annotations, return types, memory and tools.
 
 ## Playground
 
@@ -1012,7 +1039,7 @@ End-to-end context management pipeline with compaction and squeezing.
 sbt "samples/runMain org.llm4s.samples.context.ContextPipelineExample"
 ```
 
-[View all context examples →](context)
+[View all context examples →](#context-management)
 
 ---
 
@@ -1035,9 +1062,17 @@ sbt "samples/runMain org.llm4s.samples.embeddingsupport.EmbeddingExample"
 - Result visualization
 - Chunking and preprocessing
 
-[View all embedding examples →](embeddings)
+[View all embedding examples →](#embeddings)
 
 ---
+
+### EvalDatasetExample
+
+[EvalDatasetExample.scala](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/EvalDatasetExample.scala) builds a golden set of evaluation questions without an API key. It validates inputs before storing them, selects questions by tag and ID, and shows how a snapshot stays fixed as the dataset grows. A JSONL round trip ends with five imported examples and one skipped line.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.rag.EvalDatasetExample"
+```
 
 ### HybridSearchExample {#hybrid-search}
 
@@ -1206,7 +1241,7 @@ sbt "samples/runMain org.llm4s.samples.mcp.MCPToolExample"
 - Protocol handling (stdio, HTTP, SSE)
 - Tool execution
 
-[View all MCP examples →](mcp)
+[View all MCP examples →](#mcp-examples)
 
 ---
 
@@ -1442,7 +1477,7 @@ All examples are in the [samples directory](https://github.com/llm4s/llm4s/tree/
 ## Next Steps
 
 - **[User Guide](../guide/basic-usage)** - Learn concepts in depth
-- **[API Reference](/api/llm-client)** - Detailed API documentation
+- **[API Reference](/api/)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share projects
 
 ---

@@ -20,8 +20,9 @@ import java.time.Instant
  * @param timestamp  Wall-clock time when this entry was inserted. Compared against
  *                   [[CacheConfig.ttl]] to determine whether the entry has expired.
  * @param options    The [[org.llm4s.llmconnect.model.CompletionOptions]] used to produce
- *                   `response`. A cache hit requires an exact match on `options`; mismatched
- *                   options (e.g. different temperature or tool set) result in a
+ *                   `response`. A cache hit requires a match on every field that changes the
+ *                   answer (`CompletionCacheKey`; today, every field); mismatched options
+ *                   (e.g. different temperature, tool set or thinking) result in a
  *                   `OptionsMismatch` miss and bypass the cache.
  */
 @Stable

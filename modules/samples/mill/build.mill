@@ -8,7 +8,7 @@ package build
 import mill.*, scalalib.*
 
 // One version for every llm4s module: they are released together. (Or import llm4s-bom with `bomMvnDeps`.)
-val llm4sVersion = "0.5.1"
+val llm4sVersion = "0.6.0"
 
 object app extends ScalaModule {
   def scalaVersion = "3.7.1"

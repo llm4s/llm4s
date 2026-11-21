@@ -1,0 +1,14 @@
+# The client the sample builds (see Llm4sSettings). The default is a local Ollama server at http://localhost:11434,
+# which needs no key: `ollama pull llama3.2` first. Override any key with -D or an environment variable, for example
+#   LLM4S_PROVIDER=openai-compatible LLM4S_BASE_URL=https://api.openai.com/v1 LLM4S_MODEL=gpt-4o-mini LLM4S_API_KEY=sk-...
+micronaut:
+  application:
+    name: llm4s-micronaut-sample
+llm4s:
+  provider: ollama
+  model: llama3.2
+  # base-url: http://localhost:11434
+  # api-key:
+endpoints:
+  health:
+    details-visible: ANONYMOUS

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Validates that all relative Markdown links in CHANGELOG.md, README.md,
-# and docs/migrations/ resolve to real files.
+# docs/migrations/ and the News posts in docs/_posts/ resolve to real files.
+# A site-absolute link (/guide/...) names a page of llm4s.org, not a file: scripts/check-docs-site-links.sh
+# checks those, posts included.
 # Exit code 0 = all links valid.  Non-zero = broken links found.
 set -euo pipefail
 
@@ -19,7 +21,7 @@ def extract_relative_links(path):
     content = re.sub(r'`[^`\n]+`', '', content)
     for m in re.finditer(r'\]\(([^)]+)\)', content):
         link = m.group(1).strip()
-        if link.startswith(('http://', 'https://', 'mailto:', '#')):
+        if link.startswith(('http://', 'https://', 'mailto:', '#', '/')):
             continue
         path_part = link.split('#')[0].strip()
         if path_part:
@@ -51,6 +53,9 @@ TARGET_FILES=(
   "$REPO_ROOT/ADOPTERS.md"
   "$REPO_ROOT/SUPPORT.md"
 )
+for post in "$REPO_ROOT"/docs/_posts/*.md; do
+  [[ -e "$post" ]] && TARGET_FILES+=("$post")
+done
 
 for f in "${TARGET_FILES[@]}"; do
   if [[ -f "$f" ]]; then

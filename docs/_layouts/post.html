@@ -1,0 +1,26 @@
+---
+layout: landing
+---
+{%- comment -%}
+  A News post (docs/_posts, #2319), in the landing layout like /news/ itself: a short header with the date and tags,
+  the post as prose, and links back to /news/ and to the Atom feed. Front matter: title, description (the summary on
+  /news/ and in share previews), image (the share image), tags (release, community or guides) and, for a cross-post,
+  canonical_url (jekyll-seo-tag then points search engines at the original).
+{%- endcomment -%}
+<section class="lp-hero lp-hero--page lp-hero--post" aria-labelledby="post-title">
+  <div class="lp-wrap">
+    <div class="lp-hero__copy">
+      <p class="lp-eyebrow lp-eyebrow--light"><a href="{{ '/news/' | relative_url }}">News</a>{% for tag in page.tags %} &middot; {{ tag }}{% endfor %}</p>
+      <h1 id="post-title">{{ page.title }}</h1>
+      <p class="lp-post__date"><time datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%-d %B %Y" }}</time></p>
+    </div>
+  </div>
+</section>
+
+<section class="lp-section">
+  <article class="lp-wrap lp-prose lp-post">
+    {{ content }}
+    <hr>
+    <p class="lp-post__nav"><a href="{{ '/news/' | relative_url }}">All news</a> &middot; <a href="{{ '/feed.xml' | relative_url }}">Subscribe (Atom)</a></p>
+  </article>
+</section>

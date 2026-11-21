@@ -28,6 +28,9 @@
 #     -1/-2 for repeats), plus kramdown `{#id}` and HTML id=/name= attributes. UNVERIFIED for headings that
 #     contain HTML or unusual Unicode; Setext (underlined) headings are not read.
 #   - Targets containing Liquid ({{ }} or {% %}) cannot be resolved here and are skipped.
+#   - News posts, docs/_posts/YYYY-MM-DD-<slug>.md (#2319), are the one `_` directory that is checked: a post is
+#     served at /news/YYYY/MM/DD/<slug>/ (the posts' `permalink` default in _config.yml, dated by its `date:` front
+#     matter, else its file name), and its links are checked like any other page's.
 #
 # Each broken link has a cause: page-missing (no such page), repo-source (the link leaves docs/ and points at a
 # repository file: fine on GitHub, dead on the site), stale-anchor, no-front-matter, md-extension.
@@ -59,6 +62,9 @@ import sys
 REPO_ROOT = os.environ["CHECK_REPO_ROOT"]
 GENERATED_PREFIXES = ("/scaladoc", "/llms", "/llms.txt", "/llms-full.txt", "/llm4s-rules.md")
 SKIP_SCHEMES = ("http://", "https://", "mailto:", "tel:", "javascript:", "data:", "//", "ftp://")
+# News posts (#2319): docs/_posts/YYYY-MM-DD-<slug>.md, served at the posts' permalink in docs/_config.yml.
+POST_FILE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-(.+)\.(?:md|markdown)$")
+POST_PERMALINK = "/news/:year/:month/:day/:title/"
 
 
 def usage_error(message):
@@ -204,6 +210,40 @@ class Site(object):
                         self.raw_noext["/" + re.sub(r"\.(md|markdown)$", "", rel)] = rel
                 else:
                     self.assets.add("/" + rel)
+        posts = os.path.join(root, "_posts")
+        if os.path.isdir(posts):
+            for fn in sorted(os.listdir(posts)):
+                m = POST_FILE.match(fn)
+                if not m:
+                    continue
+                with open(os.path.join(posts, fn), encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                has_fm, fm = front_matter(text)
+                if not has_fm:
+                    continue
+                rec = {"rel": "_posts/" + fn, "text": text, "rendered": True, "anchors": None}
+                self.sources[rec["rel"]] = rec
+                self._add_post(rec, fm, m)
+
+    def _add_post(self, rec, fm, m):
+        """A post's URL: its `permalink`, else POST_PERMALINK with the date of its `date:` (else of its file name)."""
+        year, month, day, slug = m.group(1), m.group(2), m.group(3), m.group(4)
+        dated = re.search(r"^date:\s*['\"]?(\d{4})-(\d{2})-(\d{2})", fm, re.MULTILINE)
+        if dated:
+            year, month, day = dated.groups()
+        perm = re.search(r"^permalink:\s*['\"]?([^'\"\s]+)['\"]?\s*$", fm, re.MULTILINE)
+        url = perm.group(1) if perm else POST_PERMALINK
+        url = (url.replace(":year", year).replace(":month", month).replace(":day", day)
+               .replace(":title", slug))
+        accepted = {url}
+        if url.endswith("/"):
+            accepted |= {url.rstrip("/"), url + "index.html"}
+        else:
+            accepted.add(url + ".html")
+        rec["url"] = url
+        self.rendered[url] = rec
+        for u in accepted:
+            self.urls[u] = rec
 
     def _add_rendered(self, rec, fm):
         rel = rec["rel"]

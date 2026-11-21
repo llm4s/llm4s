@@ -8,3 +8,6 @@ The full procedure, what each job does, and how to verify or recover a release a
 [docs/reference/release.md](docs/reference/release.md).
 
 Release notes are the GitHub Releases (https://github.com/llm4s/llm4s/releases) and [CHANGELOG.md](CHANGELOG.md).
+Each release also gets a post on [llm4s.org/news](https://llm4s.org/news/), drafted from its CHANGELOG section with
+`scripts/new-release-post.sh <version>` in the pull request that prepares the release
+([Write the News post](docs/reference/release.md#write-the-news-post)).

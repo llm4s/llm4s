@@ -38,12 +38,14 @@ CI, so this table does not repeat it:
 | **DeepSeek** | `deepseek` | Cloud | DeepSeek models | Easy |
 | **OpenRouter** | `openrouter` | Cloud gateway | Many vendors' models behind one key | Easy |
 | **Z.ai** | `zai` | Cloud | GLM models | Easy |
-| **OpenAI-compatible** | `openai-compatible` | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
+| **OpenAI-compatible** | `openai-compatible` | Cloud or local | Groq, Together, Fireworks, NVIDIA NIM, OrcaRouter, UberLLM; vLLM, LM Studio, llama.cpp - config only ([recipes](#openai-compatible-endpoints)) | Easy |
 | **Mistral** | `mistral` | Cloud | Mistral and Magistral models | Easy |
 | **Cohere** | `cohere` | Cloud | Command models | Easy |
 | **xAI** | `xai` | Cloud | Grok models | Easy |
 | **Ollama** | `ollama` | Local | Open models on your machine, no API key | Easy |
+| **Jlama** | `jlama` | In-process | A small open model run inside your JVM: no API key, no server (`llm4s-jlama`, Experimental) | Easy |
 | **IBM watsonx.ai** | `watsonx` | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
+| **Perplexity** | `perplexity` | Cloud | Agent API: web-search answers with citations, from Perplexity's and other vendors' models (`llm4s-perplexity`) | Easy |
 | **Amazon Bedrock** | `bedrock` | Cloud Enterprise | Models on AWS, through the Converse API (`llm4s-bedrock`) | Medium |
 | **Requesty** | `requesty` | Cloud gateway | Many vendors' models behind one key | Easy |
 
@@ -205,8 +207,10 @@ Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` i
 reject non-default values. (`gpt-oss` models keep their sampling parameters.)
 
 The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
-returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. They are part of
-`completionTokens`, not in addition to it. OpenAI's chat-completions API does not return the
+returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. OpenAI counts them
+inside `completion_tokens`; llm4s takes them out, because `completionTokens` never includes
+`thinkingTokens` (`totalTokens` is kept as reported, and `totalOutputTokens` is the two added
+together). OpenAI's chat-completions API does not return the
 reasoning text itself, so `Completion.thinking` stays empty.
 
 ### Streaming and token usage
@@ -458,6 +462,8 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | Azure OpenAI | `endpoint` (required), `apiVersion`, `authentication`, `clientId` |
 | Vertex AI | `project` (required), `location` |
 | Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
+| Perplexity | `webSearch`, `contextWindow`, `reserveCompletion` |
+| Jlama | `modelDir`, `threads` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
 key that is neither built-in nor declared by the section's provider is ignored with a warning
@@ -480,7 +486,9 @@ unchanged.
 > `WatsonXClient`'s Scaladoc): the token-limit field, the encoding of tool-call arguments, the finish reasons
 > and the stream's usage chunk are all shown there. IBM's
 > [tool-calling guide](https://www.ibm.com/docs/SSYOK8/wsj/analyze-data/fm-api-chat-tools.html) shows the
-> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. That proves IBM's clients send them, not that the
+> same tool request (`tool_choice_option: "auto"`) and tool-call reply, and a test pins its example. `WatsonXChatOverHttpSpec` runs the client through the real HTTP stack against
+> a local server: tool calls whole and streamed, structured messages with no role-marker prompt, and the error
+> mapping and redaction for a wrong key. That proves IBM's clients send these shapes, not that the
 > service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
 > `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
 > which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has
@@ -526,8 +534,9 @@ Behaviour to know about:
   depends on the model. Like the rest of this section, both are unconfirmed until the probe suite runs.
 - **Reasoning.** `CompletionOptions.reasoning` goes as `reasoning_effort` (`Low`, `Medium` and `High` as
   `low`, `medium` and `high`) to OpenAI's gpt-oss models (`openai/gpt-oss-120b`, `openai/gpt-oss-20b` and
-  their variants), the models IBM's own clients send it to. The chat API has no value that turns reasoning
-  off, so `ReasoningEffort.None` goes as `low`, and a warning is logged once per process. Any other model
+  their variants), the models IBM's own clients send it to; `Minimal` goes as `low`, and `XHigh` and `Max` as `high`.
+  The chat API has no value that turns reasoning off, so `Thinking.Off` goes as `low`, and a warning is logged once per
+  process. Any other model
   is sent nothing for `reasoning`, again with a warning logged once per process: IBM's Model Gateway
   rejects the field for models without it, and whether the chat API does is unconfirmed.
   `include_reasoning` is not sent; the service defaults it to true.
@@ -535,7 +544,7 @@ Behaviour to know about:
   `Completion.thinking` on `complete`, and `StreamedChunk.thinkingDelta` on a stream, with the whole
   text on the final completion. It is not sent back on later turns. The chat API reports no reasoning
   token count, so `TokenUsage.thinkingTokens` stays empty (IBM's recorded replies suggest the
-  reasoning is counted in `completion_tokens`). `budgetTokens` has no counterpart and is ignored. Granite models that put their
+  reasoning is counted in `completion_tokens`). `Thinking.Adaptive` and `Thinking.Budget` have no counterpart and are ignored. Granite models that put their
   reasoning inside the content between tags (`<think>...</think>`) are not split: that text stays in
   `content`. The field names come from IBM's SDKs and from replies IBM's Java SDK recorded from
   `openai/gpt-oss-120b`; like the rest of this section, they are unconfirmed until the probe suite runs.
@@ -556,6 +565,52 @@ Behaviour to know about:
   the other variables in the example are just `${?VAR}` substitutions you write in your own config.
 
 ---
+
+## Perplexity
+
+`llm4s-perplexity` calls Perplexity's [Agent API](https://docs.perplexity.ai/docs/agent-api/quickstart)
+(`POST https://api.perplexity.ai/v1/agent`), which replaced Sonar Chat Completions: Perplexity
+[ended Sonar's support](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview) on 27 September
+2026. The Agent API speaks the OpenAI Responses format, so it has its own client rather than the generic
+`openai-compatible` one. Adding the dependency registers the `perplexity` provider.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-perplexity" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.perplexity-main {
+  provider = "perplexity"
+  model    = "perplexity/sonar"     # any Agent API model: perplexity/sonar, openai/gpt-5.6-sol, anthropic/claude-sonnet-5-5, ...
+  # apiKey defaults to PERPLEXITY_API_KEY (llm4s.credentials.perplexity.apiKey)
+  # webSearch = false               # default true
+}
+```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `model` | yes | An Agent API model id, `provider/model` ([the list](https://docs.perplexity.ai/docs/agent-api/models)) |
+| `apiKey` | no | Default `PERPLEXITY_API_KEY` |
+| `webSearch` | no | Offer the model Perplexity's `web_search` tool on every request; default `true`. Each search is billed |
+| `contextWindow` | no | The model's window in tokens; default the model registry's entry for the model's vendor, else 128000 |
+| `reserveCompletion` | no | Tokens held back for the reply; default 4096 |
+
+- **Citations.** `Completion.citations` holds the `url_citation` annotations on the answer, then each web
+  search result (its URL, title and snippet as `citedText`). The answer's `[web:N]` markers point at those
+  results. Both `complete` and a stream carry them.
+- **Usage and cost.** Cached and reasoning tokens are read from the usage details, and the cost Perplexity
+  reports for the request (`usage.cost.total_cost`, USD, searches included) is `Completion.estimatedCost`.
+- **Tools.** Your tools are sent as `function` tools beside `web_search`, and a reply's `function_call` items
+  become `ToolCall`s. A call's `thought_signature`, which some models attach, is kept and sent back with it.
+- **Request mapping.** System messages become `instructions`. `ReasoningEffort` is sent as `reasoning.effort`
+  (`None` as `minimal`). A `ResponseFormat.JsonSchema` is sent as `response_format`; plain
+  `ResponseFormat.Json` is refused, since the Agent API takes only a schema. An `anthropic/` model with no
+  `maxTokens` is sent `reserveCompletion` as `max_output_tokens`, which the Agent API requires for those models.
+  Penalties have no counterpart and are not sent. Only text content is sent.
+- **Not supported yet:** effort levels (`effort`), profiles, model fallback chains, the other built-in tools
+  (`fetch_url`, `finance_search`, ...), background runs and `previous_response_id`.
+- No live call was made while writing this module. The `@Cloud` suite `PerplexitySmokeSpec` runs it against
+  the service with `PERPLEXITY_API_KEY`.
 
 ## Azure OpenAI
 
@@ -628,7 +683,7 @@ llm4s sees is the **deployment name**, which need not name the model behind it. 
   reasoning effort, since asking is the only sign it is a reasoning model. The request then
   also follows the reasoning-model rules: `max_completion_tokens`, and no sampling parameters.
   Asking for reasoning on such a deployment that is not a reasoning model gets an error from
-  Azure; leave `reasoning` unset (or `ReasoningEffort.None`) for it.
+  Azure; leave `reasoning` and `thinking` unset for it.
 
 ### Streamed token usage
 
@@ -741,23 +796,26 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. For a Claude model,
+`Thinking.Budget(n)` is the budget, fitted to `[1024, maxTokens)`, and `Thinking.Off` sends no thinking block;
+any other `thinking` is reported as dropped.
 
 Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
 `reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with
 the effort, and `High` sends `max`, Z.ai's maximum and its default, so no level reasons more than
 `High`:
 
-| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+| Model | `Thinking.Off` | `Minimal`, `Low` | `Medium` | `High`, `XHigh`, `Max` |
 |---|---|---|---|---|
 | GLM-5.3, GLM-5.3-Flash, GLM-5.3-FlashX | `reasoning_effort: low` | `low` | `high` | `max` |
 | GLM-5.2 | `reasoning_effort: none` | `low` | `medium` | `max` |
 | GLM-5.1, GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 (and variants) | `thinking.type: disabled` | not sent | not sent | not sent |
 | any other model | not sent | not sent | not sent | not sent |
 
-GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `None` gets the lowest effort it
-accepts, as Z.ai advises; it still produces, and bills, thinking tokens, and the first such request
-in a process logs a warning naming the model. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
+GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `Thinking.Off` gets the lowest effort
+it accepts, as Z.ai advises; it still produces, and bills, thinking tokens, which the completion reports
+as an `Adjusted` adjustment naming the model. `Thinking.Off` wins over a `reasoning` also set. `Minimal`
+and `XHigh` have no Z.ai level of their own and are reported as adjusted. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
 accepts `none`, `low`, `medium`, `high` and `max`, but Z.ai currently runs `low` and `medium` as
 `high` on it; llm4s still sends the level requested. The GLM-4.x and earlier GLM-5 models document
 no `reasoning_effort`. With `reasoning` unset, neither field is sent. A GLM thinking
@@ -923,7 +981,7 @@ model: tool calling on a local server usually needs a server flag, as the recipe
 
 **Streamed token usage.** A streaming request asks for usage with
 `"stream_options": {"include_usage": true}`, which is how OpenAI - and servers that follow it,
-such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
+such as vLLM, Ollama's `/v1` and Perplexity's Orchestrator - are told to report it; usage is read from
 whichever event carries it, including a final event with empty `choices`. An endpoint that
 rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
 off with `streamUsage = false` in the section (it takes `true` or `false`, and HOCON's
@@ -950,8 +1008,10 @@ What it does **not** do:
 
 - **No reasoning configuration.** `CompletionOptions.reasoning` is ignored; no
   `reasoning_effort` or similar field is sent, so a reasoning model runs at its vendor's default.
-- **No reasoning output.** A reply's `reasoning_content` or `reasoning` field is not read, so
-  `Completion.thinking` is empty and reasoning tokens are not reported separately.
+- **No reasoning text.** A reply's `reasoning_content` or `reasoning` field is not read, so
+  `Completion.thinking` is empty. Reasoning tokens are reported when the server sends OpenAI's
+  `usage.completion_tokens_details.reasoning_tokens`: they are `TokenUsage.thinkingTokens`, taken out
+  of `completionTokens`, which never includes them.
 - **No provider-specific fields.** Anything outside the standard reply - citations, search
   results, annotations - is dropped; `Completion` has no field for it.
 - **Text only.** Messages are sent as text.
@@ -1071,44 +1131,25 @@ nim-cloud {
 
 #### Perplexity
 
-{: .warning }
-> Perplexity has replaced **Sonar Chat Completions** with its Agent API, and states that Sonar
-> "will be supported until September 27, 2026". The Agent API uses the OpenAI **Responses**
-> format (`/v1/responses`), which the generic provider does not speak. Check Sonar's status
-> before relying on the section below.
+For Perplexity's search-grounded answers use the [`perplexity` provider](#perplexity): its Agent API speaks the
+OpenAI Responses format, which this provider does not. Sonar Chat Completions, which this provider could reach,
+lost Perplexity's support on 27 September 2026.
 
-Sonar, while it runs:
+Perplexity's **Orchestrator API** (formerly the Router API) speaks Chat Completions and serves open-weight
+models, without the Agent API's web search. It is in private preview (access by request to Perplexity), and
+publishes no context windows, so set `contextWindow` for the model you pick:
 
 ```hocon
-perplexity-sonar {
+perplexity-orchestrator {
   provider = "openai-compatible"
-  baseUrl = "https://api.perplexity.ai"    # no /v1: requests go to /chat/completions
-  model = "sonar-pro"
+  baseUrl = "https://api.perplexity.ai/orchestrator/v1"   # the old /router/v1 still works
+  model = "perplexity/kimi-k3"
   apiKey = ${?PERPLEXITY_API_KEY}
 }
 ```
 
-- The context window, 200000 for `sonar-pro`, comes from the model registry.
-- **Citations and search results are not surfaced.** Sonar returns them in top-level
-  `citations` and `search_results` fields, and `Completion` has no field for them, so you get
-  the answer text - with its `[1]`-style markers - and not the sources they point to.
-- Sonar's tool-calling support is undocumented; do not rely on it.
-
-Perplexity's **Router API** speaks Chat Completions and serves open-weight models, without
-Sonar's web search. It is in private preview (access by request to Perplexity), and publishes
-no context windows, so set `contextWindow` for the model you pick:
-
-```hocon
-perplexity-router {
-  provider = "openai-compatible"
-  baseUrl = "https://api.perplexity.ai/router/v1"
-  model = "perplexity/glm-5.3-flash"
-  apiKey = ${?PERPLEXITY_API_KEY}
-}
-```
-
-The Router reports token usage on a stream only when asked with `stream_options`, which the
-generic provider sends, so streamed completions carry usage.
+The Orchestrator reports token usage on a stream only when asked with `stream_options`, which the generic
+provider sends, so streamed completions carry usage.
 
 #### OrcaRouter
 
@@ -1131,6 +1172,30 @@ orcarouter-main {
   accepts a reasoning effort as a model-name suffix (`-minimal`, `-low`, `-medium`, `-high`,
   `-max`), and since `model` is sent as-is, that is the one way to choose an effort through the
   generic path. The `reasoning_content` it passes through is not read.
+
+#### UberLLM
+
+[UberLLM](https://uberllm.dev) is an OpenAI-compatible gateway in front of several vendors'
+models:
+
+```hocon
+uberllm-main {
+  provider = "openai-compatible"
+  baseUrl = "https://api.uberllm.dev/v1"
+  model = "openai/gpt-4o-mini"
+  apiKey = ${?UBERLLM_API_KEY}   # keys start with ull_
+  contextWindow = 128000         # the model's context_length in GET /v1/models
+}
+```
+
+- Keep `contextWindow`: `api.uberllm.dev` is not one of the hosts the model registry provider is
+  inferred from, so without it the provider would use 8192. `GET /v1/models` lists every model
+  id with its `context_length`; set the one of the model you pick.
+- UberLLM documents no environment variable name; `UBERLLM_API_KEY` is only this guide's choice.
+- Model ids are provider-prefixed (`openai/`, `anthropic/`, `deepseek/`, `z-ai/`, ...), as in that
+  list. A reasoning model's reasoning output is not read, and the effort cannot be set.
+- UberLLM puts a `usage` object on the last chunk of a stream, so streamed token usage is
+  reported.
 
 ### Local servers
 
@@ -1176,7 +1241,7 @@ lmstudio {
 #### llama.cpp (`llama-server`)
 
 ```bash
-llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384
+llama-server -hf <user>/<model>:<tag> --alias local-model -c 16384 --port 8080
 ```
 
 ```hocon
@@ -1189,8 +1254,9 @@ llama-cpp {
 }
 ```
 
-- `llama-server` listens on `127.0.0.1:8080` by default. Without `--alias` the model id is the
-  model file's path; `--alias` gives it a stable name.
+- `llama-server` listens on `127.0.0.1`, on port 9931 by default in current builds; the command
+  above pins 8080 with `--port`. Without `--alias` the model id is the model file's path; `--alias`
+  gives it a stable name.
 - Tool calling uses the Jinja chat template (`--jinja`, on by default), and some models need a
   `--chat-template-file` override to get a tool-capable template.
 
@@ -1382,13 +1448,15 @@ The sources for the values above:
   [Llama 3.3 70B Instruct](https://docs.api.nvidia.com/nim/reference/meta-llama-3_3-70b-instruct),
   [self-hosted quickstart](https://docs.nvidia.com/nim/large-language-models/latest/get-started/quickstart.html),
   [self-hosted API reference](https://docs.nvidia.com/nim/large-language-models/latest/reference/api-reference.html)
-- Perplexity: [Sonar OpenAI compatibility](https://docs.perplexity.ai/docs/sonar/openai-compatibility),
-  [Sonar Pro](https://docs.perplexity.ai/docs/sonar/models/sonar-pro),
-  [migrating from Sonar](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview),
-  [Router API](https://docs.perplexity.ai/docs/router/quickstart),
-  [Router models](https://docs.perplexity.ai/docs/router/models)
+- Perplexity: [migrating from Sonar](https://docs.perplexity.ai/docs/agent-api/migrate-from-sonar/overview),
+  [Orchestrator API](https://docs.perplexity.ai/docs/router/quickstart),
+  [Orchestrator models](https://docs.perplexity.ai/docs/router/models)
 - OrcaRouter: [quickstart](https://docs.orcarouter.ai/getting-started/quickstart),
   [reasoning](https://docs.orcarouter.ai/advanced/reasoning)
+- UberLLM: [quickstart](https://uberllm.dev/docs/quickstart),
+  [authentication](https://uberllm.dev/docs/authentication),
+  [models and routing](https://uberllm.dev/docs/models-and-routing),
+  [streaming](https://uberllm.dev/docs/streaming)
 - vLLM: [OpenAI-compatible server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/),
   [`vllm serve`](https://docs.vllm.ai/en/latest/cli/serve/),
   [tool calling](https://docs.vllm.ai/en/latest/features/tool_calling/)
@@ -1566,18 +1634,19 @@ structured output, model listing (`/v1/models`) and exchange logging.
   `usage.completion_tokens_details.reasoning_tokens`. xAI counts them outside `completion_tokens`
   and inside `total_tokens`.
 - **Reasoning effort.** `CompletionOptions.reasoning` is sent as `reasoning_effort` where the model
-  takes it. xAI's reasoning models cannot stop reasoning, so `None` sends the lowest level, and the
-  first such request in a process logs a warning:
+  takes it, a level the model lacks as the nearest it has (reported as adjusted). xAI's reasoning models
+  cannot stop reasoning, so `Thinking.Off` sends the lowest level, reported as adjusted:
 
-| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
-|---|---|---|---|---|
-| `grok-4.5`, `grok-4.6`, `grok-4.7` (and their `-latest` aliases) | `low` | `low` | `medium` | `high` |
-| `grok-3-mini` (and variants) | `low` | `low` | `high` | `high` |
-| any other model | not sent | not sent | not sent | not sent |
+| Model | `Thinking.Off` | `Minimal`, `Low` | `Medium` | `High` | `XHigh`, `Max` |
+|---|---|---|---|---|---|
+| `grok-4.6`, `grok-4.7` (and their `-latest` aliases) | `low` | `low` | `medium` | `high` | `xhigh` |
+| `grok-4.5` (and its `-latest` alias) | `low` | `low` | `medium` | `high` | `high` |
+| `grok-3-mini` (and variants) | `low` | `low` | `high` | `high` | `high` |
+| any other model | not sent | not sent | not sent | not sent | not sent |
 
-  `high` is the default on Grok 4.5 and later; `xhigh` (4.6 and later) is not reachable from
-  `CompletionOptions`. `grok-4` rejects the parameter, and on `grok-4.20-multi-agent` it sets the
-  number of agents, so neither is sent it. With `reasoning` unset nothing is sent.
+  `high` is the default on Grok 4.5 and later. `grok-4` rejects the parameter, and on
+  `grok-4.20-multi-agent` it sets the number of agents, so neither is sent it. With `reasoning` and
+  `thinking` unset nothing is sent.
 - **Penalties.** xAI rejects `presence_penalty`, `frequency_penalty` and `stop` on reasoning models.
   llm4s never sends `stop`; a non-zero `presencePenalty` or `frequencyPenalty` is left out of a
   request to a reasoning model (logged once), and sent as given to a `-non-reasoning` model.
@@ -1663,6 +1732,36 @@ Free! Just compute (CPU or GPU needed).
 - Works offline (no internet needed)
 - Use GPU for faster inference
 - Ideal for sensitive data (runs locally)
+
+---
+
+## Jlama (in-process)
+
+`llm4s-jlama` (Experimental) runs a small model inside your own JVM with [Jlama](https://github.com/tjake/Jlama), a
+pure-Java inference engine: no API key, no server to install. It is for learning, offline tests and demos; for real
+workloads use [Ollama](#ollama-local-models) or a cloud provider.
+[First answer, no key, no server](../getting-started/local-jlama) is the walk-through.
+
+```hocon
+llm4s.providers.local {
+  provider = "jlama"
+  model    = "tjake/Llama-3.2-1B-Instruct-JQ4"   # a Hugging Face model id, owner/name
+}
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `model` | yes | A Hugging Face model id Jlama can load, `owner/name`; the `tjake/*-Jlama-*` and `*-JQ4` models are pre-quantised for it |
+| `modelDir` | no | Where models are downloaded to and loaded from; default `~/.cache/llm4s/jlama` |
+| `threads` | no | How many threads Jlama computes with; default the physical core count. Jlama's pool is JVM-wide, so the first model loaded sets it |
+
+- **JVM flags.** Jlama uses the JDK's incubating Vector API: run the JVM with
+  `--add-modules=jdk.incubator.vector --enable-preview` (in sbt, `run / fork := true` and
+  `run / javaOptions ++= Seq(...)`). Without them Jlama logs a warning and runs much slower.
+- **First call.** The model is downloaded on the first call, not when the client is built, then loaded from
+  `modelDir` on every later run; one model stays in memory per client until `close()`.
+- **Supported:** `complete` and `streamComplete`, text only. **Not supported:** tool calling (a request with tools
+  is refused), images and other media parts, and `responseFormat`, which is not read.
 
 ---
 
@@ -1862,6 +1961,7 @@ provider's call). `hasSpan` says whether both are present.
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
 | Gemini, Vertex AI | With `googleSearch = true` in the section (see [Google Search grounding](#google-search-grounding)): one citation per source in the candidate's `groundingMetadata.groundingChunks` - `url` and `title`, and for a Vertex AI Search / RAG source (`retrievedContext`) its text as `citedText`. No indices: Gemini's `groundingSupports` are UTF-8 byte offsets of the supported text, not where a citation sits. Without the setting, empty. Read from `complete` and from a stream. |
 | Anthropic | With `webSearch = true` in the section (see [Web search](#web-search)): one citation per source a text block cites - for a `web_search_result_location` its `url`, `title` and `cited_text`, for a `search_result_location` its `source` as `url`. Document citations (`char_location`, `page_location`, `content_block_location`) name a document, not a URL, and are skipped. No indices: Anthropic attaches a citation to a text block, not to a position in it. Read from `complete` and from a stream (`citations_delta`). |
+| Perplexity | The `url_citation` annotations on the answer, then each `web_search` result (`url`, `title`, the `snippet` as `citedText`) not already cited; see [Perplexity](#perplexity). Read from `complete` and from a stream. |
 | Ollama, Bedrock, watsonx | Empty. |
 
 Things to know:
@@ -1874,7 +1974,6 @@ Things to know:
 - **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
   absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
   cannot parse at all as no citations; the OpenAI-compatible client keeps the entries it can read.
-- **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
 - The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
   provider was called while writing this.
 

@@ -107,7 +107,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-          cache: sbt
+
+      - name: Restore the sbt dependency cache
+        uses: ./.github/actions/restore-sbt-deps
 
       - uses: sbt/setup-sbt@b113b960ba361e87e08ce02a390d51871b7ee459 # v1.5.13
 
@@ -124,7 +126,7 @@ jobs:
           echo "image=$(echo "$REGISTRY/$name:$SHA" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Build the image
-        run: sbt deployService/Docker/publishLocal
+        run: scripts/retry-on-transient-network.sh sbt deployService/Docker/publishLocal
 
       - name: Tag the image with the commit SHA
         env:
@@ -170,7 +172,7 @@ jobs:
       # Third-party action, pinned to a commit: it handles registry credentials.
       - name: Log in to the registry
         if: ${{ inputs.deploy }}
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ inputs.registry }}
           username: ${{ github.actor }}

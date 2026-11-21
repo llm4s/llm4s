@@ -286,11 +286,23 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
           |  contextWindow = 128000
           |}""".stripMargin
       ).contextWindow shouldBe 128000
+
+      recipe(
+        "uberllm-main",
+        """uberllm-main {
+          |  provider = "openai-compatible"
+          |  baseUrl = "https://api.uberllm.dev/v1"
+          |  model = "openai/gpt-4o-mini"
+          |  apiKey = ${?UBERLLM_API_KEY}   # keys start with ull_
+          |  contextWindow = 128000         # the model's context_length in GET /v1/models
+          |}""".stripMargin
+      ).contextWindow shouldBe 128000
     }
 
     "explain why those recipes keep it: without it the provider would use the default" in {
       window("https://api.together.ai/v1", "meta-llama/Llama-3.3-70B-Instruct-Turbo") shouldBe Default
       window("https://api.x.ai/v1", "grok-4.7") shouldBe Default
+      window("https://api.uberllm.dev/v1", "openai/gpt-4o-mini") shouldBe Default
     }
 
     "give the gateway example, which names its registry provider, Groq's window for the model" in {

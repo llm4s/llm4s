@@ -11,6 +11,7 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
   private val handBuilt = CalculatorTool.toolSafe.fold(e => sys.error(e.formatted), identity)
   private val typed     = TypedCalculator.tool.fold(e => sys.error(e.formatted), identity)
   private val tupled    = TypedCalculator.namedTupleTool.fold(e => sys.error(e.formatted), identity)
+  private val scoped    = TypedCalculator.scopedTool.fold(e => sys.error(e.formatted), identity)
 
   "The typed calculator" should "send the built-in schema, with the optional operand allowed to be null" in {
     val expected = handBuilt.toOpenAITool()
@@ -47,6 +48,7 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
       withClue(arguments.render()) {
         typed.execute(arguments) shouldBe handBuilt.execute(arguments)
         tupled.execute(arguments) shouldBe handBuilt.execute(arguments)
+        scoped.execute(arguments) shouldBe handBuilt.execute(arguments)
       }
     }
   }
@@ -64,6 +66,10 @@ class TypedCalculatorExampleSpec extends AnyFlatSpec with Matchers {
     parameters("description") = ujson.Str("(operation: Operation, a: Double, b: Option[Double])")
     List("operation", "a", "b").foreach(name => parameters("properties")(name)("description") = ujson.Str(name))
     tupled.toOpenAITool() shouldBe expected
+  }
+
+  "The scoped calculator" should "send the typed schema" in {
+    scoped.toOpenAITool() shouldBe typed.toOpenAITool()
   }
 
   "The sample" should "run without a model" in {

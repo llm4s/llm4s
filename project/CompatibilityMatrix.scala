@@ -5,8 +5,8 @@ import sbt._
  *
  * Read from the build, never typed by hand: the Scala version and JDK floor from `Common`, the integration libraries'
  * versions from `Versions` (project/Dependencies.scala), the JDKs and the latest Spring Boot releases CI runs from
- * `.github/workflows/ci.yml`, Kotlin from the Gradle build of `llm4s-kotlin-api` and Quarkus from the Quarkus
- * sample's POM. `sbt generateCompatibilityMatrix` writes it beside `docs/_data/capabilities.yml` (written by
+ * `.github/workflows/ci.yml`, Kotlin from the Gradle build of `llm4s-kotlin-api` and Quarkus from the POM of
+ * the Quarkus extension. `sbt generateCompatibilityMatrix` writes it beside `docs/_data/capabilities.yml` (written by
  * `org.llm4s.samples.docs.CapabilityMatrix`), CI runs that again and fails when either committed file differs, and
  * `docs/reference/compatibility-matrix.md` renders both.
  *
@@ -32,15 +32,16 @@ object CompatibilityMatrix {
       find(ci, """(?m)^\s+java: \[([^\]]+)\]""".r, "`java:` matrix of the test job").split(',').map(_.trim).toSeq
     val boot3    = find(ci, """-Dllm4s\.springBootVersion=([0-9.]+)""".r, "Spring Boot 3.x (latest) version")
     val boot4    = find(ci, """-Dllm4s\.springBoot4Version=([0-9.]+)""".r, "Spring Boot 4.x version")
+    val springAi = find(ci, """-Dllm4s\.springAiVersion=([0-9.]+)""".r, "Spring AI 2.0.x (latest) version")
     val kotlinKt = base / "modules" / "kotlin-api" / "build.gradle.kts"
     val kotlin   = find(kotlinKt, """kotlin\("jvm"\) version "([^"]+)"""".r, "Kotlin plugin version")
     val coroutines =
       find(kotlinKt, """kotlinx-coroutines-core:([0-9.]+)""".r, "kotlinx-coroutines-core version")
     val quarkus =
       find(
-        base / "modules" / "samples" / "quarkus-java" / "pom.xml",
-        """<quarkus\.platform\.version>([^<]+)<""".r,
-        "Quarkus platform version"
+        base / "modules" / "quarkus" / "pom.xml",
+        """<quarkus\.version>([^<]+)<""".r,
+        "Quarkus version"
       )
 
     val stacks = Seq(
@@ -56,21 +57,42 @@ object CompatibilityMatrix {
         Seq(Versions.springBoot4Baseline, boot4).distinct,
         s"The same artifact's Boot 4 health indicator, built against ${Versions.springBoot4Baseline}; CI also runs the specs on $boot4."
       ),
+      Stack(
+        "Spring AI",
+        "llm4s-spring-ai",
+        Seq(Versions.springAiBaseline, springAi).distinct,
+        s"Built against ${Versions.springAiBaseline}, with Spring Boot 4; CI also runs the module's specs on $springAi."
+      ),
       Stack("Cats Effect", "llm4s-effect", Seq(Versions.catsEffect), ""),
       Stack("fs2", "llm4s-effect", Seq(Versions.fs2), ""),
       Stack("ZIO", "llm4s-zio", Seq(Versions.zio), ""),
       Stack("Apache Pekko", "llm4s-pekko", Seq(Versions.pekko), ""),
+      Stack("Ox", "llm4s-ox", Seq(Versions.ox), ""),
       Stack("Project Reactor", "llm4s-reactor", Seq(Versions.reactor), ""),
+      Stack("Tapir", "llm4s-tapir", Seq(Versions.tapir), s"With sttp client ${Versions.sttpClient3}."),
+      Stack("sttp client 4", "llm4s-sttp", Seq(Versions.sttpClient4), "Any synchronous backend."),
+      Stack(
+        "Iron",
+        "llm4s-schema-iron",
+        Seq(Versions.iron),
+        s"Pinned: Iron 3.4 and later are built with Scala 3.9, whose TASTy the ${Common.scala3} compiler cannot read."
+      ),
       Stack("Kotlin", "llm4s-kotlin-api", Seq(kotlin), s"With kotlinx-coroutines $coroutines."),
       Stack(
         "Quarkus",
-        "modules/samples/quarkus-java (sample)",
+        "quarkus-llm4s (modules/quarkus, not yet published)",
         Seq(quarkus),
-        "A sample with a CDI producer, not an extension."
+        "The extension, built and tested against this release, in JVM mode only (#1463)."
       ),
       Stack("http4s", "modules/examples-http (unpublished)", Seq(Versions.http4s), ""),
       Stack("Tapir", "modules/examples-http (unpublished)", Seq(Versions.tapir), ""),
       Stack("ZIO HTTP", "modules/examples-http (unpublished)", Seq(Versions.zioHttp), ""),
+      Stack(
+        "Play Framework",
+        "modules/examples-http (unpublished)",
+        Seq(Versions.play),
+        s"Play's Pekko artifacts pinned to llm4s-pekko's ${Versions.pekko}."
+      ),
       Stack("Micrometer", "llm4s-observability-micrometer", Seq(Versions.micrometer), ""),
       Stack("OpenTelemetry", "llm4s-observability-otel", Seq(Versions.opentelemetry), ""),
       Stack("Prometheus client", "llm4s-observability-prometheus", Seq(Versions.prometheus), ""),
@@ -82,6 +104,8 @@ object CompatibilityMatrix {
         Seq(Versions.zioJson),
         s"Pinned: later releases are built with a newer Scala 3 whose TASTy the ${Common.scala3} compiler cannot read."
       ),
+      Stack("jsoniter-scala", "docs/guide/json-libraries.md (tested recipe)", Seq(Versions.jsoniterScala), ""),
+      Stack("fs2-kafka", "docs/guide/kafka.md (tested pipeline)", Seq(Versions.fs2Kafka), ""),
       Stack("OpenAI Java SDK", "llm4s-openai", Seq(Versions.openaiJava), ""),
       Stack("Anthropic Java SDK", "llm4s-anthropic", Seq(Versions.anthropic), ""),
       Stack("AWS SDK", "llm4s-bedrock", Seq(Versions.awsSdk), "")
@@ -95,7 +119,7 @@ object CompatibilityMatrix {
     val (ciJdks, all) = stacks(base)
     val header = Seq(
       "# Generated by `sbt generateCompatibilityMatrix` (project/CompatibilityMatrix.scala) from project/Dependencies.scala,",
-      "# .github/workflows/ci.yml, modules/kotlin-api/build.gradle.kts and modules/samples/quarkus-java/pom.xml.",
+      "# .github/workflows/ci.yml, modules/kotlin-api/build.gradle.kts and modules/quarkus/pom.xml.",
       "# Do not edit: CI regenerates it and fails on drift. Rendered by docs/reference/compatibility-matrix.md.",
       s"scala: ${quote(Common.scala3)}",
       s"jdk_minimum: ${quote(Common.javaRelease)}",

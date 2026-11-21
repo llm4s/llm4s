@@ -46,7 +46,7 @@ object CacheKeyGenerator {
     }
     val hash = digest.digest()
 
-    hash.map(byte => "%02x".format(byte & 0xff)).mkString
+    org.llm4s.util.Hex.of(hash)
   }
 
   private def purposeTag(purpose: InputPurpose): String =

@@ -36,12 +36,12 @@ receive them. It is **Experimental**: its API may change in any release
 ([1.0 Scope](../reference/v1-scope)).
 
 {: .note }
-> `llm4s-java-rag` is new and is published from the release after {{ site.data.project.latest_release }}. Until then,
-> build it from `main` ([Unreleased changes](../getting-started/installation#unreleased-changes-main)).
+> `llm4s-java-rag` is new: it is published from 0.6.0.
 
 ## Add the dependency
 
-The artifact is `org.llm4s:llm4s-java-rag_3`; it brings `llm4s-java-api` and `llm4s-rag` with it.
+The artifact is `org.llm4s:llm4s-java-rag_3`; it brings `llm4s-java-api` and `llm4s-rag` with it, and no provider
+module: declare the ones your chat and embedding models use, as for [`llm4s-java-api`](java#add-the-dependency).
 
 **Maven**
 

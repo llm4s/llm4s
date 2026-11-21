@@ -1,0 +1,34 @@
+// The llm4s playground (#2286): JDK 21, Coursier, sbt, Scala CLI and Metals, with a small model in an Ollama sidecar.
+// docs/getting-started/playground.md lists what to run in it; .github/workflows/devcontainer.yml builds it and runs
+// those commands.
+{
+  "name": "llm4s",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "containerEnv": {
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "qwen2.5:0.5b",
+    "EMBEDDING_MODEL": "ollama/nomic-embed-text"
+  },
+  // Runs in a Codespaces prebuild: fetches the samples' and the doctor's dependencies and compiles them, so the
+  // first `sbt samples/runMain ...` in a new codespace downloads nothing.
+  "updateContentCommand": "sbt -batch samples/compile configPolicy/compile",
+  // Runs in each new container: pulls the chat and embedding models (a no-op when they are already there).
+  "postCreateCommand": "bash .devcontainer/pull-models.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": ["scalameta.metals@1.72.0"]
+    },
+    "codespaces": {
+      "openFiles": ["docs/getting-started/playground.md"]
+    }
+  }
+}

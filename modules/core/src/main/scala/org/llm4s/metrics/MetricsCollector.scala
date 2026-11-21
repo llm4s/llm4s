@@ -25,7 +25,7 @@ import scala.concurrent.duration.FiniteDuration
  *     val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
  *     metrics.observeRequest(provider, model, Outcome.Success, duration)
  *     completion.usage.foreach { u =>
- *       metrics.addTokens(provider, model, u.promptTokens, u.completionTokens)
+ *       metrics.addTokens(provider, model, u.promptTokens, u.totalOutputTokens) // thinking included
  *     }
  *   case Left(error) =>
  *     val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
@@ -378,16 +378,17 @@ object ErrorKind {
    */
   def fromLLMError(error: org.llm4s.error.LLMError): ErrorKind =
     error match {
-      case _: org.llm4s.error.RateLimitError      => RateLimit
-      case _: org.llm4s.error.TimeoutError        => Timeout
-      case _: org.llm4s.error.AuthenticationError => Authentication
-      case _: org.llm4s.error.NetworkError        => Network
-      case _: org.llm4s.error.ValidationError     => Validation
-      case _: org.llm4s.error.InvalidInputError   => Validation
-      case _: org.llm4s.error.ServiceError        => ServiceError
-      case _: org.llm4s.error.ExecutionError      => ExecutionError
-      case _: org.llm4s.error.ConfigurationError  => Validation
-      case _: org.llm4s.error.CancelledError      => Cancelled
-      case _                                      => Unknown
+      case _: org.llm4s.error.RateLimitError       => RateLimit
+      case _: org.llm4s.error.TimeoutError         => Timeout
+      case _: org.llm4s.error.AuthenticationError  => Authentication
+      case _: org.llm4s.error.NetworkError         => Network
+      case _: org.llm4s.error.ValidationError      => Validation
+      case _: org.llm4s.error.InvalidInputError    => Validation
+      case _: org.llm4s.error.ServiceError         => ServiceError
+      case _: org.llm4s.error.ExecutionError       => ExecutionError
+      case _: org.llm4s.error.ConfigurationError   => Validation
+      case _: org.llm4s.error.CancelledError       => Cancelled
+      case _: org.llm4s.error.ContentFilteredError => Validation
+      case _                                       => Unknown
     }
 }

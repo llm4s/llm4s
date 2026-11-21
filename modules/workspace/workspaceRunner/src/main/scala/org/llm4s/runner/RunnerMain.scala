@@ -102,13 +102,26 @@ object RunnerMain extends cask.MainRoutes {
   // said once, at startup: whether execute commands are kernel-confined here (design §4.39)
   Confiner.platform() match {
     case Some(c) =>
-      logger.info(s"Commands are confined by ${c.helper} (Landlock, and seccomp when networkAllowed=false)")
+      c.protections() match {
+        case Right(p) =>
+          logger.info(s"Commands are confined by ${c.helper} (${p.describe}; seccomp when networkAllowed=false)")
+        case Left(reason) =>
+          logger.warn(
+            s"Commands are confined by ${c.helper}, which cannot report its protections here: $reason. A command " +
+              "it cannot confine is refused SANDBOX_UNAVAILABLE (design §4.39)"
+          )
+      }
       if (!c.sharedTmp)
         logger.warn(
           "This JVM does not run with both -XX:+DisableAttachMechanism and -XX:+PerfDisableSharedMem, so commands " +
             "are not granted /tmp: JVM tools that write there (sbt) fail confined. Start the runner with both flags " +
             "and java.io.tmpdir outside /tmp (the image does) (design §4.39)"
         )
+      // whether each command gets a cgroup of its own, so a daemon it starts cannot outlive it (#2008)
+      CommandCgroups.platform match {
+        case Right(_) => logger.info(CommandCgroups.report(CommandCgroups.platform))
+        case Left(_)  => logger.warn(CommandCgroups.report(CommandCgroups.platform))
+      }
     case None => logger.warn("Not on Linux: commands run unconfined; only the command policy applies (design §4.39)")
   }
 

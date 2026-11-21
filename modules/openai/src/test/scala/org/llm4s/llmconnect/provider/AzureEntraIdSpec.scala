@@ -103,7 +103,7 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "gpt-4o"))
     } { baseUrl =>
       val tokens = new CountingTokens
-      val config = AzureConfig.fromTokenProvider("my-deploy", baseUrl, tokens, AzureConfig.DEFAULT_API_VERSION).value
+      val config = AzureConfig.fromTokenProvider("my-deploy", tokens, baseUrl, AzureConfig.DEFAULT_API_VERSION).value
       config.apiKey.reveal shouldBe ""
       config.toString should include("auth=entra-id")
       val client = OpenAIClient(config).value
@@ -210,6 +210,22 @@ class AzureEntraIdSpec extends AnyFlatSpec with Matchers with EitherValues {
     keyed.toString should include("apiKey=")
     AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts).tokenProvider shouldBe None
     AzureConfig("e", Secret("k"), "m", "v", 1000, 100, keyed.timeouts, Some(tokens)).apiKey.reveal shouldBe ""
+  }
+
+  "AzureConfig.withApiKeyProvider" should "authenticate one way: it clears the token provider, and a token provider clears it" in {
+    val keyed  = AzureConfig("https://r.openai.azure.com", Secret("k"), "gpt-4o")
+    val keys   = org.llm4s.llmconnect.auth.ApiKeyProvider.static(org.llm4s.types.ProviderModelTypes.ApiKey("k2"))
+    val tokens = new CountingTokens
+    keyed.apiKeyProvider shouldBe None
+    val rotating = keyed.withTokenProvider(tokens).withApiKeyProvider(keys)
+    rotating.apiKeyProvider shouldBe Some(keys)
+    rotating.tokenProvider shouldBe None
+    rotating.toString should include("apiKeyProvider=ApiKeyProvider.static(***)")
+    rotating.withApiKeyProvider(None).apiKeyProvider shouldBe None
+    val entra = rotating.withTokenProvider(tokens)
+    entra.apiKeyProvider shouldBe None
+    entra.tokenProvider shouldBe Some(tokens)
+    entra.withTokenProvider(None).apiKeyProvider shouldBe None
   }
 
   "OpenAIEmbeddingProvider with a token provider" should "send each token as the bearer and drop a rejected one" in {

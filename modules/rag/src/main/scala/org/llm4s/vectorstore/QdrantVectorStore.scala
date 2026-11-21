@@ -40,6 +40,9 @@ final class QdrantVectorStore private (
   private val httpClient: Llm4sHttpClient
 ) extends VectorStore {
 
+  /** Whether this store sends an `api-key` header: lets the factory's tests check the key reached the store offline. */
+  private[vectorstore] def hasApiKey: Boolean = apiKey.isDefined
+
   private val collectionsUrl = s"$baseUrl/collections/$collectionName"
   private val pointsUrl      = s"$collectionsUrl/points"
 

@@ -28,7 +28,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
       <p>Most LLM tooling is Python-first, while many production systems in finance, telecom, data platforms and enterprise software are built on Scala and the JVM.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
-      <li class="lp-card lp-card--flat"><h3>No Python sidecar</h3><p>The LLM code runs in the same process, build and deployment as the rest of your service: one language to review, one artifact to ship, one runtime to patch.</p></li>
+      <li class="lp-card lp-card--flat"><h3>No Python sidecar</h3><p>The LLM code runs in the same process, build and deployment as the rest of your service: one language to review, one artifact to ship, one runtime to patch. <a href="{{ '/guide/replacing-a-python-sidecar' | relative_url }}">Replacing a Python sidecar</a> shows the migration.</p></li>
       <li class="lp-card lp-card--flat"><h3>Operations you already have</h3><p>Your logging, metrics, tracing, secrets handling, CI and security review apply unchanged. LLM4S reports through OpenTelemetry, Prometheus and Micrometer.</p></li>
       <li class="lp-card lp-card--flat"><h3>Concurrency that scales</h3><p>LLM calls are slow I/O. On JDK 21, LLM4S runs tools on virtual threads and integrates with cats-effect, ZIO, Pekko Streams and Reactor for streaming and cancellation.</p></li>
     </ul>
@@ -83,6 +83,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
           <li>Type-checked request and answer shapes instead of dictionaries.</li>
           <li>The same build, dependency scanning (SBOMs per module) and deployment pipeline as the rest of your code.</li>
         </ul>
+        <p>Coming from Python? <a href="{{ '/guide/for-python-developers' | relative_url }}">Coming from Python</a> puts OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3.</p>
       </div>
       <div class="lp-card lp-card--flat">
         <h3>Versus other JVM libraries</h3>
@@ -105,6 +106,7 @@ description: "Why build LLM applications in Scala and on the JVM, what LLM4S giv
     <header class="lp-section__head">
       <p class="lp-eyebrow">Use cases</p>
       <h2 id="cases-heading">Where it fits</h2>
+      <p>Each in a page of its own, with compiled code: <a href="{{ '/scala-ai/llm-framework' | relative_url }}">an LLM framework for Scala</a>, <a href="{{ '/scala-ai/agents' | relative_url }}">AI agents in Scala</a>, <a href="{{ '/scala-ai/rag' | relative_url }}">RAG in Scala</a>, <a href="{{ '/scala-ai/java-kotlin' | relative_url }}">Java and Kotlin</a> and <a href="{{ '/scala-ai/providers' | relative_url }}">calling OpenAI, Anthropic, Gemini or Ollama</a>.</p>
     </header>
     <ul class="lp-grid lp-grid--3">
       <li class="lp-card lp-card--flat"><h3>Customer and internal assistants</h3><p>Assistants inside existing Spring Boot, Pekko or plain JVM services, with guardrails on input and output and traces in your observability stack.</p></li>

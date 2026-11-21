@@ -103,6 +103,13 @@ def render(body, values, counts, path):
         r'\{%-?\s*unless site\.data\.project\.latest_release contains "([^"]*)"\s*-?%\}(.*?)\{%-?\s*endunless\s*-?%\}',
         unless, body, flags=re.S)
     body = re.sub(r"\{\{\s*site\.data\.project\.([a-z_]+)\s*\}\}", lambda m: values.get(m.group(1), m.group(0)), body)
+    # docs/_includes/api.html: a type's name, linked to its Scaladoc page (#2291).
+    def api(m):
+        attrs = dict(re.findall(r'(\w+)="([^"]*)"', m.group(1)))
+        name = attrs.get("text") or attrs["t"].split(".")[-1].rstrip("$")
+        return f"[`{name}`]({SITE}/scaladoc/{attrs['t'].replace('.', '/')}.html)"
+
+    body = re.sub(r"\{%-?\s*include\s+api\.html\s+([^%]*?)\s*-?%\}", api, body)
     body = body.replace("{{ llm4s_chat_providers }}", str(counts[0]))
     body = body.replace("{{ llm4s_embedding_providers }}", str(counts[1]))
     if "{%" in body:

@@ -291,6 +291,21 @@ val result = for {
 } yield results
 ```
 
+### Bulk ingestion
+
+To import many memories at once (a chat history, extracted entity facts, document chunks), use `storeAll`
+rather than calling `store` in a loop:
+
+```scala
+val imported: Result[MemoryStore] = store.storeAll(memories)
+```
+
+`storeAll` writes the whole batch in one transaction on one connection: every memory is stored or, if any row
+fails, none is. The rows are sent as JDBC batches of up to 1,000, not one round trip per memory. A memory whose
+id appears more than once is stored once, as its last occurrence, and a memory whose id is already in the table
+is replaced. Over a data source of your own (`fromDataSource`), pgjdbc's `reWriteBatchedInserts=true` folds each
+batch into multi-row inserts.
+
 ---
 
 ## Troubleshooting

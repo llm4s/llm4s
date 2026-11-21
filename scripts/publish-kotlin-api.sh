@@ -7,10 +7,15 @@
 #   scripts/publish-kotlin-api.sh 0.5.0 modules/kotlin-api/build/staging-deploy --dry-run   # build the bundle only
 #
 # It zips the version directory (org/llm4s/llm4s-kotlin-api/<version>/: the POM, jars, Gradle module file, their
-# signatures and checksums - not maven-metadata.xml, which Central writes itself) into a Portal bundle, uploads it
+# signatures and their MD5 and SHA-1 checksums) into a Portal bundle, uploads it
 # with publishingType=AUTOMATIC, the way `sbt ci-release` releases the sbt artifacts, and polls the deployment until
 # the Portal has validated it and started publishing (PUBLISHING or PUBLISHED). A deployment that FAILED validation is
 # reported with the Portal's reasons. Nothing reaches Central unless validation passes.
+#
+# Left out of the bundle: maven-metadata.xml, which Central writes itself, and what Gradle writes that Central does not
+# require - checksums of the .asc signatures and the .sha256 and .sha512 checksums. Sonatype limits the organisation to
+# 1,000 uploaded files a month (docs/reference/release.md), and this keeps the artifact to 20: five files, each with its
+# .asc, .md5 and .sha1, as project/CentralBundle.scala keeps the sbt artifacts.
 #
 # It is safe to re-run. Before uploading it asks, in this order, whether the version is already out, and uploads only
 # when every answer is no:
@@ -63,7 +68,9 @@ case "$VERSION" in *SNAPSHOT*) die "refusing to upload a snapshot ($VERSION): Ma
 # Every file Central receives must be signed. check-kotlin-publication.sh checks this too; the upload refuses on its own
 # so that it can never be the step that ships an unsigned artifact.
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(cd "$STAGING" && find "$REL" -maxdepth 1 -type f ! -name 'maven-metadata.xml*' | sort)
+while IFS= read -r f; do files+=("$f"); done < <(cd "$STAGING" && find "$REL" -maxdepth 1 -type f ! -name 'maven-metadata.xml*' \
+  ! -name '*.asc.md5' ! -name '*.asc.sha1' ! -name '*.asc.sha256' ! -name '*.asc.sha512' \
+  ! -name '*.sha256' ! -name '*.sha512' | sort)
 [ "${#files[@]}" -gt 0 ] || die "the publication at $STAGING/$REL is empty"
 for f in "${files[@]}"; do
   case "$f" in

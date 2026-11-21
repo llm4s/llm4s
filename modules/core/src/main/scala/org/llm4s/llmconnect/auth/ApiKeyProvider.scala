@@ -29,7 +29,8 @@ import scala.util.{ Try, Using }
  * redaction: an error that echoes a rotated key is scrubbed of it too.
  *
  * Stable, as [[AccessTokenProvider]] is: the Stable configs that support it (`OpenAIConfig`, `AnthropicConfig`,
- * `OpenAICompatibleConfig`) carry one.
+ * `OpenAICompatibleConfig`, `AzureConfig`, `GeminiConfig`, `DeepSeekConfig`, `ZaiConfig`) carry one, as do the
+ * Mistral, Cohere, xAI and watsonx configs (#2477).
  */
 @Stable
 trait ApiKeyProvider:

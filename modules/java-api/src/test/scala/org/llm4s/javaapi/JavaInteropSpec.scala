@@ -26,7 +26,11 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[JLlmClient]         -> "underlying",
     classOf[Answer]             -> "underlying",
     classOf[JCompletionOptions] -> "underlying",
-    classOf[JTool]              -> "function"
+    classOf[JThinking]          -> "underlying",
+    classOf[JTool]              -> "function",
+    classOf[JOutputGuardrail]   -> "output",
+    classOf[JGuardrail]         -> "input",
+    classOf[JContextWindow]     -> "config"
   )
 
   private def isInternal(m: Method): Boolean = internalByDesign(m.getDeclaringClass -> m.getName)
@@ -171,6 +175,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
     classOf[JReasoningEffort],
+    classOf[JThinking],
     classOf[JAgent],
     Class.forName("org.llm4s.javaapi.Llm4s"),
     classOf[ConversationBuilder],
@@ -201,7 +206,13 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[GeminiClientBuilder],
     classOf[OllamaClientBuilder],
     classOf[OpenAiCompatibleClientBuilder],
-    classOf[AzureOpenAiClientBuilder]
+    classOf[AzureOpenAiClientBuilder],
+    classOf[JAgentBuilder],
+    Class.forName("org.llm4s.javaapi.JGuardrails"),
+    classOf[JOutputGuardrail],
+    classOf[JGuardrail],
+    classOf[JContextWindow],
+    classOf[AiServiceBuilder[?]]
   )
 
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
@@ -421,6 +432,8 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       "createAgent(JLlmClient,ToolRegistry)",
       "createAgent(JLlmClient,ToolRegistry,boolean)",
       "wrapAgent(Agent)",
+      "agentBuilder(String,JLlmClient)",
+      "aiService(Class)",
       "openAi()",
       "anthropic()",
       "gemini()",
@@ -431,6 +444,7 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[LlmResult[_]]        -> Set("success(Object)", "failure(LLMError)"),
     classOf[ConversationBuilder] -> Set("create()"),
     classOf[JCompletionOptions]  -> Set("builder()"),
+    classOf[JThinking]           -> Set("off()", "adaptive()", "budget(int)"),
     classOf[Answer] -> Set(
       "approve(String)",
       "reject(String,String)",
@@ -440,7 +454,15 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     ),
     classOf[JAgent]                                 -> Set("pending(JAgentResult)"),
     Class.forName("org.llm4s.javaapi.StreamEvents") -> Set("decode(EventType,StreamEvent)"),
-    classOf[JEmbeddings]                            -> Set("cosineSimilarity(float[],float[])")
+    classOf[JEmbeddings]                            -> Set("cosineSimilarity(float[],float[])"),
+    Class.forName("org.llm4s.javaapi.JGuardrails") -> Set(
+      "length(int,int)",
+      "profanity()",
+      "regex(String)",
+      "regex(String,String)",
+      "json()"
+    ),
+    classOf[JContextWindow] -> Set("lastMessages(int)")
   )
 
   /** A method name the compiler made up - an expanded private name or a lambda - rather than one a caller is offered. */
@@ -516,10 +538,15 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     classOf[JEmbeddingClient],
     classOf[JCompletionOptions],
     classOf[JCompletionOptions.Builder],
+    classOf[JThinking],
     classOf[JAgent],
     classOf[AgentStream],
     classOf[ConversationBuilder],
-    classOf[Answer]
+    classOf[Answer],
+    classOf[JAgentBuilder],
+    classOf[JOutputGuardrail],
+    classOf[JGuardrail],
+    classOf[JContextWindow]
   )
 
   "the facade's other classes" should "take a token only the package can name first in every public constructor" in {
@@ -575,7 +602,11 @@ class JavaInteropSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     "org.llm4s.javaapi.JavaRecords",         // a Java record's JSON Schema, and the record read back (#1486)
     "org.llm4s.javaapi.LlmErrorKinds",       // how LlmException reads an LLMError: its kind, status and retry delay
     "org.llm4s.javaapi.ClientBuilds",        // what the client builders' build() does with their settings
-    "org.llm4s.javaapi.FacadeAsync"          // the futures of the *Async methods and their executors (#2276)
+    "org.llm4s.javaapi.FacadeAsync",         // the futures of the *Async methods and their executors (#2276)
+    "org.llm4s.javaapi.AgentBuilds",         // what JAgentBuilder keeps and what its build() does with it (#2476)
+    "org.llm4s.javaapi.AiServices",          // an AI service's method plans and its proxy handler (#2277)
+    "org.llm4s.javaapi.ProviderModules",     // whether an optional provider module is on the classpath (#1496)
+    "org.llm4s.javaapi.FrameworkConfig"      // the Quarkus extension's llm4s.* properties into clients (#2280)
   )
 
   /** Every public top-level class the compiled package holds, a Scala object's `X$` counted as `X`. */

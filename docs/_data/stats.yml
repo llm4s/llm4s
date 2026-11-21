@@ -1,26 +1,41 @@
 # Project numbers shown in the stats band of the home page (_includes/stats-band.html) and on the Foundation page.
-# Update by hand: take the GitHub numbers from https://github.com/llm4s/llm4s (stars, forks, contributors,
-# releases) and the merged pull requests from https://github.com/llm4s/llm4s/pulls?q=is%3Apr+is%3Amerged, then
-# change `as_of`. The talks count is computed from _data/events.yml at build time, so it needs no edit here.
-# Never round up or add a number that cannot be checked from a public source.
+# scripts/update-site-stats.sh (run by .github/workflows/pages.yml on every deploy and daily) refreshes them for the
+# build: the GitHub numbers and `as_of` from the GitHub API, the talks from _data/events.yml (those that have
+# started) and the Dev Hours from `dev_hour` below. The values here are only the fallback for a build where the
+# script cannot run, so there is no need to edit them by hand; set `dev_hour.skipped` when a Sunday session is
+# cancelled. Never round up or add a number that cannot be checked from a public source.
 
-as_of: "Oct 2026"
-source_note: "GitHub, as of Oct 2026. Activity is also tracked on LFX Insights."
+as_of: "Nov 2026"
+source_note: "GitHub, as of Nov 2026. Activity is also tracked on LFX Insights."
 lfx_insights: https://insights.linuxfoundation.org/project/llm4s
 
 github:
-  - value: "271"
+  - value: "276"
     label: GitHub stars
     url: https://github.com/llm4s/llm4s/stargazers
-  - value: "119"
+  - value: "135"
     label: Forks
     url: https://github.com/llm4s/llm4s/forks
-  - value: "72"
+  - value: "77"
     label: Contributors
     url: https://github.com/llm4s/llm4s/graphs/contributors
-  - value: "1,231"
+  - value: "1,337"
     label: Merged pull requests
     url: https://github.com/llm4s/llm4s/pulls?q=is%3Apr+is%3Amerged
   - value: "27"
     label: Releases
     url: https://github.com/llm4s/llm4s/releases
+
+# Counted by scripts/update-site-stats.sh; the values are the fallback.
+community:
+  - value: "16"
+    label: Talks and events
+    url: /events/
+  - value: "68"
+    label: Dev Hour sessions
+    url: /events/
+
+# The weekly Dev Hour, every Sunday at 09:00 London time since 20 Jul 2025 (announced in Scala Times #537).
+dev_hour:
+  first_session: "2025-07-20"
+  skipped: 0  # Sundays with no session

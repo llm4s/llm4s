@@ -21,6 +21,7 @@ import scala.util.Using
  * Keeps `docs/guide/observability/micrometer.md` true. The quick start is compiled here, and the page's table of meters is
  * checked against what the collector really records: every meter name, its tag names and the Prometheus series it exports.
  */
+@org.llm4s.tags.DocsSpec
 class MicrometerGuideSpec extends AnyFlatSpec with Matchers {
 
   // The quick start of the guide, compiled (it needs a configured provider, so it is not run).

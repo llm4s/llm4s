@@ -116,6 +116,8 @@ class TraceCollectorTracing[F[_]](
           .withAttribute("operation", SpanValue.StringValue(operation))
           .withAttribute("prompt_tokens", SpanValue.LongValue(usage.promptTokens.toLong))
           .withAttribute("completion_tokens", SpanValue.LongValue(usage.completionTokens.toLong))
+          .withAttribute("thinking_tokens", SpanValue.LongValue(usage.thinkingTokens.getOrElse(0).toLong))
+          .withAttribute("output_tokens", SpanValue.LongValue(usage.totalOutputTokens.toLong))
           .withAttribute("total_tokens", SpanValue.LongValue(usage.totalTokens.toLong))
           .end()
           .withStatus(SpanStatus.Ok)
@@ -228,6 +230,8 @@ class TraceCollectorTracing[F[_]](
             "operation"         -> SpanValue.StringValue(operation),
             "prompt_tokens"     -> SpanValue.LongValue(usage.promptTokens.toLong),
             "completion_tokens" -> SpanValue.LongValue(usage.completionTokens.toLong),
+            "thinking_tokens"   -> SpanValue.LongValue(usage.thinkingTokens.getOrElse(0).toLong),
+            "output_tokens"     -> SpanValue.LongValue(usage.totalOutputTokens.toLong),
             "total_tokens"      -> SpanValue.LongValue(usage.totalTokens.toLong)
           )
         )

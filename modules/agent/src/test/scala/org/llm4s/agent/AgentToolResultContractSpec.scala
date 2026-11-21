@@ -86,7 +86,7 @@ class AgentToolResultContractSpec extends AnyFlatSpec with TestTimeLimit with Ma
           .render()
     }
     def client(baseUrl: String): LLMClient =
-      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, baseUrl).flatMap(OpenAIClient(_)) match {
+      OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), baseUrl).flatMap(OpenAIClient(_)) match {
         case Right(client) => client
         case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
       }

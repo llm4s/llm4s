@@ -131,7 +131,7 @@ In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) bu
 
 - Selects the appropriate provider (OpenAI, Anthropic, etc.)
 
-- Injects the `LLMClient` into your core logic (`HelloLLM`).
+- Injects the {% include api.html t="org.llm4s.llmconnect.LLMClient" %} into your core logic (`HelloLLM`).
 
 ### 2. Complete with Messages
 
@@ -142,7 +142,7 @@ val response = client.complete(
 )
 ```
 
-- **conversation**: The conversation messages (User, Assistant, System), wrapped in `Conversation`
+- **conversation**: The conversation messages (User, Assistant, System), wrapped in {% include api.html t="org.llm4s.llmconnect.model.Conversation" %}
 - **options**: Per-request completion settings; the model is selected when the client is configured
 - Returns `Result[Completion]`
 
@@ -334,7 +334,7 @@ val gpt4Turbo = Llm4sConfig.provider("openai-gpt4-turbo")
 ### Provider-Specific Settings
 
 The model and provider come from the section in `application.conf`; per-request settings such
-as temperature and token limits go in `CompletionOptions`:
+as temperature and token limits go in {% include api.html t="org.llm4s.llmconnect.model.CompletionOptions" %}:
 
 ```hocon
 openai-main {
@@ -649,7 +649,7 @@ Great job! You've written your first LLM4S programs. Now explore:
 
 ## Learning Resources
 
-- **[Basic Examples](/examples/basic)** - More beginner-friendly examples
+- **[Basic Examples](/examples/#basic-examples)** - More beginner-friendly examples
 - **[User Guide](/guide/)** - Comprehensive feature guide
 - **[API Reference](/api/)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share ideas
