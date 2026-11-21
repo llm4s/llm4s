@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Cost controls
-description: "Control how much an LLM thinks in LLM4S: Thinking (off, adaptive or a token budget) and ReasoningEffort, mapped per provider, with what was not sent reported on the completion."
+description: "Control how much an LLM thinks in LLM4S: Thinking (off, adaptive or a budget) and ReasoningEffort, mapped per provider, with what was not sent reported back."
 search_title: "Control thinking and reasoning effort in Scala"
 parent: User Guide
 nav_order: 60
@@ -21,7 +21,7 @@ does not. llm4s gives you two controls for it, and tells you when a provider cou
 
 ## Thinking and reasoning effort
 
-`CompletionOptions` has two separate controls ([RFC 0008](../rfcs/0008-generation-controls.md)):
+`CompletionOptions` has two separate controls ([RFC 0008](../rfcs/0008-generation-controls)):
 
 - **`thinking: Option[Thinking]`** says *whether* the model thinks, and within what bound: `Thinking.Off`,
   `Thinking.Adaptive` (the model decides whether and how much), or `Thinking.budget(n)` (a token budget).
@@ -65,11 +65,11 @@ this changes is one that failed before.
 | Anthropic | `output_config.effort` where the model takes it and you set `thinking` or a new level; otherwise a `budget_tokens` budget, as before. A level Anthropic lacks (`minimal`) is sent as the nearest. | `Off` → `disabled` (a model that cannot turn thinking off gets its default, reported); `Adaptive` → `adaptive` (a model from before adaptive thinking gets a budget, reported); `Budget(n)` → `budget_tokens`, fitted to `[1024, max_tokens)`, or `adaptive` on a model that rejects a budget, each reported when changed |
 | OpenAI, Azure | `reasoning_effort`; a level the model lacks is sent as the nearest it accepts | `Off` → the lowest effort the model accepts (`none` where it can turn thinking off); `Adaptive` not needed; `Budget` dropped |
 | OpenRouter | as before: a budget for Claude models, `reasoning_effort` for OpenAI o-series | Claude models: `Budget(n)` → `thinking.budget_tokens`, `Off` → no thinking block; otherwise dropped |
-| Z.ai, xAI | by model family; see [Providers](providers.md) | `Off` → `thinking.type: disabled` or the lowest effort, as the model allows (reported where the model still thinks) |
+| Z.ai, xAI | by model family; see [Providers](providers) | `Off` → `thinking.type: disabled` or the lowest effort, as the model allows (reported where the model still thinks) |
 | Perplexity, watsonx | the Agent API's or chat API's levels, the nearest where one is missing | `Off` → the lowest effort; the others are not sent |
 | Gemini, Vertex AI, Bedrock, Ollama, other OpenAI-compatible | dropped | dropped |
 
-A provider's own mapping, and which models take which levels, is on its section of [Providers](providers.md). Which
+A provider's own mapping, and which models take which levels, is on its section of [Providers](providers). Which
 levels a model accepts comes from the bundled model metadata (`ModelCapabilities.supportedReasoningEfforts`,
 `supportsAdaptiveThinking`, `supportsOutputConfig`, `supportsThinkingOff`, `supportsBudgetThinking`); a model the
 metadata does not know is sent what you asked.
