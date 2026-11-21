@@ -51,8 +51,7 @@ class FileInfoToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     file
   }
 
-  // `humanReadableSize` formats with the JVM's default locale (`f"...%.1f"`), so the
-  // sizeHuman assertions pin a locale whose decimal separator is '.' to stay deterministic.
+  // sizeHuman must not depend on the JVM's default locale (#2669): these tests set one to prove it.
   private def withLocale[T](locale: Locale)(thunk: => T): T = {
     val previous = Locale.getDefault
     try {
@@ -73,6 +72,29 @@ class FileInfoToolSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
   it should "format megabyte sizes with one decimal" in withLocale(Locale.US) {
     infoFor(fileOfSize("one-mb.bin", 1024 * 1024).toString).map(_.sizeHuman) shouldBe Right("1.0 MB")
+  }
+
+  it should "format sizes with a '.' decimal separator whatever the default locale (#2669)" in withLocale(
+    Locale.GERMANY
+  ) {
+    infoFor(fileOfSize("german-kb.bin", 1536).toString).map(_.sizeHuman) shouldBe Right("1.5 KB")
+    infoFor(fileOfSize("german-mb.bin", 1024 * 1024 + 512 * 1024).toString).map(_.sizeHuman) shouldBe Right("1.5 MB")
+  }
+
+  it should "describe the filesystem root instead of throwing (#2670)" in {
+    // "/" on Unix, the drive root (e.g. C:\) on Windows: Path.getFileName is null for both
+    val root = testDir.toAbsolutePath.getRoot
+
+    infoFor(root.toString, allowedPaths = Seq(root.toString)).fold(
+      err => fail(s"Expected Right but got Left: $err"),
+      result => {
+        result.path shouldBe root.toString
+        result.name shouldBe root.toString
+        result.exists shouldBe true
+        result.isDirectory shouldBe true
+        result.extension shouldBe None
+      }
+    )
   }
 
   it should "report the extension after the last dot" in {
