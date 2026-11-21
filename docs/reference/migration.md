@@ -418,6 +418,14 @@ depends on it. To read a provider's API key from HashiCorp Vault without Vault A
 `VaultApiKeyProvider(VaultSettings(...))` with `withApiKeyProvider`; see
 [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile` is unchanged.
 
+## `llm4s-secrets-aws`, a new module (#2479)
+
+Nothing to change: `llm4s-secrets-aws` is a new, experimental module over `llm4s-core` alone, and no other module
+depends on it. To read a provider's API key from AWS Secrets Manager without the Secrets Store CSI driver or External
+Secrets Operator, add it and set `AwsSecretsManagerApiKeyProvider(AwsSecretsManagerSettings(...))` with
+`withApiKeyProvider`; see [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation). `apiKeyFile`
+is unchanged.
+
 ## `llm4s-repl`, a new module (#2342)
 
 Nothing to change: `llm4s-repl` is a new, experimental module, and no other module depends on it. To try llm4s from the

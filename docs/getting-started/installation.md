@@ -471,6 +471,19 @@ Vault Agent or a CSI driver to write the key to an `apiKeyFile`. It talks to Vau
 HTTP client, so it brings no Vault SDK. See
 [Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
 
+### For API keys read from AWS Secrets Manager
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-secrets-aws" % llm4sVersion
+```
+
+`AwsSecretsManagerApiKeyProvider` ([#2479](https://github.com/llm4s/llm4s/issues/2479)) reads a provider's API key
+from AWS Secrets Manager, caches it and reads it again every refresh interval, for a deployment that cannot run the
+Secrets Store CSI driver or External Secrets Operator to write the key to an `apiKeyFile`. It calls `GetSecretValue`
+with llm4s's own HTTP client and signs the request with Signature Version 4 itself, so it brings no AWS SDK. See
+[Secrets and key rotation](../PRODUCTION_DEPLOYMENT#secrets-and-key-rotation).
+
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 ```scala

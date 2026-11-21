@@ -522,7 +522,7 @@ jobs:
           - leg: core
             modules: [core, memory, memoryPostgres, schemaDerivation, schemaIron, prompt, testkit, capabilities,
                       doctor, repl, observabilityMicrometer, agentTools, llm4sTapir, llm4sSttp, traceOpentelemetry,
-                      gradleDemo, secretsVault]
+                      gradleDemo, secretsVault, secretsAws]
           - leg: rag
             modules: [rag, vectorstoreElasticsearch, vectorstoreRedis, knowledgegraph, mcp, media, image, speech,
                       observability, observabilityPrometheus]
@@ -987,6 +987,17 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: secrets-vault
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload secrets-aws coverage to Codecov
+        if: contains(matrix.modules, 'secretsAws')
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-aws/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-aws
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -1497,6 +1508,12 @@ jobs:
         ports:
           - 8200:8200
 
+      # AwsSecretsManagerApiKeyProviderIntegrationSpec (#2479): moto's Secrets Manager, which accepts any credentials.
+      moto:
+        image: motoserver/moto:5.2.5
+        ports:
+          - 5000:5000
+
       # KafkaTicketPipelineSpec (#2297): a single-node broker in KRaft mode, advertised on localhost:9092.
       kafka:
         image: apache/kafka:3.9.1
@@ -1535,7 +1552,7 @@ jobs:
       # Postgres, Redis and Valkey are covered by the service health checks above. The Qdrant and Neo4j images
       # ship no shell tooling to health-check with, so poll them from the runner instead —
       # and fail the job if they never come up, rather than letting the suites skip.
-      - name: Wait for Qdrant, Neo4j, Elasticsearch, OpenSearch, Vault and LiteLLM
+      - name: Wait for Qdrant, Neo4j, Elasticsearch, OpenSearch, Vault, moto and LiteLLM
         run: |
           wait_for() {
             for _ in $(seq 1 60); do
@@ -1551,6 +1568,7 @@ jobs:
           wait_for OpenSearch "http://localhost:9201/_cluster/health?wait_for_status=yellow&timeout=5s"
           wait_for LiteLLM http://localhost:4000/health/liveliness || { docker logs litellm; exit 1; }
           wait_for Vault http://localhost:8200/v1/sys/health
+          wait_for moto http://localhost:5000/moto-api/
 
       # The suites run with coverage instrumentation on the modules whose code only they reach against real services
       # (#2349): the pgvector, Qdrant and permission-index stores in rag, the Elasticsearch/OpenSearch and
@@ -1564,7 +1582,7 @@ jobs:
       # scripts/check-coverage-legs.sh checks this list against the upload steps below.
       - name: Run containerised integration tests
         env:
-          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres secretsVault
+          COVERAGE_MODULES: rag vectorstoreElasticsearch vectorstoreRedis memoryPostgres knowledgegraphNeo4j agentCheckpointPostgres secretsVault secretsAws
           LLM4S_IT_STRICT: "true"
           PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
           PGVECTOR_USER: postgres
@@ -1591,6 +1609,7 @@ jobs:
           LITELLM_TEST_UPSTREAM_KEY: sk-it-upstream-0001
           VAULT_TEST_ADDR: http://localhost:8200
           VAULT_TEST_TOKEN: llm4s-it-root-token
+          AWS_SECRETS_MANAGER_TEST_ENDPOINT: http://localhost:5000
         run: |
           settings=()
           reports=()
@@ -1670,6 +1689,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/secrets-vault/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: secrets-vault
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload secrets-aws integration coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/secrets-aws/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: secrets-aws
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

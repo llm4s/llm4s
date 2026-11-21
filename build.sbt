@@ -361,6 +361,7 @@ lazy val llm4s = (project in file("."))
     openai,
     azureIdentity,
     secretsVault,
+    secretsAws,
     openaiCompatible,
     voyage,
     bedrock,
@@ -1673,6 +1674,27 @@ lazy val secretsVault = (project in file("modules/secrets-vault"))
     )
   )
 
+// AWS Secrets Manager (#2479): an `ApiKeyProvider` reading a provider's API key with `GetSecretValue`, cached and read
+// again every refresh interval. One `POST` over llm4s's own HTTP client, signed with Signature Version 4 written out in
+// the module, so no AWS SDK and no dependency beyond core; `AwsSecretsManagerApiKeyProviderIntegrationSpec` in
+// modules/it runs it against moto's Secrets Manager in a container (@Docker).
+lazy val secretsAws = (project in file("modules/secrets-aws"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-secrets-aws",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage secretsAws/test secretsAws/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -2498,7 +2520,9 @@ lazy val it = (project in file("modules/it"))
     // OpenAIStructuredOutputSmokeSpec and GeminiStructuredOutputSmokeSpec (#2327): a derived sum-type schema against OpenAI and Gemini
     schemaDerivation % Test,
     // VaultApiKeyProviderSpec (#2479), a @Docker suite against Vault in dev mode
-    secretsVault % Test
+    secretsVault % Test,
+    // AwsSecretsManagerApiKeyProviderIntegrationSpec (#2479), a @Docker suite against moto's Secrets Manager
+    secretsAws % Test
   )
   .settings(
     name := "llm4s-it",
@@ -2578,6 +2602,7 @@ lazy val docs = (project in file("modules/docs"))
     openai,
     azureIdentity,
     secretsVault,
+    secretsAws,
     openaiCompatible,
     voyage,
     bedrock,
@@ -2653,6 +2678,7 @@ lazy val docs = (project in file("modules/docs"))
       (openai / Compile / sources).value,
       (azureIdentity / Compile / sources).value,
       (secretsVault / Compile / sources).value,
+      (secretsAws / Compile / sources).value,
       (openaiCompatible / Compile / sources).value,
       (voyage / Compile / sources).value,
       (bedrock / Compile / sources).value,
