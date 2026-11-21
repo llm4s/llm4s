@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `completionOptions { thinking = ... }` property, and `JReasoningEffort.MINIMAL`, `XHIGH` and `MAX`, replacing
   `budgetTokens` and `NONE` ([RFC 0008](docs/rfcs/0008-generation-controls.md) PR 4) [#2115](https://github.com/llm4s/llm4s/issues/2115).
 
+### Agent harness
+
+- **Added** `ContainerisedWorkspace(commandCgroups = true)`: on Linux each workspace command runs in a cgroup of its own and is
+  killed whole, so a daemon it starts cannot outlive it [#2008](https://github.com/llm4s/llm4s/issues/2008); [design §4.39](docs/design/typed-agent-runtime/4.39-workspace-command-confinement.md).
+- **Fixed** cancelling a `ContainerisedWorkspace` command (an interrupted `executeCommand`, as when an agent run is cancelled)
+  now cancels it on the runner too; it used to keep running, with any daemon it started [#2656](https://github.com/llm4s/llm4s/pull/2656).
+
 ### Build & tooling
 
 - **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
