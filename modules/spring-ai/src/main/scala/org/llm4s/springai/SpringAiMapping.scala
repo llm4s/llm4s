@@ -64,6 +64,8 @@ private[springai] object SpringAiMapping {
    * client did not map (`Other`, until RFC 0009 PR 2) is `TOOL_CALLS`, as Spring AI's own models report one. Any other
    * raw reason passes through, and none read is `STOP`.
    */
+  // An empty `Other("")` is a client that does not map its reason yet (Anthropic, Gemini, Vertex AI, Bedrock until
+  // RFC 0009 PR 2); Spring AI has no "unknown", so with no tool call it is reported as STOP, as it was before #2613.
   def finishOf(completion: Completion): String = completion.finishReason match {
     case FinishReason.ToolCalls                                 => ToolCallsFinish
     case FinishReason.Length                                    => LengthFinish

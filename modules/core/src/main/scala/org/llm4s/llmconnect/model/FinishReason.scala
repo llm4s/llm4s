@@ -29,7 +29,7 @@ enum FinishReason derives ReadWriter {
    */
   case Other(raw: String)
 
-  /** The chat-completions name (`stop`, `tool_calls`, `length`), or [[Other]]'s raw value. */
+  /** The chat-completions name (`stop`, `tool_calls`, `length`), or [[FinishReason.Other]]'s raw value. */
   def name: String = this match {
     case Stop       => "stop"
     case ToolCalls  => "tool_calls"
