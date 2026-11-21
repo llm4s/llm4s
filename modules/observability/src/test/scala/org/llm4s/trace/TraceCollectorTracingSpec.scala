@@ -178,6 +178,21 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("input_count").asLong shouldBe Some(5L)
   }
 
+  it should "record a token usage's thinking and its output as billed beside the raw completion count" in {
+    import org.llm4s.llmconnect.model.TokenUsage
+    val usage = TokenUsage(81, 18, 145, thinkingTokens = Some(46))
+    collector.traceEvent(TraceEvent.TokenUsageRecorded(usage, "o3", "completion")) shouldBe Right(())
+    collector.traceTokenUsage(usage, "o3", "direct") shouldBe Right(())
+
+    val spans = store.getSpans(collector.traceId)
+    spans should have size 2
+    spans.foreach { span =>
+      span.attributes("completion_tokens").asLong shouldBe Some(18L)
+      span.attributes("thinking_tokens").asLong shouldBe Some(46L)
+      span.attributes("output_tokens").asLong shouldBe Some(64L)
+    }
+  }
+
   it should "convert RAGOperationCompleted to Rag span" in {
     val event = TraceEvent.RAGOperationCompleted("search", 500.millis, Some(100), Some(50), Some(20), Some(0.01))
     collector.traceEvent(event) shouldBe Right(())

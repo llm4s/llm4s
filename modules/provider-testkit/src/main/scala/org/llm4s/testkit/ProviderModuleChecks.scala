@@ -2,6 +2,7 @@ package org.llm4s.testkit
 
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.{ CancelledError, UnsupportedContentPartError }
+import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{
   ContextWindowResolver,
@@ -27,9 +28,11 @@ import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
+import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable.ListBuffer
 
@@ -233,6 +236,42 @@ trait ProviderModuleChecks extends Assertions:
       case Left(error)                => failAt(s"streamComplete failed: ${error.message}")
       case Right(_) if chunks.isEmpty => failAt("streamComplete succeeded without delivering a single chunk")
       case Right(_)                   => succeed
+
+  /**
+   * A client built with `LlmClientOptions.withHttpClient` sends its `complete` and `streamComplete` requests
+   * through the supplied client, and closing it leaves the supplied client open: the caller owns it (#2341).
+   * The supplied client records each request and answers `400`, so no server is needed and each call ends in a
+   * `Left`. Run it for every descriptor whose `features.customHttpClient` is `true`.
+   *
+   * @param descriptor    the chat descriptor under test; its `features.customHttpClient` must be `true`
+   * @param section       a section as validation would leave it
+   * @param modelRegistry the model registry the client sees
+   */
+  def assertUsesSuppliedHttpClient(
+    descriptor: ProviderDescriptor,
+    section: NamedProviderConfig,
+    modelRegistry: ModelRegistryService = ProviderModuleChecks.defaultModelRegistry
+  )(using pos: Position): Assertion =
+    if !descriptor.features.customHttpClient then
+      failAt(s"${descriptor.id.asString} declares features.customHttpClient = false")
+    val http         = new ProviderModuleChecks.RecordingHttpClient
+    val options      = LlmClientOptions.default.withHttpClient(http)
+    val client       = assertBuildsClient(descriptor, section, options, modelRegistry)
+    val conversation = Conversation(Seq(UserMessage("Hello")))
+    def sent(what: String)(call: => Result[?]): Unit =
+      val before = http.requests.size
+      call
+      if http.requests.size == before then
+        failAt(s"${descriptor.id.asString}: $what sent no request through the supplied HTTP client")
+    // the LLM client is closed even when a check fails, so a failing provider leaks nothing
+    val checked = scala.util
+      .Try(sent("complete")(client.complete(conversation)))
+      .flatMap(_ => scala.util.Try(sent("streamComplete")(client.streamComplete(conversation, onChunk = _ => ()))))
+    val closing = scala.util.Try(client.close())
+    checked.get
+    closing.get
+    if http.closed then failAt(s"${descriptor.id.asString} closed the HTTP client its caller supplied")
+    succeed
 
   /**
    * `client.complete` honours interruption: run on a virtual thread (as the agent runtime runs
@@ -522,6 +561,33 @@ trait ProviderModuleChecks extends Assertions:
   def assertHonoursApiKeyProvider(respond: HttpExchange => Unit, path: String = "/")(
     client: (String, ApiKeyProvider) => LLMClient
   )(using pos: Position): Assertion =
+    assertSendsRotatedKey(respond, path, "complete") { (baseUrl, keys) =>
+      val built = client(baseUrl, keys)
+      (() => built.complete(Conversation(Seq(UserMessage("Hello")))), () => built.close())
+    }
+
+  /**
+   * The embedding provider sends the key its config's `ApiKeyProvider` holds at each request, not the key it held
+   * when it was built (#2478): two `embed` calls on one provider, the key rotated between them, must reach the
+   * server with the first key and then the second.
+   *
+   * @param respond  answers every request with a successful embeddings reply in the provider's format
+   * @param path     the path the server answers on; `/` answers every path
+   * @param provider builds the provider for the server's base URL, its config given the key provider with
+   *                 `EmbeddingProviderConfig.withApiKeyProvider`, as a block's `apiKeyFile` gives it one
+   */
+  def assertEmbeddingHonoursApiKeyProvider(respond: HttpExchange => Unit, path: String = "/")(
+    provider: (String, ApiKeyProvider) => EmbeddingProvider
+  )(using pos: Position): Assertion =
+    assertSendsRotatedKey(respond, path, "embed") { (baseUrl, keys) =>
+      val built = provider(baseUrl, keys)
+      (() => built.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8))), () => ())
+    }
+
+  /** Two calls through what `open` builds, the key rotated between them; each must carry the key then held. */
+  private def assertSendsRotatedKey(respond: HttpExchange => Unit, path: String, what: String)(
+    open: (String, ApiKeyProvider) => (() => Result[?], () => Unit)
+  )(using pos: Position): Assertion =
     val first  = "llm4s-contract-key-first-0001"
     val second = "llm4s-contract-key-second-0002"
     val held   = new AtomicReference(first)
@@ -532,13 +598,13 @@ trait ProviderModuleChecks extends Assertions:
       seen.add(exchange.getRequestHeaders.values.asScala.toSeq.flatMap(_.asScala))
       respond(exchange)
     } { baseUrl =>
-      val built = client(baseUrl, keys)
+      val (call, close) = open(baseUrl, keys)
       val results = Seq(first, second).map { key =>
         held.set(key)
-        scala.util.Try(built.complete(Conversation(Seq(UserMessage("Hello"))))).fold(e => Left(e.toString), identity)
+        scala.util.Try(call()).fold(e => Left(e.toString), _.left.map(_.message))
       }
-      scala.util.Try(built.close()): Unit
-      results.collectFirst { case Left(error) => error }.foreach(error => failAt(s"complete failed: $error"))
+      scala.util.Try(close()): Unit
+      results.collectFirst { case Left(error) => error }.foreach(error => failAt(s"$what failed: $error"))
     }
     val requests                                   = seen.asScala.toSeq
     def carries(headers: Seq[String], key: String) = headers.exists(_.contains(key))
@@ -621,6 +687,42 @@ object ProviderModuleChecks extends ProviderModuleChecks:
     ModelRegistryService
       .default()
       .fold(error => failAt(s"llm4s model registry failed to load: ${error.message}"), identity)
+
+  /**
+   * The HTTP client [[assertUsesSuppliedHttpClient]] supplies: it records each request's method and URL and
+   * answers every one `400` with an OpenAI-style error body.
+   */
+  final private[testkit] class RecordingHttpClient extends Llm4sHttpClient:
+    private val sentRequests     = new ConcurrentLinkedQueue[String]
+    @volatile private var isOpen = true
+    private val ErrorBody = """{"error":{"message":"refused by provider-testkit","type":"invalid_request_error"}}"""
+
+    def requests: Seq[String] = sentRequests.asScala.toSeq
+    def closed: Boolean       = !isOpen
+
+    private def record(method: String, url: String): Result[HttpResponse] =
+      sentRequests.add(s"$method $url")
+      Right(HttpResponse(400, ErrorBody))
+
+    def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: FiniteDuration) =
+      record("GET", url)
+    def post(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url)
+    def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: FiniteDuration) =
+      record("POST", url)
+    def postMultipart(url: String, headers: Map[String, String], parts: Seq[MultipartPart], timeout: FiniteDuration) =
+      record("POST", url)
+    def put(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("PUT", url)
+    def delete(url: String, headers: Map[String, String], timeout: FiniteDuration) =
+      record("DELETE", url)
+    def postRaw(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url).map(r => HttpRawResponse(r.statusCode, r.body.getBytes(StandardCharsets.UTF_8)))
+    def postStream(url: String, headers: Map[String, String], body: String, timeout: FiniteDuration) =
+      record("POST", url).map(r =>
+        StreamingHttpResponse(r.statusCode, new ByteArrayInputStream(r.body.getBytes(StandardCharsets.UTF_8)))
+      )
+    override def close(): Unit = isOpen = false
 
   /** A config no real provider builds, to prove a descriptor refuses what is not its own. */
   private object ForeignConfig extends ProviderConfig:

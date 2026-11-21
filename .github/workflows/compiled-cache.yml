@@ -1,0 +1,41 @@
+name: Compiled Output Cache
+
+# Keeps the compiled-output cache pilot (ci.yml: `Restore the compiled output` / `Save the compiled output`, in the
+# agent coverage leg and `Test (other modules)`) to one entry per job kind and branch. CI's nightly run saves a new
+# entry for each kind; this deletes the older ones, so the pilot holds about two entries of the repository's 10 GB and
+# cannot crowd out the sbt dependency cache (dependency-cache.yml). Its own workflow because deleting caches needs
+# `actions: write`, which no ci.yml job may ask for: release.yml calls ci.yml with `contents: read` only.
+on:
+  schedule:
+    - cron: "37 4 * * *"  # 04:37 UTC every day, after CI's nightly run (02:41)
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+# Read-only by default; a job that needs more declares it (#2306, OpenSSF Scorecard Token-Permissions).
+permissions:
+  contents: read
+
+jobs:
+  prune:
+    name: Delete older compiled-output caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Delete all but the newest compiled-v1 entry per job kind and branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/caches?key=compiled-v1-&per_page=100" \
+            --jq '.actions_caches[] | "\(.ref) \(.key | sub("-[0-9]+-[0-9]+$"; "")) \(.created_at) \(.id) \(.size_in_bytes) \(.key)"' |
+            sort -k1,1 -k2,2 -k3,3r |
+            awk '{ group = $1 " " $2; if (group == last) print; last = group }' |
+            while read -r ref _ _ id size key; do
+              echo "deleting $key on $ref ($((size / 1048576)) MB)"
+              gh api -X DELETE "repos/$REPO/actions/caches/$id"
+            done

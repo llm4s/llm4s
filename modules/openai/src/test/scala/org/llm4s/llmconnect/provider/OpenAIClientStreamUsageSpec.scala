@@ -27,10 +27,10 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
   private val hello = Conversation(Seq(UserMessage("hello")))
 
   private def openAI(model: String): OpenAIConfig =
-    OpenAIConfig.fromValues(model, Secret("sk-test"), None, "https://example.invalid/v1").value
+    OpenAIConfig.fromValues(model, Secret("sk-test"), "https://example.invalid/v1").value
 
   private def azure(apiVersion: String, endpoint: String = "https://r.openai.azure.com"): AzureConfig =
-    AzureConfig.fromValues("my-deploy", endpoint, Secret("azure-key"), apiVersion).value
+    AzureConfig.fromValues("my-deploy", Secret("azure-key"), endpoint, apiVersion).value
 
   private val content = chunk(
     """{"id":"c1","created":0,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}"""
@@ -69,10 +69,12 @@ final class OpenAIClientStreamUsageSpec extends AnyFlatSpec with Matchers with E
     completion.content shouldBe "Hi"
     val usage = completion.usage.value
     usage.promptTokens shouldBe 12
-    usage.completionTokens shouldBe 40
-    // The service's own total: reasoning tokens are part of completion_tokens, not added to it.
-    usage.totalTokens shouldBe 52
+    // OpenAI counts the 24 reasoning tokens inside completion_tokens; completionTokens never includes them
+    usage.completionTokens shouldBe 16
     usage.thinkingTokens shouldBe Some(24)
+    usage.totalOutputTokens shouldBe 40
+    // The service's own total, kept as reported
+    usage.totalTokens shouldBe 52
     usage.cachedTokens shouldBe Some(8)
     completion.estimatedCost shouldBe defined
     // The usage-only chunk carries no choice, so it produces no StreamedChunk.

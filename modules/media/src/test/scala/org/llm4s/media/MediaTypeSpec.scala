@@ -73,6 +73,19 @@ class MediaTypeSpec extends AnyFlatSpec with Matchers {
     MediaType.fromPath("https://example.com/a/b/clip.mp3") shouldBe Some(MediaType.Mp3)
   }
 
+  it should "ignore a URL query string or fragment" in {
+    MediaType.fromPath("https://x/y.webp?sig=a") shouldBe Some(MediaType.WebP)
+    MediaType.fromPath("https://x/y.png#t") shouldBe Some(MediaType.Png)
+    MediaType.fromPath("https://x/y.png?a=1#t") shouldBe Some(MediaType.Png)
+    MediaType.fromPath("https://x/download?file=y.png") shouldBe None
+    MediaType.fromPath("https://x/y?rsct=image/png&sig=a") shouldBe None
+    MediaType.imageFromPath("https://x/y.png?sig=a") shouldBe Some(MediaType.Png)
+  }
+
+  it should "preserve literal query and fragment characters in a local path" in {
+    MediaType.fromPath("/tmp/photo#1.png") shouldBe Some(MediaType.Png)
+  }
+
   it should "use the last dot, not the first" in {
     MediaType.fromPath("my.photo.backup.png") shouldBe Some(MediaType.Png)
   }

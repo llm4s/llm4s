@@ -43,13 +43,20 @@ import scala.concurrent.duration._
  *                             a container is not started with a name the runner would refuse
  * @param sandboxConfig        the runner's whole sandbox config, passed as `WORKSPACE_SANDBOX_CONFIG`; `None` leaves
  *                             the runner on its profile
+ * @param commandCgroups       start the container so the runner can give each command a cgroup of its own and kill it
+ *                             whole, so a daemon a command starts (`setsid`) cannot outlive it (design §4.39, #2008):
+ *                             `--cgroupns=private --cap-add SYS_ADMIN --security-opt apparmor=unconfined`. The image's
+ *                             entry point uses `SYS_ADMIN` only to make the container's cgroup writable, and drops it
+ *                             before the runner starts. Off by default: commands' daemons can then outlive them, as the
+ *                             runner logs at startup
  */
 class ContainerisedWorkspace(
   val workspaceDir: String,
   val imageName: String,
   val hostPort: Int,
   val extraAllowedCommands: Set[String] = Set.empty,
-  val sandboxConfig: Option[WorkspaceSandboxConfig] = None
+  val sandboxConfig: Option[WorkspaceSandboxConfig] = None,
+  val commandCgroups: Boolean = false
 ) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
   private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
@@ -69,9 +76,10 @@ class ContainerisedWorkspace(
   private val heartbeatExecutor = new AtomicReference[ScheduledExecutorService]()
 
   // WebSocket client and response handling
-  private val wsClient          = new AtomicReference[WebSocketClient]()
-  private val pendingResponses  = new ConcurrentHashMap[String, CompletableFuture[WorkspaceAgentResponse]]()
-  private val streamingHandlers = new ConcurrentHashMap[String, StreamingOutputMessage => Unit]()
+  private val wsClient         = new AtomicReference[WebSocketClient]()
+  private val pendingResponses = new ConcurrentHashMap[String, CompletableFuture[WorkspaceAgentResponse]]()
+  // by command id, from executeCommandWithStreaming's send until its response; never removed by a stream's own end
+  private[workspace] val streamingHandlers = new ConcurrentHashMap[String, StreamingOutputMessage => Unit]()
 
   /**
    * Custom WebSocket client that handles workspace agent protocol
@@ -156,13 +164,21 @@ class ContainerisedWorkspace(
         logger.warn(s"Received response for unknown command ID: ${response.commandId}")
     }
 
-  private def handleStreamingOutput(commandId: String, outputType: String, content: String, isComplete: Boolean): Unit =
+  /**
+   * Passes a chunk to its command's handler. Each of stdout and stderr ends with its own `isComplete` message, in
+   * either order, so neither may remove the handler: `executeCommandWithStreaming` removes it once the response is in.
+   */
+  private[workspace] def handleStreamingOutput(
+    commandId: String,
+    outputType: String,
+    content: String,
+    isComplete: Boolean
+  ): Unit =
     Option(streamingHandlers.get(commandId)) match {
       case Some(handler) =>
         Try(handler(StreamingOutputMessage(commandId, outputType, content, isComplete))).failed.foreach { ex =>
           logger.error(s"Error in streaming handler for command $commandId: ${ex.getMessage}", ex)
         }
-        if (isComplete) streamingHandlers.remove(commandId)
       case None =>
         logger.debug(s"No streaming handler registered for command $commandId")
     }
@@ -188,7 +204,8 @@ class ContainerisedWorkspace(
         workspaceDir,
         imageName,
         extraAllowedCommands,
-        sandboxConfig
+        sandboxConfig,
+        commandCgroups
       )
       .left
       .map(msg => new IllegalArgumentException(s"sandbox config: $msg"))
@@ -440,7 +457,7 @@ class ContainerisedWorkspace(
    * response, which the runner sends by its commit deadline, before this deadline, so the caller never stops waiting
    * while a change it cannot see may still commit. The interrupt is kept for the caller either way.
    */
-  private def awaitResponse(
+  private[workspace] def awaitResponse(
     command: WorkspaceAgentCommand,
     future: CompletableFuture[WorkspaceAgentResponse]
   ): Try[WorkspaceAgentResponse] = {
@@ -452,7 +469,7 @@ class ContainerisedWorkspace(
     }
     @scala.annotation.tailrec
     def await(interrupted: Boolean): (Try[WorkspaceAgentResponse], Boolean) =
-      scala.util.control.Exception.allCatch.withTry(
+      ContainerisedWorkspace.catchingInterrupts.withTry(
         future.get(math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS)
       ) match {
         case scala.util.Failure(_: InterruptedException) if !cancellable => await(interrupted = true)
@@ -632,6 +649,25 @@ class ContainerisedWorkspace(
 object ContainerisedWorkspace {
 
   /**
+   * Catches every failure of a wait, an interrupt among them: `allCatch` rethrows an `InterruptedException`
+   * (`Exception.shouldRethrow`), which would skip the cancellation of the command a caller gave up on.
+   */
+  private val catchingInterrupts: scala.util.control.Exception.Catch[Nothing] =
+    new scala.util.control.Exception.Catch(
+      scala.util.control.Exception.allCatcher[Nothing],
+      None,
+      _.isInstanceOf[scala.util.control.ControlThrowable]
+    )
+
+  /**
+   * What `docker run` needs for a cgroup per command (design §4.39, #2008): a private cgroup namespace, and for the
+   * image's entry point `SYS_ADMIN`, without AppArmor's `docker-default` (which refuses every mount), to remount the
+   * container's own cgroup read-write. The entry point drops `SYS_ADMIN` before it starts the runner.
+   */
+  private[workspace] val CommandCgroupsArgs: Seq[String] =
+    Seq("--cgroupns=private", "--cap-add", "SYS_ADMIN", "--security-opt", "apparmor=unconfined")
+
+  /**
    * The `docker run` command that starts a workspace-runner container.
    *
    * @return the argument vector, or why the sandbox config or `extraAllowedCommands` is one the runner would refuse
@@ -643,7 +679,8 @@ object ContainerisedWorkspace {
     workspaceDir: String,
     imageName: String,
     extraAllowedCommands: Set[String],
-    sandboxConfig: Option[WorkspaceSandboxConfig]
+    sandboxConfig: Option[WorkspaceSandboxConfig],
+    commandCgroups: Boolean = false
   ): Either[String, Seq[String]] = {
     val extra = extraAllowedCommands.toSeq.sorted.mkString(",")
     for {
@@ -658,7 +695,11 @@ object ContainerisedWorkspace {
           Seq("-e", s"${WorkspaceSandboxConfig.ConfigEnvVar}=${upickle.default.write(c)}")
         )
       Seq("docker", "run", "-d", "--name", containerName, "-p", s"$hostPort:$containerPort") ++
-        extraEnv ++ configEnv ++ Seq("-v", s"$workspaceDir:/workspace", imageName)
+        (if (commandCgroups) CommandCgroupsArgs else Nil) ++ extraEnv ++ configEnv ++ Seq(
+          "-v",
+          s"$workspaceDir:/workspace",
+          imageName
+        )
     }
   }
 }

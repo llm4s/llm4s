@@ -3,7 +3,7 @@ package org.llm4s.deploy
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.service.*
-import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.error.{ ContentFilteredError, LLMError, ValidationError }
 import org.llm4s.trace.TraceContext
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -193,7 +193,7 @@ object AgentService:
 
   /** The HTTP status an error is answered with. */
   private[deploy] def statusOf(error: LLMError): Int = error match
-    case _: ValidationError                                           => 400
+    case _: ValidationError | _: ContentFilteredError                 => 400
     case _: GraphError.ThreadBusy | _: QueueError.SubmissionKeyReused => 409
     case _: GraphError.PendingInterrupts | _: GraphError.NotSuspended => 409
     case _: GraphError.NothingToRecover                               => 409

@@ -36,7 +36,7 @@ final class OpenAIClientContentPartsSpec extends AnyFlatSpec with Matchers with 
       body.set(Some(ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))))
       LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("ok", "gpt-4o"))
     } { baseUrl =>
-      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), None, s"$baseUrl/v1").value).value
+      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-4o", Secret("sk-test"), s"$baseUrl/v1").value).value
       val result = client.complete(conversation, CompletionOptions())
       client.close()
       out = Some(result.map(_ => body.get.getOrElse(fail("no request"))("messages")))

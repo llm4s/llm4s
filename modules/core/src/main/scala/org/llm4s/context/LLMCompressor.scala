@@ -84,7 +84,7 @@ object LLMCompressor {
     logger.info(s"Starting LLM digest squeeze with cap: $capTokens tokens")
 
     // Find [HISTORY_SUMMARY] messages first
-    val (digestMessages, otherMessages) = messages.partition(HistorySummaryMarker.isDigest)
+    val digestMessages = messages.filter(HistorySummaryMarker.isDigest)
 
     if (digestMessages.isEmpty) {
       logger.debug("No [HISTORY_SUMMARY] messages found for digest compression")
@@ -102,10 +102,18 @@ object LLMCompressor {
 
     for {
       compressedDigests <- compressDigestMessages(digestMessages, llmClient)
-      finalMessages     = otherMessages ++ compressedDigests
+      finalMessages     = reinsertDigests(messages, compressedDigests)
       finalDigestTokens = compressedDigests.map(tokenCounter.countMessage).sum
       _                 = logger.info(s"Digest squeeze complete: $digestTokens → $finalDigestTokens tokens")
     } yield finalMessages
+  }
+
+  // `compressedDigests` has one entry per digest in `messages`, in the same order (compressDigestMessages
+  // maps each digest to exactly one replacement). Walking `messages` and substituting each digest in turn
+  // keeps every other message at its original position, instead of moving every digest to the end.
+  private def reinsertDigests(messages: Seq[Message], compressedDigests: Seq[Message]): Seq[Message] = {
+    val replacements = compressedDigests.iterator
+    messages.map(m => if (HistorySummaryMarker.isDigest(m)) replacements.next() else m)
   }
 
   private def compressDigestMessages(
@@ -143,12 +151,8 @@ object LLMCompressor {
         ContextError.llmCompressionFailed("digest", s"LLM call failed: ${error.message}")
       }
       .map { completion =>
-        val compressedDigest = HistorySummaryMarker.wrap(completion.message.content)
-        digestMessage match {
-          case _: SystemMessage => SystemMessage(compressedDigest)
-          case _: UserMessage   => UserMessage(compressedDigest)
-          case _                => UserMessage(compressedDigest) // Fallback
-        }
+        // a digest is always a SystemMessage (HistorySummaryMarker.isDigest), so its replacement is one too
+        SystemMessage(HistorySummaryMarker.wrap(completion.message.content))
       }
   }
 

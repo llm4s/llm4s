@@ -162,9 +162,8 @@ object TokenWindow {
     )
   }
 
-  // A digest is a SystemMessage HistoryCompressor wrote; a message of another type is never
-  // pinned, even one whose text happens to mention the marker (deliberately stricter than the
-  // plain substring match this used to be - see the fix for the issue this closes).
+  // A digest is a SystemMessage HistoryCompressor wrote, starting with the marker; a message of
+  // another type, or one that only mentions the marker, is never pinned (#2505).
   private def isHistoryDigestMessage(message: Message): Boolean = HistorySummaryMarker.isDigest(message)
 
   private def findRecentMessagesThatFit(

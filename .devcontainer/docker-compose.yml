@@ -1,0 +1,23 @@
+# The dev container and an Ollama sidecar (#2286). `dev` shares the sidecar's network namespace, so Ollama answers on
+# http://localhost:11434 inside the dev container: the samples' `ollama-local` section and `DoctorCli --local` work
+# unchanged. Pulled models live in a named volume, so they survive a container rebuild.
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/workspaces:cached
+    command: sleep infinity
+    network_mode: service:ollama
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:0.40.14@sha256:ebaef4f4c5d93660e1f25f8ad085a112f51ccfb0e8458073e71793959dba91c9
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:

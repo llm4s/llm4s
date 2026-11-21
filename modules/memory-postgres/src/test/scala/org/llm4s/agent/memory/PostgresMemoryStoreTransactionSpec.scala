@@ -5,13 +5,13 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.lang.reflect.{ InvocationHandler, Method, Proxy }
-import java.sql.{ Connection, PreparedStatement, SQLException }
+import java.sql.{ BatchUpdateException, Connection, PreparedStatement, SQLException }
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters._
 
 /**
- * `PostgresMemoryStore.storeAll`'s transaction guard, without a database: a scripted JDBC connection records the
- * transaction calls the store makes and fails the ones a case asks it to. The same paths against a real Postgres are
+ * `PostgresMemoryStore.storeAll`'s transaction guard and JDBC batching, without a database: a scripted JDBC connection
+ * records the transaction and batch calls the store makes and fails the ones a case asks it to. The same paths against a real Postgres are
  * in `PostgresMemoryStoreSpec` (`modules/it`, `@Docker`).
  */
 class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
@@ -19,20 +19,33 @@ class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
   private def memories(n: Int): Seq[Memory] =
     (1 to n).map(i => Memory(MemoryId(s"m$i"), s"note $i", MemoryType.Knowledge))
 
-  /** What the scripted connection should fail. `failUpdate` is the 1-based `executeUpdate` call that throws. */
+  /**
+   * What the scripted connection should fail. `failBatch` is the 1-based `executeBatch` call that throws a
+   * `BatchUpdateException`, chaining a server error unless `bareBatchFailure`.
+   */
   final private case class Script(
     failAutoCommitOff: Boolean = false,
-    failUpdate: Option[Int] = None,
+    failBatch: Option[Int] = None,
+    bareBatchFailure: Boolean = false,
     failCommit: Boolean = false,
     failRollback: Boolean = false
   )
 
   final private class ScriptedConnection(script: Script) {
     private val log     = new ConcurrentLinkedQueue[String]()
-    private var updates = 0
+    private val bound   = new ConcurrentLinkedQueue[(String, String)]()
+    private var batches = 0
+    private var pending = 0
+    private var row     = Map.empty[Int, String]
 
-    /** The transaction calls, in order: `setAutoCommit(b)`, `commit`, `rollback`, `close`, `executeUpdate`. */
+    /**
+     * The transaction and batch calls, in order: `setAutoCommit(b)`, `commit`, `rollback`, `close`, and
+     * `executeBatch(n)` for a batch of `n` rows.
+     */
     def calls: Seq[String] = log.asScala.toSeq
+
+    /** The (id, content) of every row added to a batch, in order. */
+    def rows: Seq[(String, String)] = bound.asScala.toSeq
 
     private def statement: PreparedStatement =
       Proxy
@@ -42,13 +55,26 @@ class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
           new InvocationHandler {
             override def invoke(proxy: Any, method: Method, args: Array[AnyRef]): AnyRef =
               method.getName match {
-                case "executeUpdate" =>
-                  updates += 1
-                  log.add("executeUpdate")
-                  if (script.failUpdate.contains(updates)) throw new SQLException(s"row $updates rejected")
-                  Integer.valueOf(1)
-                case "close" => null
-                case _       => null // parameter setters
+                case "setString" =>
+                  row = row.updated(args(0).asInstanceOf[Integer].intValue, args(1).asInstanceOf[String])
+                  null
+                case "addBatch" =>
+                  bound.add(row(1) -> row(2))
+                  pending += 1
+                  null
+                case "executeBatch" =>
+                  batches += 1
+                  log.add(s"executeBatch($pending)")
+                  val size = pending
+                  pending = 0
+                  if (script.failBatch.contains(batches)) {
+                    val failure = new BatchUpdateException(s"Batch entry 0 INSERT ... was aborted", Array.empty[Int])
+                    if (!script.bareBatchFailure) failure.setNextException(new SQLException(s"batch $batches rejected"))
+                    throw failure
+                  }
+                  Array.fill(size)(1)
+                case "executeUpdate" => throw new UnsupportedOperationException("writes are batched")
+                case _               => null // other parameter setters, close
               }
           }
         )
@@ -92,30 +118,57 @@ class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
   }
 
   private def run(script: Script, batch: Seq[Memory] = memories(3)): (Boolean, Seq[String]) = {
-    val conn  = new ScriptedConnection(script)
-    val store = new PostgresMemoryStore(new ScriptedDataSource(conn), "memories", None)
-    val ok    = store.storeAll(batch).isRight
-    (ok, conn.calls)
+    val (result, conn) = runWith(script, batch)
+    (result.isRight, conn.calls)
   }
 
-  private def transaction(calls: Seq[String]): Seq[String] = calls.filterNot(_ == "executeUpdate")
+  private def runWith(script: Script, batch: Seq[Memory]): (Either[String, Unit], ScriptedConnection) = {
+    val conn  = new ScriptedConnection(script)
+    val store = new PostgresMemoryStore(new ScriptedDataSource(conn), "memories", None)
+    (store.storeAll(batch).left.map(_.message).map(_ => ()), conn)
+  }
+
+  private def transaction(calls: Seq[String]): Seq[String] = calls.filterNot(_.startsWith("executeBatch"))
 
   "PostgresMemoryStore.storeAll" should "write every row in one transaction, commit it and restore autocommit" in {
     val (ok, calls) = run(Script())
     ok shouldBe true
-    calls.count(_ == "executeUpdate") shouldBe 3
+    calls shouldBe Seq("setAutoCommit(false)", "executeBatch(3)", "commit", "setAutoCommit(true)", "close")
+  }
+
+  it should "send a large batch as JDBC batches of at most WriteBatchSize rows" in {
+    val size        = PostgresMemoryStore.WriteBatchSize
+    val (ok, calls) = run(Script(), memories(2 * size + 5))
+    val batchesSent = calls.filter(_.startsWith("executeBatch"))
+    ok shouldBe true
+    batchesSent shouldBe Seq(s"executeBatch($size)", s"executeBatch($size)", "executeBatch(5)")
     transaction(calls) shouldBe Seq("setAutoCommit(false)", "commit", "setAutoCommit(true)", "close")
   }
 
-  it should "roll back, restore autocommit and fail when a row's write fails" in {
-    val (ok, calls) = run(Script(failUpdate = Some(2)))
-    ok shouldBe false
-    calls.count(_ == "executeUpdate") shouldBe 2
-    transaction(calls) shouldBe Seq("setAutoCommit(false)", "rollback", "setAutoCommit(true)", "close")
+  it should "write a repeated id once, as its last occurrence" in {
+    val m1             = Memory(MemoryId("a"), "first", MemoryType.Knowledge)
+    val m2             = Memory(MemoryId("b"), "other", MemoryType.Knowledge)
+    val m3             = Memory(MemoryId("a"), "last", MemoryType.Knowledge)
+    val (result, conn) = runWith(Script(), Seq(m1, m2, m3))
+    result shouldBe Right(())
+    conn.rows shouldBe Seq("a" -> "last", "b" -> "other")
+  }
+
+  it should "roll back, restore autocommit and fail when a batch fails, reporting the server's error" in {
+    val size           = PostgresMemoryStore.WriteBatchSize
+    val (result, conn) = runWith(Script(failBatch = Some(2)), memories(size + 1))
+    result.left.toOption.get should (include("batch 2 rejected").and(not).include("INSERT"))
+    conn.calls.filter(_.startsWith("executeBatch")) shouldBe Seq(s"executeBatch($size)", "executeBatch(1)")
+    transaction(conn.calls) shouldBe Seq("setAutoCommit(false)", "rollback", "setAutoCommit(true)", "close")
+  }
+
+  it should "report a batch failure's own message when it chains no server error" in {
+    val (result, _) = runWith(Script(failBatch = Some(1), bareBatchFailure = true), memories(2))
+    result.left.toOption.get should include("was aborted")
   }
 
   it should "leave autocommit off after a failed rollback, for the pool to reset" in {
-    val (ok, calls) = run(Script(failUpdate = Some(1), failRollback = true))
+    val (ok, calls) = run(Script(failBatch = Some(1), failRollback = true))
     ok shouldBe false
     transaction(calls) shouldBe Seq("setAutoCommit(false)", "rollback", "close")
   }
@@ -129,7 +182,7 @@ class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
   it should "fail without writing when it cannot turn autocommit off" in {
     val (ok, calls) = run(Script(failAutoCommitOff = true))
     ok shouldBe false
-    calls should not contain "executeUpdate"
+    calls.filter(_.startsWith("executeBatch")) shouldBe empty
     calls should not contain "commit"
     calls.last shouldBe "close"
   }
@@ -170,6 +223,6 @@ class PostgresMemoryStoreTransactionSpec extends AnyFlatSpec with Matchers {
     val conn  = new ScriptedConnection(Script())
     val store = new PostgresMemoryStore(new ScriptedDataSource(conn), "memories", None)
     store.store(memories(1).head).isRight shouldBe true
-    conn.calls shouldBe Seq("executeUpdate", "close")
+    conn.calls shouldBe Seq("executeBatch(1)", "close")
   }
 }

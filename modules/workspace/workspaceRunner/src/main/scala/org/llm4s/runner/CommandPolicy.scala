@@ -685,7 +685,7 @@ private[runner] object CommandPolicy {
     args.find(arg => FindFollowCluster.matches(arg)).map(notAllowed("find", _, "it follows every link it meets."))
 
   private val SeparatorOperand =
-    "after '--' it names a file to GNU sort, but uutils sort (the Rust coreutils of Ubuntu-based runner images), in " +
+    "after '--' it names a file to GNU sort, but uutils sort (the Rust coreutils of Ubuntu 25.10 and later), in " +
       "its development line, reads every argument starting with '-t' as '--field-separator=<rest>', even after '--', and opens a file of that " +
       "name, which is not path-checked. Name the file './-t...' instead."
 

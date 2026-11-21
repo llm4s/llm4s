@@ -51,6 +51,7 @@ object PlatformTests {
       "org.llm4s.llmconnect.auth.IdentityTokenSourceSpec",
       "org.llm4s.llmconnect.auth.ApiKeyProviderSpec",
       "org.llm4s.config.ApiKeyFileConfigSpec",
+      "org.llm4s.config.SharedApiKeyFileSpec",
       "org.llm4s.model.ModelRegistryServiceSpec",
       "org.llm4s.http.Llm4sHttpClientSpec"
     ),
@@ -88,7 +89,14 @@ object PlatformTests {
     ),
     "gemini" -> Seq(
       "org.llm4s.llmconnect.provider.VertexAIAuthProviderSpec",
-      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec"
+      "org.llm4s.llmconnect.provider.GcloudAdcLocationSpec",
+      "org.llm4s.llmconnect.provider.GeminiApiKeyFileSpec"
+    ),
+    "watsonx" -> Seq("org.llm4s.llmconnect.provider.WatsonXApiKeyFileSpec"),
+    // The default model directory under the user's home, and a `~` in a section's modelDir (#2284).
+    "jlama" -> Seq(
+      "org.llm4s.llmconnect.provider.JlamaConfigSpec",
+      "org.llm4s.llmconnect.provider.Llm4sJlamaModuleSpec"
     ),
     "configPolicy" -> Seq("org.llm4s.configpolicy.CheckPoliciesSourceSpec"),
     "doctor" -> Seq(

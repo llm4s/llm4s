@@ -200,7 +200,7 @@ class GraphQAPipelineTest extends AnyFunSuite with Matchers with MockFactory {
     val store     = buildTestStore()
 
     // Use very small context limits to test ranking/trimming
-    val config   = GraphQAConfig(maxContextNodes = 2, useRanking = true)
+    val config   = GraphQAConfig(maxContextNodes = 2, maxContextEdges = 1, useRanking = true)
     val pipeline = new GraphQAPipeline(llmClient, store, config)
 
     val entityResponse = """[]"""
@@ -227,6 +227,51 @@ class GraphQAPipelineTest extends AnyFunSuite with Matchers with MockFactory {
     result should be(a[Right[_, _]])
     // Result should be trimmed to maxContextNodes
     result.toOption.get.queryResult.nodes.size should be <= 2
+    result.toOption.get.queryResult.edges.size should be <= 1
+  }
+
+  test("askWithQuery should limit context edges when node ranking is not needed") {
+    val llmClient = mock[LLMClient]
+    val store     = buildTestStore()
+    val config    = GraphQAConfig(maxContextNodes = 10, maxContextEdges = 1, useRanking = true)
+    val pipeline  = new GraphQAPipeline(llmClient, store, config)
+
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("[]")))
+      .once()
+
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("Answer with a bounded context.")))
+      .once()
+
+    val result = pipeline.askWithQuery("Get everything", GraphQuery.FindNodes())
+
+    result should be(a[Right[_, _]])
+    result.toOption.get.queryResult.edges should have size 1
+  }
+
+  test("askWithQuery should limit context edges when ranking is disabled") {
+    val llmClient = mock[LLMClient]
+    val store     = buildTestStore()
+    val config    = GraphQAConfig(maxContextEdges = 1, useRanking = false)
+    val pipeline  = new GraphQAPipeline(llmClient, store, config)
+
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("[]")))
+      .once()
+
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("Answer with a bounded context.")))
+      .once()
+
+    val result = pipeline.askWithQuery("Get everything", GraphQuery.FindNodes())
+
+    result should be(a[Right[_, _]])
+    result.toOption.get.queryResult.edges should have size 1
   }
 
   test("identifyEntities should resolve mentions to graph nodes") {

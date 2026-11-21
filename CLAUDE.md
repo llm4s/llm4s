@@ -62,10 +62,11 @@ The modularisation of `modules/core` ([#1126](https://github.com/llm4s/llm4s/iss
 
 ## Adding a module
 
-Each step below is easy to miss because a missing one does not fail the build.
-1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit.
+Each step below is easy to miss because a missing one does not fail the build (step 3 now fails Quick Checks' `docsSourcesCheck`).
+1. Add a coverage floor (or an explicit disabled policy), a codecov flag and a CI upload in the same commit. CI runs a
+   module's tests only in its coverage leg, or, with no floor, in the `test` job's `TEST_MODULES`; `scripts/check-coverage-legs.sh` fails a module in neither.
 2. Add a migration note in the CHANGELOG and docs.
-3. Add the module to the `docs` project's source list in `build.sbt`. Otherwise its Scaladoc is silently never generated.
+3. Add a published module to the `docs` project's `dependsOn` and source list in `build.sbt`, or its Scaladoc is never generated; `sbt docsSourcesCheck` fails without it.
 4. Register it in `hooks/pre-commit`.
 5. If it has an integration suite that needs a database, container, model server or API key, put the suite in `modules/it` with exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` enforces this. A store that needs none, such as SQLite, runs its suites in its own module.
 6. A provider module also goes into the root aggregate, `samples`, `it`, and `configPolicy` if it has chat providers.
@@ -98,15 +99,23 @@ llm4s/
 │   │   ├── jev/               # Jev decision client (TypeSafe System One: typed Noul/Choice/Score questions); not an LLMClient
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
 │   │   ├── watsonx/           # IBM watsonx.ai chat provider (Beta; never run against the live service)
+│   │   ├── perplexity/        # Perplexity Agent API chat provider: /v1/agent, web search, citations (Beta)
 │   │   └── azure-identity/    # llm4s-azure-identity: keyless Azure OpenAI via Microsoft Entra ID (azure-identity SDK; Experimental)
+│   ├── secrets-vault/         # VaultApiKeyProvider: an API key read from HashiCorp Vault's KV engine over HTTP, no SDK (published)
+│   ├── secrets-aws/           # AwsSecretsManagerApiKeyProvider: an API key read from AWS Secrets Manager, SigV4, no SDK (published)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── schema-derivation/     # SchemaOf: a JSON schema derived from a case class (`derives`), for completeStructured (published, experimental)
+│   ├── schema-iron/           # SchemaOf and ReadWriter for Iron refinement types: bounds in the derived schema (published, experimental)
+│   ├── prompt/                # prompt"..."/system"..." interpolators: compile-time Promptable, Untrusted fencing (published, experimental)
 │   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
+│   ├── sttp/                  # llm4s-sttp: SttpLlm4sHttpClient, provider HTTP over a caller's sttp 4 backend (published)
+│   ├── capabilities/          # llm4s-capabilities: Capable[Vision & Tools], capability-typed clients (published, experimental)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── observability-micrometer/ # Micrometer MetricsCollector writing into a MeterRegistry (published)
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── tapir/                 # llm4s-tapir: tapir endpoints as tools, schemas derived from the endpoints (published)
 │   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
 │   ├── agent-checkpoint-sqlite/ # SqliteCheckpointer: the first durable Checkpointer, one SQLite file (published)
 │   ├── agent-checkpoint-postgres/ # PostgresCheckpointer: threads shared across machines, the database's clock (published)
@@ -115,20 +124,26 @@ llm4s/
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── llm4s-pekko/           # Apache Pekko Streams Sources over LLMClient.streamComplete and Agent runs (published)
+│   ├── llm4s-ox/              # Ox direct style: a streamed reply as a Flow, parComplete, raceProviders, RetrySchedule (published)
 │   ├── java-api/              # Java facade over the client and agent (published)
 │   ├── java-rag/              # Java facade for RAG over llm4s-rag: JRag (published)
 │   ├── reactor/               # Reactor Flux over the Java facade's streamed reply: Streams.toFlux (published)
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
-│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.5.2
+│   ├── spring-ai/             # Spring AI interop: llm4s as ChatModel/EmbeddingModel, a ChatModel as LLMClient (published, experimental)
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, published from 0.6.0
 │   ├── samples/               # Usage examples
 │   ├── examples-http/         # Reference apps serving an agent over HTTP: http4s, ZIO HTTP (unpublished)
 │   ├── deploy-service/        # /health, /llm-check and an example agent service (run queue, worker, SSE) + image (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── doctor/                # llm4s-doctor: DoctorCli setup checker, run on the application's own classpath (published)
+│   ├── repl/                  # llm4s-repl: ask, extract, chat() helpers for the REPL, worksheets and scripts (published, experimental)
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
+│   ├── benchmarks-comparative/ # llm4s vs LangChain4j and Spring AI on a mock server; outside the aggregate (unpublished)
+│   ├── docs/                  # Unified Scaladoc of the published modules: the `docs` project, its rootdoc.md (not published)
+│   ├── scalafix-rules/        # Scalafix rules migrating user code across breaking changes (a scalac 2.13 build-tool module; unpublished)
 │   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
 │   └── it/                    # Integration tests
 ├── docs/                # Documentation
@@ -158,7 +173,7 @@ sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
-sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks); sbt test and coverage leave them out
+sbt testPerformance    # tests tagged PerformanceTest (LinearTime scaling checks), in core and agent; sbt test and coverage leave them out
 sbt testPlatform       # only the platform-sensitive tests (project/PlatformTests.scala): what CI's Windows job runs
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
@@ -265,6 +280,7 @@ GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY whe
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY, XAI_API_KEY
 COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
+PERPLEXITY_API_KEY=...               # llm4s-perplexity (the Agent API)
 TYPESAFE_API_KEY=...                 # llm4s-jev (Jev decision client, not a provider) -> llm4s.credentials.typesafe.apiKey
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)
@@ -468,11 +484,16 @@ A test that measures how cost grows with input size (`LinearTime.assertLinear`, 
 ratio) is tagged `taggedAs(PerformanceTest)` (`org.llm4s.testutil`). `sbt test` and the coverage
 run exclude the tag - growth is platform-independent, so Windows and coverage instrumentation only
 multiplied its cost - and `sbt testPerformance` runs it (CI's ubuntu `Performance tests` job and a
-nightly run). Leave one untagged guard per spec: a single ~1 MB worst-case input under
+nightly run), only in the modules `performanceTestProjects` in `build.sbt` lists: a module whose
+tests start using the tag joins that list (`scripts/check-performance-tests.sh` fails otherwise). Leave one untagged guard per spec: a single ~1 MB worst-case input under
 `LinearTime.timed(label, hangGuard)`, generous enough never to flake, so `sbt test` still fails
 on a catastrophic (quadratic) regression.
 
-CI's Windows job runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
+On Linux CI runs each module's tests once, in its coverage leg or in the `test` job (`TEST_MODULES`).
+A suite that reads `docs/` (a guide's code blocks, links or tables) is annotated `@org.llm4s.tags.DocsSpec`, and its
+module listed in `docsTestProjects`: a docs-only PR runs only those (`sbt testDocs`), and
+`scripts/check-docs-tests.sh` fails an untagged one. On a PR, `scripts/ci-changes.sh` decides which test jobs run.
+CI's Windows job (pull requests and the nightly run, not pushes to main) runs only `sbt testPlatform`: the tests of platform-sensitive behaviour (paths and
 separators, permissions, deleting or moving open files, processes and their arguments, SQLite files
 and locks, line endings written to files, temp files, the user's home), listed in
 `project/PlatformTests.scala` as `wholeModules` (every suite runs) and `suites` (named suites of

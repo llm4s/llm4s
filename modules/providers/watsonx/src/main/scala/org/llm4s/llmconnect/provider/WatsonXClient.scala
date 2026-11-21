@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, ProcessingError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
+import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.*
 import org.llm4s.media.MediaSource
@@ -101,8 +102,10 @@ import scala.util.{ Try, Using }
  * OpenAI's gpt-oss models, `openai/gpt-oss-*`, which IBM's clients send it to (`JAVA` ChatServiceThinkingTest;
  * LCIBM chat_models.py:657-690). Any other model is sent nothing, and a warning is logged once per process: IBM's
  * Model Gateway rejects the parameter for models without it (`JAVA` ModelGatewayChatServiceIT), and whether the
- * chat API does is unchecked. The chat API has no value that turns reasoning off, so `ReasoningEffort.None` is
- * sent as `low`, the least, with a warning logged once per process ([[WatsonXClient.reasoningEffortValue]]).
+ * chat API does is unchecked. The chat API has no value that turns reasoning off, so `Thinking.Off` is sent as
+ * `low`, the least, winning over a `reasoning` also set, with a warning logged once per process; `Minimal` is sent
+ * as `low` and `XHigh` and `Max` as `high` ([[WatsonXClient.reasoningEffortValue]]). `Thinking.Adaptive` and
+ * `Thinking.Budget` have no counterpart and are not sent (this client reports no adjustments yet).
  * `include_reasoning` is not sent: it defaults to true (NODE types/vml_v1.ts:858).
  *
  * A reply's reasoning is read as thinking, from any model: `message.reasoning_content` on `complete` (NODE
@@ -163,7 +166,8 @@ class WatsonXClient(
   /** How long a streamed call may take: the section's `timeouts.stream`, else [[WatsonXClient.DefaultStreamTimeout]]. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
-  final private case class IamToken(value: String, expiresAt: Long)
+  /** An IAM token, and the API key it was exchanged for: a token from a key since rotated away is not reused. */
+  final private case class IamToken(value: String, expiresAt: Long, apiKey: String)
 
   private val tokenCache = new AtomicReference[Option[IamToken]](None)
 
@@ -176,8 +180,21 @@ class WatsonXClient(
   // blocked here does not pin its carrier and an interrupted waiter wakes with the interrupt.
   private val tokenLock = new ReentrantLock()
 
-  private def freshCached(): Option[String] =
-    tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
+  private def freshCached(apiKey: String): Option[String] =
+    tokenCache
+      .get()
+      .filter(token => token.apiKey == apiKey && nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS)
+      .map(_.value)
+
+  /**
+   * The API key to exchange: asked of the config's `ApiKeyProvider` on every request when it has one (a section's
+   * `apiKeyFile`), so a rotated key is exchanged for a new IAM token without rebuilding the client (#2477);
+   * otherwise `apiKey`. A provider that throws fails the request with an `AuthenticationError`.
+   */
+  private def currentApiKey(): Result[String] =
+    config.apiKeyProvider.fold[Result[String]](Right(config.apiKey.reveal))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(_.asKey)
+    )
 
   /**
    * The cached IAM token, or a fresh one when none is cached or it expires within the buffer.
@@ -186,22 +203,24 @@ class WatsonXClient(
    * gets `Left(CancelledError)` with its interrupt flag set again, never a thrown `InterruptedException`.
    */
   private[provider] def bearerToken(): Result[String] =
-    freshCached() match {
-      case Some(token) => Right(token)
-      case None =>
-        CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
-          case Left(interrupted) =>
-            Thread.currentThread().interrupt()
-            Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
-          case Right(()) =>
-            Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
-              freshCached() match {
-                case Some(token) => Right(token)
-                case None        => fetchToken()
+    currentApiKey().flatMap(apiKey =>
+      freshCached(apiKey) match {
+        case Some(token) => Right(token)
+        case None =>
+          CancelledError.catchInterrupt(tokenLock.lockInterruptibly()) match {
+            case Left(interrupted) =>
+              Thread.currentThread().interrupt()
+              Left(CancelledError(s"$providerName.iam-token", Some(interrupted)))
+            case Right(()) =>
+              Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+                freshCached(apiKey) match {
+                  case Some(token) => Right(token)
+                  case None        => fetchToken(apiKey)
+                }
               }
-            }
-        }
-    }
+          }
+      }
+    )
 
   /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
   private def invalidate(token: String): Unit =
@@ -211,12 +230,12 @@ class WatsonXClient(
   private def noteStatus(status: Int, token: String): Unit =
     if (status == 401) invalidate(token)
 
-  private def fetchToken(): Result[String] = {
+  private def fetchToken(apiKey: String): Result[String] = {
     val body =
-      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(config.apiKey.reveal, "UTF-8")}"
+      s"grant_type=urn%3Aibm%3Aparams%3Aoauth%3Agrant-type%3Aapikey&apikey=${URLEncoder.encode(apiKey, "UTF-8")}"
     val headers = Map("Content-Type" -> "application/x-www-form-urlencoded", "Accept" -> "application/json")
     http.post(config.iamUrl, headers, body, IAM_TIMEOUT).flatMap { response =>
-      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body)
+      if (response.statusCode >= 200 && response.statusCode < 300) parseToken(response.body, apiKey)
       else
         Left(
           AuthenticationError(
@@ -227,7 +246,7 @@ class WatsonXClient(
     }
   }
 
-  private def parseToken(body: String): Result[String] =
+  private def parseToken(body: String, apiKey: String): Result[String] =
     Try(ujson.read(body)).toResult.flatMap { json =>
       val fields = json.objOpt
       fields.flatMap(_.get("access_token")).flatMap(_.strOpt).filter(_.nonEmpty) match {
@@ -235,7 +254,7 @@ class WatsonXClient(
           val ttl =
             fields.flatMap(_.get("expires_in")).flatMap(_.numOpt).map(_.toLong).getOrElse(DEFAULT_TOKEN_TTL_SECONDS)
           iamTokens.rotate(token)
-          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl)))
+          tokenCache.set(Some(IamToken(token, nowSeconds() + ttl, apiKey)))
           Right(token)
         case None =>
           Left(AuthenticationError(providerName, "IAM response contained no access_token"))
@@ -500,9 +519,13 @@ class WatsonXClient(
     if (options.frequencyPenalty != 0.0) body("frequency_penalty") = options.frequencyPenalty
     options.responseFormat.foreach(format => body("response_format") = encodeResponseFormat(format))
     // see "Reasoning" in the class Scaladoc
-    options.reasoning.foreach { effort =>
-      if (takesReasoningEffort(config.model)) body("reasoning_effort") = reasoningEffortValue(config.model, effort)
-      else warnReasoningNotSent(config.model)
+    val off = options.thinking.contains(Thinking.Off)
+    if (off || options.reasoning.isDefined) {
+      if (!takesReasoningEffort(config.model)) warnReasoningNotSent(config.model)
+      else if (off) {
+        warnReasoningNotDisabled(config.model)
+        body("reasoning_effort") = "low"
+      } else options.reasoning.foreach(effort => body("reasoning_effort") = reasoningEffortValue(effort))
     }
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
@@ -595,7 +618,8 @@ class WatsonXClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override protected def releaseResources(): Unit = http.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object WatsonXClient {
@@ -689,19 +713,16 @@ object WatsonXClient {
 
   /**
    * A [[ReasoningEffort]] as the chat API's `reasoning_effort`, which takes `low`, `medium` and `high` (NODE
-   * types/vml_v1.ts:860-864). `None` has no counterpart, since the models that take the field always reason: it is
-   * sent as `low`, the least, and a warning naming `model` is logged once per process.
+   * types/vml_v1.ts:860-864): `Minimal` is sent as `low` and `XHigh` and `Max` as `high`, the nearest it takes.
+   * Turning reasoning off has no counterpart (see the class Scaladoc).
    */
-  private[provider] def reasoningEffortValue(model: String, effort: ReasoningEffort): String = effort match {
-    case ReasoningEffort.None =>
-      warnReasoningNotDisabled(model)
-      "low"
-    case ReasoningEffort.Low    => "low"
-    case ReasoningEffort.Medium => "medium"
-    case ReasoningEffort.High   => "high"
+  private[provider] def reasoningEffortValue(effort: ReasoningEffort): String = effort match {
+    case ReasoningEffort.Minimal | ReasoningEffort.Low                      => "low"
+    case ReasoningEffort.Medium                                             => "medium"
+    case ReasoningEffort.High | ReasoningEffort.XHigh | ReasoningEffort.Max => "high"
   }
 
-  /** Whether the `ReasoningEffort.None` warning has been logged in this process. */
+  /** Whether the `Thinking.Off` warning has been logged in this process. */
   private[provider] val warnedReasoningNotDisabled = new AtomicBoolean(false)
 
   /** Whether the warning that a model is not sent `reasoning_effort` has been logged in this process. */
@@ -710,7 +731,7 @@ object WatsonXClient {
   private def warnReasoningNotDisabled(model: String): Unit =
     if (warnedReasoningNotDisabled.compareAndSet(false, true))
       logger.warn(
-        s"watsonx model $model cannot turn reasoning off: ReasoningEffort.None is sent as reasoning_effort=low, " +
+        s"watsonx model $model cannot turn reasoning off: Thinking.Off is sent as reasoning_effort=low, " +
           "and the model still reasons. Logged once per process."
       )
 
@@ -718,7 +739,7 @@ object WatsonXClient {
     if (warnedReasoningNotSent.compareAndSet(false, true))
       logger.warn(
         s"watsonx model $model is not known to take reasoning_effort (only openai/gpt-oss-* models are sent it): " +
-          "CompletionOptions.reasoning is not sent. Logged once per process."
+          "CompletionOptions.reasoning and Thinking.Off are not sent. Logged once per process."
       )
 
   /**
@@ -815,7 +836,8 @@ object WatsonXClient {
   def apply(
     config: WatsonXConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[WatsonXClient] =
-    Try(new WatsonXClient(config, metrics, exchangeLogging)).toResult
+    Try(new WatsonXClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

@@ -60,9 +60,9 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("""x=1&user=\\'p&ss=QZXJ\\' n=1""") shouldBe """x=1&user=\\'p&ss=QZXJ\\' n=1"""
   }
 
-  it should "redact as before where an empty query value ends a JSON string (#1707)" in {
-    // The `,` after such a string is still replaced, as before: what keeps the document valid there is #1800.
-    Redaction.redact("""{"q":"a=1&token=","n":"x"}""") shouldBe s"""{"q":"a=1&token="$R"n":"x"}"""
+  it should "leave an empty query value that ends a JSON string as it is (#1707, #1800)" in {
+    // The quote after `token=` closes the string, so the value is empty and the `,` after it is kept (#1800).
+    Redaction.redact("""{"q":"a=1&token=","n":"x"}""") shouldBe """{"q":"a=1&token=","n":"x"}"""
     // a credential that is itself punctuation, or a JSON document of nothing but punctuation, is redacted
     Seq(
       """{"password":"[]"}"""               -> s"""{"password":"$R"}""",
@@ -82,10 +82,9 @@ class RedactionEscapedQuotedValueSpec extends AnyFlatSpec with Matchers {
       s"""{"q":"https://x.test/cb?a=1&api_key=","note":"${BS}uZZZZ"}""",
       s"""{"messages":[{"content":"[\\"$BS${BS}uZZZZ\\"]"}],"q":"a=1&token=","n":1}"""
     ).foreach { input =>
-      // as on main: the value after `token=` is read as running to the next string's opening quote
-      val expected = input.replaceFirst("=\",\"", s"=\"$R\"")
-      Redaction.redact(input) shouldBe expected
-      Redaction.safeBody(input) shouldBe expected
+      // the quote after `token=` closes the string, so the value is empty and nothing changes (#1800)
+      Redaction.redact(input) shouldBe input
+      Redaction.safeBody(input) shouldBe input
     }
   }
 

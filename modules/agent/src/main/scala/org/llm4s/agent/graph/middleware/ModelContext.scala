@@ -15,6 +15,7 @@ import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
   Message,
+  RequestAdjustment,
   ResponseFormat,
   StreamedChunk,
   ThinkingBlock,
@@ -57,12 +58,13 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
 
   /** Records usage that arrived without a client call, as one request to `model`. */
   def recordUsage(model: String, usage: TokenUsage, estimatedCost: Option[Double] = None): Unit =
-    record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage, provider = None)
+    record(model, Some(usage), estimatedCost, attempt = 0, toolCalls = 0, usage, provider = None, adjustments = Nil)
 
   /**
    * Records a completed model call of `request`, sent with `definitions` (its tool and response-format schemas, as
    * [[ModelContext.definitions]] renders them): attempt `attempt` of the agent's model step, or 0 for a hook's own
    * call. A completion without usage is charged an estimate (#2084). `provider` is the called provider's id, when known.
+   * The event carries the completion's adjustments (RFC 0008), so an agent caller sees what each call did not send.
    */
   private[agent] def recordCall(
     completion: Completion,
@@ -78,7 +80,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
       attempt,
       Option(completion.message).flatMap(m => Option(m.toolCalls)).fold(0)(_.size),
       completion.usage.getOrElse(ModelContext.estimated(completion, request, definitions)),
-      provider
+      provider,
+      ModelContext.nonNull(completion.adjustments).toList
     )
 
   /**
@@ -107,7 +110,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
     attempt: Int,
     toolCalls: Int,
     charged: TokenUsage,
-    provider: Option[ProviderId]
+    provider: Option[ProviderId],
+    adjustments: List[RequestAdjustment]
   ): Unit =
     run.usage.add(model, charged, cost)
     // an attempt of the agent's model step, not a hook's own call: what the turn's step count counts
@@ -121,7 +125,8 @@ final class ModelContext private[agent] (val run: RunContext, val state: ThreadS
         toolCalls,
         usage.map(events.CallUsage.fromTokenUsage),
         cost,
-        provider
+        provider,
+        adjustments
       )
     )
 

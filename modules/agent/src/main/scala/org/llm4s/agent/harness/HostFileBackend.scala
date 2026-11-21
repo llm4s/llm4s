@@ -350,7 +350,7 @@ final class HostFileBackend private (
         digest.update(buffer)
         buffer.clear()
     }
-    digest.digest().map(b => f"${b & 0xff}%02x").mkString
+    org.llm4s.util.Hex.of(digest.digest())
 
   /**
    * Writes `bytes` to `target` atomically: a flushed temporary file beside it, moved over it. A file it

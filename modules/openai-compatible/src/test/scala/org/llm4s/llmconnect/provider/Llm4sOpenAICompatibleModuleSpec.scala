@@ -89,6 +89,10 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
       }
     }
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      expectations.foreach((descriptor, _, _) => assertUsesSuppliedHttpClient(descriptor, section(descriptor)))
+    }
+
     "load the generic provider entirely from a named section, as an application does" in {
       given ProviderRegistry = ProviderRegistry.default
       ProviderTestConfig
@@ -135,11 +139,11 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
     }
   }
 
-  "a client built by the openai-compatible and openrouter descriptors" should {
+  "a client built by each openai-compatible descriptor" should {
 
-    "send the key its ApiKeyProvider holds at each request (#2313)" in {
+    "send the key its ApiKeyProvider holds at each request (#2313, #2477)" in {
       given ModelRegistryService = registryService
-      Seq(OpenAICompatibleProvider, OpenRouterProvider).foreach { descriptor =>
+      expectations.map(_._1).foreach { descriptor =>
         withClue(s"${descriptor.id.asString}: ") {
           assertHonoursApiKeyProvider(sendJsonResponse(_, 200, openAICompletion("done"))) { (baseUrl, keys) =>
             descriptor

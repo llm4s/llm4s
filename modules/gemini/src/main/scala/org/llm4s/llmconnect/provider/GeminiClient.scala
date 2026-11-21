@@ -10,11 +10,12 @@ import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.auth.CachingAccessTokenProvider
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult, UnmappedOptions }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -79,6 +80,16 @@ class GeminiClient(
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /**
+   * The key for the next request: asked of the config's `ApiKeyProvider` each time when it has one (a section's
+   * `apiKeyFile`), so a rotated key is sent without rebuilding the client (#2477); otherwise `apiKey`. A provider
+   * that throws fails the request with an `AuthenticationError` rather than escaping it.
+   */
+  private def requestKey(): Result[String] =
+    config.apiKeyProvider.fold[Result[String]](Right(config.apiKey.reveal))(keys =>
+      CachingAccessTokenProvider.guarded(keys.current()).map(_.asKey)
+    )
+
   /** How long a non-streaming call may take: the section's `timeouts.request`, else GeminiClient.DefaultRequestTimeout. */
   protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
 
@@ -94,6 +105,10 @@ class GeminiClient(
 
   // the references Gemini takes: web URLs and this provider's uploaded files
   private val fileUri = GeminiParts.geminiFileUri(providerName, config.baseUrl)
+
+  // what the transformer dropped, and a `reasoning` this client does not send (its `thinkingConfig` is not
+  // mapped yet), goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   override def complete(
     conversation: Conversation,
@@ -114,15 +129,20 @@ class GeminiClient(
           .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
-      .flatMap { transformed =>
+      .flatMap(transformed => requestKey().map(transformed -> _))
+      .flatMap { (transformed, key) =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey.reveal}"
+        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=$key"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
+        // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+        if (logger.isDebugEnabled) logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
 
         val headers = Map("Content-Type" -> "application/json")
 
@@ -134,6 +154,7 @@ class GeminiClient(
               if (response.statusCode >= 200 && response.statusCode < 300)
                 parseCompletionResponse(response.body).map(c =>
                   c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
+                    .withAdjustments(adjustments)
                 )
               else handleErrorResponse(response.statusCode, response.body, response.headers)
             }.toEither.left
@@ -164,11 +185,15 @@ class GeminiClient(
           .check(providerName, transformed.messages, fileUri)
           .map(_ => transformed)
       )
-      .flatMap { transformed =>
+      .flatMap(transformed => requestKey().map(transformed -> _))
+      .flatMap { (transformed, key) =>
+        val adjustments =
+          transformed.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, transformed.options)
+        adjustmentLog.record(config.model, adjustments)
         val transformedConversation = conversation.withMessages(transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
-        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey.reveal}&alt=sse"
+        val url                     = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=$key&alt=sse"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
@@ -190,7 +215,9 @@ class GeminiClient(
             val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
             val citations   = scala.collection.mutable.ArrayBuffer.empty[Citation]      // grounding sources, in order
             var textLength = 0 // characters of answer text streamed so far: where a text signature sits
-            var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
+            // a chunk nested too deeply, or a filter stop: the stream fails with it, unread past it
+            var refused = Option.empty[LLMError]
+            var finish  = Option.empty[String] // the last finish reason a chunk stated
 
             val result =
               Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
@@ -206,19 +233,27 @@ class GeminiClient(
                       // (#1562); a chunk that is not JSON at all is skipped, as it always was
                       BoundedJson.read(jsonStr) match {
                         case Right(json) =>
-                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                            textLength += parsed.text.length
-                            signatures ++= parsed.signatures
-                            chunks.foreach { chunk =>
-                              accumulator.addChunk(chunk)
-                              onChunk(chunk)
-                            }
+                          GeminiBlocked.filtered(json, "Gemini", textLength) match {
+                            case Some(filtered) =>
+                              // a filter stop ends the stream with its reason, as the same reply fails `complete`;
+                              // the text already delivered stays delivered
+                              refused = Some(filtered)
+                            case None =>
+                              GeminiBlocked.finishReason(json).foreach(reason => finish = Some(reason))
+                              parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                                textLength += parsed.text.length
+                                signatures ++= parsed.signatures
+                                chunks.foreach { chunk =>
+                                  accumulator.addChunk(chunk)
+                                  onChunk(chunk)
+                                }
+                              }
+                              // grounding metadata usually arrives with the last chunk; collect it from any chunk
+                              Try(json("candidates").arr.headOption).toOption.flatten
+                                .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
+                              // token usage, thinking and cached tokens included, when this chunk reports it
+                              GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                           }
-                          // grounding metadata usually arrives with the last chunk; collect it from any chunk
-                          Try(json("candidates").arr.headOption).toOption.flatten
-                            .foreach(candidate => citations ++= GeminiGrounding.citations(candidate))
-                          // token usage, thinking and cached tokens included, when this chunk reports it
-                          GeminiUsage.fromResponse(json).foreach(accumulator.updateUsage)
                         case Left(tooDeep @ BoundedJson.TooDeep()) =>
                           logger.warn(
                             s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
@@ -244,8 +279,11 @@ class GeminiClient(
                       .withEstimatedCost(cost)
                       .withCitations(citations.distinct.toList)
                       .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
+                      .withAdjustments(adjustments)
                   }
                 )
+                // an abnormal finish with nothing produced fails, decided from the whole stream as `complete` does
+                .flatMap(c => GeminiBlocked.unanswered(finish, c, "Gemini").toLeft(c))
 
             recordingExchange(startedAt, requestText)(result)(
               successResponse = Some(rawStream.result()),
@@ -435,52 +473,58 @@ class GeminiClient(
    */
   private def parseCompletionResponse(responseText: String): Result[Completion] =
     BoundedJson.read(responseText).flatMap { json =>
-      Try {
-        val candidates = json("candidates").arr
-
-        if (candidates.isEmpty) {
-          Left(ValidationError("response", "No candidates in Gemini response"))
-        } else {
-          val candidate = candidates.head
-          val content   = candidate("content")
-          val parts     = content("parts").arr
-
-          // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
-          // thought summary if one was requested, and the thought signatures, split by part
-          val parsed = GeminiThoughtSignatures.parse(providerName, parts.toSeq, 0, () => UUID.randomUUID().toString)
-          val textContent = parsed.text
-          val toolCalls   = parsed.calls
-
-          val usageOpt = GeminiUsage.fromResponse(json)
-
-          // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
-          val thinking =
-            Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
-          val message = AssistantMessage(
-            contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
-            toolCalls = toolCalls,
-            thinking = thinking
-          )
-
-          // Estimate cost using CostEstimator
-          val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-
-          Right(
-            Completion(
-              id = UUID.randomUUID().toString,
-              content = textContent,
-              model = config.model,
-              toolCalls = toolCalls.toList,
-              created = Instant.now(),
-              message = message,
-              usage = usageOpt,
-              estimatedCost = cost,
-              citations = GeminiGrounding.citations(candidate)
-            )
-          )
-        }
-      }.toEither.left.map(e => e.toLLMError).flatten
+      GeminiBlocked
+        .filtered(json, "Gemini")
+        .toLeft(())
+        .flatMap(_ => parseCandidate(json))
+        .flatMap(c => GeminiBlocked.unanswered(GeminiBlocked.finishReason(json), c, "Gemini").toLeft(c))
     }
+
+  private def parseCandidate(json: ujson.Value): Result[Completion] =
+    Try {
+      val candidates = json("candidates").arr
+
+      if (candidates.isEmpty) {
+        Left(ValidationError("response", "No candidates in Gemini response"))
+      } else {
+        val candidate = candidates.head
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none when the model wrote nothing
+
+        // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
+        // thought summary if one was requested, and the thought signatures, split by part
+        val parsed      = GeminiThoughtSignatures.parse(providerName, parts, 0, () => UUID.randomUUID().toString)
+        val textContent = parsed.text
+        val toolCalls   = parsed.calls
+
+        val usageOpt = GeminiUsage.fromResponse(json)
+
+        // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
+        val thinking =
+          Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
+        val message = AssistantMessage(
+          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+          toolCalls = toolCalls,
+          thinking = thinking
+        )
+
+        // Estimate cost using CostEstimator
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
+        Right(
+          Completion(
+            id = UUID.randomUUID().toString,
+            content = textContent,
+            model = config.model,
+            toolCalls = toolCalls.toList,
+            created = Instant.now(),
+            message = message,
+            usage = usageOpt,
+            estimatedCost = cost,
+            citations = GeminiGrounding.citations(candidate)
+          )
+        )
+      }
+    }.toEither.left.map(e => e.toLLMError).flatten
 
   /**
    * Parse a streaming chunk from Gemini into the parts it held and the [[org.llm4s.llmconnect.model.StreamedChunk StreamedChunk]]s they make: one per
@@ -496,12 +540,11 @@ class GeminiClient(
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
         val candidate = candidates.head
-        val content   = candidate("content")
-        val parts     = content("parts").arr
+        val parts     = GeminiThoughtSignatures.partsOf(candidate) // none: the chunk still ends the stream
 
         // Extract text delta, function calls and thought signatures
         val parsed =
-          GeminiThoughtSignatures.parse(providerName, parts.toSeq, textOffset, () => UUID.randomUUID().toString)
+          GeminiThoughtSignatures.parse(providerName, parts, textOffset, () => UUID.randomUUID().toString)
 
         // Extract finish reason
         val finishReason = Try(candidate("finishReason").str).toOption
@@ -574,11 +617,8 @@ class GeminiClient(
       .tapRight(c => recordExchange(startedAt, requestBody, successResponse, Right(c)))
       .tapLeft(e => recordExchange(startedAt, requestBody, failureResponse, Left(e)))
 
-  override protected def releaseResources(): Unit =
-    (http: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(httpClient, http)
 }
 
 object GeminiClient {
@@ -601,7 +641,8 @@ object GeminiClient {
   def apply(
     config: GeminiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
-    exchangeLogging: ProviderExchangeLogging
+    exchangeLogging: ProviderExchangeLogging,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[GeminiClient] =
-    Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
+    Try(new GeminiClient(config, metrics, exchangeLogging, httpClient)).toResult
 }

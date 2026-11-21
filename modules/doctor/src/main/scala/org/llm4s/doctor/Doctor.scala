@@ -157,7 +157,10 @@ object Doctor {
    * another shape (a gateway token, a test key) would otherwise reach the output.
    */
   private def knownSecrets(source: ConfigSource): Set[String] = {
-    val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption).map(_.reveal)
+    // A key file's content is not read here: a key read from one is an ApiKey, registered for redaction when read.
+    val shared = SharedCredentials.read(source).entries.values.toList.flatMap(_.toOption).collect {
+      case SharedCredentials.Entry.Key(key) => key.reveal
+    }
     (shared ::: sectionSecrets(source)).map(_.trim).filter(_.length >= MinSecretLength).toSet
   }
 

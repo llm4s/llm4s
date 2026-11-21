@@ -615,7 +615,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
   // VertexAIClient — lifecycle: releaseResources
   // ============================================================
 
-  "VertexAIClient" should "call close() on httpClient when it is AutoCloseable" in {
+  "VertexAIClient" should "leave a supplied httpClient open when it is closed: the caller owns it (#2341)" in {
     val trackingHttp = new TrackingAutoCloseableHttpClient()
     val client = new VertexAIClient(
       testConfig,
@@ -625,7 +625,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     )
     client.close()
 
-    trackingHttp.closeCalled shouldBe true
+    trackingHttp.closeCalled shouldBe false
   }
 
   // ============================================================

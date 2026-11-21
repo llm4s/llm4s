@@ -1,11 +1,18 @@
 /*
  * llm4s-confine: runs one workspace command under the runner's sandbox (design 4.39, #1983).
  *
- *   llm4s-confine --status FILE [--rx P|--ro P|--rw P|--rwx P|--wfile P]... [--no-net] -- /abs/program args...
+ *   llm4s-confine --status FILE [--max-abi N] [--rx P|--ro P|--rw P|--rwx P|--wfile P]... [--no-net] -- /abs/program args...
+ *   llm4s-confine --report [--max-abi N]
  *
  * Installs a Landlock ruleset (ABI v3 or later) granting only the listed paths, sets no_new_privs, installs a seccomp
  * filter refusing non-Unix sockets when --no-net is given, then execs the program in its own place: same pid, session
  * and process group, so the runner's kill still finds it. Every process the program starts inherits all of it.
+ *
+ * From ABI v6 (kernel 6.12) the ruleset also scopes abstract Unix sockets and signals (#2009): the program can connect
+ * only to abstract sockets made inside its own domain, and signal only processes inside it, so not the runner. Below
+ * v6 it handles filesystem rights only, as before. --report prints the protections this kernel gets, one line, and
+ * exits 0; --max-abi treats the kernel's ABI as at most N, for tests of an older kernel's behaviour (it can only
+ * weaken this helper's own ruleset, never one already applied).
  *
  * Threat model: model-issued commands inside the workspace container; the container is the outer boundary. When it
  * cannot confine, it writes why to FILE and stderr and exits 125 without running the program; the runner reports
@@ -14,6 +21,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/landlock.h>
@@ -65,6 +73,32 @@ static void unavailable(const char *fmt, ...) {
   (LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE | LANDLOCK_ACCESS_FS_EXECUTE |                      \
    LANDLOCK_ACCESS_FS_TRUNCATE)
 #define FS_HANDLED (FS_READ | FS_EXEC | FS_WRITE | FS_DEVICES)
+
+/* ABI v6 scopes (#2009). Noble's linux-libc-dev (6.8) has neither the constants nor the attribute's `scoped` field, so
+ * both are defined here, as the kernel's uapi has them. */
+#ifndef LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET
+#define LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET (1ULL << 0)
+#endif
+#ifndef LANDLOCK_SCOPE_SIGNAL
+#define LANDLOCK_SCOPE_SIGNAL (1ULL << 1)
+#endif
+#define SCOPES_ABI 6
+
+struct ruleset_attr_v6 {
+  __u64 handled_access_fs;
+  __u64 handled_access_net;
+  __u64 scoped;
+};
+
+/* The scopes a ruleset gets under Landlock ABI `abi`: both from v6, none below. */
+static __u64 scopes_for(int abi) {
+  return abi >= SCOPES_ABI ? (LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET | LANDLOCK_SCOPE_SIGNAL) : 0;
+}
+
+/* The attribute's size for `abi`: below v6 the size before `scoped`, as the ruleset was made before #2009. */
+static size_t ruleset_attr_size(int abi) {
+  return abi >= SCOPES_ABI ? sizeof(struct ruleset_attr_v6) : offsetof(struct ruleset_attr_v6, scoped);
+}
 
 static void add_rule(int ruleset, const char *path, __u64 access) {
   int fd = open(path, O_PATH | O_CLOEXEC | O_NOFOLLOW);
@@ -120,21 +154,51 @@ static void deny_network(void) {
 #endif
 }
 
+/* `--max-abi N` at argv[i], if there: N, and i moved past it; else INT_MAX. */
+static int max_abi(int argc, char **argv, int *i) {
+  if (*i >= argc || strcmp(argv[*i], "--max-abi") != 0) return INT_MAX;
+  if (*i + 1 >= argc) unavailable("--max-abi needs a number");
+  char *end;
+  long n = strtol(argv[*i + 1], &end, 10);
+  if (*argv[*i + 1] == '\0' || *end != '\0' || n < 1 || n > INT_MAX) unavailable("bad --max-abi %s", argv[*i + 1]);
+  *i += 2;
+  return (int)n;
+}
+
+/* The ABI this run uses: the kernel's, capped at `cap`; refused below v3. */
+static int landlock_abi(int cap) {
+  int abi = (int)syscall(SYS_landlock_create_ruleset, NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+  if (abi < 0) unavailable("Landlock is not available in this kernel: %s", strerror(errno));
+  if (abi > cap) abi = cap;
+  if (abi < 3) unavailable("Landlock ABI %d is below the v3 this sandbox needs (kernel 6.2)", abi);
+  return abi;
+}
+
+/* One line naming what a command gets here; the runner logs it at startup. */
+static int report(int abi) {
+  printf("landlock-abi=%d scopes=%s\n", abi, scopes_for(abi) == 0 ? "none" : "abstract-unix-socket,signal");
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int i = 1, no_net = 0;
+  if (argc > 1 && strcmp(argv[1], "--report") == 0) {
+    i = 2;
+    int cap = max_abi(argc, argv, &i);
+    if (i != argc) unavailable("usage: llm4s-confine --report [--max-abi N]");
+    return report(landlock_abi(cap));
+  }
   if (argc > 2 && strcmp(argv[1], "--status") == 0) {
     status_path = argv[2];
     i = 3;
   } else {
-    unavailable("usage: llm4s-confine --status FILE [grants] [--no-net] -- program args");
+    unavailable("usage: llm4s-confine --status FILE [--max-abi N] [grants] [--no-net] -- program args");
   }
 
-  int abi = (int)syscall(SYS_landlock_create_ruleset, NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
-  if (abi < 0) unavailable("Landlock is not available in this kernel: %s", strerror(errno));
-  if (abi < 3) unavailable("Landlock ABI %d is below the v3 this sandbox needs (kernel 6.2)", abi);
+  int abi = landlock_abi(max_abi(argc, argv, &i));
 
-  struct landlock_ruleset_attr ra = {.handled_access_fs = FS_HANDLED};
-  int ruleset = (int)syscall(SYS_landlock_create_ruleset, &ra, sizeof ra, 0);
+  struct ruleset_attr_v6 ra = {.handled_access_fs = FS_HANDLED, .scoped = scopes_for(abi)};
+  int ruleset = (int)syscall(SYS_landlock_create_ruleset, &ra, ruleset_attr_size(abi), 0);
   if (ruleset < 0) unavailable("cannot create the Landlock ruleset: %s", strerror(errno));
 
   for (; i < argc && strcmp(argv[i], "--") != 0; i++) {

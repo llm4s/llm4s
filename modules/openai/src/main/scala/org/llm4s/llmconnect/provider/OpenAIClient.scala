@@ -53,7 +53,7 @@ import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.media.{ MediaSource, MediaType }
-import org.llm4s.model.{ ModelRegistryService, TransformationResult }
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService, TransformationResult }
 import org.llm4s.security.{ KnownSecrets, TokenGenerations }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -102,8 +102,9 @@ private[provider] trait OpenAIClientTransport {
  * resolve gets it whenever it is asked for. Reasoning models get `max_completion_tokens` rather
  * than `max_tokens`, and no `temperature`, `top_p` or penalties. The reasoning tokens a
  * response reports (`completion_tokens_details.reasoning_tokens`) become
- * `TokenUsage.thinkingTokens`, streamed or not; they are part of `completionTokens`, not added
- * to it. See [[OpenAIReasoning]].
+ * `TokenUsage.thinkingTokens`, streamed or not. OpenAI counts them inside `completion_tokens`;
+ * they are taken out of `TokenUsage.completionTokens`, which never includes thinking, and
+ * `totalTokens` is kept as reported. See [[OpenAIReasoning]].
  *
  * == Streamed usage ==
  *
@@ -142,6 +143,9 @@ class OpenAIClient private[provider] (
   protected def clientDescription: String = s"$displayName client for model $model"
   protected def providerName: String      = provider.asString
   protected def modelName: String         = model
+
+  // what the transformer dropped goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
   /**
    * Creates an OpenAI client for direct OpenAI API access (or Requesty, or any other
@@ -197,6 +201,7 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.transformer(registryService),
         dropUnsupported = true
       )
+      adjustments             = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
       transformedConversation = conversation.withMessages(transformed.messages)
       params <- buildParams(
         transformedConversation,
@@ -204,9 +209,10 @@ class OpenAIClient private[provider] (
         OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
+      _    = adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
       body = serializeParams(params)
       response <- call("completion")(transport.createChatCompletion(params))
-      completion = convertFromOpenAIFormat(response)
+      completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
       _ = recordExchange(
         startedAt,
         Some(body),
@@ -236,6 +242,7 @@ class OpenAIClient private[provider] (
         dropUnsupported = true
       )
       .flatMap { transformed =>
+        val adjustments = withUnsentSampling(options, transformed) ++ effortPlan(transformed.options).adjustments
         val transformedConversation = conversation.withMessages(transformed.messages)
         // A faked stream is an ordinary completion call, which must not carry `stream_options`.
         buildParams(
@@ -243,13 +250,17 @@ class OpenAIClient private[provider] (
           transformed.options,
           OpenAIModelRules.requiresMaxCompletionTokens(model),
           streaming = !transformed.requiresFakeStreaming
-        ).map(params => (transformed, params))
+        ).map { params =>
+          adjustmentLog.record(model, adjustments) // once the request is built, so a failed build spends no warning
+          (transformed, params, adjustments)
+        }
       }
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
-      .flatMap { (transformed, params) =>
+      .flatMap { (transformed, params, adjustments) =>
         val requestBody = serializeParams(params)
-        if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
-        else executeNativeStreaming(startedAt, requestBody, params, onChunk)
+        if (transformed.requiresFakeStreaming)
+          executeFakeStreaming(startedAt, requestBody, params, adjustments, onChunk)
+        else executeNativeStreaming(startedAt, requestBody, params, adjustments, onChunk)
       }
   }
 
@@ -280,11 +291,12 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
+    adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     call("fake streaming")(transport.createChatCompletion(params))
       .map { response =>
-        val completion = convertFromOpenAIFormat(response)
+        val completion = convertFromOpenAIFormat(response).withAdjustments(adjustments)
         emitCompletionAsChunks(completion, onChunk)
         recordExchange(startedAt, Some(requestBody), Some(serialize(response)), Right(completion))
         completion
@@ -299,6 +311,7 @@ class OpenAIClient private[provider] (
     startedAt: Instant,
     requestBody: String,
     params: ChatCompletionCreateParams,
+    adjustments: List[RequestAdjustment],
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
@@ -322,7 +335,10 @@ class OpenAIClient private[provider] (
         // breakdown and its total (`StreamingAccumulator.updateUsage`).
         accumulator.toCompletion.map { c =>
           val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-          c.withModel(model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
+          c.withModel(model)
+            .withToolCalls(c.message.toolCalls.toList)
+            .withEstimatedCost(cost)
+            .withAdjustments(adjustments)
         }
       )
     }(
@@ -455,22 +471,67 @@ class OpenAIClient private[provider] (
    */
   private lazy val reasoningSupport: OpenAIReasoning.Support = OpenAIReasoning.support(model, registryService)
 
+  /** This client's model's registry capabilities, decided once for the same reason as [[reasoningSupport]]. */
+  private lazy val reasoningCapabilities = OpenAIReasoning.capabilities(model, registryService)
+
   /**
-   * The `reasoning_effort` to send for `options`, if any.
-   *
-   * Sent for a reasoning model when a level other than `ReasoningEffort.None` is asked for, and
-   * never for a model known not to reason, which OpenAI would reject. On Azure, `model` is a
-   * deployment name, which may say nothing about the model behind it: a deployment the registry
-   * cannot resolve gets the parameter whenever reasoning is asked for, since asking is the only
-   * sign the caller has a reasoning model deployed.
+   * Whether `reasoning_effort` may be sent at all: never to a model known not to reason, which OpenAI would reject.
+   * On Azure, `model` is a deployment name, which may say nothing about the model behind it: a deployment the
+   * registry cannot resolve gets the parameter whenever it is asked for, since asking is the only sign the caller
+   * has a reasoning model deployed.
    */
+  private def sendsEffort: Boolean = reasoningSupport match {
+    case OpenAIReasoning.Support.Reasoning    => true
+    case OpenAIReasoning.Support.NonReasoning => false
+    case OpenAIReasoning.Support.Unknown      => config.isInstanceOf[AzureConfig]
+  }
+
+  /** The `reasoning_effort` for `options` and what was not sent as asked (see [[OpenAIReasoning.plan]]). */
+  private def effortPlan(options: CompletionOptions): OpenAIReasoning.EffortPlan =
+    OpenAIReasoning.plan(model, options, reasoningCapabilities, sendsEffort)
+
+  /** The `reasoning_effort` to send for `options`, if any. */
   private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =
-    options.reasoning.flatMap(OpenAIReasoning.toSdk).filter { _ =>
-      reasoningSupport match {
-        case OpenAIReasoning.Support.Reasoning    => true
-        case OpenAIReasoning.Support.NonReasoning => false
-        case OpenAIReasoning.Support.Unknown      => config.isInstanceOf[AzureConfig]
-      }
+    effortPlan(options).effort
+
+  /** Whether the request for `options` goes to a reasoning model: one the registry flags, or one sent an effort. */
+  private def isReasoningRequest(options: CompletionOptions): Boolean =
+    reasoningSupport == OpenAIReasoning.Support.Reasoning || reasoningEffortFor(options).isDefined
+
+  /** Whether the request for `options` leaves out `temperature`, `top_p` and the penalties (see [[buildParams]]). */
+  private def omitsSampling(options: CompletionOptions): Boolean =
+    isReasoningRequest(options) && OpenAIReasoning.restrictsSampling(model)
+
+  /**
+   * `transformed`'s adjustments with the sampling options a reasoning-model request leaves out
+   * (`temperature`, `top_p`, the penalties) reported as `Dropped` (RFC 0008), each when the caller set it
+   * away from its `CompletionOptions` default. `requested` is what the caller asked for, before the
+   * transformer moved anything, such as the o-series temperature it adjusts to 1.0.
+   *
+   * A default is not reported, so a default call reports nothing and logs no warning: a caller that treats
+   * any `Dropped` as a failure can still use these models without setting anything. The cost is that an
+   * explicit value equal to the default goes unreported too, since `CompletionOptions` cannot tell the two apart.
+   *
+   * Any report the transformer made for one of these options is replaced, because in the end nothing is sent
+   * for it.
+   */
+  private def withUnsentSampling(
+    requested: CompletionOptions,
+    transformed: TransformationResult
+  ): List[RequestAdjustment] =
+    if (!omitsSampling(transformed.options)) transformed.adjustments
+    else {
+      val reason   = s"$model is a reasoning model, which takes no sampling parameters"
+      val defaults = CompletionOptions()
+      val sampling = List(
+        RequestOption.Temperature      -> (requested.temperature != defaults.temperature),
+        RequestOption.TopP             -> (requested.topP != defaults.topP),
+        RequestOption.PresencePenalty  -> (requested.presencePenalty != defaults.presencePenalty),
+        RequestOption.FrequencyPenalty -> (requested.frequencyPenalty != defaults.frequencyPenalty)
+      )
+      val unsent = sampling.collect { case (option, true) => option }
+      transformed.adjustments.filterNot(a => sampling.exists(_._1 == a.option)) ++
+        unsent.map(RequestAdjustment.Dropped(_, reason))
     }
 
   /**
@@ -505,14 +566,15 @@ class OpenAIClient private[provider] (
   ): Result[ChatCompletionCreateParams] =
     Try {
       val effort         = reasoningEffortFor(options)
-      val reasoningModel = reasoningSupport == OpenAIReasoning.Support.Reasoning || effort.isDefined
+      val reasoningModel = isReasoningRequest(options)
 
       val builder = ChatCompletionCreateParams
         .builder()
         .model(model)
         .messages(messages.asJava)
 
-      if (reasoningModel && OpenAIReasoning.restrictsSampling(model))
+      // reported on the Completion by withUnsentSampling
+      if (omitsSampling(options))
         logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
       else
         builder
@@ -719,11 +781,13 @@ class OpenAIClient private[provider] (
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
     val completionTokens = known(u._completionTokens()).fold(0)(_.intValue)
+    val reasoningTokens  = known(u._completionTokensDetails()).flatMap(d => known(d._reasoningTokens())).map(_.intValue)
     TokenUsage(
       promptTokens = promptTokens,
-      completionTokens = completionTokens,
+      // OpenAI counts reasoning inside completion_tokens; TokenUsage.completionTokens never includes thinkingTokens
+      completionTokens = math.max(0, completionTokens - reasoningTokens.fold(0)(math.max(0, _))),
       totalTokens = known(u._totalTokens()).fold(promptTokens + completionTokens)(_.intValue),
-      thinkingTokens = known(u._completionTokensDetails()).flatMap(d => known(d._reasoningTokens())).map(_.intValue),
+      thinkingTokens = reasoningTokens,
       cachedTokens = known(u._promptTokensDetails()).flatMap(d => known(d._cachedTokens())).map(_.intValue)
     )
   }
@@ -1186,7 +1250,8 @@ private[provider] object OpenAIClientTransport {
   }
 
   /**
-   * Azure OpenAI: an `api-key` header - or, with `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
+   * Azure OpenAI: an `api-key` header - its key asked of `apiKeyProvider` per request when that is set - or, with
+   * `tokenProvider` set, a Microsoft Entra ID bearer token - and requests to
    * `<endpoint>/openai/deployments/<model>/chat/completions?api-version=<apiVersion>`,
    * where `model` is the deployment name - the URL the Azure SDK built.
    *
@@ -1209,15 +1274,65 @@ private[provider] object OpenAIClientTransport {
     // The bearer goes through the same OkHttp client as the key would: the section's proxy and TLS apply to both.
     def transport(): OpenAIClientTransport =
       sdk(withNetwork(builder, config.network, config.endpoint).build(), config.timeouts)
-    config.tokenProvider match {
-      case None =>
+    (config.tokenProvider, config.apiKeyProvider) match {
+      case (None, None) =>
         builder.credential(AzureApiKeyCredential.create(config.apiKey.reveal))
         transport()
-      case Some(tokens) =>
+      case (None, Some(keys)) =>
+        val key = new RotatingAzureKey(keys)
+        builder.credential(key.credential)
+        key.refreshing(transport())
+      case (Some(tokens), _) =>
         val bearer = new EntraIdBearer(tokens)
         builder.credential(BearerTokenCredential.create(bearer))
         bearer.invalidatingOnRejection(transport())
     }
+  }
+
+  /**
+   * Azure's `api-key` header from `keys`, asked before each request (#2477), so a rotated key is sent without
+   * rebuilding the client. The SDK reads the header from an [[AzureApiKeyCredential]] when it prepares each request,
+   * and takes no supplier for it, so the credential is updated - through the SDK's own `update` - before each call.
+   * Updates are serialised and made only when the key differs, so a slower call never puts back a key the provider
+   * has since replaced. A failure to get the key rides through the SDK in an [[IdentityTokenException]], so it
+   * reaches the caller as the `LLMError` it was; a provider that throws fails the request with an
+   * `AuthenticationError` naming the exception's class.
+   */
+  final private[provider] class RotatingAzureKey(keys: ApiKeyProvider) {
+    // A non-blank placeholder (the SDK refuses a blank key); never sent, as each call sets the current key first.
+    private val azureKey = AzureApiKeyCredential.create("llm4s-api-key-provider").asInstanceOf[AzureApiKeyCredential]
+
+    /** The credential to give the SDK builder. */
+    def credential: com.openai.credential.Credential = azureKey
+
+    // Not `synchronized`: `keys` may fetch from a secret store, and a caller waiting behind that fetch must stay
+    // interruptible, with no virtual thread's carrier pinned. An interrupt reaches the caller as a `CancelledError`.
+    private val lock = new java.util.concurrent.locks.ReentrantLock()
+
+    private def refresh(): Unit = {
+      lock.lockInterruptibly()
+      Using.resource((() => lock.unlock()): AutoCloseable) { _ =>
+        val key = CachingAccessTokenProvider
+          .guarded(keys.current())
+          .fold(error => throw new IdentityTokenException(error), _.asKey)
+        if (azureKey.apiKey() != key) azureKey.update(key): Unit
+      }
+    }
+
+    def refreshing(underlying: OpenAIClientTransport): OpenAIClientTransport =
+      new OpenAIClientTransport {
+        override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion = {
+          refresh()
+          underlying.createChatCompletion(params)
+        }
+        override def createChatCompletionStream(
+          params: ChatCompletionCreateParams
+        ): StreamResponse[ChatCompletionChunk] = {
+          refresh()
+          underlying.createChatCompletionStream(params)
+        }
+        override def close(): Unit = underlying.close()
+      }
   }
 
   /**

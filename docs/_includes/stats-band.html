@@ -1,5 +1,6 @@
 {%- comment -%}
-  The project's public numbers, from _data/stats.yml, plus the number of talks and events in _data/events.yml.
+  The project's public numbers, from _data/stats.yml, the GitHub numbers then the talks and Dev Hours
+  (refreshed at build time by scripts/update-site-stats.sh).
 {%- endcomment -%}
 <section class="lp-stats" aria-labelledby="stats-heading">
   <div class="lp-wrap">
@@ -8,7 +9,9 @@
       {%- for s in site.data.stats.github %}
       <li><a href="{{ s.url }}"><strong>{{ s.value }}</strong><span>{{ s.label }}</span></a></li>
       {%- endfor %}
-      <li><a href="{{ '/events/' | relative_url }}"><strong>{{ site.data.events | size }}</strong><span>Talks and events</span></a></li>
+      {%- for s in site.data.stats.community %}
+      <li><a href="{{ s.url | relative_url }}"><strong>{{ s.value }}</strong><span>{{ s.label }}</span></a></li>
+      {%- endfor %}
     </ul>
     <p class="lp-stats__note">{{ site.data.stats.source_note }} <a href="{{ site.data.stats.lfx_insights }}">See LLM4S on LFX Insights</a>.</p>
   </div>

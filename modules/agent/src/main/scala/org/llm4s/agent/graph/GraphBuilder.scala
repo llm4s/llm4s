@@ -3,6 +3,7 @@ package org.llm4s.agent.graph
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.Try
 
@@ -257,12 +258,34 @@ private[graph] object TaskExecutor:
   /**
    * At most `limit` tasks at a time, in an Ox scope. Every task is forked, a lone one included: a
    * task run inline on the calling thread could catch the caller's interrupt and return normally,
-   * clearing the caller's flag, and the run would carry on as if never cancelled.
+   * clearing the caller's flag, and the run would carry on as if never cancelled. A lone task, the
+   * usual superstep, gets one virtual thread of its own instead of an Ox scope's two ([[alone]]).
    */
   def bounded(limit: Int): TaskExecutor = new TaskExecutor:
     def runAll[R](tasks: Vector[() => R]): Vector[R] =
       if tasks.isEmpty then Vector.empty
+      else if tasks.sizeIs == 1 then Vector(alone(tasks.head))
       else ox.parLimit(limit)(tasks).toVector
+
+  /**
+   * `task` on a virtual thread of its own, as Ox runs it: its exception is rethrown, and if the caller
+   * is interrupted while waiting the task is interrupted and joined before the `InterruptedException`
+   * reaches the caller, whatever the task returned.
+   */
+  private[graph] def alone[R](task: () => R): R =
+    val outcome = new java.util.concurrent.atomic.AtomicReference[Either[Throwable, R]](
+      Left(new IllegalStateException("task ended abnormally"))
+    )
+    val worker = Thread.ofVirtual().start(() => outcome.set(DefaultRunHandle.guarded(task())))
+    @tailrec def joined(interrupted: Boolean): Boolean =
+      DefaultRunHandle.guarded(worker.join()) match
+        case Right(_) => interrupted
+        case Left(_: InterruptedException) =>
+          worker.interrupt()
+          joined(interrupted = true)
+        case Left(other) => throw other
+    if joined(interrupted = false) then throw new InterruptedException()
+    outcome.get.fold(thrown => throw thrown, identity)
 
   val sequential: TaskExecutor = new TaskExecutor:
     def runAll[R](tasks: Vector[() => R]): Vector[R] = tasks.map(_())

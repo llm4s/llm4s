@@ -300,6 +300,14 @@ fresh
 printf 'jobs:\n  test:\n    steps:\n      - run: sbt test\n' > "$WORK/case/ci.yml"
 expect_fail "a workflow whose Windows job does not run testPlatform fails" "runs .sbt testPlatform. on Windows"
 
+fresh
+printf 'jobs:\n  test-windows:\n    runs-on: windows-latest\n    steps:\n      - run: sbt testPlatform\n' > "$WORK/case/ci.yml"
+expect_pass "a Windows job of its own that runs testPlatform passes"
+
+fresh
+printf 'jobs:\n  test-windows:\n    runs-on: ubuntu-latest\n    steps:\n      - run: sbt testPlatform\n' > "$WORK/case/ci.yml"
+expect_fail "testPlatform on a Linux runner only fails" "runs .sbt testPlatform. on Windows"
+
 echo
 echo "$PASSED passed, $FAILED failed"
 [ "$FAILED" -eq 0 ]

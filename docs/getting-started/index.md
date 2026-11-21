@@ -11,6 +11,12 @@ has_children: true
 
 Get up and running with LLM4S in minutes.
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/llm4s/llm4s?quickstart=1)
+Nothing to install: the [playground](playground) runs the samples in your browser against a small local model.
+
+No API key and nothing to install? **[First answer, no key, no server](local-jlama)** runs a small model inside your
+JVM with `llm4s-jlama`: one file, one command.
+
 This section will guide you through:
 
 1. **[Installation](installation)** - Set up LLM4S in your project
@@ -24,10 +30,13 @@ This section will guide you through:
 9. **[JBang Quick Start](jbang)** - A first LLM call from one Java file, with no build tool
 10. **[Mill Quick Start](mill)** - A `build.mill` project with a first call and a test that needs no API key
 11. **From Java, Spring Boot or Kotlin** - the [Java guide](/guide/java), the [Spring Boot starter](/guide/spring-boot)
-    and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`
-    {{ site.data.project.latest_release }} is not on Maven Central yet; that section says how to build it)
+    and [Kotlin coroutines](installation#for-kotlin-coroutines-and-flow) (`llm4s-kotlin-api`, on Maven Central from 0.6.0)
 12. **[First-Run Troubleshooting](troubleshooting)** - Symptoms, causes and fixes for the problems a first run most often hits
 13. **[Using LLM4S from Scala 2.13](scala-2-13)** - Call LLM4S from a Scala 2.13 project through the TASTy reader
+14. **[Playground (Codespaces)](playground)** - Try LLM4S in the browser: a GitHub Codespace with a local model, no install and no API key
+15. **[Try llm4s in the REPL](repl)** - `ask`, `extract` and `chat()` behind one import, in the Scala CLI REPL, a worksheet or a script
+16. **[First Answer, No Key, No Server](local-jlama)** - A small model run inside your JVM by Jlama: no API key, no model server
+17. **[Coming from Python?](../guide/for-python-developers)** - OpenAI SDK, LangChain, LlamaIndex and Pydantic code next to the same thing in Scala 3, one Scala concept at a time
 
 The current release is **{{ site.data.project.latest_release }}**, for Scala 3.7.x on JDK 21.
 
@@ -47,9 +56,8 @@ sbt run
 ```
 
 Check that the generated `build.sbt` lists a provider module (such as `llm4s-openai`) next to `llm4s-core`: since
-0.5.0 `llm4s-core` ships none. The template update for 0.5.x ([llm4s.g8#6](https://github.com/llm4s/llm4s.g8/pull/6))
-adds `llm4s-ollama` and `llm4s-openai` and defaults to a local Ollama section (choose OpenAI with
-`LLM4S_PROVIDER=openai-main`); an older template lists `llm4s-core` only, so add the provider yourself
+0.5.0 `llm4s-core` ships none. The template adds `llm4s-ollama` and `llm4s-openai` and defaults to a local Ollama
+section (choose OpenAI with `LLM4S_PROVIDER=openai-main`); add any other provider module you use
 ([Installation](installation#quick-start-with-the-starter-kit) shows how).
 
 llm4s reads providers from named sections in `application.conf`, not from variables of its own;
@@ -78,6 +86,9 @@ Before starting, you should have:
 
 - **Quick Start**: ~5 minutes (with starter kit)
 - **Full Tutorial**: ~30 minutes
+
+When you have made a first call, [Build a support assistant](../tutorials/support-assistant/) takes one application
+from a first call to typed answers, tools and an agent, a part at a time, with exercises a test suite checks.
 
 ## Need Help?
 

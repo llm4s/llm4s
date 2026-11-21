@@ -17,10 +17,9 @@ import org.scalatest.matchers.should.Matchers
  *    as `tool_use` / `tool_result` blocks, and thinking blocks sent back with their
  *    signatures.
  *
- *  - `clampBudgetTokens` — enforces the Anthropic API constraint that the
- *    extended-thinking budget must satisfy `1024 ≤ budget < maxTokens`.
+ * Budget fitting is part of the thinking plan, tested in [[AnthropicThinkingSpec]].
  *
- * Both methods are `private[provider]`, so tests live in the same package.
+ * The method is `private[provider]`, so tests live in the same package.
  * No real network calls are made; we only test pure request-construction logic.
  */
 class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
@@ -180,43 +179,5 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
     json should include("Hi!")
     json should include("How are you?")
     json should include("I am fine.")
-  }
-
-  // ---------------------------------------------------------------------------
-  // clampBudgetTokens — boundary conditions
-  // ---------------------------------------------------------------------------
-
-  "clampBudgetTokens" should "clamp a budget below the minimum (1024) up to 1024" in {
-    client.clampBudgetTokens(500, 2048) shouldBe 1024
-  }
-
-  it should "clamp a zero budget up to 1024" in {
-    client.clampBudgetTokens(0, 2048) shouldBe 1024
-  }
-
-  it should "clamp a budget that exceeds maxTokens - 1 down to maxTokens - 1" in {
-    client.clampBudgetTokens(3000, 2048) shouldBe 2047
-  }
-
-  it should "clamp a budget equal to maxTokens down to maxTokens - 1" in {
-    client.clampBudgetTokens(2048, 2048) shouldBe 2047
-  }
-
-  it should "pass through a budget that is within the valid range" in {
-    client.clampBudgetTokens(2000, 2048) shouldBe 2000
-  }
-
-  it should "accept a budget exactly at the lower bound (1024)" in {
-    client.clampBudgetTokens(1024, 2048) shouldBe 1024
-  }
-
-  it should "accept a budget exactly at the upper bound (maxTokens - 1)" in {
-    client.clampBudgetTokens(2047, 2048) shouldBe 2047
-  }
-
-  it should "work correctly with a large maxTokens value" in {
-    client.clampBudgetTokens(50000, 200000) shouldBe 50000
-    client.clampBudgetTokens(200000, 200000) shouldBe 199999
-    client.clampBudgetTokens(500, 200000) shouldBe 1024
   }
 }

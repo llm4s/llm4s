@@ -216,7 +216,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
         |"logprobs":null,"finish_reason":"stop"}],
         |"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}""".stripMargin
     withJson("/v1/chat/completions", body) { (base, seen) =>
-      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), None, s"$base/v1").flatMap(OpenAIClient(_)).value
+      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), s"$base/v1").flatMap(OpenAIClient(_)).value
       val result = client.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
       withClue(okHttpOrigin) {
         result.map(_.content) shouldBe Right("hi from fake openai")
@@ -233,7 +233,7 @@ class MixedOkHttpClasspathSpec extends AnyFlatSpec with Matchers with EitherValu
       "data: [DONE]"
     )
     withSse("/v1/chat/completions", events) { base =>
-      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), None, s"$base/v1").flatMap(OpenAIClient(_)).value
+      val client = OpenAIConfig.fromValues("gpt-4o-mini", Secret("k"), s"$base/v1").flatMap(OpenAIClient(_)).value
       val result = client.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
       withClue(okHttpOrigin)(result.map(_.content) shouldBe Right("hi stream"))
     }

@@ -113,6 +113,10 @@ class Llm4sWatsonXModuleSpec extends AnyWordSpec with Matchers with ProviderModu
 
   "a client built by the watsonx descriptor" should {
 
+    "send complete and streamComplete through a supplied HTTP client, and leave it open (#2341)" in {
+      assertUsesSuppliedHttpClient(WatsonXProvider, section("http://localhost:1"))
+    }
+
     "complete through the IAM exchange and the chat endpoint" in {
       val body =
         """{"id":"gen-1","choices":[{"index":0,"message":{"role":"assistant","content":"Hello there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}}"""

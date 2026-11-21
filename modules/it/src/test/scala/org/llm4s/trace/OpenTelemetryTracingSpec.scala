@@ -28,8 +28,8 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     tracing.getSpanKind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "model", "op")) shouldBe SpanKind.INTERNAL
 
     tracing.getSpanKind(TraceEvent.CompletionReceived("id", "model", 0, "content")) shouldBe SpanKind.CLIENT
-    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)) shouldBe SpanKind.CLIENT
-    tracing.getSpanKind(TraceEvent.ErrorOccurred(new Exception(""), "")) shouldBe SpanKind.CLIENT
+    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)) shouldBe SpanKind.INTERNAL
+    tracing.getSpanKind(TraceEvent.ErrorOccurred(new Exception(""), "")) shouldBe SpanKind.INTERNAL
   }
 
   it should "map CompletionReceived parameters to OpenTelemetry Semantic Conventions" in {

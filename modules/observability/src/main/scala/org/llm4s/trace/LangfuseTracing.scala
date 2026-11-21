@@ -188,9 +188,13 @@ class LangfuseTracing(
         body("model") = text("model")
         payload.flatMap(_.get("usage")).flatMap(_.objOpt).foreach { usage =>
           def tokens(key: String): ujson.Value = usage.get(key).getOrElse(ujson.Null)
+          // output as billed: the completion plus any thinking, which completionTokens never includes
+          val output = usage.get("completionTokens").flatMap(_.numOpt).fold(ujson.Null: ujson.Value) { completion =>
+            ujson.Num(completion + usage.get("thinkingTokens").flatMap(_.numOpt).getOrElse(0d))
+          }
           body("usage") = ujson.Obj(
             "input"  -> tokens("promptTokens"),
-            "output" -> tokens("completionTokens"),
+            "output" -> output,
             "total"  -> tokens("totalTokens"),
             "unit"   -> "TOKENS"
           )
@@ -401,6 +405,8 @@ class LangfuseTracing(
             "output" -> ujson.Obj(
               "prompt_tokens"     -> e.usage.promptTokens,
               "completion_tokens" -> e.usage.completionTokens,
+              "thinking_tokens"   -> e.usage.thinkingTokens.getOrElse(0),
+              "output_tokens"     -> e.usage.totalOutputTokens,
               "total_tokens"      -> e.usage.totalTokens
             ),
             "metadata" -> ujson.Obj(

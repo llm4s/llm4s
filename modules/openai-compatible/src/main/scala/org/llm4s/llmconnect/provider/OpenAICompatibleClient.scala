@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.security.{ KnownSecrets, Secret, TokenGenerations }
-import org.llm4s.error.{ AuthenticationError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, ServiceError, ValidationError }
 import org.llm4s.http.HttpNetworkSettings
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.{
@@ -12,14 +12,14 @@ import org.llm4s.llmconnect.auth.{
   TokenExchange,
   TokenExchangeConfig
 }
-import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -45,7 +45,9 @@ import scala.util.{ Try, Using }
  *    two-minute timeout ([[OpenAICompatibleClient.RequestTimeout]]);
  *  - `streamComplete`: the same with `"stream": true`, read as server-sent
  *    events until `[DONE]`, each delta fanned out to one chunk per tool call,
- *    with a five-minute timeout ([[OpenAICompatibleClient.StreamTimeout]]);
+ *    with a five-minute timeout ([[OpenAICompatibleClient.StreamTimeout]]). A stream
+ *    that ends without a `finish_reason` or `[DONE]`, or carries an `error` event, is
+ *    a `Left`: what was delivered is not a finished reply;
  *  - request building: role mapping, sampling parameters, tools and
  *    `response_format`;
  *  - one provider exchange recorded per call, success or failure; and the
@@ -55,13 +57,16 @@ import scala.util.{ Try, Using }
  * @param dialect         how this provider departs from the standard format.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
+ * @param suppliedHttpClient the HTTP client to send requests through, which the caller keeps owning (#2341);
+ *                        by default one built from `settings.network`, closed with this client.
  */
 @Stable
 class OpenAICompatibleClient(
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
-  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+  suppliedHttpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
@@ -92,8 +97,9 @@ class OpenAICompatibleClient(
   // before the previous one is released. The provider may be the caller's own code, so it is registered here.
   private val bearers = new TokenGenerations
 
-  // Scoped to the provider package so specs can substitute one
-  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create(settings.network)
+  // The supplied client, or one routed by the settings' proxy and TLS settings; scoped to the provider package so
+  // specs can substitute one
+  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.resolve(suppliedHttpClient, settings.network)
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
   private val endpoint                                = s"${settings.baseUrl}/chat/completions"
 
@@ -105,12 +111,15 @@ class OpenAICompatibleClient(
   // this is the origin a request is about to be sent to
   private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
 
+  // what the dialect could not send goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    renderRequest(conversation, options, stream = false).flatMap { requestText =>
+    renderRequest(conversation, options, stream = false).flatMap { (requestText, adjustments) =>
       withAuthRetry { headers =>
         httpClient
           .post(endpoint, headers, requestText, requestTimeout)
@@ -118,10 +127,12 @@ class OpenAICompatibleClient(
           .flatMap { response =>
             val body = response.body
             logger.debug(s"Response status: ${response.statusCode}")
-            logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
+            // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+            if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
-                Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
+                Try(parseCompletion(readReply(body))).toResult
+                  .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
@@ -142,7 +153,7 @@ class OpenAICompatibleClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    renderRequest(conversation, options, stream = true).flatMap { requestText =>
+    renderRequest(conversation, options, stream = true).flatMap { (requestText, adjustments) =>
       // Each attempt records its own exchange. A non-200 reply is mapped before any event is
       // read, so `onChunk` has not been called when an attempt is retried.
       withAuthRetry { headers =>
@@ -159,7 +170,7 @@ class OpenAICompatibleClient(
                 response.headers
               )
             )
-            .map(bindThinking(_, conversation, options))
+            .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
         recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
         result
       }
@@ -192,7 +203,12 @@ class OpenAICompatibleClient(
         .map(HttpFailures.streamReadError(_, endpoint, streamTimeout))
         .flatten
 
-  /** Reads an SSE body to `[DONE]` or end of stream; the caller closes it. */
+  /**
+   * Reads an SSE body to `[DONE]` or end of stream; the caller closes it. A `Right` means the model
+   * finished: the stream said so with a `finish_reason` or `[DONE]` (a server may send only one), and
+   * reported no `error` event. Reading stops at an `error` event. Chunks delivered before either
+   * failure stay delivered.
+   */
   private def readStream(
     body: InputStream,
     rawStream: StringBuilder,
@@ -205,13 +221,17 @@ class OpenAICompatibleClient(
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     var usage       = Option.empty[TokenUsage]
     var servedModel = Option.empty[String]
-    Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+    var ended       = false
+    var failure     = Option.empty[LLMError]
+    Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
+          if (event.data.contains("[DONE]")) ended = true
           event.data.filter(_ != "[DONE]").foreach { data =>
             val json = readReply(data)
+            failure = streamedError(json)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
@@ -219,17 +239,26 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            parseStreamingChunks(json, toolCalls).foreach { chunk =>
-              accumulator.addChunk(chunk)
-              onChunk(chunk)
-            }
+            if (failure.isEmpty)
+              parseStreamingChunks(json, toolCalls).foreach { chunk =>
+                chunk.finishReason.filter(_.nonEmpty).foreach { reason =>
+                  ended = true
+                  if (reason == "error")
+                    failure = Some(ServiceError(502, providerName, "the stream ended with finish_reason 'error'"))
+                }
+                accumulator.addChunk(chunk)
+                onChunk(chunk)
+              }
           }
         }
     }
     // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
     val opaqueThinking = dialect.decodeThinkingDetails(details.result())
-    accumulator.toCompletion.map { c =>
+    val unfinished = Option.when(!ended)(
+      NetworkError("stream ended without a finish_reason or [DONE]; the reply is incomplete", None, endpoint)
+    )
+    failure.orElse(unfinished).toLeft(()).flatMap(_ => accumulator.toCompletion).map { c =>
       val finalUsage = usage.orElse(c.usage)
       val message =
         if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
@@ -251,6 +280,31 @@ class OpenAICompatibleClient(
   private def readReply(text: String): ujson.Value =
     if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
     else ujson.read(text)
+
+  /**
+   * The failure an event reports in an `error` field, which a server sends once the 200 status is
+   * already out. The field is an object with a `message` or a plain string; an empty one, which some
+   * proxies put on every event, is no failure. A `status_code` or numeric `code` that is an HTTP failure
+   * status keeps its meaning, so a request that can't succeed is not retried: Groq reports a tool call cut by
+   * the token limit this way, with a text `code` and `status_code` 400. Anything else is a 502, retried like a
+   * bad gateway.
+   */
+  private def streamedError(json: ujson.Value): Option[LLMError] =
+    json.objOpt
+      .flatMap(_.get("error"))
+      .filter(error => error != ujson.Null && error != ujson.Obj() && error != ujson.Str(""))
+      .flatMap { error =>
+        val message =
+          error.objOpt.flatMap(_.get("message")).flatMap(_.strOpt).orElse(error.strOpt).getOrElse(error.render())
+        val status = error.objOpt.toSeq
+          .flatMap(fields => Seq("status_code", "code").flatMap(fields.get))
+          .flatMap(_.numOpt)
+          .map(_.toInt)
+          .find(code => code >= 400 && code <= 599)
+          .getOrElse(502)
+        val body = ujson.Obj("error" -> ujson.Obj("message" -> Redaction.remoteBody(message))).render()
+        HttpErrorMapper.mapHttpError(status, body, providerName).swap.toOption
+      }
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -278,7 +332,12 @@ class OpenAICompatibleClient(
     if (!completion.message.hasSealedThinking) completion
     else completion.withMessage(ThinkingReplay.bind(replayOrigin, completion.message, conversation.messages, options))
 
-  private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
+  /** The rendered request and what the dialect could not send, which goes on the `Completion`. */
+  private def renderRequest(
+    conversation: Conversation,
+    options: CompletionOptions,
+    stream: Boolean
+  ): Result[(String, List[RequestAdjustment])] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
     // costs no round trip and names the problem. The check is on the messages that will be
     // sent, not the conversation: a dialect that drops empty assistant turns (Mistral) can
@@ -300,17 +359,18 @@ class OpenAICompatibleClient(
       )
       .flatMap { _ =>
         Try {
-          val body = createRequestBody(conversation, options)
+          val (body, adjustments) = buildRequest(conversation, options)
           if (stream) {
             body("stream") = true
             if (dialect.streamUsageOption) body("stream_options") = ujson.Obj("include_usage" -> true)
           }
-          body.render()
+          (body.render(), adjustments)
         }.toResult
       }
-      .tapRight { requestText =>
+      .tapRight { (requestText, adjustments) =>
+        adjustmentLog.record(settings.model, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
-        logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
+        if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
       .tapLeft(error => recordExchange(Instant.now(), "", None, Left(error)))
 
@@ -429,7 +489,14 @@ class OpenAICompatibleClient(
    * Builds the request body for `conversation`, without the `stream` flag.
    * Scoped to the provider package so specs can inspect it.
    */
-  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
+    buildRequest(conversation, options)._1
+
+  /** The request body, as [[createRequestBody]] builds it, and what the dialect could not send (RFC 0008). */
+  private def buildRequest(
+    conversation: Conversation,
+    options: CompletionOptions
+  ): (ujson.Obj, List[RequestAdjustment]) = {
     val messages = sendableMessages(conversation, options).map {
       case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))
@@ -482,8 +549,8 @@ class OpenAICompatibleClient(
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
-    dialect.addReasoning(body, settings.model, options)
-    body
+    val adjustments = dialect.addReasoning(body, settings.model, options)
+    (body, adjustments)
   }
 
   /** Reads a non-streaming reply. Throws on a malformed one; `complete` turns that into a `Left`. */
@@ -549,16 +616,24 @@ class OpenAICompatibleClient(
   private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
     cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
-  /** Token usage from a `usage` object, or from the first element of a `usage` array. */
+  /**
+   * Token usage from a `usage` object, or from the first element of a `usage` array. Reasoning
+   * tokens the provider counts inside `completion_tokens` ([[OpenAICompatibleDialect.reasoningInCompletion]])
+   * are taken out of `completionTokens`, so they are counted once, as `thinkingTokens`.
+   */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
     usage.objOpt.orElse(usage.arrOpt.flatMap(_.headOption).flatMap(_.objOpt)).map { u =>
       val prompt     = u("prompt_tokens").num.toInt
       val completion = u("completion_tokens").num.toInt
+      val reasoning  = dialect.reasoningTokens(ujson.Obj.from(u))
+      // TokenUsage.completionTokens never includes thinkingTokens: take them out where the provider counted them in
+      val answer =
+        if (dialect.reasoningInCompletion) math.max(0, completion - reasoning.fold(0)(math.max(0, _))) else completion
       TokenUsage(
         promptTokens = prompt,
-        completionTokens = completion,
+        completionTokens = answer,
         totalTokens = u.get("total_tokens").flatMap(_.numOpt).map(_.toInt).getOrElse(prompt + completion),
-        thinkingTokens = dialect.reasoningTokens(ujson.Obj.from(u))
+        thinkingTokens = reasoning
       )
     }
 
@@ -635,7 +710,8 @@ class OpenAICompatibleClient(
 
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
-  override protected def releaseResources(): Unit = httpClient.close()
+  // A client the caller supplied is the caller's to close (#2341).
+  override protected def releaseResources(): Unit = Llm4sHttpClient.closeIfOwned(suppliedHttpClient, httpClient)
 }
 
 object OpenAICompatibleClient {
@@ -643,6 +719,17 @@ object OpenAICompatibleClient {
   private[provider] val AuthorizationHeaderRefusal: String =
     "an Authorization header cannot be sent with a Dynamic or Exchange credential: the request's Authorization " +
       "is the credential's token - remove the header"
+
+  /**
+   * A dialect client's bearer: the key `keys` holds at each request when the config carries an
+   * `ApiKeyProvider` (a section's `apiKeyFile`, #2477), otherwise `apiKey`.
+   */
+  private[provider] def keyCredential(apiKey: Secret, keys: Option[ApiKeyProvider]): Credential =
+    keys.fold(Credential.Static(apiKey))(Credential.Rotating(_))
+
+  /** A dialect client's key check: `apiKey` must not be blank, unless an `ApiKeyProvider` supplies the key. */
+  private[provider] def requireKey(displayName: String, apiKey: Secret, keys: Option[ApiKeyProvider]): Result[Unit] =
+    if keys.isDefined then Right(()) else ProviderConfig.nonEmpty(displayName, "apiKey", apiKey.reveal)
 
   /** Whether `headers` set `Authorization` (in any case) over a `credential` whose token is refreshed. */
   /**
@@ -894,7 +981,8 @@ object OpenAICompatibleClient {
   def apply(
     config: OpenAICompatibleConfig,
     metrics: MetricsCollector = MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.FromConfig
   )(using ModelRegistryService): Result[OpenAICompatibleClient] =
     // A config built with `apply` or the `with*` setters skipped `fromValues`; its rules are applied here too.
     OpenAICompatibleConfig
@@ -905,7 +993,8 @@ object OpenAICompatibleClient {
             settings(valid),
             OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage),
             metrics,
-            exchangeLogging
+            exchangeLogging,
+            httpClient
           )
         ).toResult
       )

@@ -90,5 +90,6 @@ the GitHub Release, Discord), and how far ahead, is **to be decided before 1.0**
 ## Keeping this page current
 
 The table comes from `docs/_data/support.yml`, which a release updates by hand
-([Release Process](release#update-the-support-table)). A mechanical check that a release tag appears in the table is
-not in place yet.
+([Release Process](release#update-the-support-table)). `scripts/check-support-table.sh` checks it: CI fails a pull
+request whose table lacks the newest release in the CHANGELOG, and the release workflow fails a release tag that is not
+the table's `latest` line before anything is published.

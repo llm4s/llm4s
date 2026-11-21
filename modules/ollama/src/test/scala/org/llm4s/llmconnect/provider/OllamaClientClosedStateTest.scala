@@ -90,4 +90,15 @@ class OllamaClientClosedStateTest extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     result.left.toOption.get.message should include("mistral")
   }
+
+  it should "leave an HTTP client supplied to apply open when closed, and close one it built (#2341)" in {
+    val http     = new org.llm4s.http.MockHttpClient(org.llm4s.http.HttpResponse(200, "{}"))
+    val supplied = OllamaClient(createTestConfig, httpClient = http).fold(e => fail(e.message), identity)
+    supplied.close()
+    http.closed shouldBe false
+
+    val owned = OllamaClient(createTestConfig).fold(e => fail(e.message), identity)
+    owned.close()
+    owned.complete(createTestConversation, CompletionOptions()).isLeft shouldBe true
+  }
 }

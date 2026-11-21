@@ -15,9 +15,11 @@ import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.FakeLlmClient;
 import org.llm4s.javaapi.JCompletion;
 import org.llm4s.javaapi.JCompletionOptions;
+import org.llm4s.javaapi.JContextWindow;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JEmbeddingPurpose;
 import org.llm4s.javaapi.JEmbeddings;
+import org.llm4s.javaapi.JGuardrails;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.JTool;
@@ -243,6 +245,25 @@ final class GuideSnippets {
         List<JTool> tools = new java.util.ArrayList<>(JTool.fromAnnotated(new Payments(billing)).get());
         tools.add(refund.get());
         return Llm4s.createAgentWithTools(client, tools).get().run("Charge 5 cents, then refund it").get();
+    }
+
+    /** The "An agent with a system prompt, guardrails and a context window" block (#2476). */
+    static JAgentResult agentBuilder(JLlmClient client, JTool add) {
+        LlmResult<JAgent> built = Llm4s.agentBuilder("support", client)
+            .systemPrompt("You are a support assistant. Answer in JSON.")
+            .tools(List.of(add))
+            .inputGuardrails(List.of(JGuardrails.length(1, 10_000), JGuardrails.profanity()))
+            .outputGuardrails(List.of(JGuardrails.json()))
+            .contextWindow(JContextWindow.lastMessages(20))
+            .streaming(true)
+            .build();
+
+        JAgent agent = built.get();
+        JAgentResult result = agent.run("What is 2 + 3?").get();
+        result.status().guardrail().ifPresent(g ->
+            System.out.println("Blocked by " + g + ": " + result.status().reason().orElse("")));
+
+        return result;
     }
 
     /** The "Streaming the reply" block (#1485). */
