@@ -160,7 +160,7 @@ build that imports the BOM declares `implementation("org.llm4s:llm4s-kotlin-api"
 it as a `gradle` line (`project/PublishedArtifacts.scala`, `Gradle`), so `scripts/verify-release.sh` checks it is on
 Central, and `sbt publishedArtifactsCheck` requires it to be documented like any other artifact.
 
-Every pull request runs steps 2 and 3 unsigned in the `Kotlin API` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
+Every pull request runs steps 2 and 3 unsigned in the `Kotlin, Java and framework consumers` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
 the publication fails there and not on release day; `scripts/test-publish-kotlin-api.sh` runs step 4 against a fake
 Portal. To try it locally (it writes nothing outside the repository but the local Maven repository you name):
 
@@ -238,7 +238,7 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
 
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
 than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
-in all. CI's Kotlin API job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
+in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
 signed with a throwaway key, never uploaded). A release is then 952 files and about 27 MB from sbt (58 modules, the BOM
 and 5 relocation stubs) plus 20 files from `llm4s-kotlin-api`, so **one release a month fits under the limit, and two do
 not**: a second release in a month (a patch release included) needs the limit raised by Sonatype first.

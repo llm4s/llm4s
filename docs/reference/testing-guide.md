@@ -220,7 +220,8 @@ it should "read values in time linear in the input" taggedAs PerformanceTest in 
 `sbt test` and the coverage run exclude the tag: an algorithm's growth is the same on every
 platform, so running these tests on Windows and under coverage instrumentation multiplied their
 cost - most of each CI test job's time - without adding a signal. `sbt testPerformance` runs only
-the tagged tests, in every module; CI runs it in the ubuntu-only `Performance tests` job on every
+the tagged tests, in the modules that have them (`performanceTestProjects` in `build.sbt`: core and agent;
+`scripts/check-performance-tests.sh` fails Quick Checks when a test elsewhere uses the tag); CI runs it in the ubuntu-only `Performance tests` job on every
 pull request, in parallel with the other test jobs, and nightly (`performance-nightly.yml`).
 `sbt "core/testOnly *RedactionShapesSpec"` runs a whole suite, tagged tests included: the
 exclusion applies to `test`, not to a suite named explicitly.

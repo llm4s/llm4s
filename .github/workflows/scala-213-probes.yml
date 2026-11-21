@@ -5,27 +5,17 @@ name: Scala 2.13 probes
 # (docs/design/scala-2.13-interop/expected.md), in either direction (#2301). A change to a frozen signature can
 # silently break a Scala 2.13 caller (an opaque type, a uPickle type class in a signature, a top-level companion);
 # and a fix that makes a blocked probe compile must update the table and docs/getting-started/scala-2-13.md with it.
-# It needs a publishLocal of nine modules and Maven Central, so it runs nightly and when the frozen modules,
-# llm4s-java-api, the build or the probes change, not on every pull request.
+# It needs a publishLocal of nine modules and Maven Central, so it runs nightly, on a push to main that changes the frozen
+# modules, llm4s-java-api, the build or the probes, and on a pull request labelled `run-probes`.
 
 on:
   schedule:
     - cron: "41 3 * * *"  # 03:41 UTC every day
+  # Not on every pull request that touches those modules (it was, about 15 runner minutes each): the nightly run and the
+  # push to main catch a break within a day. A pull request that changes a frozen signature can still run the probes
+  # before it merges, by adding the `run-probes` label (or by dispatching this workflow on its branch).
   pull_request:
-    paths:
-      - modules/media/src/main/**
-      - modules/core/src/main/**
-      - modules/agent/src/main/**
-      - modules/ollama/src/main/**
-      - modules/openai/src/main/**
-      - modules/openai-compatible/src/main/**
-      - modules/anthropic/src/main/**
-      - modules/gemini/src/main/**
-      - modules/java-api/src/main/**
-      - build.sbt
-      - project/**
-      - docs/design/scala-2.13-interop/**
-      - .github/workflows/scala-213-probes.yml
+    types: [labeled]
   push:
     branches: [main]
     paths:
@@ -47,13 +37,15 @@ on:
 permissions:
   contents: read
 
+# A pull request's group carries the label, so labelling it with anything else does not cancel a probe run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && github.event.label.name || 'all' }}
   cancel-in-progress: true
 
 jobs:
   probes:
     name: Scala 2.13 probes (2.13.16 and latest)
+    if: github.event_name != 'pull_request' || github.event.label.name == 'run-probes'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
