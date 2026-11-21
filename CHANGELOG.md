@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Build & tooling
 
+- **Added** SLSA build provenance for every release's jars and POMs, the SBOMs on its GitHub Release and the `workspace-runner` image, `verify-release.sh --attestations`,
+  and a guide with the PGP key fingerprint [#2305](https://github.com/llm4s/llm4s/issues/2305); [Verifying Releases](docs/reference/verifying-releases.md).
 - **Changed** each published module's `-javadoc.jar` is a sub-1 KB pointer to [llm4s.org/scaladoc](https://llm4s.org/scaladoc/), not its own Scaladoc, and
   its CycloneDX SBOM and the signatures' checksums are no longer uploaded to Maven Central (SBOMs: GitHub Release); IDEs read the sources jar ([release guide](docs/reference/release.md#what-is-published-to-maven-central)).
 - **Changed** CI costs fewer runner minutes: each module's tests run once (its coverage leg, or `Test (other modules)`), drafts run nothing, a pull request skips the test jobs its change cannot affect (a docs-only one runs the suites tagged `DocsSpec`), a push to main leaves Windows, performance, ScalaDoc and the consumer and Spring jobs to a nightly run, the consumer and Spring builds share jobs, the agent coverage leg and the other-modules tests reuse the nightly build's compiled output, and benchmarks run weekly ([testing guide](docs/reference/testing-guide.md)).

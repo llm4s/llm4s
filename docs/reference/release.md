@@ -75,11 +75,11 @@ ci → publish → publish-kotlin → github-release → docs
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Checks the release's Scaladoc (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list) and that every `-javadoc.jar` is the pointer jar (`sbt javadocJarCheck`), then signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`, whose bundle is [checked](#what-is-published-to-maven-central) before upload) |
-| `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
+| `publish` | Checks the release's Scaladoc (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list) and that every `-javadoc.jar` is the pointer jar (`sbt javadocJarCheck`), then signs and stages the sbt artifacts (`sbt ci-release`, whose bundle is [checked](#what-is-published-to-maven-central) before upload), attests the build provenance of the staged jars and POMs, and uploads them to Maven Central (`sbt sonaRelease`) |
+| `publish-kotlin` | Builds, signs, checks, attests and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Warns when the tag has no [News post](#write-the-news-post), then deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
-| `docker` | Builds and pushes the container image |
+| `docker` | Builds and pushes the container image, and attests its provenance by digest |
 
 ### The docs deploy runs from `main`, built from the tag
 
@@ -234,7 +234,8 @@ to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that u
   `scripts/publish-kotlin-api.sh` leaves them out of the Kotlin bundle too, with Gradle's `.sha256` and `.sha512`.
 - **The CycloneDX SBOMs** (`-cyclonedx.json`), which sbt-sbom adds to every project's published artifacts. They are
   dropped from the publication (`NoSbomInPublication` in the same file) and are on the
-  [GitHub Release](sbom#where-the-sboms-are) instead, where the `sbom` job attaches every module's.
+  [GitHub Release](sbom#where-the-sboms-are) instead, where the `sbom` job attests their build provenance and attaches
+  every module's.
 
 The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
 than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
@@ -263,6 +264,9 @@ it never overwrites. Write whatever the release deserves once it exists.
 ### 5. Verify Release
 
 - Check GitHub Actions: https://github.com/llm4s/llm4s/actions/workflows/release.yml
+- Check the attestations: https://github.com/llm4s/llm4s/attestations lists the provenance of every jar, POM, SBOM
+  and the image, and `scripts/verify-release.sh <version> --attestations` runs `gh attestation verify` on each
+  published artifact and the image ([Verifying Releases](verifying-releases)).
 - Check Docker images: https://github.com/llm4s/llm4s/pkgs/container/workspace-runner
 - Verify Maven Central, with the script rather than by eye:
 

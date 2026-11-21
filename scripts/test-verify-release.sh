@@ -10,6 +10,10 @@
 # `bom` (a POM with <dependencyManagement>) and `stub` (a POM with <relocation>); for the sbt-published ones, the .asc,
 # .md5 and .sha1 beside each file, and no checksum of a signature or CycloneDX SBOM.
 #
+# `--attestations` (#2305) is tested against a fake `gh` that accepts `gh attestation verify <target> -R llm4s/llm4s
+# --signer-workflow llm4s/llm4s/.github/workflows/release.yml` for a target named in a fixture list and refuses any
+# other target, repository or signer.
+#
 # Usage: scripts/test-verify-release.sh
 set -uo pipefail
 
@@ -42,6 +46,20 @@ if [ -n "$write_out" ]; then printf '%s' "$code"; exit 0; fi
 exit 0
 FAKE
 chmod +x "$WORK/bin/curl"
+
+# The fake gh: attested targets are listed, one per line (a file's base name, or an oci:// reference), in $FAKE_ATTESTED.
+cat > "$WORK/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+[ "$1 $2" = "attestation verify" ] || { echo "unexpected: gh $*" >&2; exit 2; }
+target="$3"; shift 3
+[ "$*" = "-R llm4s/llm4s --signer-workflow llm4s/llm4s/.github/workflows/release.yml" ] ||
+  { echo "unexpected flags: $*" >&2; exit 2; }
+case "$target" in oci://*) name="$target" ;; *) [ -s "$target" ] || { echo "empty file" >&2; exit 1; }; name="$(basename "$target")" ;; esac
+grep -qxF -- "$name" "$FAKE_ATTESTED" && exit 0
+echo "Error: no attestations found for subject" >&2
+exit 1
+FAKE
+chmod +x "$WORK/bin/gh"
 
 VERSION=0.5.0
 
@@ -139,6 +157,39 @@ cp -R "$WORK/good" "$WORK/corejar"
 rm "$WORK/corejar/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.jar"
 run corejar "$WORK/corejar"
 expect "a Scala artifact without its jar is missing" 1 "MISSING  artifact llm4s-core_3"
+
+# ---- --attestations ---------------------------------------------------------------------------------------------------
+# run_attest <repo-dir> <attested-list>: as run, with --attestations
+run_attest() {
+  OUT="$(PATH="$WORK/bin:$PATH" FAKE_REPO="$1" FAKE_BASE="$BASE" MAVEN_CENTRAL_URL="$BASE" FAKE_ATTESTED="$2" \
+    bash "$SCRIPT" "v$VERSION" --list "$WORK/list.txt" --attestations 2>&1)"
+  RC=$?
+}
+printf '%s\n' "llm4s-core_3-$VERSION.jar" "llm4s-kotlin-api-$VERSION.jar" "llm4s-bom-$VERSION.pom" "core_3-$VERSION.pom" \
+  "oci://ghcr.io/llm4s/workspace-runner:$VERSION" > "$WORK/attested.txt"
+
+run_attest "$WORK/good" "$WORK/attested.txt"
+expect "every artifact and the image attested" 0 "All 5 coordinates resolve at $VERSION, each with build provenance"
+expect "the image is checked" 0 "ok       image    ghcr.io/llm4s/workspace-runner:$VERSION"
+
+grep -vxF "llm4s-core_3-$VERSION.jar" "$WORK/attested.txt" > "$WORK/nocore.txt"
+run_attest "$WORK/good" "$WORK/nocore.txt"
+expect "a jar with no attestation is reported" 1 "no build provenance for llm4s-core_3-$VERSION.jar"
+
+grep -vxF "llm4s-bom-$VERSION.pom" "$WORK/attested.txt" > "$WORK/nobom.txt"
+run_attest "$WORK/good" "$WORK/nobom.txt"
+expect "a POM-only artifact is checked by its POM" 1 "no build provenance for llm4s-bom-$VERSION.pom"
+
+grep -v '^oci://' "$WORK/attested.txt" > "$WORK/noimage.txt"
+run_attest "$WORK/good" "$WORK/noimage.txt"
+expect "an image with no attestation is reported" 1 "MISSING  image    ghcr.io/llm4s/workspace-runner:$VERSION"
+
+run_attest "$WORK/corejar" "$WORK/attested.txt"
+expect "a missing jar is reported as missing, not as unattested" 1 "jar HTTP 404"
+
+run good "$WORK/good"
+if grep -q image <<<"$OUT"; then bad "without --attestations neither gh nor the image is used" "$OUT"
+else ok "without --attestations neither gh nor the image is used"; fi
 
 # ---- the javadoc jars --------------------------------------------------------------------------------------------------
 CORE_JAVADOC="org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION-javadoc.jar"
