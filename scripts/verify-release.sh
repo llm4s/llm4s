@@ -7,8 +7,9 @@
 #
 # The expected coordinates come from the build (`sbt -error listPublishedArtifacts`), not from a list kept
 # here, so a module added to the build is checked the day it is added. For each real artifact the POM and
-# the jar must exist; for an artifact published from the Gradle build (`llm4s-kotlin-api`, a `gradle` line) the POM
-# and the jar must exist and the POM must depend on `llm4s-java-api_3` at the same version, the one the release
+# the jar must exist, and its -javadoc.jar must be the small pointer to https://llm4s.org/scaladoc/ (project/
+# JavadocPointer.scala); for an artifact published from the Gradle build (`llm4s-kotlin-api`, a `gradle` line) the POM
+# and the jar and the javadoc jar must exist and the POM must depend on `llm4s-java-api_3` at the same version, the one the release
 # published from sbt; for the bill of materials (`llm4s-bom`, POM-only) the POM must exist and must carry a
 # <dependencyManagement>; for each relocation stub (the pre-0.4.0 coordinates, `core`, `workspaceclient`, ...)
 # the POM must exist and must carry a <relocation>. v0.4.0 shipped without its stubs and nobody noticed
@@ -46,6 +47,10 @@ fi
 
 status() { curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$1" || echo 000; }
 
+JAVADOC_MAX_BYTES=51200   # JavadocPointer.MaxBytes
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
 missing=0; checked=0
 while read -r kind id; do
   [ -n "${id:-}" ] || continue
@@ -70,6 +75,23 @@ while read -r kind id; do
   if { [ "$kind" = artifact ] || [ "$kind" = gradle ]; } && [ -z "$problems" ]; then
     jcode="$(status "$BASE/$id/$VERSION/$id-$VERSION.jar")"
     [ "$jcode" = 200 ] || problems="jar HTTP $jcode"
+  fi
+  # Maven Central requires a javadoc jar. An sbt module's is the pointer to the site's Scaladoc
+  # (project/JavadocPointer.scala), so it must be small and say where the API docs are; the Kotlin artifact's is Dokka's.
+  if { [ "$kind" = artifact ] || [ "$kind" = gradle ]; } && [ -z "$problems" ]; then
+    javadoc="$BASE/$id/$VERSION/$id-$VERSION-javadoc.jar"
+    dcode="$(status "$javadoc")"
+    if [ "$dcode" != 200 ]; then
+      problems="javadoc jar HTTP $dcode"
+    elif [ "$kind" = artifact ]; then
+      curl -s --max-time 60 "$javadoc" > "$TMP/javadoc.jar"
+      size="$(wc -c < "$TMP/javadoc.jar" | tr -d ' ')"
+      if [ "$size" -gt "$JAVADOC_MAX_BYTES" ]; then
+        problems="javadoc jar is $size bytes, over $JAVADOC_MAX_BYTES: not the pointer jar"
+      elif ! unzip -p "$TMP/javadoc.jar" README.md 2>/dev/null | grep -qF 'https://llm4s.org/scaladoc/'; then
+        problems="javadoc jar has no README.md pointing to https://llm4s.org/scaladoc/"
+      fi
+    fi
   fi
   if [ -n "$problems" ]; then
     printf '  MISSING  %-8s %-40s %s\n' "$kind" "$id" "$problems"

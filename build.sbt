@@ -184,9 +184,20 @@ lazy val commonSettings = Seq(
   // No `-Wconf` for `doc`: Scala 3's Scaladoc skips `-Wconf` and `-Werror` ("Skipping unused scalacOptions"), so
   // they can neither silence nor fail a Scaladoc warning. CI's ScalaDoc job fails on a warning in an llm4s source
   // with scripts/check-scaladoc-warnings.sh instead (#1967).
-  semanticdbEnabled                      := true,
-  Test / scalafix / unmanagedSources     := Seq.empty,
-  Compile / packageDoc / publishArtifact := !isSnapshot.value,
+  semanticdbEnabled                  := true,
+  Test / scalafix / unmanagedSources := Seq.empty,
+  // The -javadoc.jar is a pointer to the site's unified Scaladoc (https://llm4s.org/scaladoc/), not this module's own
+  // Scaladoc, which repeated ~6 MB of Scaladoc's static assets in every jar: the 0.6.0 javadoc jars were 165 MB of a
+  // 193 MB upload, over Sonatype's monthly release-size limit. Maven Central requires the jar, not its content. Setting
+  // the mappings means packaging (and so `publish` and `ci-release`) never runs `Compile / doc`; `sbt doc` and
+  // `sbt docs/doc` still build the Scaladoc. `javadocJarCheck` fails CI when a published module's javadoc jar is
+  // missing or is not the pointer. See project/JavadocPointer.scala.
+  Compile / packageDoc / publishArtifact := true,
+  Compile / packageDoc / mappings := JavadocPointer.mappings(
+    target.value / "javadoc-pointer",
+    if (crossPaths.value) s"${moduleName.value}_${scalaBinaryVersion.value}" else moduleName.value,
+    version.value
+  ),
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
   Test / doc / sources                := Seq.empty,
@@ -254,6 +265,10 @@ lazy val listPublishedArtifacts = taskKey[Unit](
 // committed files differ.
 lazy val generateCompatibilityMatrix = taskKey[Unit](
   "Write docs/_data/capabilities.yml (from the discovered provider descriptors) and docs/_data/tested-versions.yml (from the build)"
+)
+// Every published module's -javadoc.jar is the pointer to https://llm4s.org/scaladoc/. See project/JavadocPointer.scala.
+lazy val javadocJarCheck = taskKey[Unit](
+  "Fail the build if a published module ships no -javadoc.jar, or one that is not the small pointer to the site's Scaladoc"
 )
 lazy val bomCheck = taskKey[Unit](
   "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
@@ -611,6 +626,31 @@ lazy val llm4s = (project in file("."))
       CompatibilityMatrix.write((ThisBuild / baseDirectory).value, streams.value.log)
       (samples / Compile / runMain).toTask(" org.llm4s.samples.docs.CapabilityMatrixMain").value
     },
+    // Every published module that ships a jar ships a javadoc jar, and it is the small pointer to the site's Scaladoc,
+    // not the module's own Scaladoc (project/JavadocPointer.scala).
+    javadocJarCheck / aggregate := false,
+    javadocJarCheck := Def.taskDyn {
+      val modules = Def
+        .task(
+          (thisProjectRef.value, name.value, (publish / skip).value, (Compile / packageBin / publishArtifact).value)
+        )
+        .all(ScopeFilter(inAnyProject))
+        .value
+      val refs = modules.collect { case (ref, name, false, true) if name.startsWith("llm4s-") => ref }
+      Def.task {
+        val jars = Def
+          .task(
+            (
+              if (crossPaths.value) s"${moduleName.value}_${scalaBinaryVersion.value}" else moduleName.value,
+              (Compile / packageDoc / publishArtifact).value,
+              (Compile / packageDoc).value
+            )
+          )
+          .all(ScopeFilter(inProjects(refs: _*)))
+          .value
+        JavadocPointer.check(jars, streams.value.log)
+      }
+    }.value,
     bomCheck / aggregate := false,
     bomCheck := {
       val projects = Def

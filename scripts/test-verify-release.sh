@@ -5,8 +5,8 @@
 # 200 and the file when the file exists, 404 otherwise. The list of coordinates is passed with `--list`, as the script
 # accepts it, so sbt is not needed either.
 #
-# The cases cover each kind of line `sbt listPublishedArtifacts` prints: `artifact` (POM and jar), `gradle` (the
-# Gradle-built llm4s-kotlin-api: POM, jar, and a POM that depends on llm4s-java-api_3 at the release's version, #1494),
+# The cases cover each kind of line `sbt listPublishedArtifacts` prints: `artifact` (POM, jar and the pointer javadoc
+# jar), `gradle` (the Gradle-built llm4s-kotlin-api: POM, jar, javadoc jar, and a POM that depends on llm4s-java-api_3 at the release's version, #1494),
 # `bom` (a POM with <dependencyManagement>) and `stub` (a POM with <relocation>).
 #
 # Usage: scripts/test-verify-release.sh
@@ -44,12 +44,20 @@ chmod +x "$WORK/bin/curl"
 
 VERSION=0.5.0
 
+# pointer_jar <jar> <README.md text>: a javadoc jar holding a README.md, as project/JavadocPointer.scala writes one
+pointer_jar() {
+  local d; d="$(mktemp -d "$WORK/jar.XXXX")"
+  printf '%s\n' "$2" > "$d/README.md"
+  (cd "$d" && zip -q "$1" README.md)
+}
+
 # A fixture repository with every kind of coordinate present and correct.
 fixture() { # <dir>
   local r="$1/org/llm4s"
   mkdir -p "$r/llm4s-core_3/$VERSION" "$r/llm4s-kotlin-api/$VERSION" "$r/llm4s-bom/$VERSION" "$r/core_3/$VERSION"
   echo '<project><artifactId>llm4s-core_3</artifactId></project>' > "$r/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.pom"
   echo jar > "$r/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.jar"
+  pointer_jar "$r/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION-javadoc.jar" 'See https://llm4s.org/scaladoc/'
   cat > "$r/llm4s-kotlin-api/$VERSION/llm4s-kotlin-api-$VERSION.pom" <<POM
 <project>
   <artifactId>llm4s-kotlin-api</artifactId>
@@ -64,6 +72,7 @@ fixture() { # <dir>
 </project>
 POM
   echo jar > "$r/llm4s-kotlin-api/$VERSION/llm4s-kotlin-api-$VERSION.jar"
+  echo dokka > "$r/llm4s-kotlin-api/$VERSION/llm4s-kotlin-api-$VERSION-javadoc.jar"
   echo '<project><dependencyManagement></dependencyManagement></project>' > "$r/llm4s-bom/$VERSION/llm4s-bom-$VERSION.pom"
   echo '<project><distributionManagement><relocation></relocation></distributionManagement></project>' > "$r/core_3/$VERSION/core_3-$VERSION.pom"
 }
@@ -123,6 +132,32 @@ cp -R "$WORK/good" "$WORK/corejar"
 rm "$WORK/corejar/org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION.jar"
 run corejar "$WORK/corejar"
 expect "a Scala artifact without its jar is missing" 1 "MISSING  artifact llm4s-core_3"
+
+# ---- the javadoc jars --------------------------------------------------------------------------------------------------
+CORE_JAVADOC="org/llm4s/llm4s-core_3/$VERSION/llm4s-core_3-$VERSION-javadoc.jar"
+
+cp -R "$WORK/good" "$WORK/nodoc"
+rm "$WORK/nodoc/$CORE_JAVADOC"
+run nodoc "$WORK/nodoc"
+expect "a Scala artifact without its javadoc jar is missing" 1 "javadoc jar HTTP 404"
+
+cp -R "$WORK/good" "$WORK/bigdoc"
+rm "$WORK/bigdoc/$CORE_JAVADOC"
+pointer_jar "$WORK/bigdoc/$CORE_JAVADOC" 'See https://llm4s.org/scaladoc/'
+head -c 60000 /dev/zero >> "$WORK/bigdoc/$CORE_JAVADOC"
+run bigdoc "$WORK/bigdoc"
+expect "a javadoc jar holding a module's Scaladoc again is refused" 1 "not the pointer jar"
+
+cp -R "$WORK/good" "$WORK/nopointer"
+rm "$WORK/nopointer/$CORE_JAVADOC"
+pointer_jar "$WORK/nopointer/$CORE_JAVADOC" 'some other text'
+run nopointer "$WORK/nopointer"
+expect "a javadoc jar that does not point to the site's Scaladoc is refused" 1 "no README.md pointing to"
+
+cp -R "$WORK/good" "$WORK/kotlinnodoc"
+rm "$WORK/kotlinnodoc/org/llm4s/llm4s-kotlin-api/$VERSION/llm4s-kotlin-api-$VERSION-javadoc.jar"
+run kotlinnodoc "$WORK/kotlinnodoc"
+expect "a Kotlin artifact without its javadoc jar is missing" 1 "MISSING  gradle   llm4s-kotlin-api"
 
 # ---- the list sbt prints feeds the gradle lines through ---------------------------------------------------------------
 if grep -qF "'^(artifact|gradle|bom|stub) '" "$SCRIPT"; then

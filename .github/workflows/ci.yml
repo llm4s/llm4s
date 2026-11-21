@@ -344,6 +344,12 @@ jobs:
       - name: Check the BOM lists every published artifact
         run: sbt --client bomCheck
 
+      # Fails when a published module ships no -javadoc.jar (Maven Central requires one) or one that is not the small
+      # pointer to https://llm4s.org/scaladoc/: a module's own Scaladoc jar repeated ~6 MB of static assets, and the
+      # 0.6.0 javadoc jars alone hit Sonatype's monthly release-size limit (project/JavadocPointer.scala).
+      - name: Check every javadoc jar is the pointer to the site's Scaladoc
+        run: sbt --client javadocJarCheck
+
       # Fails when a published POM lacks what Maven Central requires (name, description, https URL, licence,
       # developer, SCM) or points its <scm> anywhere but https://github.com/llm4s/llm4s, which is how Scaladex
       # finds the project (#1455). It reads the generated POMs (project/PomMetadata.scala).
