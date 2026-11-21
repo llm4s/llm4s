@@ -43,7 +43,10 @@ class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
 
     it("should fail with its own message when the provider is unset (#2504)") {
       val p = PolicyBuilder.allowedProviders(Set("openai"), Set("prod"))
-      p.evaluate(base.copy(provider = None), "prod") shouldBe PolicyFail("allowed-providers", "provider is not set (env 'prod')")
+      p.evaluate(base.copy(provider = None), "prod") shouldBe PolicyFail(
+        "allowed-providers",
+        "provider is not set (env 'prod')"
+      )
     }
   }
 
