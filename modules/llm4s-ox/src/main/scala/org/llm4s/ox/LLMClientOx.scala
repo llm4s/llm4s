@@ -76,9 +76,9 @@ object LLMClientOx {
 
     /**
      * Runs the flow and accumulates its chunks into the `Completion` they describe (content, tool calls, thinking,
-     * finish), as core's `StreamingAccumulator` does. A chunk carries no token usage or model, so the result has
-     * none. A flow failed by an [[LLMException]] returns its `LLMError` as a `Left`; any other exception, an
-     * interrupt included, propagates.
+     * finish), as core's `StreamingAccumulator` does. A chunk carries no token usage, model or adjustments, so the
+     * result has none: `client.streamComplete` returns what the client could not send as asked. A flow failed by an
+     * [[LLMException]] returns its `LLMError` as a `Left`; any other exception, an interrupt included, propagates.
      */
     def accumulate: Result[Completion] = {
       val accumulator = StreamingAccumulator.create()

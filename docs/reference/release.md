@@ -75,11 +75,11 @@ ci → publish → publish-kotlin → github-release → docs
 | Job | Does |
 |-----|------|
 | `ci` | Full CI on the tagged commit |
-| `publish` | Checks the Scaladoc it will package (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list), then signs and publishes the sbt artifacts to Maven Central (`sbt ci-release`) |
-| `publish-kotlin` | Builds, signs, checks and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
+| `publish` | Checks the release's Scaladoc (`sbt doc`, then `scripts/check-scaladoc-warnings.sh`: no warning in an llm4s source, none in a third-party source that `scripts/scaladoc-third-party-warnings.txt` does not list) and that every `-javadoc.jar` is the pointer jar (`sbt javadocJarCheck`), then signs and stages the sbt artifacts (`sbt ci-release`, whose bundle is [checked](#what-is-published-to-maven-central) before upload), attests the build provenance of the staged jars and POMs, and uploads them to Maven Central (`sbt sonaRelease`) |
+| `publish-kotlin` | Builds, signs, checks, attests and uploads `llm4s-kotlin-api`, the Gradle-built Kotlin artifact, at the same version (see [The Kotlin artifact](#the-kotlin-artifact-llm4s-kotlin-api)) |
 | `github-release` | Creates the GitHub Release for the tag |
 | `docs` | Warns when the tag has no [News post](#write-the-news-post), then deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
-| `docker` | Builds and pushes the container image |
+| `docker` | Builds and pushes the container image, and attests its provenance by digest |
 
 ### The docs deploy runs from `main`, built from the tag
 
@@ -160,7 +160,7 @@ build that imports the BOM declares `implementation("org.llm4s:llm4s-kotlin-api"
 it as a `gradle` line (`project/PublishedArtifacts.scala`, `Gradle`), so `scripts/verify-release.sh` checks it is on
 Central, and `sbt publishedArtifactsCheck` requires it to be documented like any other artifact.
 
-Every pull request runs steps 2 and 3 unsigned in the `Kotlin API` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
+Every pull request runs steps 2 and 3 unsigned in the `Kotlin, Java and framework consumers` CI job, at `0.1.0-SNAPSHOT`, so a change that breaks
 the publication fails there and not on release day; `scripts/test-publish-kotlin-api.sh` runs step 4 against a fake
 Portal. To try it locally (it writes nothing outside the repository but the local Maven repository you name):
 
@@ -210,6 +210,42 @@ The `bom` line is `llm4s-bom`, a POM-only bill of materials that pins every real
 version. It is generated from the same list as the `artifact` lines, and `sbt bomCheck` (a CI quick check)
 fails when the generated POM disagrees with that list.
 
+#### What is published to Maven Central
+
+Each `artifact` is published as a POM, the jar, a sources jar and a `-javadoc.jar`. The javadoc jar is a pointer, not
+the module's Scaladoc: a `README.md` and an `index.html` of under 1 KB saying the API documentation is at
+[llm4s.org/scaladoc](https://llm4s.org/scaladoc/), the unified Scaladoc of every module that the docs deploy builds
+from the tag (`sbt docs/doc`). Maven Central requires a javadoc jar but not its content, and each module's own Scaladoc
+repeated about 6 MB of Scaladoc's fonts, scripts and images: the 0.6.0 javadoc jars were 165 MB of a 193 MB upload,
+which put the release over Sonatype's monthly release-size limit for the organisation. IDEs read the sources jar for
+documentation and navigation. Packaging the pointer runs no Scaladoc, so `sbt ci-release` does not run `doc`; the
+`publish` job's `sbt doc` step is what checks the release's Scaladoc. `sbt javadocJarCheck` (a CI quick check, and a
+`publish` step) fails when a published module has no javadoc jar, or one over 50 KB or without the pointer
+(`project/JavadocPointer.scala`). `llm4s-kotlin-api`'s javadoc jar is still its Dokka HTML (about 0.5 MB).
+
+Each of those files goes up with its `.asc` signature and its `.md5` and `.sha1` checksums, which is what Central
+requires, and nothing else: 16 files a module, 4 for the BOM and each relocation stub. Sonatype limits the organisation
+to **1,000 uploaded files a month**, and 0.6.0 uploaded 1,752. Two things that used to go up no longer do:
+
+- **Checksums of the signatures** (`.asc.md5`, `.asc.sha1`). sbt checksums every file it stages, the signatures
+  included, and Central says "`.asc` files don't need checksum files"
+  ([requirements](https://central.sonatype.org/publish/requirements/)). The build replaces sbt's `sonaBundle`, which
+  `sonaRelease` zips and uploads, with one that leaves them out (`project/CentralBundle.scala`).
+  `scripts/publish-kotlin-api.sh` leaves them out of the Kotlin bundle too, with Gradle's `.sha256` and `.sha512`.
+- **The CycloneDX SBOMs** (`-cyclonedx.json`), which sbt-sbom adds to every project's published artifacts. They are
+  dropped from the publication (`NoSbomInPublication` in the same file) and are on the
+  [GitHub Release](sbom#where-the-sboms-are) instead, where the `sbom` job attests their build provenance and attaches
+  every module's.
+
+The bundle is checked as it is built: `sonaBundle` fails on a checksum of a signature, a CycloneDX file, a file other
+than a POM or jar, a file without its `.asc`, `.md5` and `.sha1`, more than 16 files for one artifact, or more than 1,000
+in all. CI's `Kotlin, Java and framework consumers` job builds the same bundle on every pull request (`publishSigned sonaBundle` at a release version,
+signed with a throwaway key, never uploaded). A release is then 968 files and about 27 MB from sbt (59 modules, the BOM
+and 5 relocation stubs) plus 20 files from `llm4s-kotlin-api`, so **one release a month fits under the limit, and two do
+not**: a second release in a month (a patch release included) needs the limit raised by Sonatype first.
+`scripts/verify-release.sh` checks the published result: each file's `.asc`, `.md5` and `.sha1`, and no `.asc.md5` or
+`-cyclonedx.json`.
+
 ### 4. Do NOT create the GitHub Release by hand
 
 The `github-release` job creates it for you, and it runs **after** `publish` succeeds. That
@@ -228,6 +264,9 @@ it never overwrites. Write whatever the release deserves once it exists.
 ### 5. Verify Release
 
 - Check GitHub Actions: https://github.com/llm4s/llm4s/actions/workflows/release.yml
+- Check the attestations: https://github.com/llm4s/llm4s/attestations lists the provenance of every jar, POM, SBOM
+  and the image, and `scripts/verify-release.sh <version> --attestations` runs `gh attestation verify` on each
+  published artifact and the image ([Verifying Releases](verifying-releases)).
 - Check Docker images: https://github.com/llm4s/llm4s/pkgs/container/workspace-runner
 - Verify Maven Central, with the script rather than by eye:
 
@@ -431,6 +470,6 @@ We follow semantic versioning (MAJOR.MINOR.PATCH):
 - MINOR: New features, backwards compatible
 - PATCH: Bug fixes, backwards compatible
 
-Current documented version series: 0.5.x (pre-1.0 development). Until the MiMa baseline is set, any release,
+Current documented version series: 0.6.x (pre-1.0 development). Until the MiMa baseline is set, any release,
 patch included, may carry a breaking change, listed in the CHANGELOG with a migration note; see
 [Compatibility Policy](compatibility-policy#versions).

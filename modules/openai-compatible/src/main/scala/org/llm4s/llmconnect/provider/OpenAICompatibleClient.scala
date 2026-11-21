@@ -19,7 +19,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
-import org.llm4s.model.ModelRegistryService
+import org.llm4s.model.{ AdjustmentLog, ModelRegistryService }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.{ BoundedJson, Redaction }
@@ -111,12 +111,15 @@ class OpenAICompatibleClient(
   // this is the origin a request is about to be sent to
   private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
 
+  // what the dialect could not send goes on every Completion; this warns once per model and option
+  private lazy val adjustmentLog = new AdjustmentLog(settings.providerName)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    renderRequest(conversation, options, stream = false).flatMap { requestText =>
+    renderRequest(conversation, options, stream = false).flatMap { (requestText, adjustments) =>
       withAuthRetry { headers =>
         httpClient
           .post(endpoint, headers, requestText, requestTimeout)
@@ -124,10 +127,12 @@ class OpenAICompatibleClient(
           .flatMap { response =>
             val body = response.body
             logger.debug(s"Response status: ${response.statusCode}")
-            logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
+            // a plain slf4j logger builds the message first: redact only for a line that is logged (#2631)
+            if (logger.isDebugEnabled) logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
-                Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
+                Try(parseCompletion(readReply(body))).toResult
+                  .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
               else
                 HttpErrorMapper.mapHttpError(
                   response.statusCode,
@@ -148,7 +153,7 @@ class OpenAICompatibleClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    renderRequest(conversation, options, stream = true).flatMap { requestText =>
+    renderRequest(conversation, options, stream = true).flatMap { (requestText, adjustments) =>
       // Each attempt records its own exchange. A non-200 reply is mapped before any event is
       // read, so `onChunk` has not been called when an attempt is retried.
       withAuthRetry { headers =>
@@ -165,7 +170,7 @@ class OpenAICompatibleClient(
                 response.headers
               )
             )
-            .map(bindThinking(_, conversation, options))
+            .map(bindThinking(_, conversation, options).withAdjustments(adjustments))
         recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
         result
       }
@@ -327,7 +332,12 @@ class OpenAICompatibleClient(
     if (!completion.message.hasSealedThinking) completion
     else completion.withMessage(ThinkingReplay.bind(replayOrigin, completion.message, conversation.messages, options))
 
-  private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
+  /** The rendered request and what the dialect could not send, which goes on the `Completion`. */
+  private def renderRequest(
+    conversation: Conversation,
+    options: CompletionOptions,
+    stream: Boolean
+  ): Result[(String, List[RequestAdjustment])] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
     // costs no round trip and names the problem. The check is on the messages that will be
     // sent, not the conversation: a dialect that drops empty assistant turns (Mistral) can
@@ -349,17 +359,18 @@ class OpenAICompatibleClient(
       )
       .flatMap { _ =>
         Try {
-          val body = createRequestBody(conversation, options)
+          val (body, adjustments) = buildRequest(conversation, options)
           if (stream) {
             body("stream") = true
             if (dialect.streamUsageOption) body("stream_options") = ujson.Obj("include_usage" -> true)
           }
-          body.render()
+          (body.render(), adjustments)
         }.toResult
       }
-      .tapRight { requestText =>
+      .tapRight { (requestText, adjustments) =>
+        adjustmentLog.record(settings.model, adjustments)
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
-        logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
+        if (logger.isDebugEnabled) logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
       }
       .tapLeft(error => recordExchange(Instant.now(), "", None, Left(error)))
 
@@ -478,7 +489,14 @@ class OpenAICompatibleClient(
    * Builds the request body for `conversation`, without the `stream` flag.
    * Scoped to the provider package so specs can inspect it.
    */
-  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
+    buildRequest(conversation, options)._1
+
+  /** The request body, as [[createRequestBody]] builds it, and what the dialect could not send (RFC 0008). */
+  private def buildRequest(
+    conversation: Conversation,
+    options: CompletionOptions
+  ): (ujson.Obj, List[RequestAdjustment]) = {
     val messages = sendableMessages(conversation, options).map {
       case um: UserMessage if !um.parts.exists(ContentPart.isMedia) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(um.content))
@@ -531,8 +549,8 @@ class OpenAICompatibleClient(
     options.responseFormat.foreach { fmt =>
       dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
-    dialect.addReasoning(body, settings.model, options)
-    body
+    val adjustments = dialect.addReasoning(body, settings.model, options)
+    (body, adjustments)
   }
 
   /** Reads a non-streaming reply. Throws on a malformed one; `complete` turns that into a `Left`. */
@@ -598,16 +616,24 @@ class OpenAICompatibleClient(
   private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
     cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
-  /** Token usage from a `usage` object, or from the first element of a `usage` array. */
+  /**
+   * Token usage from a `usage` object, or from the first element of a `usage` array. Reasoning
+   * tokens the provider counts inside `completion_tokens` ([[OpenAICompatibleDialect.reasoningInCompletion]])
+   * are taken out of `completionTokens`, so they are counted once, as `thinkingTokens`.
+   */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
     usage.objOpt.orElse(usage.arrOpt.flatMap(_.headOption).flatMap(_.objOpt)).map { u =>
       val prompt     = u("prompt_tokens").num.toInt
       val completion = u("completion_tokens").num.toInt
+      val reasoning  = dialect.reasoningTokens(ujson.Obj.from(u))
+      // TokenUsage.completionTokens never includes thinkingTokens: take them out where the provider counted them in
+      val answer =
+        if (dialect.reasoningInCompletion) math.max(0, completion - reasoning.fold(0)(math.max(0, _))) else completion
       TokenUsage(
         promptTokens = prompt,
-        completionTokens = completion,
+        completionTokens = answer,
         totalTokens = u.get("total_tokens").flatMap(_.numOpt).map(_.toInt).getOrElse(prompt + completion),
-        thinkingTokens = dialect.reasoningTokens(ujson.Obj.from(u))
+        thinkingTokens = reasoning
       )
     }
 

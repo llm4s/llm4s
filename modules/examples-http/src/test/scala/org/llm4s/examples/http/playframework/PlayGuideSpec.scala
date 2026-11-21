@@ -12,6 +12,7 @@ import scala.util.Using
  * line of a `scala` block must be a line of the app's sources, and every line of a `hocon` block a line of its
  * `application.conf`. The sources are compiled and tested by this module's other specs.
  */
+@org.llm4s.tags.DocsSpec
 class PlayGuideSpec extends AnyFlatSpec with Matchers {
 
   private val GuidePath   = "docs/guide/http-reference-apps.md"

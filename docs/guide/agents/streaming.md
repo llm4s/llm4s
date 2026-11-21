@@ -64,10 +64,31 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost`, `provider`, `adjustments` | after each provider call returns a completion - every attempt a retrying wrapper makes, numbered in `attempts`, and (`attempts` 0) each call a hook makes through `ModelContext.accounted` |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
+
+`adjustments` is the call's `Completion.adjustments` ([RFC 0008](../../rfcs/0008-generation-controls)): each
+requested option the provider or model did not send as asked. An agent run returns no `Completion`, so this is
+where an agent caller finds them, one call at a time. An empty list means nothing was reported, not that every
+option was sent: some omissions are not reported yet. Like every durable event, a call's `ModelCallCompleted` is
+stored only when its task commits, so the adjustments of a task that fails are not seen.
+
+```scala
+import org.llm4s.llmconnect.model.RequestAdjustment
+
+agent
+  .stream(ThreadId("t1"), "Summarise the report") {
+    case AgentEvents.ModelCallCompleted(m) =>
+      m.adjustments.foreach {
+        case RequestAdjustment.Dropped(option, reason) => println(s"${m.model} did not send $option: $reason")
+        case _                                         => ()
+      }
+    case _ => ()
+  }
+  .flatMap(_.await())
+```
 
 **Live** events are for watching. They carry content, have no `seq`, and are never stored or replayed.
 

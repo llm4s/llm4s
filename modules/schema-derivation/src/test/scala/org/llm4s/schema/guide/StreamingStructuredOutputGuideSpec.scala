@@ -17,6 +17,7 @@ import java.nio.file.{ Files, Paths }
  * blocks are here. Every `scala` block of the section must appear in this file word for word (ignoring whitespace).
  * Change the guide and this spec together.
  */
+@org.llm4s.tags.DocsSpec
 class StreamingStructuredOutputGuideSpec extends AnyFlatSpec with Matchers {
 
   object Streaming {

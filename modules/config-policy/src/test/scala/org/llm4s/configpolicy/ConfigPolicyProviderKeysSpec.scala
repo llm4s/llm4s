@@ -32,7 +32,7 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
     ConfigPolicyEngine.check(config, policy, env).map(_.rule)
 
   private def openai(url: String): OpenAIConfig =
-    OpenAIConfig.fromValues("gpt-4o", Secret("k"), None, url).value
+    OpenAIConfig.fromValues("gpt-4o", Secret("k"), url).value
 
   private def fromSection(section: String): ProviderConfig =
     Llm4sConfig
@@ -178,13 +178,13 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
 
   "the prod preset's model patterns" should {
     "need an explicit suffix pattern to allow dated snapshots" in {
-      val snapshot = OpenAIConfig.fromValues("gpt-4o-2024-08-06", Secret("k"), None, "https://api.openai.com/v1").value
+      val snapshot = OpenAIConfig.fromValues("gpt-4o-2024-08-06", Secret("k"), "https://api.openai.com/v1").value
       rules(snapshot, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) should contain("allowedModels")
 
       val widened = ConfigPolicy.prodSafeDefaults.withAllowedModelPatterns("openai/gpt-4o(-.*)?")
       rules(snapshot, widened, CatalogEnvironment.Prod) should not contain "allowedModels"
       rules(
-        OpenAIConfig.fromValues("gpt-4o", Secret("k"), None, "https://api.openai.com/v1").value,
+        OpenAIConfig.fromValues("gpt-4o", Secret("k"), "https://api.openai.com/v1").value,
         widened,
         CatalogEnvironment.Prod
       ) should not contain "allowedModels"

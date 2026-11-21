@@ -31,6 +31,7 @@ import scala.util.Try
  *  - the code blocks on the docs page, rendered for the script's release, are the committed files, so the page cannot
  *    drift from what was run; rendered for 0.5.0 they add the provider modules and a logging backend.
  */
+@org.llm4s.tags.DocsSpec
 class ScalaCliQuickstartSpec extends AnyFlatSpec with Matchers {
 
   private val root: Path =

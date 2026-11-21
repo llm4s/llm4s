@@ -28,6 +28,7 @@ import java.time.Instant
  * The client is a script, not a model: it returns the reply each test hands it, so the checks are on what llm4s
  * does with a reply and never on what a model says.
  */
+@org.llm4s.tags.DocsSpec
 class JsonLibrariesGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   /** Answers every request with `reply` and records the requests. */

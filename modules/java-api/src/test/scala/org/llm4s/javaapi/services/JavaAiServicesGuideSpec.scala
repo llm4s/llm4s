@@ -17,6 +17,7 @@ import scala.jdk.CollectionConverters.*
  * javac compiles; this spec checks that each block is in that file, word for word, and runs the snippets against
  * scripted clients, pinning what the prose says they do.
  */
+@org.llm4s.tags.DocsSpec
 class JavaAiServicesGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   private val GuideFile = "docs/guide/java-ai-services.md"

@@ -12,6 +12,7 @@ import org.scalatest.matchers.should.Matchers
  * Part 1 of the support-assistant tutorial (`docs/tutorials/support-assistant/part-1-first-call.md`): its code, run
  * against a scripted client; its page, compared with the code word for word; and exercise 1, the solution and yours.
  */
+@org.llm4s.tags.DocsSpec
 class Part1Spec extends AnyFlatSpec with Matchers with TutorialSpecSupport {
   import Part1FirstCall.*
 

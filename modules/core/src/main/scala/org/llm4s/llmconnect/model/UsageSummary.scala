@@ -13,8 +13,10 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  *
  * @param requestCount   number of API calls attributed to this model
  * @param inputTokens    cumulative prompt tokens sent to the model
- * @param outputTokens   cumulative completion tokens received from the model
- * @param thinkingTokens cumulative extended-thinking tokens (Anthropic only; zero for other providers)
+ * @param outputTokens   cumulative output tokens received from the model, thinking included: each
+ *                       request's `TokenUsage.totalOutputTokens`, what the provider billed as output
+ * @param thinkingTokens cumulative thinking/reasoning tokens, the part of `outputTokens` that was
+ *                       thinking; zero where the provider reports none
  * @param totalCost      cumulative estimated cost in USD; `BigDecimal(0)` when cost data is unavailable
  *
  * Build one with [[ModelUsage.apply]] and change it with the `with*` setters; the constructor and `copy` are
@@ -36,10 +38,10 @@ final case class ModelUsage private (
   /** Sets the cumulative prompt tokens. */
   def withInputTokens(inputTokens: Long): ModelUsage = copy(inputTokens = inputTokens)
 
-  /** Sets the cumulative completion tokens. */
+  /** Sets the cumulative output tokens, thinking included. */
   def withOutputTokens(outputTokens: Long): ModelUsage = copy(outputTokens = outputTokens)
 
-  /** Sets the cumulative extended-thinking tokens. */
+  /** Sets the cumulative thinking tokens, the part of `outputTokens` that was thinking. */
   def withThinkingTokens(thinkingTokens: Long): ModelUsage = copy(thinkingTokens = thinkingTokens)
 
   /** Sets the cumulative estimated cost in USD. */
@@ -57,7 +59,7 @@ final case class ModelUsage private (
     copy(
       requestCount = requestCount + 1L,
       inputTokens = inputTokens + usage.promptTokens.toLong,
-      outputTokens = outputTokens + usage.completionTokens.toLong,
+      outputTokens = outputTokens + usage.totalOutputTokens.toLong, // thinking included
       thinkingTokens = thinkingTokens + thinking.toLong,
       totalCost = totalCost + costValue
     )
@@ -90,8 +92,8 @@ object ModelUsage {
    *
    * @param requestCount   number of API calls attributed to this model
    * @param inputTokens    cumulative prompt tokens
-   * @param outputTokens   cumulative completion tokens
-   * @param thinkingTokens cumulative extended-thinking tokens
+   * @param outputTokens   cumulative output tokens, thinking included
+   * @param thinkingTokens cumulative thinking tokens, the part of `outputTokens` that was thinking
    * @param totalCost      cumulative estimated cost in USD
    */
   def apply(
@@ -123,8 +125,10 @@ object ModelUsage {
  *
  * @param requestCount   total API calls across all models
  * @param inputTokens    total prompt tokens sent across all models
- * @param outputTokens   total completion tokens received across all models
- * @param thinkingTokens total extended-thinking tokens (non-zero only for Anthropic models)
+ * @param outputTokens   total output tokens received across all models, thinking included (each request's
+ *                       `TokenUsage.totalOutputTokens`)
+ * @param thinkingTokens total thinking/reasoning tokens, the part of `outputTokens` that was thinking; zero
+ *                       where no provider reports any
  * @param totalCost      total estimated cost in USD; `BigDecimal(0)` when unavailable
  * @param byModel        per-model breakdown; keyed by the model identifier string
  *
@@ -187,7 +191,7 @@ final case class UsageSummary private (
     copy(
       requestCount = requestCount + 1L,
       inputTokens = inputTokens + usage.promptTokens.toLong,
-      outputTokens = outputTokens + usage.completionTokens.toLong,
+      outputTokens = outputTokens + usage.totalOutputTokens.toLong, // thinking included
       thinkingTokens = thinkingTokens + thinking.toLong,
       totalCost = totalCost + costValue,
       byModel = byModel.updated(model, updatedModelUsage)

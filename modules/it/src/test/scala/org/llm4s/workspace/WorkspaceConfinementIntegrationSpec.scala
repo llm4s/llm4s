@@ -87,6 +87,15 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       "public class T { public static void main(String[] a) throws Exception { " +
         "java.io.File f = java.io.File.createTempFile(\"llm4s\", \".tmp\"); System.out.print(f); f.delete(); } }"
     )
+    // signals its parent, the runner's JVM, with SIGTERM (#2009): refused from Landlock ABI v6
+    write(
+      dirA,
+      "S.java",
+      "public class S { public static void main(String[] a) throws Exception { " +
+        "ProcessHandle runner = ProcessHandle.current().parent().orElseThrow(); " +
+        "String cmd = new String(java.nio.file.Files.readAllBytes(java.nio.file.Path.of(\"/proc/\" + runner.pid() + \"/cmdline\"))); " +
+        "System.out.print(\"parent=\" + cmd.replace('\\0', ' ').trim() + \" signalled=\" + runner.destroy()); } }"
+    )
     // java is never an extra command (it runs any code): the whole config names it, only to have a JVM to run
     val config = WorkspaceSandboxConfig.Permissive.copy(
       allowedCommands = WorkspaceSandboxConfig.Permissive.allowedCommands + "java",
@@ -114,6 +123,22 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
     if (owner != RepoOwner.toString && !dockerDesktop)
       fail(s"the repository is owned by uid $owner in the container, not $RepoOwner")
     start(dirA, HostPortA, config, extra = Set("curl", "jcmd"))
+  }
+
+  /** The image's Landlock protections on this Docker host's kernel, as its helper reports them (#2009). */
+  private def imageProtections: String = {
+    val p = new ProcessBuilder(
+      "docker",
+      "run",
+      "--rm",
+      "--entrypoint",
+      "/usr/local/bin/llm4s-confine",
+      ContainerisedWorkspaceTest.image,
+      "--report"
+    ).redirectErrorStream(true).start()
+    val out = new String(p.getInputStream.readAllBytes(), StandardCharsets.UTF_8).trim
+    if (p.waitFor() != 0) fail(s"llm4s-confine --report failed in the image: $out")
+    out
   }
 
   /** Whether the Docker daemon is Docker Desktop's, whose bind mounts do not keep a chown made in a container. */
@@ -246,5 +271,22 @@ class WorkspaceConfinementIntegrationSpec extends AnyFlatSpec with Matchers with
       r.exitCode should not be 0
       (r.stdout should not).include("JDK")
     }
+  }
+
+  // last: were the signal not refused, the runner would stop
+  it should "not signal the runner's JVM, from Landlock ABI v6 (#2009)" in {
+    val ws     = live(workspaceA)
+    val report = imageProtections
+    info(report)
+    val abi = raw"landlock-abi=(\d+) .*".r.findFirstMatchIn(report).map(_.group(1).toInt).getOrElse(0)
+    assume(abi >= 6, s"this Docker host's kernel has no Landlock scopes: $report")
+    report should endWith("scopes=abstract-unix-socket,signal")
+    val r = runCommand(ws, "java S.java")
+    withClue(s"java: $r") {
+      r.exitCode shouldBe 0
+      r.stdout should include("org.llm4s.runner.RunnerMain") // its parent is the runner
+      r.stdout should endWith("signalled=false")
+    }
+    runCommand(ws, "cat b").stdout shouldBe "replacement" // the runner is still there
   }
 }

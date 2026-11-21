@@ -36,6 +36,7 @@ import java.nio.file.{ Files, Path, Paths }
  * `HelloLlm4s.java` (run by `JavaGuideSpec`) and `WrapClientTest.kt` (run by the Kotlin API's Gradle build); the last
  * tests check that they still are.
  */
+@org.llm4s.tags.DocsSpec
 class ScalaAiPagesSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---------------------------------------------------------------------------------------------------------------

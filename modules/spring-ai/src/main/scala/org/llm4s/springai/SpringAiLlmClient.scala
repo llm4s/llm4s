@@ -27,7 +27,8 @@ import scala.util.Try
  * `Llm4s.wrapClient(new SpringAiLlmClient(chatModel))` gives the facade's `JLlmClient`.
  *
  * The conversation's system, user, assistant (with its tool calls) and tool messages become the `Prompt`; the options'
- * temperature, top-p, max tokens, presence and frequency penalties and tools are sent as `ToolCallingChatOptions`. The
+ * temperature, top-p, max tokens, presence and frequency penalties and tools are set on a copy of the model's own
+ * options (`chatModel.getOptions`), so a model that reads its own options type, such as `OpenAiChatModel`, gets it. The
  * Spring AI model returns its tool calls, which the llm4s agent runs. The response's id, model, text, tool calls and
  * usage become the [[org.llm4s.llmconnect.model.Completion Completion]]. An exception the model throws, or a `Flux`
  * error while streaming, is a `Left`; an [[org.llm4s.javaapi.LlmException LlmException]] gives back the error it carries.
@@ -45,7 +46,7 @@ final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveC
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     SpringAiLlmClient
-      .attempt(chatModel.call(SpringAiMapping.prompt(conversation, options)))
+      .attempt(chatModel.call(SpringAiMapping.prompt(conversation, options, chatModel.getOptions)))
       .flatMap(SpringAiMapping.completion)
 
   override def streamComplete(
@@ -57,7 +58,7 @@ final class SpringAiLlmClient(chatModel: ChatModel, contextWindow: Int, reserveC
     SpringAiLlmClient
       .attempt {
         chatModel
-          .stream(SpringAiMapping.prompt(conversation, options))
+          .stream(SpringAiMapping.prompt(conversation, options, chatModel.getOptions))
           .doOnNext(response => acc.add(response).fold(e => throw SpringAiMapping.failure(e), _.foreach(onChunk)))
           .blockLast()
       }

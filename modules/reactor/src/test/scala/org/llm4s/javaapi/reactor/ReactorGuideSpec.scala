@@ -15,6 +15,7 @@ import scala.jdk.CollectionConverters.*
  * against this module's public API, and this spec checks that each block of the guide is in it and runs them over
  * scripted clients.
  */
+@org.llm4s.tags.DocsSpec
 class ReactorGuideSpec extends AnyWordSpec with Matchers {
 
   import GuideDocs.*

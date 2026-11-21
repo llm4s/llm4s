@@ -450,6 +450,31 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     mkPipeline(ec = badClient).answer("any question").isLeft shouldBe true
   }
 
+  it should "trace the answer's output tokens as billed: the completion plus the thinking it leaves out" in {
+    val events = mutable.Buffer.empty[org.llm4s.trace.TraceEvent]
+    val recording = new org.llm4s.trace.Tracing {
+      def traceEvent(event: org.llm4s.trace.TraceEvent): Result[Unit]                  = { events += event; Right(()) }
+      def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
+      def traceError(error: Throwable, context: String): Result[Unit]                  = Right(())
+      def traceCompletion(completion: Completion, model: String): Result[Unit]         = Right(())
+      def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+    }
+    // a reasoning reply after its client's conversion: 18 answer tokens and 46 thinking tokens
+    val reasoning = new MockLLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        super.complete(conversation, options).map(_.withUsage(TokenUsage(81, 18, 145, thinkingTokens = Some(46))))
+    }
+    val p =
+      RAGPipeline.withStores(defaultConfig, reasoning, embeddingClient, vectorStore, keywordIndex, Some(recording))
+    p.indexDocument("doc1", "Paris is the capital of France.")
+    p.answer("What is the capital of France?").isRight shouldBe true
+
+    val answered = events.collect {
+      case e: org.llm4s.trace.TraceEvent.RAGOperationCompleted if e.operation == "answer" => e
+    }
+    answered.map(e => (e.llmPromptTokens, e.llmCompletionTokens)) shouldBe Seq((Some(81), Some(64)))
+  }
+
   // =========================================================================
   // clear
   // =========================================================================

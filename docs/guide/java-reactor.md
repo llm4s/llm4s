@@ -33,8 +33,7 @@ It is a module of its own, not part of `llm4s-java-api`, so that a Java applicat
 `reactor-core`. It is **Experimental**: its API may change in any release ([1.0 Scope](../reference/v1-scope)).
 
 {: .note }
-> `llm4s-reactor` is new and is published from the release after {{ site.data.project.latest_release }}. Until then,
-> build it from `main` ([Unreleased changes](../getting-started/installation#unreleased-changes-main)).
+> `llm4s-reactor` is new: it is published from 0.6.0.
 
 ## Add the dependency
 

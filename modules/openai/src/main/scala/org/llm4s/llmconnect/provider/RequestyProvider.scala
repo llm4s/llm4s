@@ -45,8 +45,8 @@ object RequestyProvider extends ProviderDescriptor:
       config <- OpenAIConfig.fromValues(
         section.model.asString,
         apiKey,
-        section.extra(OpenAIConfig.OrganizationKey),
         baseUrl,
+        section.extra(OpenAIConfig.OrganizationKey),
         Some(id)
       )
     yield config

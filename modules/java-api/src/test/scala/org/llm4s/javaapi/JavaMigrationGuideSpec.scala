@@ -25,6 +25,7 @@ import scala.util.Using
  * block of the guide is word for word in one of them, and runs this module's blocks against `FakeLlmClient` or a
  * client it scripts. The LangChain4j and Spring AI side of the guide is prose with sourced links, not code.
  */
+@org.llm4s.tags.DocsSpec
 class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matchers {
 
   private val GuideFile = "docs/guide/java-migration.md"
@@ -103,7 +104,10 @@ class JavaMigrationGuideSpec extends AnyWordSpec with TestTimeLimit with Matcher
     }
 
     "link the issues it names as gaps, and be linked from the pages the issue lists" in {
-      Seq("2277", "2278").foreach(n => guide should include(s"https://github.com/llm4s/llm4s/issues/$n"))
+      guide should include("https://github.com/llm4s/llm4s/issues/2277")
+      // Spring AI interop (#2278) shipped as llm4s-spring-ai: no longer a gap, the guide points to it instead.
+      (guide should not).include("https://github.com/llm4s/llm4s/issues/2278")
+      guide should include("(spring-ai)")
       Seq("migrating-from-langchain4j", "java", "spring-boot", "comparison").foreach { page =>
         withClue(s"docs/guide/$page.md does not link the Java migration guide: ") {
           GuideDocs.read(GuideFile, s"docs/guide/$page.md") should include("(java-migration")

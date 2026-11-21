@@ -24,7 +24,10 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
   private def wrap(client: LLMClient): JLlmClient = Llm4s.wrapClient(client)
 
   private def emitting(pieces: Seq[String], end: => Result[Completion]): LLMClient =
-    new Scripted(onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end }, () => end)
+    new Scripted(
+      onChunk => { pieces.foreach(p => onChunk(StreamedChunk(id = "c", content = Some(p)))); end },
+      () => end
+    )
 
   private val conversation = Conversation(Seq(UserMessage("q")))
   private val options      = JCompletionOptions.builder().temperature(0.1).build()
@@ -56,9 +59,12 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be cold: each subscription makes its own provider call" in {
-    val calls  = new AtomicInteger(0)
-    val client = new Scripted(onChunk => { calls.incrementAndGet(); onChunk(chunk(0)); Right(completion("x")) }, () => Right(completion("x")))
-    val flux   = Streams.toFlux(wrap(client), "q")
+    val calls = new AtomicInteger(0)
+    val client = new Scripted(
+      onChunk => { calls.incrementAndGet(); onChunk(chunk(0)); Right(completion("x")) },
+      () => Right(completion("x"))
+    )
+    val flux = Streams.toFlux(wrap(client), "q")
     calls.get shouldBe 0
     StepVerifier.create(flux).expectNext("x").expectComplete().verify(Deadline)
     StepVerifier.create(flux).expectNext("x").expectComplete().verify(Deadline)
@@ -138,7 +144,9 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
     val total    = 500
     val client = new Scripted(
       onChunk => {
-        (1 to total).foreach { i => produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", content = Some(s"$i"))) }
+        (1 to total).foreach { i =>
+          produced.incrementAndGet(); onChunk(StreamedChunk(id = "c", content = Some(s"$i")))
+        }
         Right(completion("all"))
       },
       () => Right(completion("all"))
@@ -153,9 +161,7 @@ class StreamsSpec extends AnyFlatSpec with Matchers {
         .expectSubscription()
         .expectNoEvent(Duration.ofMillis(50))
         .`then`(() => heldBack(0))
-    ) { (step, i) =>
-      step.thenRequest(1).expectNext(s"$i").`then`(() => heldBack(i.toLong))
-    }
+    )((step, i) => step.thenRequest(1).expectNext(s"$i").`then`(() => heldBack(i.toLong)))
     oneAtATime
       .thenRequest(Long.MaxValue)
       .expectNextCount((total - 5).toLong)

@@ -7,12 +7,18 @@ import pureconfig.ConfigSource
 import java.util.Locale
 
 object CheckPolicies {
-  def main(args: Array[String]): Unit = {
+  def main(args: Array[String]): Unit = sys.exit(run(args))
+
+  /**
+   * Checks the config `args` name (`--env <name>`, `--config <file>`) and returns the exit code: `0` when it passes
+   * the environment's policy, `1` when it violates it or does not load, `2` for an unknown `--env`.
+   */
+  def run(args: Array[String]): Int = {
     val envName = parseArg(args, "--env").getOrElse("prod")
     resolveEnv(envName) match {
       case Left(error) =>
         Console.err.println(error)
-        sys.exit(2)
+        2
       case Right((environment, policy)) =>
         val configOpt = parseArg(args, "--config")
         val source    = sourceFor(configOpt)
@@ -27,15 +33,15 @@ object CheckPolicies {
           case Right(violations) =>
             if (violations.isEmpty) {
               println(s"Config policy check passed for env=$envName")
-              sys.exit(0)
+              0
             } else {
               Console.err.println(s"Config policy check failed for env=$envName")
               violations.foreach(v => Console.err.println(s" - [${v.rule}] ${v.message}"))
-              sys.exit(1)
+              1
             }
           case Left(error) =>
             Console.err.println(s"Failed to load provider config: ${error.formatted}")
-            sys.exit(1)
+            1
         }
     }
   }

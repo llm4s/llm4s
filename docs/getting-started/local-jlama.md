@@ -41,8 +41,8 @@ depending on the machine. For real work use [Ollama](ollama-quickstart), which s
 - Network access **once**, to download the model from Hugging Face to `~/.cache/llm4s/jlama`. Later runs load it from
   there and need no network.
 
-`llm4s-jlama` is new: it is published with the first release after 0.5.1. Until that release, run the sample from a
-clone of the repository with `sbt localJlamaDemo` (see [From a clone](#from-a-clone-of-the-repository)).
+`llm4s-jlama` is new: it is published from 0.6.0. To run the sample from a clone of the repository instead, use
+`sbt localJlamaDemo` (see [From a clone](#from-a-clone-of-the-repository)).
 {: .note }
 
 ## The JVM flags

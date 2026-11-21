@@ -30,6 +30,7 @@ import scala.concurrent.duration.*
  * provider's error, or the timeout. The timeout cases use a provider call that parks until its thread is
  * interrupted, so they cannot pass by a race; no case sleeps.
  */
+@org.llm4s.tags.DocsSpec
 class EffectSystemsGuideSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
   import EffectSystemsGuide.*
 

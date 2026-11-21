@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.llmconnect.model.ReasoningEffort
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -480,5 +481,68 @@ class ModelMetadataSettersSpec extends AnyFlatSpec with Matchers {
       disallowedParams = Some(Set("fixture-param")),
       temperatureConstraint = Some((0.2, 0.8))
     )
+  }
+
+  it should "set, replace and clear supportsAdaptiveThinking" in {
+    val enabled  = ModelCapabilities(supportsAdaptiveThinking = Some(true))
+    val disabled = ModelCapabilities(supportsAdaptiveThinking = Some(false))
+
+    baseCapabilities.withSupportsAdaptiveThinking(true) shouldBe enabled
+    baseCapabilities.withSupportsAdaptiveThinking(Some(true)) shouldBe enabled
+    baseCapabilities.withSupportsAdaptiveThinking(false) shouldBe disabled
+    enabled.withSupportsAdaptiveThinking(false) shouldBe disabled
+    disabled.withSupportsAdaptiveThinking(Some(true)) shouldBe enabled
+    enabled.withSupportsAdaptiveThinking(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
+  }
+
+  it should "set, replace and clear supportsOutputConfig" in {
+    val enabled  = ModelCapabilities(supportsOutputConfig = Some(true))
+    val disabled = ModelCapabilities(supportsOutputConfig = Some(false))
+
+    baseCapabilities.withSupportsOutputConfig(true) shouldBe enabled
+    baseCapabilities.withSupportsOutputConfig(Some(true)) shouldBe enabled
+    baseCapabilities.withSupportsOutputConfig(false) shouldBe disabled
+    enabled.withSupportsOutputConfig(false) shouldBe disabled
+    disabled.withSupportsOutputConfig(Some(true)) shouldBe enabled
+    enabled.withSupportsOutputConfig(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
+  }
+
+  it should "set, replace and clear supportsThinkingOff" in {
+    val enabled  = ModelCapabilities(supportsThinkingOff = Some(true))
+    val disabled = ModelCapabilities(supportsThinkingOff = Some(false))
+
+    baseCapabilities.withSupportsThinkingOff(true) shouldBe enabled
+    baseCapabilities.withSupportsThinkingOff(Some(true)) shouldBe enabled
+    baseCapabilities.withSupportsThinkingOff(false) shouldBe disabled
+    enabled.withSupportsThinkingOff(false) shouldBe disabled
+    disabled.withSupportsThinkingOff(Some(true)) shouldBe enabled
+    enabled.withSupportsThinkingOff(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
+  }
+
+  it should "set, replace and clear supportsBudgetThinking" in {
+    val enabled  = ModelCapabilities(supportsBudgetThinking = Some(true))
+    val disabled = ModelCapabilities(supportsBudgetThinking = Some(false))
+
+    baseCapabilities.withSupportsBudgetThinking(true) shouldBe enabled
+    baseCapabilities.withSupportsBudgetThinking(Some(true)) shouldBe enabled
+    baseCapabilities.withSupportsBudgetThinking(false) shouldBe disabled
+    enabled.withSupportsBudgetThinking(false) shouldBe disabled
+    disabled.withSupportsBudgetThinking(Some(true)) shouldBe enabled
+    enabled.withSupportsBudgetThinking(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
+  }
+
+  it should "set, replace and clear supportedReasoningEfforts" in {
+    val populated   = ModelCapabilities(supportedReasoningEfforts = Some(Set(ReasoningEffort.Low)))
+    val replacement = ModelCapabilities(supportedReasoningEfforts = Some(Set(ReasoningEffort.High)))
+
+    baseCapabilities.withSupportedReasoningEfforts(Set[ReasoningEffort](ReasoningEffort.Low)) shouldBe populated
+    baseCapabilities.withSupportedReasoningEfforts(Some(Set[ReasoningEffort](ReasoningEffort.Low))) shouldBe populated
+    populated.withSupportedReasoningEfforts(Set[ReasoningEffort](ReasoningEffort.High)) shouldBe replacement
+    populated.withSupportedReasoningEfforts(None) shouldBe baseCapabilities
+    baseCapabilities shouldBe ModelCapabilities()
   }
 }

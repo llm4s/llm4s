@@ -275,13 +275,13 @@ class JCompletionSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       .hashCode
   }
 
-  it should "count what an agent turn's usage sums: prompt tokens as input, completion tokens as output" in {
+  it should "count what an agent turn's usage sums: prompt tokens as input, completion and thinking as output" in {
     val tokens = full.usage.get
     val usage  = FacadeInternals.tokenUsage(tokens)
     val turn   = FacadeInternals.usageSummary(UsageSummary().add("m", tokens, None).add("m", tokens, None))
 
     turn.inputTokens shouldBe 2L * usage.promptTokens
-    turn.outputTokens shouldBe 2L * usage.completionTokens
+    turn.outputTokens shouldBe 2L * (usage.completionTokens + usage.thinkingTokens)
     turn.thinkingTokens shouldBe 2L * usage.thinkingTokens
   }
 }

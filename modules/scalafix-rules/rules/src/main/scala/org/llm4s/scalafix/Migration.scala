@@ -10,6 +10,10 @@ private[scalafix] object Migration {
   def guide05(anchor: String): String =
     s"https://github.com/llm4s/llm4s/blob/main/docs/migrations/0-4-1-to-0-5-0.md#$anchor"
 
+  /** The per-change migration notes written since 0.5.1 (docs/reference/migration.md), by section anchor. */
+  def guide10(anchor: String): String =
+    s"https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md#$anchor"
+
   private val memberSuffix = """(\.apply|\.unapply|#copy|#`<init>`)\((\+\d+)?\)\.$""".r
 
   /**
@@ -38,6 +42,13 @@ private[scalafix] object Migration {
             parameter.substring(0, parameter.lastIndexOf("("))
         }
     }
+
+  /**
+   * Whether a call builds an `owner`: its `apply` (as Scala 3 records it, the object itself), or its constructor.
+   */
+  def constructs(callee: String, owner: String): Boolean =
+    callee == owner + "." || callee == owner + "#" || callee.startsWith(owner + ".apply(") ||
+      callee.startsWith(owner + "#`<init>`(")
 
   /** The tree's symbol, if SemanticDB recorded one for it. */
   def symbolOf(tree: Tree)(implicit doc: SemanticDocument): Option[Symbol] = {

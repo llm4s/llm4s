@@ -25,7 +25,7 @@ There is no Helidon module for llm4s. This page wires the [Java API](java) into 
 routing. Every Java, YAML and Gradle snippet is an excerpt of the runnable sample,
 [`modules/samples/helidon-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/helidon-java), which CI
 builds and tests against the library on every pull request. Helidon MP is a MicroProfile runtime: there, a CDI
-producer as in the [Quarkus guide](quarkus#the-client-as-a-cdi-bean), with `@ConfigProperty` in place of
+producer as in the [Quarkus guide](quarkus#without-the-extension), with `@ConfigProperty` in place of
 `@ConfigMapping`, does the same job.
 
 ## Run the sample
@@ -36,7 +36,7 @@ You need **JDK 21 or newer** and **Gradle 8.11 or newer**. The sample's default 
 ```bash
 ollama pull llama3.2
 cd modules/samples/helidon-java
-gradle run -Pllm4sVersion=0.5.1
+gradle run -Pllm4sVersion=0.6.0
 ```
 
 Then ask it something, once as a whole reply and once streamed:

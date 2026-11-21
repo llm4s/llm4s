@@ -36,7 +36,7 @@ Result: 6 passed, 0 warnings, 1 failed, 2 skipped
 
 ## Running it
 
-The doctor is `llm4s-doctor`, published from the first release after 0.5.1. It depends on `llm4s-core` only. Run it
+The doctor is `llm4s-doctor`, published from 0.6.0. It depends on `llm4s-core` only. Run it
 from your own project, so it runs on your project's classpath: it reads the `application.conf` your application loads
 and finds only the provider modules your build depends on. A provider your build lacks is reported as missing, not
 found on someone else's classpath.

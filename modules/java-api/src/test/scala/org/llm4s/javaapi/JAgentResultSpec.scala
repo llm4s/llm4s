@@ -205,17 +205,18 @@ class JAgentResultSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
 
   "JUsageSummary" should "report the totals, and each model's share sorted by model name, in JDK types" in {
     val u = FacadeInternals.usageSummary(usage)
-    (u.requestCount, u.inputTokens, u.outputTokens, u.thinkingTokens) shouldBe ((3L, 14L, 7L, 2L))
+    // output includes thinking: 5 + 2 thinking, 1, 1
+    (u.requestCount, u.inputTokens, u.outputTokens, u.thinkingTokens) shouldBe ((3L, 14L, 9L, 2L))
     u.totalCost shouldBe new java.math.BigDecimal("0.75")
     u.byModel.keySet.asScala.toList shouldBe List("gpt-a", "gpt-b")
     val b = u.byModel.get("gpt-b")
-    (b.requestCount, b.inputTokens, b.outputTokens, b.thinkingTokens) shouldBe ((2L, 11L, 6L, 2L))
+    (b.requestCount, b.inputTokens, b.outputTokens, b.thinkingTokens) shouldBe ((2L, 11L, 8L, 2L))
     b.totalCost shouldBe new java.math.BigDecimal("0.75")
     u.byModel.get("gpt-a").totalCost.signum shouldBe 0
     an[UnsupportedOperationException] should be thrownBy u.byModel.clear()
     (u.byModel.getClass.getName should not).startWith("scala.")
-    u.toString shouldBe "JUsageSummary(3 requests, 14 in, 7 out, 2 thinking, 0.75 USD)"
-    b.toString shouldBe "JModelUsage(2 requests, 11 in, 6 out, 2 thinking, 0.75 USD)"
+    u.toString shouldBe "JUsageSummary(3 requests, 14 in, 9 out, 2 thinking, 0.75 USD)"
+    b.toString shouldBe "JModelUsage(2 requests, 11 in, 8 out, 2 thinking, 0.75 USD)"
   }
 
   it should "be a value, as each model's share is" in {

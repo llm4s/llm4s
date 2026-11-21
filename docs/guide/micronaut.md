@@ -35,7 +35,7 @@ You need **JDK 21 or newer** and **Gradle 8.11 or newer**. The sample's default 
 ```bash
 ollama pull llama3.2
 cd modules/samples/micronaut-java
-gradle run -Pllm4sVersion=0.5.1
+gradle run -Pllm4sVersion=0.6.0
 ```
 
 Then ask it something, once as a whole reply and once streamed:

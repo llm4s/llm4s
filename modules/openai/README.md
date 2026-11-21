@@ -91,8 +91,9 @@ val reply = for {
 - **Streaming and tool calling**, through the `openai-java` SDK.
 - **Structured output:** `ResponseFormat.Json` maps to the SDK's `json_object` response format and
   `ResponseFormat.JsonSchema` to `json_schema`.
-- **Reasoning:** `CompletionOptions.reasoning` is sent as `reasoning_effort` to a reasoning model
-  (`ReasoningEffort.None` sends nothing) and never to a model known not to reason. On Azure, a
+- **Reasoning:** `CompletionOptions.reasoning` is sent as `reasoning_effort` to a reasoning model, a level the
+  model lacks as the nearest it accepts, and `Thinking.Off` as the lowest it accepts (`none` where it can turn
+  thinking off); never to a model known not to reason. On Azure, a
   deployment name the model registry cannot resolve gets it whenever reasoning is asked for.
 - **OpenAI model rules:** the o-series and `max_completion_tokens` handling live in this module
   (`OpenAIModelRules`), not in core.

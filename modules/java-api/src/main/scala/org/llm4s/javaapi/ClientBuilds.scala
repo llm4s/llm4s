@@ -86,8 +86,8 @@ private[javaapi] object ClientBuilds {
       config <- OpenAIConfig.fromValues(
         model,
         apiKey,
-        present(s.organization),
-        present(s.baseUrl).getOrElse(OpenAIConfig.DEFAULT_BASE_URL)
+        present(s.baseUrl).getOrElse(OpenAIConfig.DEFAULT_BASE_URL),
+        present(s.organization)
       )(using resolver)
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)
@@ -157,9 +157,9 @@ private[javaapi] object ClientBuilds {
       apiVersion = present(s.apiVersion).getOrElse(AzureConfig.DEFAULT_API_VERSION)
       config <- azureCredential(s) match {
         case Left(apiKey) =>
-          apiKey.flatMap(AzureConfig.fromValues(model, endpoint, _, apiVersion)(using resolver))
+          apiKey.flatMap(AzureConfig.fromValues(model, _, endpoint, apiVersion)(using resolver))
         case Right(tokens) =>
-          tokens.flatMap(AzureConfig.fromTokenProvider(model, endpoint, _, apiVersion)(using resolver))
+          tokens.flatMap(AzureConfig.fromTokenProvider(model, _, endpoint, apiVersion)(using resolver))
       }
       sized    <- sizes(s, config.contextWindow, config.reserveCompletion)
       timeouts <- timeouts(s)

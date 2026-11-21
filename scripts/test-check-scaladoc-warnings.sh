@@ -104,7 +104,7 @@ if command -v ruby >/dev/null 2>&1; then
     def check_step(steps)
       steps.index do |s|
         r = s["run"].to_s
-        r.include?("set -o pipefail") && r =~ /sbt doc\b.*\| tee scaladoc\.log/ &&
+        r.include?("set -o pipefail") && r =~ /sbt\b.*\bdoc\b.*\| tee scaladoc\.log/ &&
           r.include?("scripts/check-scaladoc-warnings.sh scaladoc.log")
       end
     end

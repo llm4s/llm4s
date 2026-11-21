@@ -243,7 +243,9 @@ private[springai] object SpringAiMapping {
         builder.usage(
           new DefaultUsage(
             Integer.valueOf(u.promptTokens),
-            Integer.valueOf(u.completionTokens),
+            Integer.valueOf(
+              u.totalOutputTokens
+            ), // output as billed, reasoning included, as Spring AI's OpenAI binding counts it
             Integer.valueOf(u.totalTokens),
             u,
             u.cachedTokens.map(t => java.lang.Long.valueOf(t.toLong)).orNull,
@@ -259,8 +261,12 @@ private[springai] object SpringAiMapping {
 
   // ---- llm4s request -> Spring AI request (SpringAiLlmClient) -------------------------------------------------------
 
-  def prompt(conversation: Conversation, options: CompletionOptions): Prompt =
-    new Prompt(messages(conversation.messages).asJava, chatOptions(options))
+  /**
+   * The prompt for `conversation`. Its options start from `defaults`, the model's own (`ChatModel.getOptions`), as
+   * Spring AI's `ChatClient` builds them: a model such as `OpenAiChatModel` casts the prompt's options to its own type.
+   */
+  def prompt(conversation: Conversation, options: CompletionOptions, defaults: ChatOptions): Prompt =
+    new Prompt(messages(conversation.messages).asJava, chatOptions(options, defaults))
 
   private def messages(all: Seq[Message]): List[SpringMessage] = {
     // A tool call's name, by id: Spring AI's tool response names its tool, llm4s's only the call it answers.
@@ -288,15 +294,19 @@ private[springai] object SpringAiMapping {
       .toList
   }
 
-  private def chatOptions(options: CompletionOptions): ToolCallingChatOptions = {
+  private def chatOptions(options: CompletionOptions, defaults: ChatOptions): ToolCallingChatOptions = {
     val callbacks: List[ToolCallback] = options.tools.toList.map(springTool)
+    // A copy of the model's options when they take tools, else (a hand-written model's plain defaults) the generic ones.
+    val builder: ToolCallingChatOptions.Builder[?] = Option(defaults).map(_.mutate()) match {
+      case Some(own: ToolCallingChatOptions.Builder[?]) => own
+      case _                                            => ToolCallingChatOptions.builder()
+    }
     // One statement per setter, as in `assistant`.
-    val builder = ToolCallingChatOptions.builder()
-    val _       = builder.temperature(java.lang.Double.valueOf(options.temperature))
-    val _       = builder.topP(java.lang.Double.valueOf(options.topP))
-    val _       = builder.presencePenalty(java.lang.Double.valueOf(options.presencePenalty))
-    val _       = builder.frequencyPenalty(java.lang.Double.valueOf(options.frequencyPenalty))
-    val _       = builder.toolCallbacks(callbacks.asJava)
+    val _ = builder.temperature(java.lang.Double.valueOf(options.temperature))
+    val _ = builder.topP(java.lang.Double.valueOf(options.topP))
+    val _ = builder.presencePenalty(java.lang.Double.valueOf(options.presencePenalty))
+    val _ = builder.frequencyPenalty(java.lang.Double.valueOf(options.frequencyPenalty))
+    val _ = builder.toolCallbacks(callbacks.asJava)
     options.maxTokens.foreach(m => builder.maxTokens(Integer.valueOf(m)))
     builder.build()
   }
