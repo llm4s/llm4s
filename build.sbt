@@ -299,6 +299,18 @@ lazy val coveragePolicyCheck = taskKey[Unit](
   "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
 )
 
+// ---- dependency cache ----
+// Resolves every artifact CI downloads lazily, in every project, including those outside the root aggregate (`it`,
+// `docs`, the scalafix projects, the benchmarks). .github/workflows/dependency-cache.yml runs it on main and saves the
+// result as the one sbt dependency cache every other job restores: on 2026-11-20 each job resolved what a partial
+// cache lacked, in parallel, and Maven Central answered 429 (pekko-stream_3, llm4s-rag_3 0.5.1, scala2-sbt-bridge).
+// `update` resolves all of a project's configurations at once (Compile, Test, Jmh, scala-tool, scala-doc-tool), so
+// `Test / update` is the same report. The compiler bridge and MiMa's previous artifacts are resolved separately, on
+// first use, so they are named here too.
+lazy val resolveAll = taskKey[Unit](
+  "Resolve every dependency, compiler bridge and MiMa baseline of every project, for the CI dependency cache"
+)
+
 // ---- frozen dependency check ----
 // A frozen module must not resolve a document-parsing, speech, cloud-storage, database,
 // observability-backend or foreign vendor-SDK dependency, directly or transitively: freezing it
@@ -649,6 +661,17 @@ lazy val llm4s = (project in file("."))
              |  coverageDisabled      // with a comment saying why it is not measured
              |Also add a codecov flag for the module in codecov.yml in the same commit.""".stripMargin
         )
+    },
+    resolveAll / aggregate := false,
+    resolveAll := {
+      // The filter is written out each time: a val shared between `.all` calls breaks the task macro.
+      val reports   = update.all(ScopeFilter(inAnyProject)).value
+      val bridges   = scalaCompilerBridgeBinaryJar.all(ScopeFilter(inAnyProject)).value
+      val baselines = mimaPreviousClassfiles.all(ScopeFilter(inAnyProject)).value
+      streams.value.log.info(
+        s"Resolved ${reports.size} projects, ${bridges.flatten.distinct.size} compiler bridge(s) and " +
+          s"${baselines.map(_.size).sum} MiMa baseline(s)"
+      )
     },
     frozenDependencyCheck / aggregate := false,
     frozenDependencyCheck := {
