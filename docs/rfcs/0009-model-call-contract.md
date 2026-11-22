@@ -8,7 +8,7 @@ nav_order: 9
 
 # RFC 0009: The model call contract
 
-- **Status:** Implemented, in the release after 0.6.0 (PRs #2681, #2688, #2700, #2691, #PR5, #2687)
+- **Status:** Implemented, in the release after 0.6.0 (PRs #2681, #2688, #2700, #2691, #2702, #2687)
 - **Author(s):** @Somay-kousis
 - **Tracking issue:** [#2613](https://github.com/llm4s/llm4s/issues/2613)
 - **Pull request:** [#2614](https://github.com/llm4s/llm4s/pull/2614)
@@ -422,7 +422,7 @@ Already done or in progress, no RFC needed:
   finish or a blocked prompt a `ContentFilteredError`, on both paths.
 
 Under this RFC, each PR with its own review. **With PR 5 all six are merged, and the RFC is delivered:** PR 1 #2681, PR 2
-#2688, PR 3 #2700, PR 4 #2691, PR 5 #PR5, PR 6 #2687.
+#2688, PR 3 #2700, PR 4 #2691, PR 5 #2702, PR 6 #2687.
 
 1. **PR 1 (Part 1, core).** `FinishReason`, `Completion.finishReason`, typed `StreamedChunk.finishReason`, the
    accumulator carrying it, `TracingLLMClient` reading it for `complete`. Mapped for the chat-completions clients
