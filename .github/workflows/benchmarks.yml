@@ -32,6 +32,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps
@@ -56,6 +57,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps

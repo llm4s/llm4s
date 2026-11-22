@@ -39,6 +39,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: 21
+          problem-matcher: true
 
       - uses: VirtusLab/scala-cli-setup@9d61091a7d9d19f69faa59b31cdbc6ef2537eccc # v1.19.0
 

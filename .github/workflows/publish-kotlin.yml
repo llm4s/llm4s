@@ -67,6 +67,7 @@ jobs:
         with:
           java-version: "21"
           distribution: "temurin"
+          problem-matcher: true
 
       - name: Restore the sbt dependency cache
         uses: ./.github/actions/restore-sbt-deps

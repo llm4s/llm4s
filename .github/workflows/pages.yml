@@ -113,6 +113,7 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+          problem-matcher: true
 
       # The sbt dependency cache that dependency-cache.yml saves, restored without saving. Written out rather than through
       # .github/actions/restore-sbt-deps because the checkout above may be an older release tag that has neither that
