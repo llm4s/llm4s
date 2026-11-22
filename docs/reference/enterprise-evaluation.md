@@ -4,7 +4,7 @@ title: Enterprise Evaluation
 parent: Reference
 nav_order: 25
 description: "Answers to the questions an open-source intake form asks about LLM4S, each linked to its evidence, with the known gaps."
-cites_open_issues: [1281, 1465, 2289, 2305, 2307, 2310]
+cites_open_issues: [1281, 2289, 2307, 2310]
 ---
 
 # Enterprise Evaluation
@@ -113,9 +113,7 @@ closes, so this list is updated when the gap is.
 | Gap | Issue |
 |---|---|
 | No binary-compatibility baseline yet: MiMa checks nothing until a pre-1.0 release sets one, then 1.0 | [#1281](https://github.com/llm4s/llm4s/issues/1281) |
-| GitHub private vulnerability reporting, the preferred route in SECURITY.md, is not enabled | [#1465](https://github.com/llm4s/llm4s/issues/1465) |
 | Support policy published, but release cadence, supported lines after 1.0, long-term support and end-of-support notice period are not yet decided (see [Support Policy](support-policy)) | [#2289](https://github.com/llm4s/llm4s/issues/2289) |
-| Build provenance is attested from the next release, but no release has yet been verified with `gh attestation verify` | [#2305](https://github.com/llm4s/llm4s/issues/2305) |
 | No OpenSSF Best Practices badge | [#2307](https://github.com/llm4s/llm4s/issues/2307) |
 | No trademark and name-use policy; neutrality and continuity not documented in GOVERNANCE.md | [#2310](https://github.com/llm4s/llm4s/issues/2310) |
 
@@ -143,12 +141,12 @@ Support policy: fixes ship in the latest release only (https://llm4s.org/referen
   no SLA, no commercial support (SUPPORT.md).
 Security: SECURITY.md; reports handled by the Security Committee and maintainers, best
   effort, no response-time commitment. Threat model: https://llm4s.org/reference/security.
-  No published advisories. Private vulnerability reporting not yet
-  enabled (https://github.com/llm4s/llm4s/issues/1465).
+  No published advisories. GitHub private vulnerability reporting
+  is enabled.
 Supply chain: CycloneDX SBOM per module on each GitHub Release; OSV-Scanner weekly and on
   dependency changes. Maven Central artifacts PGP-signed (https://llm4s.org/reference/verifying-releases).
-  OpenSSF Scorecard on every push to main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). Build
-  provenance from the next release (https://github.com/llm4s/llm4s/issues/2305); no Best Practices badge
+  OpenSSF Scorecard on every push to main (https://scorecard.dev/viewer/?uri=github.com/llm4s/llm4s). SLSA build
+  provenance attested for every release; no Best Practices badge
   (https://github.com/llm4s/llm4s/issues/2307).
 Data protection: no telemetry; data goes only to the providers and stores you configure;
   default tracing prints metadata only (https://llm4s.org/guide/data-protection).
