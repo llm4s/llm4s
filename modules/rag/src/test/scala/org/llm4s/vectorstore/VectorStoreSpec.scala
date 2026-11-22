@@ -38,6 +38,20 @@ class VectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach 
       retrieved.toOption.flatten.map(_.metadata) shouldBe Some(Map("source" -> "test", "type" -> "document"))
     }
 
+    "keep metadata values with quotes, backslashes and newlines intact" in {
+      val metadata = Map("headings" -> """["A \"b\"","c\\d"]""", "note" -> "line 1\nline 2", "docId" -> "d-1")
+      store.upsert(VectorRecord("q-1", Array(0.1f, 0.2f), Some("x"), metadata)) shouldBe Right(())
+      store.get("q-1").toOption.flatten.map(_.metadata) shouldBe Some(metadata)
+      store
+        .search(Array(0.1f, 0.2f), 5, Some(MetadataFilter.Equals("docId", "d-1")))
+        .map(_.map(_.record.id)) shouldBe Right(Seq("q-1"))
+    }
+
+    "read metadata an older version wrote without escaping" in {
+      SQLiteVectorStore.deserializeMetadata("""{"a":"1","b":"two"}""") shouldBe Map("a" -> "1", "b" -> "two")
+      SQLiteVectorStore.deserializeMetadata("""{"a":"x\y"}""") shouldBe Map("a" -> """x\y""")
+    }
+
     "return None for non-existent record" in {
       val result = store.get("non-existent")
       result shouldBe Right(None)

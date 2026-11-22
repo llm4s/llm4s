@@ -1,5 +1,6 @@
 package org.llm4s.rag
 
+import org.llm4s.chunking.DocumentChunk
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
@@ -78,8 +79,8 @@ class RAGQueryTransformerSpec extends AnyFlatSpec with Matchers with EitherValue
 
   "RAG.query" should "embed the upper-cased query and retrieve its matching chunk" in {
     withRag(RAGConfig.default.withQueryTransformer(upperCase)) { (rag, provider) =>
-      rag.ingestChunks("lower-case", Seq("hello")) shouldBe Right(1)
-      rag.ingestChunks("upper-case", Seq("HELLO")) shouldBe Right(1)
+      rag.ingestChunks("lower-case", DocumentChunk.fromTexts(Seq("hello"))).map(_.size) shouldBe Right(1)
+      rag.ingestChunks("upper-case", DocumentChunk.fromTexts(Seq("HELLO"))).map(_.size) shouldBe Right(1)
       provider.inputs.clear()
 
       val results = rag.query("hello", topK = Some(1)).value
@@ -121,8 +122,8 @@ class RAGQueryTransformerSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "embed the original query unchanged when no transformers are configured" in {
     withRag(RAGConfig.default) { (rag, provider) =>
-      rag.ingestChunks("lower-case", Seq("hello")) shouldBe Right(1)
-      rag.ingestChunks("upper-case", Seq("HELLO")) shouldBe Right(1)
+      rag.ingestChunks("lower-case", DocumentChunk.fromTexts(Seq("hello"))).map(_.size) shouldBe Right(1)
+      rag.ingestChunks("upper-case", DocumentChunk.fromTexts(Seq("HELLO"))).map(_.size) shouldBe Right(1)
       provider.inputs.clear()
 
       val results = rag.query("hello", topK = Some(1)).value

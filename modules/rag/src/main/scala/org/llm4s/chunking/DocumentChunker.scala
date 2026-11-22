@@ -46,6 +46,54 @@ final case class ChunkMetadata(
 
 object ChunkMetadata {
   val empty: ChunkMetadata = ChunkMetadata()
+
+  /** The record metadata key of [[ChunkMetadata.sourceFile]]. */
+  val SourceFileKey: String = "chunk.sourceFile"
+
+  /** The record metadata key of [[ChunkMetadata.startOffset]]. */
+  val StartOffsetKey: String = "chunk.startOffset"
+
+  /** The record metadata key of [[ChunkMetadata.endOffset]]. */
+  val EndOffsetKey: String = "chunk.endOffset"
+
+  /** The record metadata key of [[ChunkMetadata.headings]], a JSON array of strings. */
+  val HeadingsKey: String = "chunk.headings"
+
+  /** The record metadata key of [[ChunkMetadata.isCodeBlock]], present (as `"true"`) only for a code block. */
+  val IsCodeBlockKey: String = "chunk.isCodeBlock"
+
+  /** The record metadata key of [[ChunkMetadata.language]]. */
+  val LanguageKey: String = "chunk.language"
+
+  /**
+   * The chunk metadata as the string entries `RAG` stores in each chunk's record metadata: only the fields that are
+   * set, under the `chunk.`-prefixed keys of this object, so they never collide with a document's own metadata.
+   * [[fromRecordMetadata]] reads them back.
+   */
+  def toRecordMetadata(metadata: ChunkMetadata): Map[String, String] =
+    metadata.sourceFile.map(SourceFileKey -> _).toMap ++
+      metadata.startOffset.map(o => StartOffsetKey -> o.toString) ++
+      metadata.endOffset.map(o => EndOffsetKey -> o.toString) ++
+      (if (metadata.headings.isEmpty) Map.empty else Map(HeadingsKey -> upickle.default.write(metadata.headings))) ++
+      (if (metadata.isCodeBlock) Map(IsCodeBlockKey -> "true") else Map.empty) ++
+      metadata.language.map(LanguageKey -> _)
+
+  /**
+   * The chunk metadata [[toRecordMetadata]] stored in a record's metadata, for example a search result's. A key that
+   * is absent, or a value that does not parse, leaves that field at its default; other keys are ignored.
+   */
+  def fromRecordMetadata(metadata: Map[String, String]): ChunkMetadata =
+    ChunkMetadata(
+      sourceFile = metadata.get(SourceFileKey),
+      startOffset = metadata.get(StartOffsetKey).flatMap(_.toIntOption),
+      endOffset = metadata.get(EndOffsetKey).flatMap(_.toIntOption),
+      headings = metadata
+        .get(HeadingsKey)
+        .flatMap(json => scala.util.Try(upickle.default.read[Seq[String]](json)).toOption)
+        .getOrElse(Seq.empty),
+      isCodeBlock = metadata.get(IsCodeBlockKey).contains("true"),
+      language = metadata.get(LanguageKey)
+    )
 }
 
 /**
@@ -75,6 +123,16 @@ final case class DocumentChunk(
    * Check if this chunk is non-empty.
    */
   def nonEmpty: Boolean = content.nonEmpty
+}
+
+object DocumentChunk {
+
+  /**
+   * Chunks with no metadata from texts already split, indexed `0, 1, 2, ...` in order: what `RAG.ingestChunks` takes
+   * for text that carries no chunk metadata.
+   */
+  def fromTexts(texts: Seq[String]): Seq[DocumentChunk] =
+    texts.zipWithIndex.map { case (content, index) => DocumentChunk(content, index) }
 }
 
 /**

@@ -231,7 +231,7 @@ class PgSharedVectorTableSpec extends AnyFlatSpec with Matchers with BeforeAndAf
           chunks = Seq(ChunkWithEmbedding("permissioned chunk", Array(0.1f, 0.2f, 0.3f), 0))
         )
         listed <- store.list(10, 0, None)
-      } yield (n, listed.flatMap(_.content))
+      } yield (n.size, listed.flatMap(_.content))
 
       result shouldBe Right((1, Seq("permissioned chunk")))
     } finally store.close()

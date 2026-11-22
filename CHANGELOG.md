@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#2714); [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
 - A positional pattern on `RAGAnswerResult` or `TraceEvent.RAGOperationCompleted` gains a field (`metrics`,
   `stageDurations`) (#2734); [migration](docs/reference/migration.md#rag-tracing-covers-every-model-call-and-each-querys-stages-2734).
+- `RAG.ingestChunks` takes `Seq[DocumentChunk]` and returns `Seq[IndexedChunk]`, and `SearchIndex.ingest` returns the
+  stored ids (#2732); [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
 
 ### Providers
 
@@ -163,6 +165,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SQLiteDocumentRegistry`, so `sync` survives a restart; `sync(loader, sourceId)` deletes only its own source's
   documents [#2714](https://github.com/llm4s/llm4s/issues/2714);
   [migration](docs/reference/migration.md#documentregistry-is-source-scoped-2714).
+- **Added** pre-chunked ingest that keeps each chunk's `ChunkMetadata` in its stored record: `RAG.ingestChunks` and
+  `ingestChunksWithPermissions` take `DocumentChunk`s and return the stored ids, with `RAG.chunk` and
+  `ingestBytesWithPermissions` [#2732](https://github.com/llm4s/llm4s/issues/2732);
+  [migration](docs/reference/migration.md#ragingestchunks-takes-documentchunks-2732).
+- **Fixed** `SQLiteVectorStore` writes metadata as escaped JSON: a value with a quote or backslash no longer corrupts
+  its record's metadata [#2732](https://github.com/llm4s/llm4s/issues/2732).
 
 ### Build & tooling
 

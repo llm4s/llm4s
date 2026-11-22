@@ -93,7 +93,8 @@ trait SearchIndex {
    * @param chunks Pre-chunked content with embeddings
    * @param metadata Document metadata
    * @param readableBy Document-level permission override (empty = inherit from collection)
-   * @return Number of chunks indexed
+   * @return the ids the chunks are stored under, one per chunk in the order given: the `id` a search result for
+   *         each carries
    */
   def ingest(
     collectionPath: CollectionPath,
@@ -101,7 +102,7 @@ trait SearchIndex {
     chunks: Seq[ChunkWithEmbedding],
     metadata: Map[String, String] = Map.empty,
     readableBy: Set[PrincipalId] = Set.empty
-  ): Result[Int]
+  ): Result[Seq[String]]
 
   /**
    * Delete a document from a collection.

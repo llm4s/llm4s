@@ -585,16 +585,22 @@ object SQLiteVectorStore {
   // Serialization Helpers
   // ============================================================
 
+  /** Metadata as a JSON object, quotes, backslashes and control characters escaped (#2732). */
   private[vectorstore] def serializeMetadata(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
+    else upickle.default.write(metadata)
 
+  /**
+   * The metadata [[serializeMetadata]] wrote. A row an older version wrote without escaping, and so not always valid
+   * JSON, is read with the pattern that version used.
+   */
   private[vectorstore] def deserializeMetadata(json: String): Map[String, String] =
     if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      val pattern = """"([^"]+)":"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
+    else
+      Try(upickle.default.read[Map[String, String]](json)).getOrElse {
+        val pattern = """"([^"]+)":"([^"]*)"""".r
+        pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
+      }
 
   private[vectorstore] def serializeEmbedding(embedding: Array[Float]): Array[Byte] = {
     val buffer = java.nio.ByteBuffer.allocate(embedding.length * 4)
