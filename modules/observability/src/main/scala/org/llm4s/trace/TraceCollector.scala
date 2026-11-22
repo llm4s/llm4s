@@ -197,8 +197,17 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.ErrorOccurred(error, context, ts, _, _, _, _, _, _) =>
+      case TraceEvent.ErrorOccurred(error, context, ts, _, _, _, _, _, _, usage) =>
         val errorMessage = Option(error.getMessage).getOrElse("")
+        // a content-filtered reply's billed tokens (#2676)
+        val tokens = usage.toSeq.flatMap(u =>
+          Seq(
+            "prompt_tokens"     -> SpanValue.LongValue(u.promptTokens.toLong),
+            "completion_tokens" -> SpanValue.LongValue(u.completionTokens.toLong),
+            "output_tokens"     -> SpanValue.LongValue(u.totalOutputTokens.toLong),
+            "total_tokens"      -> SpanValue.LongValue(u.totalTokens.toLong)
+          )
+        )
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -212,7 +221,7 @@ class TraceCollectorTracing[F[_]](
             "error_type"    -> SpanValue.StringValue(error.getClass.getSimpleName),
             "error_message" -> SpanValue.StringValue(errorMessage),
             "context"       -> SpanValue.StringValue(context)
-          )
+          ) ++ tokens
         )
 
       case TraceEvent.TokenUsageRecorded(usage, model, operation, ts, _) =>

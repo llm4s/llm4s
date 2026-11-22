@@ -267,6 +267,11 @@ class OpenTelemetryTracing private[trace] (
           .put(TraceAttributes.ErrorType, e.errorType.getOrElse(e.error.getClass.getName))
         if (model.nonEmpty) builder.put(TraceAttributes.RequestModel, model)
         e.provider.foreach(p => builder.put(TraceAttributes.ProviderName, TraceAttributes.providerName(p.asString)))
+        // a content-filtered reply is billed: its tokens are the span's usage, as a success's are (#2676)
+        e.usage.foreach { u =>
+          builder.put(TraceAttributes.InputTokens, u.promptTokens.toLong)
+          builder.put(TraceAttributes.OutputTokens, u.totalOutputTokens.toLong)
+        }
         (TraceAttributes.spanName(operation, model), builder.build())
 
       case e: TraceEvent.ErrorOccurred =>
