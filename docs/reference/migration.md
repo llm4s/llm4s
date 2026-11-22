@@ -184,6 +184,8 @@ defaulted field, so only a positional pattern on them changes:
 - `TokenUsage` gains `longCacheCreationTokens: Option[Int]`, the cache writes made with the 1-hour lifetime:
   `case TokenUsage(p, c, t, _, _, _)` becomes `case TokenUsage(p, c, t, _, _, _, _)`.
 - `ModelPricing` gains `cacheCreationInputTokenCostAbove1hr: Option[Double]` as its last field.
+- Java and Kotlin see no Scala defaults, so a call to `TokenUsage.apply` or `ModelPricing.apply` from them passes
+  the new argument too (`Option.empty()`).
 
 The `PositionalPatternsGainFields` Scalafix rule does not add these binders yet; add them by hand, or match on the
 type and read the fields.
