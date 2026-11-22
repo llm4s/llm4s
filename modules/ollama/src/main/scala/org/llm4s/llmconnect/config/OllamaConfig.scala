@@ -46,14 +46,31 @@ final case class OllamaConfig private (
 object OllamaConfig {
   private val standardReserve = 4096
 
-  /** Builds a config without validating it; [[fromValues]] validates. */
-  def apply(model: String, baseUrl: String, contextWindow: Int, reserveCompletion: Int): OllamaConfig =
+  /** Context window used when `apply` is given none: 8192 tokens. */
+  val DEFAULT_CONTEXT_WINDOW: Int = 8192
+
+  /** Completion reserve used when `apply` is given none: 4096 tokens. */
+  val DEFAULT_RESERVE_COMPLETION: Int = standardReserve
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates. Every field after `baseUrl` has a
+   * default: `contextWindow` and `reserveCompletion` the fixed [[DEFAULT_CONTEXT_WINDOW]] and
+   * [[DEFAULT_RESERVE_COMPLETION]], whatever the model; the two-argument `apply` and [[fromValues]]
+   * derive them from the model name instead.
+   */
+  def apply(
+    model: String,
+    baseUrl: String,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
+  ): OllamaConfig =
     new OllamaConfig(
       model,
       baseUrl,
       contextWindow,
       reserveCompletion,
-      ProviderTimeouts.default,
+      timeouts,
       network = HttpNetworkSettings.default
     )
 
@@ -65,7 +82,7 @@ object OllamaConfig {
    */
   def apply(model: String, baseUrl: String): OllamaConfig = {
     val (cw, rc) = ollamaFallback(model)
-    apply(model, baseUrl, cw, rc)
+    apply(model, baseUrl, contextWindow = cw, reserveCompletion = rc)
   }
 
   private def ollamaFallback(modelName: String): (Int, Int) =

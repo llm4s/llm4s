@@ -91,6 +91,41 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     s.name shouldBe "search"
   }
 
+  "AgentToolSpec's setters" should "replace the name, description and schema" in {
+    val other = Schema.`object`[Search]("Other").withRequiredField("query", Schema.string("Another query"))
+    val s     = spec("search").withName("lookup").withDescription("Looks up").withSchema(other)
+    s.name shouldBe "lookup"
+    s.description shouldBe "Looks up"
+    s.schema shouldBe other
+    s.argumentSchema shouldBe other.toJsonSchema(false)
+  }
+
+  "withName" should "refuse an invalid name, as apply does" in {
+    an[IllegalArgumentException] should be thrownBy spec("search").withName("search web")
+  }
+
+  it should "move the default resource to the new name, and keep declared resources" in {
+    spec("search").withName("lookup").resourcesOf(Search("q")) shouldBe
+      Vector(ToolResource(Operation.Invoke, "lookup"))
+    val declared = Vector(ToolResource(Operation.Read, "/docs"))
+    spec("search").withResources(_ => declared).withName("lookup").resourcesOf(Search("q")) shouldBe declared
+  }
+
+  "withTimeout" should "set the timeout from a value or an Option, and clear it with None" in {
+    import scala.concurrent.duration.*
+    spec("search").withTimeout(2.seconds).timeout shouldBe Some(2.seconds)
+    spec("search").withTimeout(Some(3.seconds)).timeout shouldBe Some(3.seconds)
+    spec("search").withTimeout(2.seconds).withTimeout(None).timeout shouldBe None
+    an[IllegalArgumentException] should be thrownBy spec("search").withTimeout(Some(Duration.Zero))
+  }
+
+  "withLocks" should "set the locks from a function or an Option, and clear them with None" in {
+    val locks: Search => Set[LockKey] = s => Set(LockKey("search", s.query))
+    spec("search").withLocks(locks).locksOf.map(_(Search("q"))) shouldBe Some(Set(LockKey("search", "q")))
+    spec("search").withLocks(Some(locks)).locksOf.map(_(Search("q"))) shouldBe Some(Set(LockKey("search", "q")))
+    spec("search").withLocks(locks).withLocks(None).locksOf shouldBe None
+  }
+
   "AgentTool.apply" should "run its function and declare its writes" in {
     val key = StateKey.replace[Int]("count", 0)
     val tool =

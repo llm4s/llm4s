@@ -30,6 +30,10 @@ final case class LoopAgent private (
   maxPromptSectionTokens: Int,
   output: Option[OutputFormat]
 ):
+  def withId(id: AgentId): LoopAgent                              = copy(id = id)
+  def withModel(model: ModelStep): LoopAgent                      = copy(model = model)
+  def withTools(tools: ToolSet): LoopAgent                        = copy(tools = tools)
+  def withSystemPrompt(prompt: String): LoopAgent                 = withSystemPrompt(Some(prompt))
   def withSystemPrompt(prompt: Option[String]): LoopAgent         = copy(systemPrompt = prompt)
   def withMaxSteps(steps: Int): LoopAgent                         = copy(maxSteps = steps)
   def withMiddleware(middleware: Seq[AgentMiddleware]): LoopAgent = copy(middleware = middleware)

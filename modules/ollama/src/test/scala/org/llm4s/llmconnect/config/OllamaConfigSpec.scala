@@ -6,6 +6,8 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration.*
+
 /**
  * `OllamaConfig`'s construction, fallbacks and self-description.
  *
@@ -132,5 +134,19 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .withContextWindow(32768)
       .withReserveCompletion(2048)
     adjusted shouldBe OllamaConfig("llama3", "http://ollama:11434", 32768, 2048)
+  }
+
+  test("OllamaConfig.apply defaults every field after baseUrl and takes timeouts") {
+    val defaults = OllamaConfig("codellama", "http://ollama:11434", contextWindow = 16384)
+    defaults.contextWindow shouldBe 16384
+    defaults.reserveCompletion shouldBe OllamaConfig.DEFAULT_RESERVE_COMPLETION
+    defaults.timeouts shouldBe ProviderTimeouts.default
+
+    val timeouts = ProviderTimeouts(request = Some(30.seconds))
+    val timed    = OllamaConfig("llama3", "http://ollama:11434", timeouts = timeouts)
+    timed.contextWindow shouldBe OllamaConfig.DEFAULT_CONTEXT_WINDOW
+    timed.reserveCompletion shouldBe 4096
+    timed.timeouts shouldBe timeouts
+    OllamaConfig("llama3", "http://ollama:11434").withTimeouts(timeouts) shouldBe timed
   }
 }
