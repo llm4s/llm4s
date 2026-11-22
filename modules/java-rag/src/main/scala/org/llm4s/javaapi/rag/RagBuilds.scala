@@ -4,7 +4,7 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.javaapi.{ FacadeInternals, JEmbeddingClient, JLlmClient, LlmResult }
+import org.llm4s.javaapi.{ FacadeInternals, JCompletionOptions, JEmbeddingClient, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.rag.{ RAG, RAGConfig }
 import org.llm4s.types.Result
@@ -29,7 +29,8 @@ private[rag] object RagBuilds {
     chunkSize: java.lang.Integer,
     chunkOverlap: java.lang.Integer,
     topK: java.lang.Integer,
-    systemPrompt: String
+    systemPrompt: String,
+    completionOptions: JCompletionOptions
   ): LlmResult[JRag] =
     guarded("JRag.build") {
       for {
@@ -37,7 +38,7 @@ private[rag] object RagBuilds {
         where  <- storeOf(store)
         chunks <- chunking(Option(chunkSize).map(_.intValue), Option(chunkOverlap).map(_.intValue))
         k      <- Option(topK).map(_.intValue).fold(Right(None))(k => positive("topK", k).map(Some(_)))
-        config = settings(chunks, k, Option(llm), Option(systemPrompt), where)
+        config = settings(chunks, k, Option(llm), Option(systemPrompt), Option(completionOptions), where)
         registry <- Llm4sConfig.modelRegistryService()
         provider = new JEmbeddingProvider(client)
         rag <- RAG.buildWithEmbeddings(config, new EmbeddingClient(provider)(using registry), provider.model)
@@ -79,6 +80,7 @@ private[rag] object RagBuilds {
     topK: Option[Int],
     llm: Option[JLlmClient],
     systemPrompt: Option[String],
+    completionOptions: Option[JCompletionOptions],
     sqlite: Option[String]
   ): RAGConfig = {
     val steps: Seq[RAGConfig => RAGConfig] = Seq(
@@ -86,6 +88,7 @@ private[rag] object RagBuilds {
       c => topK.fold(c)(c.withTopK),
       c => llm.fold(c)(l => c.withLLM(l.underlying)),
       c => systemPrompt.fold(c)(c.withSystemPrompt),
+      c => completionOptions.fold(c)(o => c.withCompletionOptions(o.underlying)),
       c => sqlite.fold(c)(c.withSQLite)
     )
     steps.foldLeft(RAGConfig.default)((config, step) => step(config))
