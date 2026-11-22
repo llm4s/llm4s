@@ -226,9 +226,9 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
     JRag.sqlite(Path.of("a.db")) should not be JRag.sqlite(Path.of("b.db"))
     JRag.sqlite(Path.of("a.db")).toString shouldBe "JRagStore(sqlite a.db)"
     JRag.builder().toString shouldBe
-      "JRagBuilder(embeddings=null, llm=none, store=JRagStore(in memory), chunking=default, topK=default, systemPrompt=default)"
+      "JRagBuilder(embeddings=null, llm=none, store=JRagStore(in memory), chunking=default, topK=default, systemPrompt=default, completionOptions=default)"
     JRag.builder().llm(llm()).chunking(400, 50).topK(3).systemPrompt("Be brief.").toString should endWith(
-      "llm=set, store=JRagStore(in memory), chunking=400/50, topK=3, systemPrompt=set)"
+      "llm=set, store=JRagStore(in memory), chunking=400/50, topK=3, systemPrompt=set, completionOptions=default)"
     )
   }
 
@@ -250,6 +250,25 @@ class JRagSpec extends AnyFlatSpec with TestTimeLimit with Matchers {
       val answer = rag.ask("Where did the cat sit?").get()
       answer.sources.size shouldBe 1
       model.conversations.head.messages.head.content shouldBe "Answer in one word."
+    } finally rag.close()
+  }
+
+  "the builder's completionOptions" should "reach the model, and temperature 0.0 without them (#2715)" in {
+    val default = new EchoingLlm()
+    val plain   = pipeline(JRag.builder().embeddings(embeddings()).llm(llm(default)).build())
+    try {
+      plain.ask("Where did the cat sit?").get()
+      default.options.map(_.temperature) shouldBe Seq(0.0)
+    } finally plain.close()
+
+    val model   = new EchoingLlm()
+    val options = org.llm4s.javaapi.JCompletionOptions.builder().temperature(0.4).maxTokens(200).build()
+    val builder = JRag.builder().embeddings(embeddings()).llm(llm(model)).completionOptions(options)
+    builder.toString should include("completionOptions=JCompletionOptions(")
+    val rag = pipeline(builder.build())
+    try {
+      rag.ask("Where did the cat sit?").get()
+      model.options.map(o => (o.temperature, o.maxTokens)) shouldBe Seq((0.4, Some(200)))
     } finally rag.close()
   }
 }
