@@ -46,7 +46,9 @@ import scala.util.{ Try, Using }
  *
  * A reply's `message.thinking` becomes the returned message's [[org.llm4s.llmconnect.model.AssistantMessage.thinking AssistantMessage.thinking]] (and so
  * [[org.llm4s.llmconnect.model.Completion.thinking Completion.thinking]]); streamed, each line's `thinking` is a [[org.llm4s.llmconnect.model.StreamedChunk.thinkingDelta StreamedChunk.thinkingDelta]] and
- * the accumulated text is the message's thinking. An assistant message's thinking text is sent back
+ * the accumulated text is the message's thinking. `CompletionOptions.thinking` and `reasoning` are sent as `think`:
+ * `true` or `false`, or a level for a model that takes levels, as `/api/show` lists them (see [[OllamaThink]]).
+ * An assistant message's thinking text is sent back
  * as its `thinking`, as Ollama's tool-calling guide asks: a thinking model's follow-up request after
  * a tool call carries its earlier reasoning with the content and tool calls (#1381).
  *
@@ -106,22 +108,55 @@ class OllamaClient(
     connect(conversation, options)
   }
 
-  private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-    createRequestBody(conversation, options, stream = false).flatMap { body =>
-      val adjustments = unsent(options)
+  private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+    val think = thinkPlan(options)
+    requestBody(conversation, options, stream = false, think).flatMap { body =>
+      val adjustments = unsent(options, think)
       send(body, options).map(_.withAdjustments(adjustments))
     }
+  }
 
   // what the request does not send goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
-  /** What `options` asks for that the request does not send: Ollama's `think` is not mapped yet (RFC 0008). */
-  private def unsent(options: CompletionOptions): List[RequestAdjustment] = {
-    val adjustments =
-      UnmappedOptions.reasoningAndThinking(config.model, options) ++ UnmappedOptions.promptCache(config.model, options)
+  /** What `options` asks for that the request does not send as asked: `think`'s report, and any prompt cache. */
+  private def unsent(options: CompletionOptions, think: OllamaThink.Plan): List[RequestAdjustment] = {
+    val adjustments = think.adjustments ++ UnmappedOptions.promptCache(config.model, options)
     adjustmentLog.record(config.model, adjustments)
     adjustments
   }
+
+  // the `think` values the model takes, from `/api/show`, once a reply has said; see `thinkControls`
+  @volatile private var discoveredThink: Option[OllamaThink.Controls] = None
+
+  /**
+   * The `think` values the model takes. `/api/show` lists them in `thinking.values`, so it is asked once, on the first
+   * request that sets `thinking` or `reasoning`, and its answer kept. A reply without them (a server older than the
+   * metadata) is kept as the controls [[OllamaThink.byName]] gives; a failed call is not kept, so a later request asks
+   * again, and this one uses [[OllamaThink.byName]].
+   */
+  private def thinkControls(): OllamaThink.Controls =
+    discoveredThink.getOrElse {
+      val headers = Map("Content-Type" -> "application/json")
+      val body    = ujson.Obj("model" -> config.model).render()
+      http.post(s"${config.baseUrl}/api/show", headers, body, timeout = requestTimeout) match {
+        case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
+          val controls = Try(ujson.read(response.body)).toOption
+            .flatMap(OllamaThink.fromShow)
+            .getOrElse(OllamaThink.byName(config.model))
+          discoveredThink = Some(controls)
+          controls
+        case other =>
+          val why = other.fold(_.message, response => s"HTTP ${response.statusCode}")
+          OllamaClient.logger.debug(s"Ollama /api/show for ${config.model} failed ($why); think follows the model name")
+          OllamaThink.byName(config.model)
+      }
+    }
+
+  /** The `think` field for `options`, asking for the model's controls only when it sets thinking or reasoning. */
+  private def thinkPlan(options: CompletionOptions): OllamaThink.Plan =
+    if (!OllamaThink.asked(options)) OllamaThink.Plan(None, Nil)
+    else OllamaThink.plan(config.model, options, thinkControls())
 
   private def send(requestBody: ujson.Obj, options: CompletionOptions): Result[Completion] = {
     val requestText = requestBody.render()
@@ -213,8 +248,9 @@ class OllamaClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    createRequestBody(conversation, options, stream = true).flatMap { body =>
-      val adjustments = unsent(options)
+    val think = thinkPlan(options)
+    requestBody(conversation, options, stream = true, think).flatMap { body =>
+      val adjustments = unsent(options, think)
       stream(body, options, onChunk).map(_.withAdjustments(adjustments))
     }
   }
@@ -328,12 +364,24 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean
+  ): Result[ujson.Obj] = requestBody(conversation, options, stream, thinkPlan(options))
+
+  private def requestBody(
+    conversation: Conversation,
+    options: CompletionOptions,
+    stream: Boolean,
+    think: OllamaThink.Plan
   ): Result[ujson.Obj] =
     PartEncoding
       .check(providerName, conversation.messages, OllamaClient.userPart, PartEncoding.textOnly)
-      .map(_ => requestBody(conversation, options, stream))
+      .map(_ => encode(conversation, options, stream, think))
 
-  private def requestBody(conversation: Conversation, options: CompletionOptions, stream: Boolean): ujson.Obj = {
+  private def encode(
+    conversation: Conversation,
+    options: CompletionOptions,
+    stream: Boolean,
+    think: OllamaThink.Plan
+  ): ujson.Obj = {
     val toolNames = conversation.messages
       .collect { case am: AssistantMessage => am.toolCalls }
       .flatten
@@ -386,6 +434,7 @@ class OllamaClient(
     if (options.tools.nonEmpty)
       body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toOpenAITool(strict = false))))
     options.responseFormat.foreach(rf => body("format") = OllamaClient.encodeFormat(rf))
+    think.think.foreach(value => body("think") = value)
     body
   }
 

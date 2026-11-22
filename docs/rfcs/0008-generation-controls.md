@@ -226,7 +226,8 @@ Mapping, each provider in its own module. Anything not listed is reported as `Dr
 | Gemini / Vertex AI | `thinking_level` where supported (Gemini 3 and later) | Gemini 2.5: `thinkingBudget`: `Off` → 0, `Adaptive` → -1, `Budget(n)` → n, fitted to the model's range (`Adjusted` when fitted); 2.5 Pro cannot turn thinking off and gets its minimum. Gemini 3 and later deprecate `thinkingBudget` and reject it beside a level: `Off` → the lowest level, `Budget` `Dropped` (the Gemini follow-up) |
 | watsonx | gpt-oss models: `reasoning_effort`, a level it lacks `Adjusted` to the nearest; other models `Dropped` | gpt-oss: `Off` → `low` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped`; other models `Dropped` |
 | Perplexity | `reasoning.effort`, every level by name | `Off` → `minimal` (`Adjusted`), `Adaptive` `NotNeeded`, `Budget` `Dropped` |
-| Bedrock, Ollama, others | `Dropped` until mapped | `Dropped` until mapped (Ollama `think` in a follow-up) |
+| Ollama | `think`: the nearest level the model takes (from `/api/show`), or `true` on an on/off model (`Adjusted`) | `Off` → `false`, or the lowest level where thinking cannot be turned off (`Adjusted`); `Adaptive` → `true`, or `NotNeeded` on a levels-only model; `Budget` → `true` (`Adjusted`) or `Dropped` (the Ollama follow-up) |
+| Bedrock, others | `Dropped` until mapped | `Dropped` until mapped |
 
 Apart from the exception above, Anthropic's `output_config.effort` applies only when a caller sets one of the new
 levels or sets `thinking` explicitly. A caller using `reasoning` alone on a model that takes a budget keeps today's
@@ -420,8 +421,9 @@ Follow-ups, one provider or one control per PR, under this RFC: Bedrock `cachePo
 thinking levels, and service tier. Gemini thinking levels are delivered in
 [#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623), and watsonx, Perplexity and Jlama report what they
 leave out in [#2699](https://github.com/llm4s/llm4s/pull/2699).
-Bedrock `cachePoint`, Ollama `think` and service tier are still open; until each lands, its provider reports the
-option `Dropped` (service tier has no option yet).
+Ollama `think` is delivered under [#2726](https://github.com/llm4s/llm4s/issues/2726): `thinking` and `reasoning` as
+`think`, from the values `/api/show` lists for the model. Bedrock `cachePoint` and service tier are still open; until
+each lands, its provider reports the option `Dropped` (service tier has no option yet).
 
 The docs (`docs/guide/cost-controls.md` with the mapping table, precedence rule and warm-up pattern, rows in
 `providers.md`, and the adjustment contract in `writing-a-provider.md`) land with PRs 1, 4 and 6.
