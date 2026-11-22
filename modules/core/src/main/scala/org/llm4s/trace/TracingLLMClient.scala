@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.ContentFilteredError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, FinishReason, StreamedChunk }
@@ -17,8 +18,9 @@ import scala.util.Try
  * An [[org.llm4s.llmconnect.LLMClient]] that traces each of its calls (#2275): a completion - plain or streamed - as one
  * [[TraceEvent.CompletionReceived]] carrying the call's provider, request model, server address, options, duration,
  * finish reasons, usage and messages, and a failed call as one [[TraceEvent.ErrorOccurred]] naming the operation
- * (`chat`), model, provider and error type. A backend that follows the OpenTelemetry GenAI conventions turns each into
- * the call's `chat <model>` span; backends record message content only when told to.
+ * (`chat`), model, provider and error type, with the usage a [[org.llm4s.error.ContentFilteredError]] was billed
+ * (#2676). A backend that follows the OpenTelemetry GenAI conventions turns each into the call's `chat <model>` span;
+ * backends record message content only when told to.
  *
  * {{{
  * val traced = TracingLLMClient(client, tracing, providerConfig)
@@ -106,7 +108,12 @@ final class TracingLLMClient private (
           model = requestModel,
           provider = providerId,
           errorType = Some(error.getClass.getSimpleName),
-          duration = Some(duration)
+          duration = Some(duration),
+          // a filtered reply is billed: its tokens reach the trace, as a success's do (#2676)
+          usage = error match {
+            case filtered: ContentFilteredError => filtered.usage
+            case _                              => None
+          }
         )
     }
     Try(tracing.traceEvent(event)): Unit

@@ -90,8 +90,13 @@ possibly empty or cut short, with the provider's reason as `Other`.
 - A stream's text already passed to `onChunk` stays delivered; no chunk carries the filter's reason, and the error's
   message says how many characters the filter cut after.
 - `ContentFilteredError.usage` carries the tokens the provider reported for the filtered call, which it bills, on
-  both paths and for Gemini and Vertex AI too (#2676). A client's metrics record them; a trace's `ErrorOccurred`
-  does not carry usage.
+  both paths and for Gemini and Vertex AI too (#2676). A client's metrics record them, and `TracingLLMClient` puts
+  them on the call's `TraceEvent.ErrorOccurred`, whose new last field is `usage: Option[TokenUsage]`; the
+  OpenTelemetry backend reports it as the `chat <model>` span's `gen_ai.usage.*`, Langfuse in the event's metadata.
+  `ContentFilteredError`'s own extractor still binds four fields.
+- A positional pattern on `TraceEvent.ErrorOccurred` gains a field:
+  `case TraceEvent.ErrorOccurred(error, context, _, _, _, _, _, _, _, _)`. The `PositionalPatternsGainFields` Scalafix
+  rule adds it to 0.6.0's nine-field pattern.
 - Match `ContentFilteredError` (`provider`, `reason`, `promptBlocked`) where you read a `content_filter`, `refusal`
   or guardrail reason off a `Completion`. `ReliableClient`'s circuit breaker counts it as neither a success nor a
   failure, and it is not retried.

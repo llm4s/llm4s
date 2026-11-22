@@ -82,6 +82,19 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     event("body")("statusMessage").str should include("test error")
     event("body")("metadata")("context").str shouldBe "test-context"
     event("body")("metadata")("error_type").str shouldBe "RuntimeException"
+    event("body")("metadata").obj.contains("usage") shouldBe false
+  }
+
+  it should "carry a failed call's billed usage in the ErrorOccurred event's metadata (#2676)" in {
+    val mock    = new MockHttpClient(HttpResponse(200, ""))
+    val tracing = makeTracing(mock)
+    val error   = TraceEvent.ErrorOccurred(new RuntimeException("filtered"), "chat", usage = Some(TokenUsage(7, 4, 11)))
+
+    tracing.traceEvent(error).isRight shouldBe true
+    val usage = ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")("usage")
+    usage("prompt_tokens").num shouldBe 7
+    usage("completion_tokens").num shouldBe 4
+    usage("total_tokens").num shouldBe 11
   }
 
   // =========================================================================
