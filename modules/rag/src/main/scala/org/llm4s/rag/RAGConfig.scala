@@ -4,6 +4,7 @@ import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
 import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
@@ -45,6 +46,10 @@ import org.llm4s.security.Secret
  *                          fails the build with the registry's "not registered" error.
  * @param embeddingModel    the model to embed with. When `None`, the model of the resolved
  *                          provider config is used, then the provider's own default.
+ * @param completionOptions the options the answer is generated with (`queryWithAnswer` and
+ *                          `queryWithPermissionsAndAnswer`, each of which can override them per
+ *                          call): temperature, max tokens, reasoning and the rest. The default is
+ *                          [[RAGConfig.DefaultCompletionOptions]], temperature 0.0.
  */
 final case class RAGConfig(
   // Embedding settings
@@ -84,7 +89,9 @@ final case class RAGConfig(
   queryTransformers: Seq[QueryTransformer] = Seq.empty,
   // GraphRAG integration
   graphStore: Option[GraphStore] = None,
-  graphRAGConfig: GraphRAGConfig = GraphRAGConfig()
+  graphRAGConfig: GraphRAGConfig = GraphRAGConfig(),
+  // Answer generation options
+  completionOptions: CompletionOptions = RAGConfig.DefaultCompletionOptions
 ) {
 
   // ========== Embedding Configuration ==========
@@ -283,6 +290,14 @@ final case class RAGConfig(
   def withSystemPrompt(prompt: String): RAGConfig =
     copy(systemPrompt = Some(prompt))
 
+  /**
+   * The options the answer is generated with, in place of [[RAGConfig.DefaultCompletionOptions]] (temperature 0.0):
+   * for example `CompletionOptions(temperature = 0.7, maxTokens = Some(512))`. `queryWithAnswer` and
+   * `queryWithPermissionsAndAnswer` can still override them per call.
+   */
+  def withCompletionOptions(options: CompletionOptions): RAGConfig =
+    copy(completionOptions = options)
+
   // ========== Observability Configuration ==========
 
   /** Enable tracing for cost tracking and observability */
@@ -462,6 +477,9 @@ object RAGConfig {
 
   /** The embedding provider a default config names. It ships in `llm4s-openai`, not `llm4s-rag`. */
   val DefaultEmbeddingProvider: ProviderId = ProviderId("openai")
+
+  /** The options an answer is generated with by default: temperature 0.0, so the answer sticks to the contexts. */
+  val DefaultCompletionOptions: CompletionOptions = CompletionOptions(temperature = 0.0)
 
   /** Default configuration - OpenAI `text-embedding-3-small` embeddings, sentence chunking, RRF fusion, in-memory */
   val default: RAGConfig = RAGConfig()
