@@ -277,7 +277,8 @@ object PromptCache {
 - **Anthropic** puts `cache_control` breakpoints on the last system block, the last tool and, for `Conversation`, the
   last message, with the TTL.
 - **OpenAI**, **Gemini** and **Vertex AI** cache automatically, so they report `NotNeeded`.
-- **Bedrock** (`cachePoint`) follows in its own PR. Until then it, like every other provider, reports `Dropped`.
+- **Bedrock** puts Converse `cachePoint` blocks in the same three places, delivered in its own follow-up (#2726, see
+  [Delivery](#delivery)). Every other provider reports `Dropped`.
 - **A prefix too short to cache is reported.** Anthropic ignores `cache_control` below the model's minimum cacheable
   length without an error. When a request asked for `promptCache` and the response's `cachedTokens` and
   `cacheCreationTokens` are both zero, the client adds
@@ -420,8 +421,10 @@ Follow-ups, one provider or one control per PR, under this RFC: Bedrock `cachePo
 thinking levels, and service tier. Gemini thinking levels are delivered in
 [#2710](https://github.com/llm4s/llm4s/pull/2710) (Gemini and Vertex AI send `thinkingConfig`, replacing #2623), and watsonx, Perplexity and Jlama report what they
 leave out in [#2699](https://github.com/llm4s/llm4s/pull/2699).
-Bedrock `cachePoint`, Ollama `think` and service tier are still open; until each lands, its provider reports the
-option `Dropped` (service tier has no option yet).
+Bedrock `cachePoint` is delivered under [#2726](https://github.com/llm4s/llm4s/issues/2726): `cachePoint` blocks for
+the scopes, the 1-hour TTL where the model takes it, and an `Adjusted` or `Dropped` for what a model cannot take.
+Ollama `think` and service tier are still open; until each lands, its provider reports the option `Dropped` (service
+tier has no option yet).
 
 The docs (`docs/guide/cost-controls.md` with the mapping table, precedence rule and warm-up pattern, rows in
 `providers.md`, and the adjustment contract in `writing-a-provider.md`) land with PRs 1, 4 and 6.

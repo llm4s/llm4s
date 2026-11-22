@@ -23,6 +23,7 @@ import org.llm4s.model.{
   AdjustmentLog,
   ModelRegistryService,
   RequestTransformer,
+  PromptCacheReport,
   TransformationResult,
   UnmappedOptions
 }
@@ -49,6 +50,7 @@ import software.amazon.awssdk.services.bedrockruntime.{ BedrockRuntimeAsyncClien
 import software.amazon.awssdk.services.bedrockruntime.model.{
   AccessDeniedException,
   BedrockRuntimeException,
+  CacheTTL,
   ContentBlock,
   ConversationRole,
   DocumentBlock,
@@ -192,6 +194,16 @@ class BedrockClient(
   // field is mapped yet), goes on every Completion; this warns once per model and option
   private lazy val adjustmentLog = new AdjustmentLog(providerName)
 
+  // the model's registry entry, for whether it takes cache checkpoints (see BedrockPromptCache)
+  private lazy val capabilities = registryService.lookup(config.model).toOption.map(_.capabilities)
+
+  private def cachePlan(options: CompletionOptions): BedrockPromptCache.Plan =
+    BedrockPromptCache.plan(config.model, options, capabilities)
+
+  // a request that sent a cache checkpoint and neither read nor wrote the cache is reported (RFC 0008, Part 3)
+  private def answeredCache(options: CompletionOptions, usage: Option[TokenUsage]): List[RequestAdjustment] =
+    PromptCacheReport.uncached(cachePlan(options).scope.nonEmpty, usage)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -213,7 +225,7 @@ class BedrockClient(
               val completion =
                 parsed
                   .withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
-                  .withAdjustments(adjustments)
+                  .withAdjustments(adjustments ++ answeredCache(opts, parsed.usage))
               recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
               completion
             }
@@ -241,7 +253,8 @@ class BedrockClient(
           runStream(request, onChunk, raw)
         }
         .map(c =>
-          c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts)).withAdjustments(adjustments)
+          c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts))
+            .withAdjustments(adjustments ++ answeredCache(opts, c.usage))
         )
         .tapRight(c => recordExchange(startedAt, requestJson, Some(raw.result()), Right(c)))
         .tapLeft(e => recordExchange(startedAt, requestJson, Option.when(raw.nonEmpty)(raw.result()), Left(e)))
@@ -270,7 +283,7 @@ class BedrockClient(
       )
       .map { t =>
         val adjustments = t.adjustments ++ UnmappedOptions.reasoningAndThinking(config.model, t.options) ++
-          UnmappedOptions.promptCache(config.model, t.options)
+          cachePlan(t.options).adjustments
         (conversation.withMessages(t.messages), t.options, adjustments)
       }
 
@@ -316,14 +329,7 @@ class BedrockClient(
         }
       }
       .onMessageStop(e => queue.put(StreamSignal.Stop(e.stopReasonAsString())))
-      .onMetadata { e =>
-        Option(e.usage()).foreach { u =>
-          queue.put(
-            StreamSignal
-              .Usage(Option(u.inputTokens()).fold(0)(_.intValue), Option(u.outputTokens()).fold(0)(_.intValue))
-          )
-        }
-      }
+      .onMetadata(e => Option(e.usage()).foreach(u => queue.put(StreamSignal.Usage(BedrockClient.tokenUsage(u)))))
       .build()
 
     val handler = ConverseStreamResponseHandler
@@ -414,9 +420,9 @@ class BedrockClient(
               if (filtered.isEmpty)
                 emit(StreamedChunk(messageId, None, None, Some(BedrockClient.finishReason(reason))))
               drain()
-            case StreamSignal.Usage(input, output) =>
-              usage = Some(TokenUsage(promptTokens = input, completionTokens = output, totalTokens = input + output))
-              accumulator.updateTokens(input, output)
+            case StreamSignal.Usage(reported) =>
+              usage = Some(reported)
+              accumulator.updateUsage(reported)
               drain()
             case StreamSignal.Finished(Some(error))      => Left(mapException(error))
             case StreamSignal.Finished(None) if !stopped =>
@@ -474,17 +480,39 @@ class BedrockClient(
     cfg.build()
   }
 
-  private def toolConfig(options: CompletionOptions): Option[ToolConfiguration] =
-    Option.when(options.tools.nonEmpty)(
-      ToolConfiguration.builder().tools(options.tools.map(convertTool).asJava).build()
-    )
+  private def toolConfig(options: CompletionOptions, cache: BedrockPromptCache.Plan): Option[ToolConfiguration] =
+    Option.when(options.tools.nonEmpty) {
+      val checkpoint = Option.when(cache.covers(PromptCache.Scope.Tools))(Tool.fromCachePoint(cache.point))
+      ToolConfiguration.builder().tools((options.tools.map(convertTool) ++ checkpoint).asJava).build()
+    }
+
+  /** The system blocks, with a cache checkpoint after them when the plan covers the system prompt. */
+  private def systemBlocks(systemTexts: Seq[String], cache: BedrockPromptCache.Plan): Seq[SystemContentBlock] =
+    if (systemTexts.isEmpty) Seq.empty
+    else
+      systemTexts.map(SystemContentBlock.fromText) ++
+        Option.when(cache.covers(PromptCache.Scope.System))(SystemContentBlock.fromCachePoint(cache.point))
+
+  /** The messages, with a cache checkpoint at the end of the last when the plan covers the conversation. */
+  private def withConversationCheckpoint(
+    messages: Seq[BedrockMessage],
+    cache: BedrockPromptCache.Plan
+  ): Seq[BedrockMessage] =
+    if (!cache.covers(PromptCache.Scope.Conversation)) messages
+    else
+      messages.lastOption.fold(messages) { last =>
+        val content = last.content().asScala.toSeq :+ ContentBlock.fromCachePoint(cache.point)
+        messages.init :+ last.toBuilder.content(content.asJava).build()
+      }
 
   private def buildConverseRequest(conversation: Conversation, options: CompletionOptions): Result[ConverseRequest] =
     partitionMessages(conversation, options).map { (systemTexts, messages) =>
-      val builder = ConverseRequest.builder().modelId(config.model).messages(messages.asJava)
-      if (systemTexts.nonEmpty) builder.system(systemTexts.map(SystemContentBlock.fromText).asJava)
+      val cache = cachePlan(options)
+      val builder =
+        ConverseRequest.builder().modelId(config.model).messages(withConversationCheckpoint(messages, cache).asJava)
+      if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
-      toolConfig(options).foreach(builder.toolConfig)
+      toolConfig(options, cache).foreach(builder.toolConfig)
       builder.build()
     }
 
@@ -493,10 +521,15 @@ class BedrockClient(
     options: CompletionOptions
   ): Result[ConverseStreamRequest] =
     partitionMessages(conversation, options).map { (systemTexts, messages) =>
-      val builder = ConverseStreamRequest.builder().modelId(config.model).messages(messages.asJava)
-      if (systemTexts.nonEmpty) builder.system(systemTexts.map(SystemContentBlock.fromText).asJava)
+      val cache = cachePlan(options)
+      val builder =
+        ConverseStreamRequest
+          .builder()
+          .modelId(config.model)
+          .messages(withConversationCheckpoint(messages, cache).asJava)
+      if (systemTexts.nonEmpty) builder.system(systemBlocks(systemTexts, cache).asJava)
       builder.inferenceConfig(inferenceConfig(options))
-      toolConfig(options).foreach(builder.toolConfig)
+      toolConfig(options, cache).foreach(builder.toolConfig)
       builder.build()
     }
 
@@ -649,13 +682,7 @@ class BedrockClient(
           thinking = thinking
         )
 
-      val usage = Option(response.usage()).map { u =>
-        TokenUsage(
-          promptTokens = u.inputTokens(),
-          completionTokens = u.outputTokens(),
-          totalTokens = u.totalTokens()
-        )
-      }
+      val usage = Option(response.usage()).map(BedrockClient.tokenUsage)
 
       val stopReason = Option(response.stopReasonAsString()).filter(_.nonEmpty)
       // a guardrail or filter stop is an error, whatever text came first (RFC 0009)
@@ -764,6 +791,33 @@ class BedrockClient(
 }
 
 object BedrockClient {
+
+  // ---- usage ----
+
+  /**
+   * Converse's usage in llm4s's terms. Converse's `inputTokens` counts only the input neither read from nor written to
+   * the prompt cache, and AWS gives the whole input as `inputTokens + cacheReadInputTokens + cacheWriteInputTokens`
+   * (https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html), which is `promptTokens` here, as
+   * `CostEstimator` reads it. A `cacheDetails` entry with the `1h` TTL counts the writes priced at the 1-hour rate.
+   */
+  private[provider] def tokenUsage(u: software.amazon.awssdk.services.bedrockruntime.model.TokenUsage): TokenUsage = {
+    def count(n: Integer): Int = Option(n).fold(0)(_.intValue)
+    val reads                  = Option(u.cacheReadInputTokens()).map(_.intValue)
+    val writes                 = Option(u.cacheWriteInputTokens()).map(_.intValue)
+    val longWrites =
+      Option
+        .when(u.hasCacheDetails)(u.cacheDetails().asScala.filter(_.ttl() == CacheTTL.VALUE_1_H))
+        .filter(_.nonEmpty)
+        .map(_.map(d => count(d.inputTokens())).sum)
+    TokenUsage(
+      promptTokens = count(u.inputTokens()) + reads.getOrElse(0) + writes.getOrElse(0),
+      completionTokens = count(u.outputTokens()),
+      totalTokens = count(u.totalTokens()),
+      cachedTokens = reads,
+      cacheCreationTokens = writes,
+      longCacheCreationTokens = longWrites
+    )
+  }
 
   // ---- finish reasons ----
 
@@ -876,7 +930,7 @@ object BedrockClient {
     case ToolStart(index: Int, id: String, name: String)
     case ToolArgs(index: Int, fragment: String)
     case Stop(reason: String)
-    case Usage(inputTokens: Int, outputTokens: Int)
+    case Usage(usage: TokenUsage)
     case Finished(error: Option[Throwable])
   }
 
