@@ -1,5 +1,6 @@
 package org.llm4s.javaapi.rag;
 
+import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JEmbeddingClient;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.LlmResult;
@@ -26,7 +27,7 @@ import org.llm4s.javaapi.LlmResult;
 public final class JRagBuilder {
 
   static final JRagBuilder EMPTY =
-      new JRagBuilder(null, null, JRagStore.inMemory(), null, null, null, null);
+      new JRagBuilder(null, null, JRagStore.inMemory(), null, null, null, null, null);
 
   private final JEmbeddingClient embeddings;
   private final JLlmClient llm;
@@ -35,6 +36,7 @@ public final class JRagBuilder {
   private final Integer chunkOverlap;
   private final Integer topK;
   private final String systemPrompt;
+  private final JCompletionOptions completionOptions;
 
   private JRagBuilder(
       JEmbeddingClient embeddings,
@@ -43,7 +45,8 @@ public final class JRagBuilder {
       Integer chunkSize,
       Integer chunkOverlap,
       Integer topK,
-      String systemPrompt) {
+      String systemPrompt,
+      JCompletionOptions completionOptions) {
     this.embeddings = embeddings;
     this.llm = llm;
     this.store = store;
@@ -51,6 +54,7 @@ public final class JRagBuilder {
     this.chunkOverlap = chunkOverlap;
     this.topK = topK;
     this.systemPrompt = systemPrompt;
+    this.completionOptions = completionOptions;
   }
 
   /**
@@ -58,7 +62,7 @@ public final class JRagBuilder {
    * document and every question as a query, with the client's model.
    */
   public JRagBuilder embeddings(JEmbeddingClient embeddings) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /**
@@ -66,12 +70,12 @@ public final class JRagBuilder {
    * of kind {@code CONFIGURATION} and only {@code search} works. {@code null} for none.
    */
   public JRagBuilder llm(JLlmClient llm) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /** Where the chunks are kept: {@link JRag#inMemory()}, the default, or {@link JRag#sqlite(java.nio.file.Path)}. */
   public JRagBuilder store(JRagStore store) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /**
@@ -80,12 +84,12 @@ public final class JRagBuilder {
    * where they can. The default is 800 and 150.
    */
   public JRagBuilder chunking(int size, int overlap) {
-    return new JRagBuilder(embeddings, llm, store, size, overlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, size, overlap, topK, systemPrompt, completionOptions);
   }
 
   /** How many chunks a search returns, and a question is answered from, at least 1. The default is 5. */
   public JRagBuilder topK(int topK) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /**
@@ -93,7 +97,20 @@ public final class JRagBuilder {
    * alone and to say when they are not enough. {@code null} for the default.
    */
   public JRagBuilder systemPrompt(String systemPrompt) {
-    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return new JRagBuilder(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
+  }
+
+  /**
+   * The options the model answers with (temperature, max tokens, reasoning and the rest), instead of the default,
+   * temperature 0.0, so the answer keeps to the chunks. {@code null} for the default.
+   *
+   * <pre>{@code
+   * builder.completionOptions(JCompletionOptions.builder().temperature(0.3).maxTokens(512).build())
+   * }</pre>
+   */
+  public JRagBuilder completionOptions(JCompletionOptions completionOptions) {
+    return new JRagBuilder(
+        embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /**
@@ -102,7 +119,7 @@ public final class JRagBuilder {
    * Sends no request and never throws.
    */
   public LlmResult<JRag> build() {
-    return RagBuilds.build(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt);
+    return RagBuilds.build(embeddings, llm, store, chunkSize, chunkOverlap, topK, systemPrompt, completionOptions);
   }
 
   /** The fields set so far. */
@@ -120,6 +137,8 @@ public final class JRagBuilder {
         + (topK == null ? "default" : topK)
         + ", systemPrompt="
         + (systemPrompt == null ? "default" : "set")
+        + ", completionOptions="
+        + (completionOptions == null ? "default" : completionOptions)
         + ")";
   }
 }

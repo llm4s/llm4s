@@ -113,6 +113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed** `file_info` describes the filesystem root instead of throwing, and its `sizeHuman` is `1.5 KB` under every
   default locale [#2670](https://github.com/llm4s/llm4s/issues/2670), [#2669](https://github.com/llm4s/llm4s/issues/2669).
 
+### Embeddings & RAG
+
+- **Added** `RAGConfig.withCompletionOptions`: the options `queryWithAnswer` and `queryWithPermissionsAndAnswer` generate
+  the answer with, which each call can override (`options = ...`); the default is still temperature 0.0. Java:
+  `JRagBuilder.completionOptions` [#2715](https://github.com/llm4s/llm4s/issues/2715).
+
 ### Build & tooling
 
 - **Changed** `llm4s-agent` takes the MiMa baseline with the other frozen modules, not a later one of its own: RFC 0001 is

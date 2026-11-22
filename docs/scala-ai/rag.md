@@ -74,7 +74,10 @@ def askTheDocs(rag: RAG, question: String): Result[RAGAnswerResult] = for {
 } yield answer
 ```
 
-`queryWithAnswer` returns the answer and the passages it was given (`contexts`), so you can show sources. Instead
+`queryWithAnswer` returns the answer and the passages it was given (`contexts`), so you can show sources. The answer
+is generated at temperature 0.0, so it keeps to the passages; set other options for every answer with
+`RAGConfig.withCompletionOptions(CompletionOptions(temperature = 0.7, maxTokens = Some(512)))`, or for one call with
+`rag.queryWithAnswer(question, options = ...)`. Instead
 of text, `rag.ingest(path)` reads a file or a whole directory, and `rag.query(question)` returns the passages without
 asking the model. Retrieval is hybrid: vector similarity and keyword (BM25) search, fused, with optional reranking by
 Cohere or by a model ([vector store guide](../guide/vector-store#hybrid-search)).
